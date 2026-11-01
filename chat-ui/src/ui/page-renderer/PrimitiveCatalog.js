@@ -78,6 +78,11 @@ export const PRIMITIVE_CATALOG = {
     use: 'Use for important inline contextual messages.',
     avoid: 'Do not use alerts as explanatory decoration.',
   },
+  Image: {
+    tier: 'support',
+    use: 'Use for a hero banner, illustration, or picture the page genuinely shows; reference an asset_manifest entry by asset_id.',
+    avoid: 'Do not add decorative images to data-dense work surfaces or invent an asset_id missing from asset_manifest.',
+  },
   AlertBanner: {
     tier: 'support',
     use: 'Use for high-priority page-level alerts that change what the user should do.',

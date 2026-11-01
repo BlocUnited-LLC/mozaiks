@@ -39,7 +39,7 @@ def test_exact_base_capture_and_governed_document_census():
     assert BASELINE["base_tree"] == "dd750e01833fb127061d085fc2f718a081d8266c"
     assert (
         canonical_digest(BASELINE)
-        == "9f463cad6357e577de3acc51ac9a14bdc421bae4933c7f4b6fac663391faeadd"
+        == "f9dacbfae75e9a73da3da1d3816c82e95a1f0b7d539f9f03965ebf4b72e61f7c"
     )
     actual = sorted(
         path.relative_to(ROOT).as_posix()
@@ -48,8 +48,8 @@ def test_exact_base_capture_and_governed_document_census():
         for path in directory.rglob(filename)
     )
     assert actual == [row["path"] for row in BASELINE["documents"]]
-    assert len(actual) == 32
-    assert sum(Path(path).name == "orchestrator.yaml" for path in actual) == 16
+    assert len(actual) == 34
+    assert sum(Path(path).name == "orchestrator.yaml" for path in actual) == 17
 
 
 @pytest.mark.parametrize("before", BASELINE["documents"], ids=lambda row: row["path"])

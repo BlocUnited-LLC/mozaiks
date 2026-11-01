@@ -256,6 +256,8 @@ VALID_GRID_GAPS = {"sm", "md", "lg", "1", "2", "3", "4", "6", "8", "10", "12"}
 VALID_MODAL_SIZES = {"small", "medium", "large", "full"}
 VALID_SELECTION_MODES = {"none", "single", "multi"}
 VALID_ASSET_SOURCES = {"local", "remote", "uploaded", "generated", "stock"}
+PLANNED_ASSET_SOURCES = {"generated", "uploaded"}
+VALID_ASSET_ASPECTS = {"square", "landscape", "portrait"}
 VALID_SHELL_MODES = {"standard", "workspace", "conversation", "focused", "immersive", "public"}
 VALID_SHELL_ACTION_SURFACES = {"studio", "app", "user", "workflow_session", "transition", "public", "page"}
 VALID_SHELL_ACTION_WHEN_FIELDS = {
@@ -371,13 +373,22 @@ def _validate_asset_manifest(asset_manifest: Any) -> None:
         _validate_optional_string(asset.get("url"), field=f"{path}.url")
         _validate_optional_string(asset.get("alt"), field=f"{path}.alt")
         _validate_optional_string(asset.get("license"), field=f"{path}.license")
+        _validate_optional_string(asset.get("brief"), field=f"{path}.brief")
         _validate_string_list(asset.get("usage"), field=f"{path}.usage")
         _validate_string_list(asset.get("tags"), field=f"{path}.tags")
+        aspect = asset.get("aspect")
+        if aspect is not None and aspect not in VALID_ASSET_ASPECTS:
+            raise ValueError(f"{path}.aspect must be one of {sorted(VALID_ASSET_ASPECTS)} or null")
 
         has_path = _is_non_empty_string(asset.get("path"))
         has_url = _is_non_empty_string(asset.get("url"))
-        if not has_path and not has_url:
+        if has_path or has_url:
+            continue
+        # A planned asset has no file yet; the media step makes or reserves it from the brief.
+        if source not in PLANNED_ASSET_SOURCES:
             raise ValueError(f"{path} must include at least one of path or url")
+        if not _is_non_empty_string(asset.get("brief")):
+            raise ValueError(f"{path}.brief is required for a planned {source} asset without path or url")
 
 
 def _validate_data_contract(data_contract: Any) -> None:

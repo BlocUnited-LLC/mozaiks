@@ -54,22 +54,25 @@ Agents opt into media behavior via `agents.yaml`:
 
 ```yaml
 agents:
-  - name: BrandDesignerAgent
-    system_message: "Generate brand-safe visual options."
-    multimodal_inputs_enabled: true
+  - name: LandscapeImageMakerAgent
+    structured_outputs_required: false
+    system_message: "Create exactly one image from the message."
     image_generation:
-      quality: high
-      size: "1024x1024"
+      quality: medium
+      size: "1536x1024"
       background: opaque   # transparent requires gpt-image-1
-      output_format: png
-    promotion_targets:
-      - brand_asset
-      - app_asset
+      output_format: webp
+      output_compression: 85
+      promotion_targets:
+        - app_asset
 ```
 
 `image_generation` implies `image_generation_enabled`.
-`promotion_targets` declares which promotion slots this agent's output may fill —
-the harvest middleware uses this to tag `GeneratedMediaAsset.promotion_targets`.
+`promotion_targets` sits inside the `image_generation` block and declares which
+promotion slots this agent's output may fill; the harvest middleware uses it to
+tag `GeneratedMediaAsset.promotion_targets`. When the agent runs as a task-batch
+worker, the harvest also records `task_batch_id` and `task_id` in
+`generation_params`, so a later step can match each image to its job.
 
 ## Generate → Harvest → Promote
 
@@ -209,8 +212,8 @@ events. `MediaAssetStore.persist_generated_binary_result(...)` writes:
 Generated media remains a proposal until a workflow or user action promotes it.
 Promotion targets are generic:
 
-- `brand_asset` — committed to `config/asset_manifest.json` via `promote_brand_asset`
-- `app_asset` — app-bundle media inventory
+- `brand_asset` — brand imagery such as logos
+- `app_asset` — app-bundle media inventory, published by the App Media Step below
 - `page_asset` — page-specific imagery
 - `campaign_asset` — app-defined campaign or placement records
 - `artifact` — review-only workflow output
@@ -219,30 +222,62 @@ Promotion targets are generic:
 assets. Downstream consumers (e.g. `create_listing` in a marketplace module)
 read from it rather than querying `MediaAssets` directly.
 
+The manifest is a versioned list; AppGenerator validates it in `save_app_schema`:
+
 ```json
 {
-  "assets": {
-    "logo": {
-      "asset_id": "media_abc123",
-      "content_url": "/api/media/assets/{app_id}/media_abc123/content",
-      "alt_text": "",
-      "promoted": true
+  "version": "1.0",
+  "assets": [
+    {
+      "asset_id": "home-hero",
+      "kind": "hero_image",
+      "source": "generated",
+      "brief": "A warm coffee counter in morning light.",
+      "aspect": "landscape",
+      "alt": "Barista pouring a latte",
+      "usage": ["home"],
+      "path": "ui/assets/home-hero.webp",
+      "tags": ["ai_generated"]
     }
-  }
+  ]
 }
 ```
 
-## Reference Workflows
+## App Media Step In The Build
 
-The OSS factory ships one reference workflow that demonstrates the full pipeline:
+AppGenerator plans the images an app's pages show; it does not make them.
+
+- A **planned** entry has a `brief` and `aspect` and no `path` or `url`.
+  `source: generated` is decorative or brand art made with AI.
+  `source: uploaded` must depict something real (a product, property, person,
+  or dish) and is reserved for the owner to supply; it is never AI art.
+- Pages show an entry with the `Image` primitive: `{asset_id, alt, caption,
+  variant: banner|inline}`. The host serves bundle images at
+  `GET /api/app-assets/{asset_id}` from the entry's `path`; a planned entry
+  answers 404 and the primitive shows a neutral placeholder.
+
+`AppMediaGenerator` runs after AppGenerator and before SecurityReadiness in every
+sequence where AppGenerator hands off to SecurityReadiness:
+
+1. A `before_chat` hook reads the planned `generated` entries (at most eight)
+   and brand context from the bound build's current bundle.
+2. `MediaPlanAgent` writes one shared art direction and one prompt per entry;
+   `compose_media_jobs` turns them into one job per asset and adds the rule
+   that images carry no text, so they cannot invent prices or names.
+3. The `app_media_jobs` task batch runs one square, landscape, or portrait image
+   maker per job; a failed job leaves its slot planned and never fails the build.
+4. `publish_app_media` writes each image under `ui/assets/`, a labeled SVG
+   placeholder for each `uploaded` entry, and the updated manifest into a new
+   **draft child version** of the app bundle, then points the registry's current
+   build at it. SecurityReadiness, AppReview, preview, and download read that
+   version. A rerun finds no planned entries and changes nothing.
+
+## Reference Workflows
 
 | Workflow | Purpose |
 |----------|---------|
-| `BrandAssetGeneratorWorkflow` | Logo and brand imagery. Promotes to `role=logo` in `asset_manifest.json`. |
-
-It follows the generate → harvest → promote pattern and can be customized via
-`build_context` overlays or used as an archetype for app-specific media
-workflows.
+| `AppMediaGenerator` | The build's app media step described above. |
+| `BrandAssetGeneratorWorkflow` | Standalone logo workflow outside every build sequence. Its `promote_brand_asset` writes a legacy role-keyed manifest that AppGenerator rejects; it is retired together with the hosted product test that still imports it. |
 
 Apps build their own promote-side tools on these primitives. A workflow that
 attaches generated media to an app's own records supplies that tool itself;

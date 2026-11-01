@@ -391,6 +391,38 @@ async def test_harvest_generated_media_response_persists_context_and_emits_ui(tm
     assert transport.events[0]["payload"]["assets"][0]["asset_id"] == assets[0].asset_id
 
 
+@pytest.mark.asyncio
+async def test_harvest_records_the_task_batch_job_that_generated_each_asset(tmp_path) -> None:
+    from ag2.events import BinaryResult, ModelMessage, ModelResponse
+
+    asset_store = MediaAssetStore(client=_Client(_Collection()), content_store=LocalMediaContentStore(root=tmp_path))
+    context = {
+        "app_id": "app_1", "chat_id": "chat_1",
+        "current_task_batch_id": "app_media_jobs", "current_task_id": "home-hero",
+    }
+    response = ModelResponse(
+        ModelMessage("Made the banner."),
+        model="gpt-image-1",
+        provider="openai",
+        files=[BinaryResult(b"image-bytes", metadata={"media_type": "image/webp", "filename": "hero.webp"})],
+    )
+
+    assets = await harvest_generated_media_response(
+        response,
+        agent_name="LandscapeImageMakerAgent",
+        workflow_name="AppMediaGenerator",
+        context_variables=context,
+        generation_params={"size": "1536x1024"},
+        asset_store=asset_store,
+        emit_ui=False,
+    )
+
+    assert assets[0].generation_params == {
+        "agent_name": "LandscapeImageMakerAgent", "size": "1536x1024",
+        "task_batch_id": "app_media_jobs", "task_id": "home-hero",
+    }
+
+
 def test_azure_blob_content_store_implements_media_content_store_interface() -> None:
     """AzureBlobMediaContentStore satisfies the MediaContentStore Protocol without
     requiring live Azure credentials — it raises RuntimeError only when import or

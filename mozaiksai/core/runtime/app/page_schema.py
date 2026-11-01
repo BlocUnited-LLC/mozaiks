@@ -298,6 +298,13 @@ class AppAlertConfig(PageContractModel):
     dismissible: bool = False
 
 
+class AppImageConfig(PageContractModel):
+    asset_id: str
+    alt: str | None = None
+    caption: str | None = None
+    variant: Literal["banner", "inline"] | None = None
+
+
 class AppSkeletonConfig(PageContractModel):
     rows: int | None = None
     height: str | None = None
@@ -525,6 +532,7 @@ _TOP_LEVEL_CONFIG_MODELS: dict[str, type[PageContractModel]] = {
     "Button": AppButtonConfig,
     "Modal": AppModalConfig,
     "Alert": AppAlertConfig,
+    "Image": AppImageConfig,
     "Skeleton": AppSkeletonConfig,
     "Empty": AppEmptyConfig,
     "PageHeader": AppPageHeaderConfig,
