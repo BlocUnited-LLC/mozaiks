@@ -144,6 +144,7 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
         ["SubscriptionContractDesigner"],
         ["AgentGenerator"],
         ["AppGenerator"],
+        ["AppMediaGenerator"],
         ["SecurityReadiness"],
     ]
     # database_setup_selector is intentionally absent: it gated the build on a
@@ -232,6 +233,7 @@ async def test_offline_factory_artifact_lineage_smoke_hydrates_workflow_metadata
         ["SubscriptionContractDesigner"],
         ["AgentGenerator"],
         ["AppGenerator"],
+        ["AppMediaGenerator"],
         ["SecurityReadiness"],
     ]
     assert result["artifact_lineage"]["workflow_bundle_inputs"] == {

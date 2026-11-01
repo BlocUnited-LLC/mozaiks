@@ -319,6 +319,7 @@ models:
         - Button
         - Modal
         - Alert
+        - Image
         - Skeleton
         - Empty
         - PageHeader

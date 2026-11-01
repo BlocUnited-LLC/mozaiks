@@ -25,6 +25,7 @@ import { Grid }            from '../primitives/Grid.jsx';
 import { Button }          from '../primitives/Button.jsx';
 import { Modal }           from '../primitives/Modal.jsx';
 import { Alert }           from '../primitives/Alert.jsx';
+import { Image }           from '../primitives/Image.jsx';
 import { Skeleton, Empty } from '../primitives/Skeleton.jsx';
 import { Timeline }        from '../primitives/Timeline.jsx';
 import { CodeBlock }       from '../primitives/CodeBlock.jsx';
@@ -56,6 +57,7 @@ const PRIMITIVES = {
   Button:          { Component: Button,          schema: PRIMITIVE_SCHEMAS.Button },
   Modal:           { Component: Modal,           schema: PRIMITIVE_SCHEMAS.Modal },
   Alert:           { Component: Alert,           schema: PRIMITIVE_SCHEMAS.Alert },
+  Image:           { Component: Image,           schema: PRIMITIVE_SCHEMAS.Image },
   Skeleton:        { Component: Skeleton,        schema: PRIMITIVE_SCHEMAS.Skeleton },
   Empty:           { Component: Empty,           schema: PRIMITIVE_SCHEMAS.Empty },
   Timeline:        { Component: Timeline,        schema: PRIMITIVE_SCHEMAS.Timeline },

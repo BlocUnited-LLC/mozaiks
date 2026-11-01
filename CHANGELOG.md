@@ -12,6 +12,21 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- Generated apps get their images made during the build. AppGenerator plans
+  the images each page shows in `config/asset_manifest.json` (a `brief` and
+  `aspect`, `source: generated` for AI art, `source: uploaded` for photos the
+  owner must supply), and the new `AppMediaGenerator` step, between
+  AppGenerator and SecurityReadiness, makes the AI images in parallel, writes
+  them and labeled upload placeholders under `ui/assets/`, and publishes them
+  as a new draft bundle version that review, preview, and download use. A
+  failed image keeps its placeholder instead of failing the build. Images
+  carry no text, so they cannot invent prices or names.
+- The `Image` page primitive shows an asset-manifest entry by `asset_id`
+  (`banner` or `inline`), served from the app bundle at
+  `GET /api/app-assets/{asset_id}`.
+
 ### Changed
 
 - Generated UI acceptance can verify a candidate against the existing local

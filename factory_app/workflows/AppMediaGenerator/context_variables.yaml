@@ -1,0 +1,181 @@
+definitions:
+  run_build_binding:
+    type: object
+    description: Server-verified target and build lineage. Execution app_id remains the host identity.
+    source:
+      type: runtime
+      required: true
+  artifact_version_id:
+    type: string
+    writer_ids: [transition_router, deterministic_tool]
+    persisted: true
+    description: >
+      The bound build's current app bundle version. publish_app_media replaces it
+      with the media child version it registers, for the SecurityReadiness and
+      AppReview handoff.
+    source:
+      type: state
+      default: null
+  bundle_path:
+    type: string
+    writer_ids: [transition_router, deterministic_tool]
+    persisted: true
+    description: Staged app directory of the current bundle version, carried to AppReview.
+    source:
+      type: state
+      default: null
+  lifecycle_state:
+    type: string
+    writer_ids: [transition_router, deterministic_tool]
+    persisted: true
+    description: Registered bundle lifecycle state carried to AppReview.
+    source:
+      type: state
+      default: null
+  app_validation_status:
+    type: string
+    writer_ids: [transition_router]
+    description: AppGenerator validation result, carried unchanged to AppReview.
+    source:
+      type: state
+      default: null
+  app_validation_strategy_used:
+    type: string
+    writer_ids: [transition_router]
+    description: Validation strategy used by AppGenerator, carried unchanged to AppReview.
+    source:
+      type: state
+      default: null
+  app_validation_preview_url:
+    type: string
+    writer_ids: [transition_router]
+    description: Optional preview URL from AppGenerator validation, carried unchanged.
+    source:
+      type: state
+      default: null
+  integration_tests_passed:
+    type: boolean
+    writer_ids: [transition_router]
+    description: AppGenerator integration result, carried unchanged; missing evidence remains null.
+    source:
+      type: state
+      default: null
+  app_bundle_acceptance_status:
+    type: string
+    writer_ids: [transition_router]
+    description: AppGenerator deterministic acceptance result, carried unchanged.
+    source:
+      type: state
+      default: null
+  workflow_sequence:
+    type: string
+    description: Active workflow sequence id for build journey continuity.
+    source:
+      type: state
+      default: null
+  media_requests:
+    type: array
+    writer_ids: [lifecycle_tool]
+    description: >
+      Planned AI-made images from the current bundle's config/asset_manifest.json:
+      asset_id, kind, brief, aspect, alt, and usage for each generated entry
+      without a path, capped at the media budget.
+    source:
+      type: computed
+      default: []
+  media_brand_context:
+    type: object
+    writer_ids: [lifecycle_tool]
+    description: App name, product description, and theme colors and fonts that style the images.
+    source:
+      type: computed
+      default: {}
+  media_job_items:
+    type: array
+    writer_ids: [deterministic_tool]
+    description: One image job per accepted art-direction entry, consumed by the app_media_jobs task batch.
+    source:
+      type: computed
+      default: []
+  app_media_jobs_results:
+    type: object
+    description: Per-job outputs of the app_media_jobs task batch.
+    source:
+      type: computed
+      default: {}
+  app_media_jobs_status:
+    type: string
+    description: Aggregate status of the app_media_jobs task batch.
+    source:
+      type: computed
+      default: pending
+  task_run_mode:
+    type: boolean
+    description: True when an image maker is executing one scoped image job.
+    source:
+      type: computed
+      default: false
+  current_task_batch_id:
+    type: string
+    description: Current task batch id for image maker calls.
+    source:
+      type: computed
+      default: null
+  current_task_id:
+    type: string
+    description: Current image job id (the asset_id) for image maker calls.
+    source:
+      type: computed
+      default: null
+  current_task:
+    type: object
+    description: Current image job for image maker calls.
+    source:
+      type: computed
+      default: null
+  app_media_summary:
+    type: object
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: >
+      Outcome of publish_app_media: published flag, generated, placeholder, and
+      missing asset ids, the new artifact_version_id, or the error.
+    source:
+      type: computed
+      default: {}
+  app_media_complete:
+    type: boolean
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: True once publish_app_media has run, whether or not images were published.
+    source:
+      type: computed
+      default: false
+
+agents:
+  MediaPlanAgent:
+    variables:
+      - media_requests
+      - media_brand_context
+  SquareImageMakerAgent:
+    variables:
+      - task_run_mode
+      - current_task_batch_id
+      - current_task_id
+      - current_task
+  LandscapeImageMakerAgent:
+    variables:
+      - task_run_mode
+      - current_task_batch_id
+      - current_task_id
+      - current_task
+  PortraitImageMakerAgent:
+    variables:
+      - task_run_mode
+      - current_task_batch_id
+      - current_task_id
+      - current_task
+  MediaPublishAgent:
+    variables:
+      - app_media_summary
+      - app_media_complete
