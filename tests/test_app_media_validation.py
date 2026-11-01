@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -130,25 +131,31 @@ async def test_media_candidate_passes_real_pinned_docker_acceptance_and_build(mo
     image_id = inspected.stdout.strip()
     monkeypatch.setenv("MOZAIKS_APP_RUNTIME_IMAGE_ID", image_id)
     monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "docker")
-    text_files = _basic_crud_files()
+    text_files = json.loads(
+        (Path(__file__).parent / "fixtures/runtime_smoke_good_bundle_fdfa818e.json").read_text(encoding="utf-8")
+    )["files"]
+    # Use the same real CRUD source as the existing contained acceptance test.
+    # Its recorded subscriptions predate the self-hosted entitlement_dispatch module.
+    del text_files["config/subscriptions.yaml"]
+    app_id = json.loads(text_files["data/contract.json"])["app_id"]
     text_files["config/asset_manifest.json"] = json.dumps({
         "version": "1.0", "assets": [{
             "asset_id": "hero", "kind": "hero_image", "source": "generated",
             "path": IMAGE_PATH, "alt": "Blue test image",
         }],
     })
-    text_files["ui/pages/orders.yaml"] += """
-  - id: orders-hero
-    primitive: Image
-    config:
-      asset_id: hero
-      alt: Blue test image
-      variant: banner
+    text_files["ui/pages/tasks.yaml"] += """
+- id: tasks-hero
+  primitive: Image
+  config:
+    asset_id: hero
+    alt: Blue test image
+    variant: banner
 """
     files = {**text_files, IMAGE_PATH: IMAGE}
 
     result = await validate_generated_app_candidate(
-        files=files, app_id="support-operations", validation_strategy="docker", timeout_seconds=180,
+        files=files, app_id=app_id, validation_strategy="docker", timeout_seconds=180,
     )
 
     assert result["validation_status"] == "passed", json.dumps(result, indent=2)
