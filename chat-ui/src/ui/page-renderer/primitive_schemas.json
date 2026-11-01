@@ -100,6 +100,20 @@
       "dismissible": "boolean — default false"
     }
   },
+  "Image": {
+    "tier": "support",
+    "use": "Use for a hero banner, illustration, or picture the page genuinely shows; reference an asset_manifest entry by asset_id.",
+    "avoid": "Do not add decorative images to data-dense work surfaces or invent an asset_id missing from asset_manifest.",
+    "required": [
+      "asset_id"
+    ],
+    "properties": {
+      "asset_id": "string — REQUIRED",
+      "alt": "string",
+      "caption": "string",
+      "variant": "string: inline|banner — default inline"
+    }
+  },
   "Skeleton": {
     "tier": "specialized",
     "use": "Use only for short in-place loading placeholders.",

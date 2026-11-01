@@ -33,6 +33,7 @@ from factory_app.workflows.AppGenerator.tools.task_integrity import (
     mark_repair_responded,
     validate_repair_candidate,
 )
+from mozaiksai.core.runtime.app.asset_manifest import asset_manifest_index
 from mozaiksai.core.runtime.app.page_schema import (
     PageSchemaValidationError,
     validate_page_schema,
@@ -256,6 +257,8 @@ VALID_GRID_GAPS = {"sm", "md", "lg", "1", "2", "3", "4", "6", "8", "10", "12"}
 VALID_MODAL_SIZES = {"small", "medium", "large", "full"}
 VALID_SELECTION_MODES = {"none", "single", "multi"}
 VALID_ASSET_SOURCES = {"local", "remote", "uploaded", "generated", "stock"}
+PLANNED_ASSET_SOURCES = {"generated", "uploaded"}
+VALID_ASSET_ASPECTS = {"square", "landscape", "portrait"}
 VALID_SHELL_MODES = {"standard", "workspace", "conversation", "focused", "immersive", "public"}
 VALID_SHELL_ACTION_SURFACES = {"studio", "app", "user", "workflow_session", "transition", "public", "page"}
 VALID_SHELL_ACTION_WHEN_FIELDS = {
@@ -353,13 +356,12 @@ def _validate_asset_manifest(asset_manifest: Any) -> None:
     assets = asset_manifest.get("assets")
     if not isinstance(assets, list):
         raise ValueError("asset_manifest.assets must be a list")
+    asset_manifest_index(asset_manifest)
 
     for index, asset in enumerate(assets):
         path = f"asset_manifest.assets[{index}]"
         if not isinstance(asset, dict):
             raise ValueError(f"{path} must be an object")
-        if not _is_non_empty_string(asset.get("asset_id")):
-            raise ValueError(f"{path}.asset_id is required")
         if not _is_non_empty_string(asset.get("kind")):
             raise ValueError(f"{path}.kind is required")
 
@@ -371,13 +373,22 @@ def _validate_asset_manifest(asset_manifest: Any) -> None:
         _validate_optional_string(asset.get("url"), field=f"{path}.url")
         _validate_optional_string(asset.get("alt"), field=f"{path}.alt")
         _validate_optional_string(asset.get("license"), field=f"{path}.license")
+        _validate_optional_string(asset.get("brief"), field=f"{path}.brief")
         _validate_string_list(asset.get("usage"), field=f"{path}.usage")
         _validate_string_list(asset.get("tags"), field=f"{path}.tags")
+        aspect = asset.get("aspect")
+        if aspect is not None and aspect not in VALID_ASSET_ASPECTS:
+            raise ValueError(f"{path}.aspect must be one of {sorted(VALID_ASSET_ASPECTS)} or null")
 
         has_path = _is_non_empty_string(asset.get("path"))
         has_url = _is_non_empty_string(asset.get("url"))
-        if not has_path and not has_url:
+        if has_path or has_url:
+            continue
+        # A planned asset has no file yet; the media step makes or reserves it from the brief.
+        if source not in PLANNED_ASSET_SOURCES:
             raise ValueError(f"{path} must include at least one of path or url")
+        if not _is_non_empty_string(asset.get("brief")):
+            raise ValueError(f"{path}.brief is required for a planned {source} asset without path or url")
 
 
 def _validate_data_contract(data_contract: Any) -> None:
@@ -1632,6 +1643,20 @@ def save_app_schema(
         rendered_files = {
             path: _app_artifact_target(staging, path).read_text(encoding="utf-8") for path in rendered_paths
         }
+        try:
+            manifest_path = staging / "config/asset_manifest.json"
+            asset_index = asset_manifest_index(
+                json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else None,
+            )
+            for page in page_list:
+                validate_page_schema(page, asset_ids=asset_index.keys())
+        except (ValueError, PageSchemaValidationError) as exc:
+            message = str(exc)
+            if isinstance(exc, PageSchemaValidationError):
+                message = "; ".join(f"{item.location}: {item.code}" for item in exc.diagnostics)
+            if mark_repair_rejected(context_variables, message):
+                return f"App schema repair rejected: {message}"
+            raise ValueError(message) from exc
 
     active_repair = (detach(_context_get(context_variables, "bundle_repair_result")) or {}).get("active")
     if isinstance(active_repair, dict):

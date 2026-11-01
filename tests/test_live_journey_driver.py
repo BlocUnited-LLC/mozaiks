@@ -1008,7 +1008,7 @@ def test_the_workbench_answer_is_its_declared_continue_action() -> None:
 
 def test_every_validation_and_review_agent_that_hands_to_the_user_is_kept_from_free_text() -> None:
     workflows = ("ValueEngine", "ThemeCapture", "DesignDocs", "SubscriptionContractDesigner", "AgentGenerator",
-                 "AppGenerator", "SecurityReadiness", "AppReview")
+                 "AppGenerator", "AppMediaGenerator", "SecurityReadiness", "AppReview")
     agents: set[tuple[str, str]] = set()
     checkers: set[tuple[str, str]] = set()
     for workflow in workflows:

@@ -39,6 +39,18 @@
       "parser_document_fingerprint": "32d3e5cfebba7ae811128e63a272ac146e8798c5396651b443b06e153ad54383"
     },
     {
+      "path": "factory_app/workflows/AppMediaGenerator/orchestrator.yaml",
+      "source_bytes_fingerprint": "df12f8d0cf65ab469d55e9f61229a3c540269396fa35ff1271fd157512eb0e8f",
+      "source_document_fingerprint": "311e37ef777e3561c9194125da0706086aca08cabf15247c41f9466d816929af",
+      "parser_document_fingerprint": "e577ac382d6d4f5c50259667d11de5d1a67ffb838aecc75064a4ac2f4162fb82"
+    },
+    {
+      "path": "factory_app/workflows/AppMediaGenerator/structured_outputs.yaml",
+      "source_bytes_fingerprint": "8404b261ba3b2e45e3959aa65a796a5bcf5f43f5cc48602572cb9acdde4b1ca0",
+      "source_document_fingerprint": "f1f2d4488f812499ff1247d258c4e4bb46fc57e9d7d328669fc92ab342af9e56",
+      "parser_document_fingerprint": "0900c50db322e9add274a2f30abaf38bd8f46e1f307497477b7a7a6821238560"
+    },
+    {
       "path": "factory_app/workflows/AppReview/orchestrator.yaml",
       "source_bytes_fingerprint": "18dbf36f12de21f71c83e8e6d934edb3624f689ffda7297b23f4c4347e1677ad",
       "source_document_fingerprint": "23f3e3ff4d21d0c2ce62d7e25b076e542e4b6a9b555ab21a5ef648b441c56418",

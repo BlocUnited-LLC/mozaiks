@@ -11,8 +11,8 @@ from typing import Any, Literal, overload
 from mozaiksai.control_plane.contracts import safe_artifact_relpath
 from mozaiksai.core.artifacts.content_store import read_verified_artifact_bundle
 from mozaiksai.core.artifacts.models import BuildRecord
+from mozaiksai.core.runtime.app.paths import APP_BINARY_ASSET_SUFFIXES
 
-_BINARY_ASSET_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".ico", ".svg", ".woff", ".woff2", ".ttf", ".otf", ".eot", ".pdf", ".mp3", ".mp4"}
 _MAX_FILE_BYTES = 8_000_000
 APP_BUNDLE_MAX_TOTAL_BYTES = 64_000_000
 APP_BUNDLE_MAX_FILES = 4096
@@ -89,7 +89,7 @@ async def read_artifact_bundle(
                 if retain_svg_text and not include_binary:
                     files[path] = svg_text
                     continue
-            if suffix in _BINARY_ASSET_SUFFIXES:
+            if suffix in APP_BINARY_ASSET_SUFFIXES:
                 if include_binary:
                     files[path] = data
                 else:

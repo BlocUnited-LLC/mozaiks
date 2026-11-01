@@ -34,6 +34,7 @@ models:
         - Button
         - Modal
         - Alert
+        - Image
         - Skeleton
         - Empty
         - PageHeader
@@ -4121,6 +4122,32 @@ models:
         items: AppPageAction
         description: Optional modal actions.
 
+  AppImageConfig:
+    type: model
+    fields:
+      asset_id:
+        type: str
+        description: Exact asset_manifest entry id this image shows. Must exist in the emitted or existing asset_manifest. Use 1-128 ASCII letters, digits, dots, underscores or hyphens, starting with a letter or digit; no trailing dot or reserved filename.
+      alt:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Alt text for the image; copy the asset_manifest entry's alt. Null marks it decorative.
+      caption:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional caption under the image.
+      variant:
+        type: literal
+        values:
+        - inline
+        - banner
+        - 'null'
+        description: banner for a full-width hero crop; inline for a picture in the content flow.
+
   AppAlertConfig:
     type: model
     fields:
@@ -4763,6 +4790,7 @@ models:
     - AppButtonConfig
     - AppModalLeafConfig
     - AppAlertConfig
+    - AppImageConfig
     - AppSkeletonConfig
     - AppEmptyConfig
     - AppTimelineConfig
@@ -4789,6 +4817,7 @@ models:
         - Button
         - Modal
         - Alert
+        - Image
         - Skeleton
         - Empty
         - PageHeader
@@ -4895,6 +4924,7 @@ models:
     - AppButtonConfig
     - AppModalConfig
     - AppAlertConfig
+    - AppImageConfig
     - AppSkeletonConfig
     - AppEmptyConfig
     - AppTimelineConfig
@@ -4919,6 +4949,7 @@ models:
         - Button
         - Modal
         - Alert
+        - Image
         - Skeleton
         - Empty
         - PageHeader
@@ -5511,7 +5542,7 @@ models:
     fields:
       asset_id:
         type: str
-        description: Stable identifier used by ui/pages schemas and shell config to reference this asset.
+        description: Stable identifier unique case-insensitively within the manifest. Use 1-128 ASCII letters, digits, dots, underscores or hyphens, starting with a letter or digit; no trailing dot or reserved filename (CON, PRN, AUX, NUL, COM1-9, LPT1-9).
       kind:
         type: str
         description: Asset category such as logo, icon, hero_image, illustration, or video.
@@ -5523,19 +5554,41 @@ models:
         - uploaded
         - generated
         - stock
-        description: Origin of the asset payload.
+        description: >
+          Origin of the asset payload. `generated` is decorative or brand art the
+          media step creates with AI. `uploaded` is a real-world image (product,
+          property, person, dish) the app owner supplies; never plan AI art for it.
+      brief:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: >
+          One-sentence description of what the image shows, written for an
+          illustrator. Required for a planned generated or uploaded asset that
+          has no path or url yet.
+      aspect:
+        type: literal
+        values:
+        - square
+        - landscape
+        - portrait
+        - 'null'
+        description: Image shape for planned visual assets; null for non-image assets.
       path:
         type: union
         variants:
         - str
         - 'null'
-        description: Relative file path inside the app bundle when source is local/uploaded.
+        description: >
+          Relative file path inside the app bundle. Null for a planned generated or
+          uploaded asset; the media step fills it in.
       url:
         type: union
         variants:
         - str
         - 'null'
-        description: Absolute URL when source is remote.
+        description: Absolute HTTP(S) URL without embedded credentials when source is remote.
       alt:
         type: union
         variants:

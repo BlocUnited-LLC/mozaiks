@@ -528,6 +528,7 @@ agents:
           - StatusPill: `label`
           - ActionButton: `actions` (list of {label, action_type, ...})
           - Alert / AlertBanner: `message`
+          - Image: `asset_id` (an `asset_manifest` entry)
           - Button: `label`
           - Timeline: `items` (list of {label, status})
           - CodeBlock: `code`
@@ -866,6 +867,7 @@ agents:
       - Prefer compact summary cards plus a focused follow-up interaction over repeating the same entity title, metadata, and form fields in multiple stacked sections.
       - `Alert`: status message. Config: optional `title`, required `message`, optional `variant` (default|info|success|warning|destructive), `dismissible`.
       - `Button`: action button. Config: `label`, optional `variant`, `size`, and `action`.
+      - `Image`: a picture the page genuinely shows (hero banner, illustration, cover). Config: required `asset_id` naming an `asset_manifest` entry, optional `alt`, `caption`, `variant` (banner|inline). Plan the entry in `asset_manifest` with `brief` and `aspect` when it does not exist yet. Do not decorate data-dense work surfaces.
       - `Skeleton`: loading placeholder. Config: `rows`, `height`.
       - `Empty`: empty-state placeholder. Config: `title`, `message`, optional `action`, `icon`.
       - `InlineEmptyState`: compact empty state embedded within a data section. Config: `title`, optional `description`, optional `action`.
@@ -950,6 +952,7 @@ agents:
         heading/semibold/lg/tight/normal/none; casing follows the approved app design.
       - `shell_config` owns only app-wide shell behavior: `header.logo`, sparse `header.actions`, canonical `shortcuts`, `navigation.policy`, `navigation.items` for non-page-owned entries, and compact `chrome` mode overrides.
       - `asset_manifest` owns reusable media inventory metadata (`asset_id`, source, path/url, alt/provenance, usage). Use it for logos/icons/hero imagery/video references.
+      - Plan the images this specific app's pages need as `asset_manifest` entries without a path or url: an `Image` section references its entry by `asset_id`. Give each planned entry `brief` (one sentence describing what it shows), `aspect`, `alt`, and `usage`. Use `source: generated` only for decorative or brand art (banners, illustrations, backgrounds, covers, empty-state art); the media step creates it with AI after the build. Use `source: uploaded` for anything that must depict something real (a product, property, person, dish, or user content); the media step reserves a labeled placeholder for the owner to replace. Plan only images a page actually shows.
       - Do NOT put raw spacing, padding, width, or density tokens in `shell_config`.
       - Do NOT put colors, font families, shadows, radius, or page-local palettes in `shell_config`.
       - Do NOT put header actions, profile menu items, or footer links in `theme_config_patch`.
@@ -1076,7 +1079,7 @@ agents:
       5. Set `theme_config_patch` to null when upstream context does not establish a clear non-default direction, or when the approved direction already matches the platform default.
       6. Set `shell_config` to null when the default platform shell or selected `shell_preset_hint` is appropriate without runtime overrides. Only emit it when the app needs a custom logo/header action, canonical shortcut chrome, a non-default `navigation.policy`, non-page-owned `navigation.items`, or a non-default `chrome` mode policy.
       7. If `captured_theme_config` is present, it already supplies the full token structure, including `primitives` and semantic `ui` spacing; emit only the app-specific deltas `theme_config_patch` accepts (`theme` selectors, `identity`, `fonts`, `ui.page.title`).
-      8. Set `asset_manifest` to null when shipped/default assets are sufficient. Emit it only when the app requires non-default image/icon/media inventory that should be cataloged.
+      8. Set `asset_manifest` to null when shipped/default assets are sufficient. Emit it only when the app requires non-default image/icon/media inventory that should be cataloged, including the planned images its `Image` sections reference.
       9. Set `custom_route_bundle` to null unless a persistent route truly requires custom full-page React.
       10. The approved DesignDocs `data_contract` is supplied in context. Do not emit, replace, or reinterpret it from page needs.
       11. If `custom_route_bundle` is not null:

@@ -1,0 +1,47 @@
+tools:
+  - agent: MediaPlanAgent
+    file: tools/compose_media_jobs.py
+    function: compose_media_jobs
+    description: >
+      Join the validated art direction with the planned media requests into one
+      image job per asset, choosing the image maker for each requested shape.
+    tool_type: Agent_Tool
+    auto_tool_call: true
+    bind_to_agent: false
+  - agent: MediaPublishAgent
+    file: tools/publish_app_media.py
+    function: publish_app_media
+    description: >
+      Place the images generated in this run into a new draft version of the
+      bound app bundle, reserve labeled placeholders for owner-supplied photos,
+      and make that version the build's current artifact.
+    tool_type: Agent_Tool
+    auto_tool_call: false
+
+lifecycle_tools:
+  - trigger: on_start
+    agent: null
+    file: ../_shared/platform/build_lifecycle.py
+    function: emit_build_started
+    description: Advance the registered build to the media workflow.
+    tool_type: Agent_Tool
+  - trigger: on_complete
+    agent: null
+    file: ../_shared/platform/build_lifecycle.py
+    function: emit_build_completed
+    description: Complete build tracking when media is the final workflow in the sequence.
+    tool_type: Agent_Tool
+  - trigger: on_fail
+    agent: null
+    file: ../_shared/platform/build_lifecycle.py
+    function: emit_build_failed
+    description: Record a failed media workflow against the current registered build.
+    tool_type: Agent_Tool
+  - trigger: before_chat
+    agent: null
+    file: load_media_requests.py
+    function: load_media_requests
+    description: >
+      Read the planned images and brand context from the bound build's current
+      app bundle before the art director runs.
+    tool_type: Agent_Tool

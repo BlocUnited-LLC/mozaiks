@@ -26,6 +26,7 @@ export {
   FileList,
   Form,
   Grid,
+  Image,
   ArtifactLoadingState,
   IconButton,
   InlineEmptyState,

@@ -50,6 +50,7 @@ from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templat
     verified_pack_template_inventory,
     verified_selected_pack_sources,
 )
+from mozaiksai.core.runtime.app.asset_manifest import asset_manifest_index
 from mozaiksai.core.runtime.app.auth_contract import (
     APP_AUTH_COMPONENTS,
     AppAuthContractError,
@@ -1687,6 +1688,10 @@ def _scan_page_schema_structure(files_map: dict[str, str]) -> list[str]:
     """Validate declarative page YAML with the runtime page-schema contract."""
     errors: list[str] = []
     normalized = _normalized_files_map(files_map)
+    try:
+        assets = asset_manifest_index(json.loads(normalized.get("config/asset_manifest.json", "null")))
+    except (TypeError, ValueError) as exc:
+        return [f"config/asset_manifest.json: {exc}"]
 
     for path, content in normalized.items():
         if not path.startswith("ui/pages/"):
@@ -1708,7 +1713,7 @@ def _scan_page_schema_structure(files_map: dict[str, str]) -> list[str]:
             continue
 
         try:
-            validate_page_schema(schema)
+            validate_page_schema(schema, asset_ids=assets.keys())
         except PageSchemaValidationError as exc:
             errors.extend(
                 f"{path}: {diagnostic.location}: {diagnostic.code}"

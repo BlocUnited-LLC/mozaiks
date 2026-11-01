@@ -23,7 +23,7 @@ import tempfile
 import zipfile
 
 logger = logging.getLogger(__name__)
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -849,10 +849,10 @@ def validate_module_implementation_contract(files: dict[str, str]) -> dict[str, 
     }
 
 
-def _canonical_workspace_files(files: dict[str, str]) -> dict[str, str]:
+def _canonical_workspace_files(files: Mapping[str, str | bytes]) -> dict[str, str | bytes]:
     from mozaiksai.core.runtime.app.paths import app_bundle_workspace_path
 
-    staged: dict[str, str] = {}
+    staged: dict[str, str | bytes] = {}
     for path, content in files.items():
         if not _safe_relpath(path):
             raise ValueError("Invalid app validation file path")
@@ -894,7 +894,7 @@ def _bounded_validation_timeout(timeout_seconds: int) -> int:
 async def _run_sandbox_validation(
     *,
     strategy: str,
-    resolved_files: dict[str, str],
+    resolved_files: Mapping[str, str | bytes],
     commands: list[str],
     start_dev_server: bool,
     timeout_seconds: int,
@@ -1947,6 +1947,15 @@ async def run_app_bundle_acceptance_gate(
         generated_files = admitted_app_file_map(
             context_variables, revision_baseline=await load_revision_baseline(context_variables),
         )
+    binary_assets = dict(runtime_binary_assets or {})
+    if set(binary_assets) & set(generated_files) or any(
+        not isinstance(content, bytes) for content in binary_assets.values()
+    ):
+        raise ValueError("Runtime binary assets must be bytes and cannot overlap text source")
+    runtime_files: dict[str, str | bytes] = {**generated_files, **binary_assets}
+    if binary_assets:
+        # The same bounded identity check runs before either contained worker.
+        app_runtime_smoke._generated_source_digests(runtime_files)
     selected_capability_packs = (
         [pack for pack in capability_packs if isinstance(pack, dict)]
         if isinstance(capability_packs, list)
@@ -2088,10 +2097,14 @@ async def run_app_bundle_acceptance_gate(
         generated_files,
         context_variables,
     )
-    app_runtime_load_result = await _app_runtime_load_result(generated_files)
-    runtime_smoke_result = await _app_runtime_smoke_result(generated_files)
+    if binary_assets:
+        app_runtime_load_result = await app_runtime_smoke.run_contained_generated_app_runtime_load(runtime_files)
+        runtime_smoke_result = await app_runtime_smoke.run_contained_generated_app_runtime_smoke(runtime_files)
+    else:
+        app_runtime_load_result = await _app_runtime_load_result(generated_files)
+        runtime_smoke_result = await _app_runtime_smoke_result(generated_files)
     runtime_smoke_result = app_runtime_smoke.apply_generated_acceptance_scope(
-        runtime_smoke_result, generated_files,
+        runtime_smoke_result, runtime_files,
         os.environ.get("MOZAIKS_APP_RUNTIME_IMAGE_ID", "").strip(),
     )
     load_worker_verified = (
@@ -2246,7 +2259,9 @@ async def run_app_bundle_acceptance_gate(
     result["bundle_repair"] = bundle_repair
     result["task_recovery_request"] = recovery_request
     if acceptance_passed:
-        result["snapshot_digest"] = artifact_snapshot_digest(context_variables, generated_files)
+        result["snapshot_digest"] = artifact_snapshot_digest(
+            context_variables, generated_files, binary_assets=binary_assets,
+        )
 
     _context_set(context_variables, "bundle_scan_passed", bundle_scan_result["passed"])
     _context_set(context_variables, "bundle_scan_result", bundle_scan_result)
@@ -2285,6 +2300,7 @@ async def validate_app_build(
     timeout_seconds: int = 120,
     validation_strategy: str | None = None,
     context_variables: Any | None = None,
+    runtime_binary_assets: dict[str, bytes] | None = None,
 ) -> dict[str, Any]:
     workflow_name = "AppGenerator"
     chat_id = None
@@ -2346,9 +2362,17 @@ async def validate_app_build(
         return result
 
     # e2b and docker both route through the SandboxPort abstraction
+    staged_files: dict[str, str | bytes] = dict(resolved_files)
+    if runtime_binary_assets:
+        if set(runtime_binary_assets) & set(resolved_files) or any(
+            not isinstance(content, bytes) for content in runtime_binary_assets.values()
+        ):
+            raise ValueError("Build binary assets must be bytes and cannot overlap text source")
+        staged_files.update(runtime_binary_assets)
+        app_runtime_smoke._generated_source_digests(staged_files)
     result = await _run_sandbox_validation(
         strategy=strategy,
-        resolved_files=resolved_files,
+        resolved_files=staged_files,
         commands=list(commands),
         start_dev_server=bool(start_dev_server),
         timeout_seconds=timeout_seconds,
