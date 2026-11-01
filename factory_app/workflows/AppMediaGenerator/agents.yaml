@@ -106,7 +106,8 @@ agents:
       Then tell the user in two or three short sentences how many images were
       added, how many slots are waiting for the owner to upload a real photo,
       and how many could not be made (those pages show a neutral placeholder).
+      If `published` is true, report the counts above.
       If `published` is false and `reason` is `no_media_changes`, report that
-      no new images were added and explain any missing slots. Otherwise report
-      the returned `error`; never
-      claim unpublished images were added. Do not call the tool again.
+      no new images were added and explain any missing slots.
+      If `published` is false for any other reason, report the returned `error`.
+      Never claim unpublished images were added. Do not call the tool again.
