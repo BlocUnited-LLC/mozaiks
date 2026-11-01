@@ -85,7 +85,7 @@ def test_combined_image_initializes_real_adapter_offline(
     assert result["adapter"] == adapter
     assert result["adapter_version"] == version
     assert result["agent_name"] == name
-    assert result["ag2_version"] == "1.1.2"
+    assert result["ag2_version"] == "1.2.2"
     assert result["acp_version"] == "0.12.1"
     assert result["node_version"] == "v22.23.3"
     assert result["protocol_version"] == 1

@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Updated the AG2 runtime and provider extras to 1.2.2. OpenAI workflows keep
+  Chat Completions through the explicit `OpenAICompletionsConfig`; Responses
+  workflows keep their selected API. Anthropic no longer receives the shared
+  temperature setting, which Anthropic SDK 2.x rejects.
 - Generated UI acceptance can verify a candidate against the existing local
   driver's owned backend and built frontend, with authenticated browser evidence
   preserved per run. External-host probes still cannot accept a candidate.

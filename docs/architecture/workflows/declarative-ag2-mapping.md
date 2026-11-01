@@ -56,6 +56,15 @@ the compiled `transition_graph.yaml` transition graph.
 Each agent entry becomes an AG2 agent definition after prompt composition and
 tool binding.
 
+Provider selection stays explicit in `llm_config`. With AG2 1.2.2,
+`api_type: openai` maps to `OpenAICompletionsConfig` and keeps Chat Completions;
+setting `use_responses_api: true` selects `OpenAIResponsesConfig` instead.
+AG2's deprecated `OpenAIConfig` name is not used because its meaning changes
+in AG2 1.4.0.
+Anthropic configs omit the shared `temperature` setting: Anthropic SDK 2.x
+rejects that sampling parameter. OpenAI and Gemini retain their supported
+temperature settings.
+
 ### `transition_graph.yaml`
 
 Maps to AG2 1.0 Network transition conditions and targets. Mozaiks compiles
