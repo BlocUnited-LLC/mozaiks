@@ -346,11 +346,17 @@ upstream changelog into this document.
   [1.2.2](https://github.com/ag2ai/ag2/releases/tag/v1.2.2) release and migration
   notes plus the [source comparison from 1.1.2](https://github.com/ag2ai/ag2/compare/v1.1.2...v1.2.2).
   All AG2 extras and the ACP proof images use the exact 1.2.2 pin.
-  `OpenAICompletionsConfig` replaces the deprecated `OpenAIConfig` name so
+  `OpenAICompletionsConfig` replaces the `OpenAIConfig` name so
   ordinary OpenAI workflows keep Chat Completions after AG2 changes the old
   name's meaning in 1.4.0. Explicit Responses selection remains unchanged.
   Anthropic no longer receives Mozaiks' shared temperature default because
   Anthropic SDK 2.x rejects that sampling option.
+- **Ollama typing gap**: AG2 removed `OllamaConfig.create_files_client`,
+  inheriting the Files API rejection stub from `ModelConfig`. Mypy treats that
+  protocol stub as abstract even though the config remains instantiable at
+  runtime. The config adapter suppresses only `abstract` at construction;
+  no replacement class or duplicate stub is introduced. Remove this suppression
+  when AG2 restores a concrete typing contract.
 - **No workaround became deletable**: Hub acceptance and dispatch ordering,
   private human attachment, default-handler packet construction, transition
   condition composition, and `CHANNEL_STATE_DEP` keep their existing contracts.

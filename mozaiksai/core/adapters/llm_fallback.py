@@ -313,7 +313,8 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
             "streaming": streaming,
             **_model_call_limits(llm_config, entry, ("max_tokens",)),
         }
-        return OllamaConfig(**kwargs)
+        # AG2 1.2.2 inherits the Files API rejection stub, which mypy treats as abstract.
+        return OllamaConfig(**kwargs)  # type: ignore[abstract]
     # openai / azure / default
     if api_type == "openai" and bool(llm_config.get("use_responses_api") or llm_config.get("responses_api")):
         from ag2.config import OpenAIResponsesConfig

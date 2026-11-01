@@ -59,7 +59,7 @@ tool binding.
 Provider selection stays explicit in `llm_config`. With AG2 1.2.2,
 `api_type: openai` maps to `OpenAICompletionsConfig` and keeps Chat Completions;
 setting `use_responses_api: true` selects `OpenAIResponsesConfig` instead.
-AG2's deprecated `OpenAIConfig` name is not used because its meaning changes
+AG2's `OpenAIConfig` name is not used because its meaning changes
 in AG2 1.4.0.
 Anthropic configs omit the shared `temperature` setting: Anthropic SDK 2.x
 rejects that sampling parameter. OpenAI and Gemini retain their supported
