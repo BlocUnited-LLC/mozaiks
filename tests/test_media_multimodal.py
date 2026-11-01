@@ -179,7 +179,7 @@ def test_build_ag2_image_generation_tools_is_openai_only() -> None:
 
 
 def test_llm_config_to_ag2_config_can_use_openai_responses_config() -> None:
-    from ag2.config import OpenAIConfig, OpenAIResponsesConfig
+    from ag2.config import OpenAICompletionsConfig, OpenAIResponsesConfig
 
     base_config = llm_config_to_ag2_config({
         "config_list": [{"api_type": "openai", "model": "gpt-4.1", "api_key": "test"}],
@@ -189,7 +189,7 @@ def test_llm_config_to_ag2_config_can_use_openai_responses_config() -> None:
         "use_responses_api": True,
     })
 
-    assert isinstance(base_config, OpenAIConfig)
+    assert isinstance(base_config, OpenAICompletionsConfig)
     assert isinstance(responses_config, OpenAIResponsesConfig)
 
 

@@ -16,7 +16,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH=/opt/acp/node_modules/.bin:$PATH \
     HOME=/home/sandbox
 RUN python -m pip install --no-cache-dir --no-compile \
-        "ag2[acp]==1.1.2" "agent-client-protocol==0.12.1" \
+        "ag2[acp]==1.2.2" "agent-client-protocol==0.12.1" \
     && useradd --create-home --uid 10001 --shell /usr/sbin/nologin sandbox \
     && mkdir /workspace \
     && chown sandbox:sandbox /workspace
