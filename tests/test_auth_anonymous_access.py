@@ -35,6 +35,7 @@ from mozaiksai.core.auth.anonymous_access import (
 )
 from mozaiksai.core.auth.config import clear_auth_config_cache
 from mozaiksai.core.auth.dependencies import (
+    development_default_user_id,
     is_shared_development_identity,
     resolve_scope_from_principal,
     validate_user_id_against_principal,
@@ -877,6 +878,28 @@ def test_only_the_shared_development_identity_names_other_users() -> None:
     assert validate_user_id_against_principal(hosted_dev_user) == "dev-user"
     with pytest.raises(HTTPException):
         validate_user_id_against_principal(hosted_dev_user, body_user_id="victim")
+
+
+def test_the_shared_development_identity_naming_itself_acts_for_the_development_default_user(monkeypatch) -> None:
+    """Studio creates a draft for the development default user; the journey route
+    then resolves the browser's own "anonymous" id. Both must name one owner, or
+    the registered build target is not found (live traversal 2026-11-02, #1005)."""
+    development = _principal(provenance="local_development")
+    visitor = _principal(provenance="anonymous")
+    token_user = _principal(provenance="token_validated")
+    monkeypatch.delenv("MOZAIKS_DEFAULT_USER_ID", raising=False)
+
+    studio_owner = resolve_scope_from_principal(development, default_user_id=development_default_user_id())
+    journey_owner = resolve_scope_from_principal(development, user_id="anonymous")
+    assert studio_owner == journey_owner == ("default", "demo-user")
+    assert resolve_scope_from_principal(development) == ("default", "demo-user")
+
+    monkeypatch.setenv("MOZAIKS_DEFAULT_USER_ID", "local-owner")
+    assert resolve_scope_from_principal(development, user_id="anonymous") == ("default", "local-owner")
+    assert resolve_scope_from_principal(development, user_id="victim") == ("default", "victim")
+    # Every other principal still acts only as itself.
+    assert resolve_scope_from_principal(visitor, user_id="anonymous") == ("default", "anonymous")
+    assert resolve_scope_from_principal(token_user, user_id="anonymous") == ("default", "anonymous")
 
 
 def test_a_token_whose_subject_is_anonymous_acts_only_as_itself() -> None:

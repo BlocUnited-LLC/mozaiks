@@ -58,6 +58,8 @@ for doc in db.ChatSessions.find({"generated_files": {"$exists": True, "$ne": Non
         {
             "chat_id": str(doc.get("_id")),
             "workflow": doc.get("workflow_name"),
+            # WorkflowStatus: 0 in progress, 1 completed, 2 failed.
+            "status": doc.get("status"),
             "file_count": len(files) if hasattr(files, "__len__") else 0,
         }
     )

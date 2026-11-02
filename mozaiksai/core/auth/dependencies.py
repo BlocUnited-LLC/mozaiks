@@ -15,6 +15,7 @@ Usage:
         ...
 """
 
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -43,6 +44,11 @@ logger = get_core_logger("auth.dependencies")
 
 #: The user id of the shared anonymous principal when AUTH_ANON_USER_ID is unset.
 ANONYMOUS_USER_ID = "anonymous"
+
+
+def development_default_user_id() -> str:
+    """The user the shared development identity acts for when a request names none."""
+    return os.getenv("MOZAIKS_DEFAULT_USER_ID", "").strip() or "demo-user"
 
 # FastAPI security scheme for OpenAPI docs
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -528,11 +534,13 @@ def resolve_scope_from_principal(
     authenticated principal's claims, then returns the canonical resolved pair.
     Raises :class:`fastapi.HTTPException` on a mismatch or missing required value.
     *default_user_id* is the user the shared development identity acts for
-    when the caller names none; every other principal acts as itself.
+    when the caller names none (default: :func:`development_default_user_id`);
+    every other principal acts as itself. The shared identity naming itself
+    names nobody, so Studio and journey routes resolve the same owner.
     """
     effective_user_id = user_id
-    if is_shared_development_identity(principal) and not effective_user_id:
-        effective_user_id = str(default_user_id or "").strip() or None
+    if is_shared_development_identity(principal) and effective_user_id in {None, "", ANONYMOUS_USER_ID}:
+        effective_user_id = str(default_user_id or "").strip() or development_default_user_id()
 
     resolved_user_id = validate_user_id_against_principal(principal, body_user_id=effective_user_id)
 
