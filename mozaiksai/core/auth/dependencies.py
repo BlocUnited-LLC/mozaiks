@@ -47,7 +47,11 @@ ANONYMOUS_USER_ID = "anonymous"
 
 
 def development_default_user_id() -> str:
-    """The user the shared development identity acts for when a request names none."""
+    """The one user the shared development identity acts for in a local Studio.
+
+    Studio and profile routes resolve it when a request names nobody, and the
+    shell projects it to the browser so every route names the same owner.
+    """
     return os.getenv("MOZAIKS_DEFAULT_USER_ID", "").strip() or "demo-user"
 
 # FastAPI security scheme for OpenAPI docs
@@ -534,13 +538,11 @@ def resolve_scope_from_principal(
     authenticated principal's claims, then returns the canonical resolved pair.
     Raises :class:`fastapi.HTTPException` on a mismatch or missing required value.
     *default_user_id* is the user the shared development identity acts for
-    when the caller names none (default: :func:`development_default_user_id`);
-    every other principal acts as itself. The shared identity naming itself
-    names nobody, so Studio and journey routes resolve the same owner.
+    when the caller names none; every other principal acts as itself.
     """
     effective_user_id = user_id
-    if is_shared_development_identity(principal) and effective_user_id in {None, "", ANONYMOUS_USER_ID}:
-        effective_user_id = str(default_user_id or "").strip() or development_default_user_id()
+    if is_shared_development_identity(principal) and not effective_user_id:
+        effective_user_id = str(default_user_id or "").strip() or None
 
     resolved_user_id = validate_user_id_against_principal(principal, body_user_id=effective_user_id)
 

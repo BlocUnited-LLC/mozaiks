@@ -880,28 +880,6 @@ def test_only_the_shared_development_identity_names_other_users() -> None:
         validate_user_id_against_principal(hosted_dev_user, body_user_id="victim")
 
 
-def test_the_shared_development_identity_naming_itself_acts_for_the_development_default_user(monkeypatch) -> None:
-    """Studio creates a draft for the development default user; the journey route
-    then resolves the browser's own "anonymous" id. Both must name one owner, or
-    the registered build target is not found (live traversal 2026-11-02, #1005)."""
-    development = _principal(provenance="local_development")
-    visitor = _principal(provenance="anonymous")
-    token_user = _principal(provenance="token_validated")
-    monkeypatch.delenv("MOZAIKS_DEFAULT_USER_ID", raising=False)
-
-    studio_owner = resolve_scope_from_principal(development, default_user_id=development_default_user_id())
-    journey_owner = resolve_scope_from_principal(development, user_id="anonymous")
-    assert studio_owner == journey_owner == ("default", "demo-user")
-    assert resolve_scope_from_principal(development) == ("default", "demo-user")
-
-    monkeypatch.setenv("MOZAIKS_DEFAULT_USER_ID", "local-owner")
-    assert resolve_scope_from_principal(development, user_id="anonymous") == ("default", "local-owner")
-    assert resolve_scope_from_principal(development, user_id="victim") == ("default", "victim")
-    # Every other principal still acts only as itself.
-    assert resolve_scope_from_principal(visitor, user_id="anonymous") == ("default", "anonymous")
-    assert resolve_scope_from_principal(token_user, user_id="anonymous") == ("default", "anonymous")
-
-
 def test_a_token_whose_subject_is_anonymous_acts_only_as_itself() -> None:
     """The one change with authentication on: the user id "anonymous" in a
     validated token used to let the caller name any user and see every owner."""
@@ -1420,6 +1398,32 @@ def test_billing_fulfillment_local_branch_needs_development_access(monkeypatch) 
     _auth(monkeypatch, ENV="development")  # demo mode is never an explicit disable
     with pytest.raises(HTTPException):
         _authorize_fulfillment(request, _principal(provenance="local_development"))
+
+
+@pytest.mark.asyncio
+async def test_shell_projects_the_owner_studio_creates_records_for(monkeypatch) -> None:
+    """The browser names its projected id in journey requests and WebSocket
+    paths; Studio creates the draft app for the development default user. The
+    two must be one owner, or a local build cannot start (#1005)."""
+    from mozaiksai.core.runtime.app.auth_contract import build_app_auth_projection
+
+    async def projected_id() -> str:
+        runtime = (await build_app_auth_projection(None, client_scope=_scope(LOCAL, ("Host", "localhost:8000"))))["runtime"]
+        return runtime["user"]["id"]
+
+    development = _principal(provenance="local_development")
+    _off(monkeypatch)
+    monkeypatch.delenv("MOZAIKS_DEFAULT_USER_ID", raising=False)
+    studio_owner = resolve_scope_from_principal(development, default_user_id=development_default_user_id())[1]
+    assert await projected_id() == studio_owner == "demo-user"
+    # The journey route resolves the id the browser names to the same owner.
+    assert resolve_scope_from_principal(development, user_id=await projected_id())[1] == studio_owner
+
+    monkeypatch.setenv("MOZAIKS_DEFAULT_USER_ID", "local-owner")
+    assert await projected_id() == "local-owner"
+    # A local identity with its own id acts as itself, as before.
+    _off(monkeypatch, AUTH_ANON_USER_ID="dev-user")
+    assert await projected_id() == "dev-user"
 
 
 @pytest.mark.asyncio
