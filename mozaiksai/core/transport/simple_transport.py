@@ -247,8 +247,35 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         chat_id = payload.get("chat_id")
         if not chat_id:
             return
+        ui_event = {
+            "kind": "usage_delta",
+            **{
+                key: payload[key]
+                for key in ("event_id", "chat_id", "prompt_tokens", "completion_tokens", "total_tokens")
+                if key in payload
+            },
+        }
         try:
-            await self.send_event_to_ui({"kind": "usage_delta", **payload}, str(chat_id))
+            if payload.get("workflow_name") == "GeneralCapability":
+                # Ask usage belongs to a durable general chat, while its live
+                # WebSocket is connected under a separate carrier chat ID.
+                app_id = str(payload.get("app_id") or "")
+                user_id = str(payload.get("user_id") or "")
+                if not app_id or not user_id:
+                    return
+                for carrier_id, connection in list(self.connections.items()):
+                    general_session = connection.get("general_session")
+                    if (
+                        connection.get("active")
+                        and connection.get("websocket") is not None
+                        and str(connection.get("app_id") or "") == app_id
+                        and str(connection.get("user_id") or "anonymous") == user_id
+                        and isinstance(general_session, dict)
+                        and general_session.get("chat_id") == chat_id
+                    ):
+                        await self.send_event_to_ui(ui_event, carrier_id)
+                return
+            await self.send_event_to_ui(ui_event, str(chat_id))
         except Exception:
             logger.debug("Failed to forward usage_delta to UI", exc_info=True)
 
@@ -702,6 +729,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 envelope_type == 'chat.select_speaker'
                 or envelope_type == 'chat.run_complete'
                 or envelope_type == 'chat.activity'
+                or envelope_type == 'chat.usage_delta'
                 or is_ui_tool_event
             )
             

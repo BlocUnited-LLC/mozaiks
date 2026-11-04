@@ -73,7 +73,7 @@ function isUserReplay(data) {
 export function useWidgetAskWS({
   api, appId, userId, chatId: chatIdProp, workflowName,
   activeGeneralChatId, setActiveGeneralChatId,
-  messages, setMessages, getPendingMessageIds, onConversationAcknowledged,
+  messages, setMessages, getPendingMessageIds, onConversationAcknowledged, onUsageDelta,
   enabled = false, pageContext = null, pagePath = null,
 }) {
   const wsRef = useRef(null);
@@ -88,7 +88,7 @@ export function useWidgetAskWS({
   const requestRef = useRef(0);
   const identityRef = useRef(null);
   const latestRef = useRef(null);
-  latestRef.current = { appId, userId, messages, setMessages, getPendingMessageIds, onConversationAcknowledged, activeGeneralChatId, setActiveGeneralChatId };
+  latestRef.current = { appId, userId, messages, setMessages, getPendingMessageIds, onConversationAcknowledged, onUsageDelta, activeGeneralChatId, setActiveGeneralChatId };
   const [status, setStatus] = useState('disconnected');
   const [isAgentTyping, setIsAgentTyping] = useState(false);
   const [generalModeReady, setGeneralModeReady] = useState(false);
@@ -205,6 +205,13 @@ export function useWidgetAskWS({
         if (!current() || !connected) return;
         const data = normalise(raw);
         const type = typeof data.type === 'string' ? data.type.replace(/^chat\./, '') : '';
+        if (type === 'usage_delta') {
+          const payload = data.data;
+          if (!newConversationRef.current && payload?.chat_id === acknowledgedIdRef.current) {
+            latestRef.current.onUsageDelta?.(payload);
+          }
+          return;
+        }
         const gid = data.general_chat_id || data.metadata?.general_chat_id || data.data?.metadata?.general_chat_id;
         if (type === 'mode_changed' || type === 'general_session_created') {
           if (!gid || (type === 'mode_changed' && data.mode !== 'general' && data.data?.mode !== 'general')) return;
