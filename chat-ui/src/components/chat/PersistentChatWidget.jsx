@@ -9,6 +9,7 @@ import {
 } from '../../styles/brandAssets';
 import { authFetch } from '../../adapters/api';
 import { useWidgetAskWS } from '../../hooks/useWidgetAskWS';
+import { applyChatUsageDelta, emptyChatStatusUsage, resetChatStatusRun } from '../../pages/chatStatusUsage';
 import {
   buildSupportConversationTranscript,
   buildSupportRequestPayload,
@@ -79,6 +80,7 @@ const PersistentChatWidget = ({
   const [supportSent, setSupportSent] = useState(false);
   const [supportError, setSupportError] = useState(null);
   const [supportLoading, setSupportLoading] = useState(false);
+  const [statusUsage, setStatusUsage] = useState(emptyChatStatusUsage);
 
   // Resolve identity from ChatUIProvider context
   const resolvedAppId = user?.app_id || config?.appId || config?.app_id || null;
@@ -134,6 +136,17 @@ const PersistentChatWidget = ({
     setPendingSendCount(0);
   }, []);
   useEffect(clearPendingSends, [clearPendingSends, effectiveAppId, effectiveUserId]);
+  useEffect(() => {
+    setStatusUsage(emptyChatStatusUsage());
+  }, [effectiveAppId, effectiveUserId]);
+  useEffect(() => {
+    setStatusUsage(current => current.scopeKey === (activeGeneralChatId ? `ask:${activeGeneralChatId}` : null)
+      ? current : resetChatStatusRun(current, { mode: 'ask', chatId: activeGeneralChatId }));
+  }, [activeGeneralChatId]);
+
+  const handleUsageDelta = useCallback((payload) => {
+    setStatusUsage(current => applyChatUsageDelta(current, { mode: 'ask', chatId: payload.chat_id }, payload));
+  }, []);
 
   // Widget's own WS connection in ask/general mode.
   const {
@@ -161,12 +174,29 @@ const PersistentChatWidget = ({
           .map(message => message.optimistic)];
       });
     },
+    onUsageDelta: handleUsageDelta,
     enabled: wsEnabled,
     pageContext,
     pagePath,
   });
   const hasPendingCurrentSends = pendingSendCount > 0 && pendingWidgetSendsRef.current.some(message =>
     message.generalChatId === getQueueScope());
+  const statusPhase = historyStatus === 'error'
+    ? 'error'
+    : selectingNew || (wsStatus === 'connected' && !generalModeReady) || isAgentTyping || hasPendingCurrentSends
+      ? 'working'
+      : 'idle';
+  const statusDetail = historyStatus === 'error'
+    ? 'Conversation history unavailable'
+    : selectingNew
+      ? 'Starting a new conversation'
+      : wsStatus === 'connected' && !generalModeReady
+        ? 'Loading conversation'
+        : isAgentTyping || hasPendingCurrentSends
+          ? 'Assistant is responding'
+          : '';
+  const runTokens = !selectingNew && activeGeneralChatId && statusUsage.scopeKey === `ask:${activeGeneralChatId}`
+    ? statusUsage.totalTokens : null;
 
   // Server-known workflow session (survives cleared localStorage) so the
   // "Back to workspace" logo button stays reliable across pages and reloads.
@@ -338,6 +368,7 @@ const PersistentChatWidget = ({
     }
 
     // Send via the widget's own WS; queue if the user submits before connect finishes.
+    setStatusUsage(current => resetChatStatusRun(current, { mode: 'ask', chatId: activeGeneralChatId }));
     if (wsStatus === 'connected' && generalModeReady) {
       const sent = wsSend(text);
       if (!sent) {
@@ -354,7 +385,10 @@ const PersistentChatWidget = ({
 
   // Start a fresh ask conversation
   const handleNewConversation = () => {
-    if (startNewConversation()) supportCueInjectedRef.current = false;
+    if (startNewConversation()) {
+      supportCueInjectedRef.current = false;
+      setStatusUsage(current => resetChatStatusRun(current, { mode: 'ask', chatId: null }));
+    }
   };
 
   // Navigate to full ask ChatPage
@@ -805,7 +839,8 @@ const PersistentChatWidget = ({
               messages={isAgentTyping ? [...askMessages, { id: 'widget-thinking', isThinking: true, agentName: 'Assistant' }] : askMessages}
               onSendMessage={handleSendMessage}
               loading={wsStatus === 'connecting'}
-              connectionStatus={wsStatus === 'connected' ? 'connected' : 'disconnected'}
+              connectionStatus={wsStatus}
+              chatStatus={{ phase: statusPhase, detail: statusDetail, totalTokens: runTokens }}
               conversationMode="ask"
               onConversationModeChange={(mode) => setConversationMode(mode)}
               isOnChatPage={false}

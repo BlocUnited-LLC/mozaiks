@@ -34,6 +34,7 @@ import { mapGeneralMessage } from '../session/generalTranscript';
 import { useChatStartupEffects } from '../hooks/useChatStartupEffects';
 import { useWorkflowStart } from '../hooks/useWorkflowStart';
 import { isFailedWorkflowSession, useFailedWorkflowRetry } from '../hooks/useFailedWorkflowRetry';
+import { applyChatUsageDelta, emptyChatStatusUsage, resetChatStatusRun } from './chatStatusUsage';
 import {
   clearStoredArtifactState,
   clearStoredChatCacheSeed,
@@ -107,6 +108,7 @@ const ChatPage = () => {
   const [ws, setWs] = useState(null);
   const wsRef = useRef(null);
   const [loading, setLoading] = useState(true);
+  const [chatStatusUsage, setChatStatusUsage] = useState(emptyChatStatusUsage);
   const setMessagesWithLogging = useCallback(updater => setMessages(prev => typeof updater==='function'?updater(prev):updater), []);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [transportType, setTransportType] = useState(null);
@@ -246,6 +248,15 @@ const ChatPage = () => {
   useEffect(() => {
     conversationModeRef.current = conversationMode;
   }, [conversationMode]);
+  const activeGeneralChatIdRef = useRef(activeGeneralChatId);
+  useEffect(() => {
+    activeGeneralChatIdRef.current = activeGeneralChatId;
+  }, [activeGeneralChatId]);
+  const statusChatId = conversationMode === 'ask' ? activeGeneralChatId : currentChatId;
+  const statusScopeKey = statusChatId ? `${conversationMode}:${statusChatId}` : null;
+  useEffect(() => {
+    setChatStatusUsage(current => current.scopeKey === statusScopeKey ? current : emptyChatStatusUsage());
+  }, [statusScopeKey]);
   const isSidePanelOpen = isArtifactOpen;
   const setIsSidePanelOpen = setIsArtifactOpen;
   const [forceOverlay, setForceOverlay] = useState(false);
@@ -3447,6 +3458,13 @@ const ChatPage = () => {
         }
         return;
       }
+      case 'usage_delta': {
+        const usage = data.data && typeof data.data === 'object' ? data.data : data;
+        const mode = conversationModeRef.current;
+        const chatId = mode === 'ask' ? activeGeneralChatIdRef.current : currentChatIdRef.current;
+        setChatStatusUsage(current => applyChatUsageDelta(current, { mode, chatId }, usage));
+        return;
+      }
       case 'usage_summary': {
         if (showSystemMessages) {
           setMessagesWithLogging(prev => [...prev, { id:`usage-${Date.now()}`, sender:'system', agentName:'System', content:`📊 Usage: tokens=${data.total_tokens} prompt=${data.prompt_tokens} completion=${data.completion_tokens}${data.cost?` cost=$${data.cost}`:''}`, isStreaming:false }]);
@@ -5308,6 +5326,9 @@ const ChatPage = () => {
 
   const sendMessage = async (messageContent) => {
 
+    const usageChatId = conversationMode === 'ask' ? activeGeneralChatId : currentChatId;
+    setChatStatusUsage(current => resetChatStatusRun(current, { mode: conversationMode, chatId: usageChatId }));
+
     const artifactContextPayload = buildComposerArtifactContext(
       messageContent?.artifactContext || currentArtifactContext || null
     );
@@ -6079,6 +6100,28 @@ const ChatPage = () => {
       : (isMobileView ? 'Artifact drawer' : undefined);
 
   const pendingComposerInputToolCall = findPendingComposerInputRequestToolCall(messages);
+  const activeThinkingAgent = [...messages].reverse().find(message => message?.isThinking)?.agentName;
+  const chatStatus = {
+    phase: pendingHarnessDecision || pendingWorkflowReply || pendingComposerInputToolCall
+      ? 'waiting'
+      : loading
+        ? 'working'
+        : failedWorkflowRetry.available
+          ? 'error'
+          : workflowCompleted
+            ? 'complete'
+            : 'idle',
+    detail: pendingHarnessDecision
+      ? 'Choose the next step'
+      : pendingWorkflowReply || pendingComposerInputToolCall
+        ? 'Reply to continue'
+        : loading
+          ? activeThinkingAgent && activeThinkingAgent !== 'Agent'
+            ? `${activeThinkingAgent} is working`
+            : 'Processing your request'
+          : '',
+    totalTokens: chatStatusUsage.scopeKey === statusScopeKey ? chatStatusUsage.totalTokens : null,
+  };
 
   const handleViewWidgetAsk = useCallback(() => {
     setWidgetOverlayOpen(false);
@@ -6105,6 +6148,7 @@ const ChatPage = () => {
       loading={loading}
       onAgentAction={handleAgentAction}
       connectionStatus={connectionStatus}
+      chatStatus={chatStatus}
       transportType={transportType}
       workflowName={currentWorkflowName}
       structuredOutputs={getWorkflow(currentWorkflowName)?.structuredOutputs || {}}
@@ -6342,6 +6386,7 @@ const ChatPage = () => {
         onArtifactToggle={artifactToggleHandler}
         artifactToggleLabel={artifactToggleLabel}
         connectionStatus={connectionStatus}
+        chatStatus={chatStatus}
         transportType={transportType}
         workflowName={currentWorkflowName}
         structuredOutputs={getWorkflow(currentWorkflowName)?.structuredOutputs || {}}
