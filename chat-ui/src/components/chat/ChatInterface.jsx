@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import ChatMessage from "./ChatMessage";
+import ChatStatusBar from "./ChatStatusBar";
 import { useNavigate, useParams } from "react-router-dom";
 import UIToolRenderer from "../../core/ui/UIToolRenderer";
 import {
@@ -157,6 +158,7 @@ const ModernChatInterface = ({
   artifactToggleLabel,
   hasUnseenArtifact = false,
   connectionStatus,
+  chatStatus = null,
   transportType,
   workflowName,
   workflowHasChildren = false,
@@ -799,6 +801,8 @@ const ModernChatInterface = ({
           </div>
         )}
       </div>
+
+      <ChatStatusBar chatStatus={chatStatus} connectionStatus={connectionStatus} />
 
   {/* Fixed Transmission Input Area - Never moves */}
             <div className={`flex-shrink-0 p-3 sm:p-4 border-t border-[rgba(var(--color-primary-light-rgb),0.2)] bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.05)] to-[rgba(var(--color-secondary-rgb),0.05)] backdrop-blur-xl shadow-lg transition-all duration-500 transmission-input-tight rounded-b-[inherit]`}>
