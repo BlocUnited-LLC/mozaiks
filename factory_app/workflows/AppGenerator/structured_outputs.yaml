@@ -20,7 +20,11 @@ models:
         description: Exact app-owned module id from the supplied module-action inventory.
       action_id:
         type: str
-        description: Exact action id declared by that module. Never infer ids from URLs or display labels.
+        description: >
+          Exact action id declared by that module. Never infer ids from URLs or
+          display labels. Automatic admin data requires admin_internal,
+          read_only true and an input schema accepting an empty object. Explicit
+          submit/delete actions use their declared action without automatic-read admission.
 
   PrimitiveSectionHint:
     type: model
@@ -2302,9 +2306,21 @@ models:
         description: >
           External HTTP exposure posture for this action. Use public or
           public_readonly only for anonymous-safe HTTP actions. Use null for
-          authenticated UI/API actions. Internal/admin_internal disable HTTP dispatch
-          even with authentication and are only for trusted runtime/event calls.
+          authenticated UI/API actions. Internal disables HTTP dispatch.
+          Admin_internal uses the authenticated operator POST dispatcher;
+          automatic page reads additionally require read_only true and an input
+          schema accepting an empty object. Explicit admin mutations remain
+          submit/delete actions, never automatic data sources.
           Does not bypass permissions or entitlement_gate checks.
+      read_only:
+        type: bool
+        default: false
+        description: >
+          Explicit side-effect-free read declaration, independent of HTTP exposure.
+          Never infer from an action name or empty inputs. False for writes,
+          approval, remediation or domain-event emission. Admin automatic reads
+          require true, admin_internal exposure, and an input schema accepting {}.
+          Existing permission and entitlement checks remain authoritative.
       timeout_seconds:
         type: union
         default: null

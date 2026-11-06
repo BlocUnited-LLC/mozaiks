@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 from mozaiksai.core.runtime.app.loader import AppLoader, AppLoadError, AppLoadResult
 from mozaiksai.core.runtime.app.module_loader import ModuleLoader
@@ -241,6 +242,50 @@ async def test_app_loader_loads_valid_module(tmp_path: Path) -> None:
     assert len(result.modules) == 1
     assert result.modules[0].name == "tasks"
     assert result.failed_module_names == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("local_read_only", [None, True, False])
+async def test_app_loader_validates_admin_page_against_composed_module_contracts(tmp_path, local_read_only):
+    active, defaults = tmp_path / "active" / "app", tmp_path / "defaults" / "app"
+    active.mkdir(parents=True)
+    _write_app_json(active)
+
+    def write_read(root, read_only):
+        module_path = _write_valid_module(root) / "module.yaml"
+        manifest = yaml.safe_load(module_path.read_text(encoding="utf-8"))
+        manifest["actions"][0].update(
+            api_surface="admin_internal", read_only=read_only,
+            input_schema={"type": "object", "additionalProperties": False},
+            output_schema={"type": "object", "properties": {
+                "items": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}}}},
+            }},
+        )
+        module_path.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+
+    write_read(defaults, True)
+    if local_read_only is not None:
+        write_read(active, local_read_only)
+    page_path = active / "ui/pages/inventory.yaml"
+    page_path.parent.mkdir(parents=True)
+    page_path.write_text(yaml.safe_dump({
+        "schema_version": "mozaiks.app_page.v1", "name": "inventory", "route": "/inventory",
+        "title": "Inventory", "page_type": "record_list", "layout": "full-width",
+        "sections": [{"id": "rows", "primitive": "DataTable", "config": {
+            "api_endpoint": "/api/admin/modules/tasks/list/read", "data_key": "items",
+            "columns": [{"key": "name", "label": "Name"}],
+        }}],
+    }), encoding="utf-8")
+    if local_read_only is False:
+        # A default read must never override the actual mounted local writer.
+        with pytest.raises(AppLoadError, match="ineligible_action_binding"):
+            await AppLoader.load(str(active), module_defaults_path=str(defaults))
+    else:
+        result = await AppLoader.load(str(active), module_defaults_path=str(defaults))
+        assert result.failed_module_names == []
+        assert result.modules[0].path == (defaults if local_read_only is None else active) / "modules/tasks"
+        assert result.modules[0].action_read_only_map == {"list": True}
+        assert result.page_schemas["inventory"].sections[0].config["api_endpoint"].endswith("/tasks/list/read")
 
 
 @pytest.mark.asyncio

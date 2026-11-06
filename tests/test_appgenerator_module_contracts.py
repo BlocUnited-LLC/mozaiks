@@ -424,7 +424,9 @@ def test_appgenerator_guides_module_auth_surface_and_scope_contract() -> None:
     standard_constraints = "\n".join(module_archetypes["archetypes"]["standard"]["hard_constraints"])
 
     assert "actions[].api_surface is part of the module contract" in module_constraints
-    assert "Internal/admin_internal actions reject every HTTP request" in module_constraints
+    assert "Internal actions reject HTTP dispatch" in module_constraints
+    assert "Admin_internal actions use the authenticated operator POST dispatcher" in module_constraints
+    assert "read_only: true" in module_constraints
     assert "External HTTP dispatch and internal runtime dispatch are separate paths" in module_constraints
     assert "ctx.workspace_id" in module_constraints
     assert "Custom API adapters must not bypass module action auth" in api_constraints

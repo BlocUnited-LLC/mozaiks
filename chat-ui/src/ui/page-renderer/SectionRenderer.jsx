@@ -409,7 +409,9 @@ export function SectionRenderer({
         const target = interpolateString(action.href, context);
         if (!target) return null;
 
-        const method = actionType === 'delete' && !target.startsWith('/api/modules/') ? 'DELETE' : 'POST';
+        const isModuleAction = target.startsWith('/api/modules/')
+          || /^\/api\/admin\/modules\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+$/.test(target);
+        const method = actionType === 'delete' && !isModuleAction ? 'DELETE' : 'POST';
         const body = action.payload != null
           ? interpolateValue(action.payload, context)
           : extraContext.values ?? context.selected_row ?? {};

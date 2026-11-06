@@ -201,7 +201,7 @@ def _write_action(shape: dict[str, Any], operation: str) -> dict[str, Any]:
     return {
         "id": action_id, "description": description, "handler_method": action_id, "api_surface": None,
         "input_schema": input_schema, "output_schema": output_schema, "permissions": [], "emits": [],
-        "entitlement_gate": None, "ask_context_safe": False,
+        "entitlement_gate": None, "ask_context_safe": False, "read_only": False,
     }
 
 

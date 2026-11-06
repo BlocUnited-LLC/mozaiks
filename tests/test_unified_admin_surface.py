@@ -167,6 +167,19 @@ def test_runtime_admin_config_discovers_module_admin_yaml(tmp_path) -> None:
     module_root = app_root / "modules" / "crm"
     contracts_root = module_root / "contracts"
     contracts_root.mkdir(parents=True)
+    (module_root / "module.yaml").write_text(yaml.safe_dump({
+        "schema_version": "mozaiks.module.v1",
+        "module": {
+            "id": "crm", "display_name": "CRM", "version": "1.0.0",
+            "description": "Contacts", "handler": "backend.handler:ContactsModule",
+        },
+        "actions": [{
+            "id": "list_contacts", "description": "List contacts", "handler_method": "list_contacts",
+            "output_schema": {"type": "array", "items": {
+                "type": "object", "properties": {"name": {"type": "string"}},
+            }},
+        }],
+    }), encoding="utf-8")
     (contracts_root / "admin.yaml").write_text(
         yaml.safe_dump(
             {

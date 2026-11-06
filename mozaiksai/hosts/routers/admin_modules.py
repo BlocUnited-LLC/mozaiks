@@ -2,6 +2,7 @@
 
 Route:
     POST /api/admin/modules/{module_name}/{action_name}
+    POST /api/admin/modules/{module_name}/{action_name}/read
 
 Dispatches ONLY actions declared ``api_surface: admin_internal``, and only
 for token-validated principals carrying an operator role from a
@@ -21,6 +22,10 @@ arrive in the Authorization header — the ``access_token`` query fallback
 ``internal`` actions stay HTTP-unreachable everywhere. The public module
 route's ban on ``admin_internal`` is unchanged; this router is the only
 sanctioned HTTP path to operator surfaces.
+
+Automatic data loads use the parameterless /read operation. It additionally
+requires registered ``read_only: true`` metadata; ordinary admin actions may
+write and are never inferred to be safe from their names or input schemas.
 """
 from __future__ import annotations
 
@@ -68,7 +73,7 @@ async def _audit_gate_denial(
         await get_audit_logger().log_admin_access(
             actor_id=(principal.user_id if principal else "anonymous"),
             app_id=(principal.app_id if principal else None),
-            route=f"/api/admin/modules/{module_name}/{action_name}",
+            route=request.url.path,
             method=request.method,
             outcome=outcome,
         )
@@ -154,5 +159,45 @@ async def execute_admin_module_action(
         principal=operator,
         params=params,
         context_overrides=context_overrides,
+        lane="admin",
+    )
+
+
+@router.post("/api/admin/modules/{module_name}/{action_name}/read")
+async def read_admin_module_action(
+    module_name: str,
+    action_name: str,
+    request: Request,
+    principal: UserPrincipal | None = Depends(optional_user),
+):
+    """Admit only explicitly declared parameterless reads through the admin lane."""
+    operator = await _require_operator(request, principal, module_name, action_name)
+    await _require_admin_surface(request, operator, module_name, action_name)
+    registry = getattr(request.app.state, "executor_registry", None)
+    executor = registry.module_executor if registry is not None else None
+    if executor is None or not executor.is_read_only_action(module_name, action_name):
+        await _audit_gate_denial(
+            request, operator, module_name, action_name, outcome="denied_not_read_only"
+        )
+        raise HTTPException(status_code=404, detail="Action not found")
+
+    if request.query_params:
+        raise HTTPException(status_code=400, detail="Automatic admin reads do not accept query inputs")
+    if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
+        raise HTTPException(status_code=400, detail="Automatic admin reads require an empty JSON object")
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload.") from exc
+    if not isinstance(body, dict) or body:
+        raise HTTPException(status_code=400, detail="Automatic admin reads require an empty JSON object")
+
+    return await _execute_module_action(
+        module_name=module_name,
+        action_name=action_name,
+        request=request,
+        principal=operator,
+        params={},
+        context_overrides={},
         lane="admin",
     )

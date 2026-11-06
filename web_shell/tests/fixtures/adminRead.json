@@ -1,0 +1,101 @@
+{
+  "route": {
+    "path": "/admin/catalog",
+    "component": "AdminPortal",
+    "label": "Catalog inventory",
+    "order": 0,
+    "meta": {
+      "requiresAuth": true,
+      "requiresRole": "admin",
+      "title": "Catalog inventory",
+      "appShell": true,
+      "adminPage": "catalog_inventory",
+      "shellMode": "workspace"
+    }
+  },
+  "config": {
+    "pages": [
+      {
+        "id": "catalog_inventory",
+        "label": "Catalog inventory",
+        "path": "/admin/catalog",
+        "icon": null,
+        "order": 0,
+        "enabled": true,
+        "show_in_navigation": true,
+        "scope": "workspace",
+        "surfaces": null
+      }
+    ],
+    "runtime_panels": [
+      {
+        "id": "stats",
+        "label": "Usage Stats",
+        "page": "usage"
+      },
+      {
+        "id": "runs",
+        "label": "Active Runs",
+        "page": "usage"
+      },
+      {
+        "id": "sessions",
+        "label": "Recent Sessions",
+        "page": "operations"
+      }
+    ],
+    "module_panels": [
+      {
+        "id": "catalog.inventory",
+        "label": "Inventory",
+        "description": null,
+        "page": "catalog_inventory",
+        "order": 0,
+        "renderer": "schema",
+        "layout": "full-width",
+        "sections": [
+          {
+            "id": "catalog-table",
+            "primitive": "DataTable",
+            "config": {
+              "data_key": "items",
+              "columns": [
+                {
+                  "key": "name",
+                  "label": "Name"
+                },
+                {
+                  "key": "status",
+                  "label": "Status"
+                }
+              ],
+              "actions": [
+                {
+                  "id": "add",
+                  "label": "Add entry",
+                  "action_type": "submit",
+                  "payload": {},
+                  "href": "/api/admin/modules/catalog/add_entry"
+                },
+                {
+                  "id": "delete",
+                  "label": "Delete entry",
+                  "action_type": "delete",
+                  "payload": {},
+                  "href": "/api/admin/modules/catalog/delete_entry"
+                }
+              ],
+              "api_endpoint": "/api/admin/modules/catalog/list_inventory/read"
+            }
+          }
+        ],
+        "component": null,
+        "permissions": [
+          "catalog.read"
+        ],
+        "module_id": "catalog",
+        "source": "module"
+      }
+    ]
+  }
+}

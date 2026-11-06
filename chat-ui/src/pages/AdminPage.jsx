@@ -24,6 +24,7 @@ import { UsersSection }        from '../admin/pages/UsersSection.jsx'
 import { UsageSection }        from '../admin/pages/UsageSection.jsx'
 import { OperationsSection }   from '../admin/pages/ActivitySection.jsx'
 import { SettingsSection }     from '../admin/pages/SettingsSection.jsx'
+import { ErrorState, LoadingState } from '../ui/primitives/Surface.jsx'
 
 // ---------------------------------------------------------------------------
 // Page routing — extract active page id from the URL suffix
@@ -77,10 +78,10 @@ function pagePanels(panels, pageId) {
 // Root
 // ---------------------------------------------------------------------------
 
-export default function AdminPage() {
+export default function AdminPage({ route } = {}) {
   const { user } = useChatUI()
   const location = useLocation()
-  const { data: config } = useAdminFetch('/api/admin/config')
+  const { data: config, loading, error, refresh } = useAdminFetch('/api/admin/config')
 
   // Client-side role guard (backend enforces independently on all API routes)
   const isAdmin = user?.roles?.includes('admin') ?? true // true fallback = no-auth dev mode
@@ -95,7 +96,16 @@ export default function AdminPage() {
     )
   }
 
-  const activePage        = AdminSectionRoute(location.pathname)
+  if (error) {
+    return <ErrorState title="Unable to load admin configuration" message={error} action={{ label: 'Retry', onClick: refresh }} />
+  }
+  if (loading && !config) return <LoadingState message="Loading admin configuration" />
+
+  // Registry-backed routes carry the canonical ID, including underscores/case.
+  // App dashboard routes without metadata retain their existing suffix routing.
+  const activePage        = typeof route?.meta?.adminPage === 'string' && route.meta.adminPage.trim()
+    ? route.meta.adminPage
+    : AdminSectionRoute(location.pathname)
   const allPages          = config?.pages ?? []
   const allRuntimePanels  = normalizeRuntimePanels(config?.runtime_panels)
   const allModulePanels   = normalizeModulePanels(config?.module_panels)

@@ -42,6 +42,8 @@ from mozaiksai.core.runtime.app.module_loader import LoadedModule, ModuleLoader
 from mozaiksai.core.runtime.app.page_schema import (
     AppPageSchema,
     PageSchemaValidationError,
+    build_page_action_contracts,
+    build_page_action_contracts_from_module_contracts,
     build_page_action_index,
     build_page_action_index_from_module_contracts,
     discover_page_schema_paths,
@@ -244,11 +246,14 @@ class AppLoader:
         try:
             action_index = build_page_action_index_from_module_contracts(base_path)
             action_index.update(build_page_action_index(loaded_modules))
+            action_contracts = build_page_action_contracts_from_module_contracts(base_path)
+            action_contracts.update(build_page_action_contracts(loaded_modules))
             ask_context_index = build_page_action_index_from_module_contracts(base_path, ask_context_only=True)
             ask_context_index.update(build_page_action_index(loaded_modules, ask_context_only=True))
             page_schemas = load_app_page_schemas(
                 base_path,
                 action_index=action_index,
+                action_contracts=action_contracts,
                 ask_context_index=ask_context_index,
             )
         except PageSchemaValidationError as exc:

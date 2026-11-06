@@ -153,10 +153,11 @@ def test_internal_actions_cannot_be_page_or_admin_data_sources(api_surface, tmp_
     manifest = yaml.safe_load(_module_files()[path])
     next(action for action in manifest["actions"] if action["id"] == "list_tasks")["api_surface"] = api_surface
     context = _bridge({"generated_files": {path: yaml.safe_dump(manifest)}})
-    assert "list_tasks" not in module_action_index_from_context(context)["task_management"]
-    with _workflow_tool_invocation(context), pytest.raises(ValueError, match="unknown module/action"):
+    assert ("list_tasks" in module_action_index_from_context(context)["task_management"]) == (api_surface == "admin_internal")
+    diagnostic = "unknown module/action" if api_surface == "internal" else "automatic admin data requires"
+    with _workflow_tool_invocation(context), pytest.raises(ValueError, match=diagnostic):
         save_app_schema(manifest={"app_name": "Tasks"}, pages=[_pages()[1]], context_variables=context)
-    with pytest.raises(ValueError, match="unknown module/action"):
+    with pytest.raises(ValueError, match=diagnostic):
         extract_code_file_map_from_payload({"module_contract": {
             "module_id": "task_management", "module_yaml": manifest,
             "admin_yaml": {"panels": [{"id": "tasks", "sections": _pages()[1]["sections"]}]},

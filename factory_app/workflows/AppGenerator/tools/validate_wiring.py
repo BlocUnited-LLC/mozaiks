@@ -29,6 +29,7 @@ may legitimately have no declarative page API references.
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -37,9 +38,15 @@ import yaml
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
+from mozaiksai.core.runtime.app.page_data_bindings import (
+    iter_data_bound_sections,
+    page_data_binding_errors,
+    schema_field_paths,
+)
 from mozaiksai.core.runtime.app.page_schema import (
     discover_page_schema_paths,
     validate_ask_context_references,
+    validate_page_endpoint_bindings,
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
@@ -54,11 +61,6 @@ from mozaiksai.core.workflow.generator_support.page_action_bindings import (
 from mozaiksai.core.workflow.generator_support.page_binding_construction import (
     canonical_write_ids,
     listed_collections,
-)
-from mozaiksai.core.workflow.generator_support.page_data_bindings import (
-    iter_data_bound_sections,
-    page_data_binding_errors,
-    schema_field_paths,
 )
 
 _logger = logging.getLogger("tools.validate_wiring")
@@ -218,6 +220,11 @@ def _endpoint_to_action_key(endpoint: str) -> tuple[str | None, str | None]:
     path = parsed.path.strip()
     if path in PLATFORM_READ_ENDPOINTS:
         return None, None
+    if path.startswith("/api/admin/modules/"):
+        match = re.fullmatch(r"/api/admin/modules/([A-Za-z0-9_-]+)/([A-Za-z0-9_-]+)(?:/read)?", path)
+        if match is None:
+            return None, "admin module endpoints must use a canonical action or admitted /read operation"
+        return f"{match[1]}/{match[2]}", None
     if path.startswith("/api/modules/"):
         parts = path.strip("/").split("/")
         if len(parts) != 4 or parts[0] != "api" or parts[1] != "modules" or not parts[2] or not parts[3]:
@@ -609,14 +616,35 @@ async def validate_wiring(
         if isinstance(manifest, dict) and isinstance(manifest.get("pages"), list):
             ask_pages.extend(manifest["pages"])
     action_contracts = _generated_module_action_contracts(contract_files)
+    binding_documents = list(app_pages)
+    for path, content in contract_files.items():
+        if path.startswith("modules/") and path.endswith("/contracts/admin.yaml"):
+            try:
+                admin = yaml.safe_load(content)
+            except yaml.YAMLError:
+                continue  # The module contract validator reports malformed YAML.
+            for panel in admin.get("panels", []) if isinstance(admin, dict) else []:
+                if isinstance(panel, dict) and panel.get("sections"):
+                    binding_documents.append({"name": f"{path}:{panel.get('id')}", "sections": panel["sections"]})
+    action_index: dict[str, frozenset[str]] = {}
+    for key in known_actions:
+        if "/" in key:
+            module, action = key.split("/", 1)
+            action_index[module] = action_index.get(module, frozenset()) | {action}
     server_table_failures = _server_table_binding_errors(app_pages, action_contracts)
     ask_context_failures = _ask_context_binding_errors(
         ask_pages, action_contracts,
     )
     workflow_names = generated_workflow_names(contract_files, context_variables)
     page_binding_failures: list[dict[str, Any]] = []
-    for page in app_pages:
+    for page in binding_documents:
         for test, errors, suggestion in (
+            ("wiring_page_action", [item.message for item in validate_page_endpoint_bindings(
+                page, action_index=action_index, action_contracts=action_contracts,
+            ) if item.code not in {"page_schema.unknown_module", "page_schema.unknown_action"}],
+             # The existing endpoint cross-reference pass owns unknown-action
+             # diagnostics, including their established failure classification.
+             "Use a declared action on its matching HTTP surface; automatic admin data requires read admission."),
             ("wiring_page_output", page_data_binding_errors(page, action_contracts),
              "Select KPI keys, table response keys and columns from the bound action's declared output_schema."),
             ("wiring_page_workflow", page_workflow_binding_errors(page, workflow_names),
@@ -650,7 +678,7 @@ async def validate_wiring(
     page_binding_failures.extend(canonical_write_failures)
 
     # Collect endpoint references after standalone disk pages have been resolved.
-    endpoint_refs = _extract_endpoint_refs(app_pages)
+    endpoint_refs = _extract_endpoint_refs(binding_documents)
     referenced_set: set[str] = set()
     endpoint_keys: dict[tuple[str, str, str], str | None] = {}
     invalid_refs: set[tuple[str, str, str]] = set()
