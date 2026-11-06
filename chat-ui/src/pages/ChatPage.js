@@ -6100,11 +6100,13 @@ const ChatPage = () => {
       : (isMobileView ? 'Artifact drawer' : undefined);
 
   const pendingComposerInputToolCall = findPendingComposerInputRequestToolCall(messages);
-  const activeThinkingAgent = [...messages].reverse().find(message => message?.isThinking)?.agentName;
+  const activeThinkingMessage = [...messages].reverse().find(message => message?.isThinking);
+  const activeThinkingAgent = activeThinkingMessage?.agentName;
+  const isWorking = loading || Boolean(activeThinkingMessage);
   const chatStatus = {
     phase: pendingHarnessDecision || pendingWorkflowReply || pendingComposerInputToolCall
       ? 'waiting'
-      : loading
+      : isWorking
         ? 'working'
         : failedWorkflowRetry.available
           ? 'error'
@@ -6115,7 +6117,7 @@ const ChatPage = () => {
       ? 'Choose the next step'
       : pendingWorkflowReply || pendingComposerInputToolCall
         ? 'Reply to continue'
-        : loading
+        : isWorking
           ? activeThinkingAgent && activeThinkingAgent !== 'Agent'
             ? `${activeThinkingAgent} is working`
             : 'Processing your request'
