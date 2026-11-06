@@ -13,6 +13,7 @@ import httpx
 import pytest
 
 from mozaiksai.core.adapters import circuit_breaker
+from mozaiksai.core.adapters import http_app_backend as adapter_module
 from mozaiksai.core.adapters.http_app_backend import HttpAppBackendAdapter
 
 
@@ -30,7 +31,12 @@ def _http_server(respond):
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            request = {"path": self.path, "headers": dict(self.headers)}
+            request = {
+                "method": self.command,
+                "path": self.path,
+                "headers": dict(self.headers),
+                "body": self.rfile.read(int(self.headers.get("Content-Length", "0"))),
+            }
             requests.append(request)
             status, headers, body = respond(request)
             self.send_response(status)
@@ -39,6 +45,9 @@ def _http_server(respond):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        do_POST = do_GET
+        do_DELETE = do_GET
 
         def log_message(self, *_args):
             pass
@@ -266,3 +275,161 @@ async def test_deeply_nested_json_preserves_raw_response_fallback(monkeypatch):
 
     assert response.success and response.status_code == 200
     assert response.data == {"raw": body}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("strict_json", [False, True])
+@pytest.mark.parametrize("status,data", [
+    (200, {"ok": True}),
+    (201, {"created": "item"}),
+    (200, [{"id": "a"}, {"id": "b"}]),
+    (201, []),
+    (200, {"raw": "valid JSON field, not a parse failure"}),
+    (200, None),
+    (200, "text"),
+    (200, 42),
+    (200, 1.25),
+    (200, False),
+    (207, {"status": "degraded"}),
+])
+async def test_successful_json_response_values(http_server, status, data, strict_json):
+    origin, requests = http_server(lambda _: _json_response(status, data))
+
+    response = await HttpAppBackendAdapter(
+        origin, trust_env=False, strict_json=strict_json,
+    ).request("GET", "/read")
+
+    assert response.success and response.status_code == status
+    assert response.data == data
+    assert type(response.data) is type(data)
+    assert response.error is None
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [b"", b"not-json", b'{"broken":', b"\xff", b"NaN", b"Infinity", b"-Infinity", b'{"value":NaN}'])
+async def test_strict_json_rejects_invalid_success_safely(http_server, caplog, body):
+    origin, requests = http_server(lambda _: (200, {}, body))
+
+    response = await HttpAppBackendAdapter(
+        origin, trust_env=False, strict_json=True,
+    ).request("GET", "/read?token=test-private-query")
+
+    assert not response.success and response.status_code == 200
+    assert response.error == "backend_invalid_response"
+    assert response.data is None
+    assert "test-private-query" not in caplog.text
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_strict_json_rejects_excessive_nesting(monkeypatch):
+    depth = sys.getrecursionlimit() + 100
+    body = "[" * depth + "0" + "]" * depth
+    with pytest.raises(RecursionError):
+        json.loads(body)
+    _mock_transport(monkeypatch, lambda _: httpx.Response(201, text=body))
+
+    response = await HttpAppBackendAdapter(
+        "http://localhost:9999", strict_json=True,
+    ).request("GET", "/read")
+
+    assert not response.success and response.status_code == 201
+    assert response.error == "backend_invalid_response" and response.data is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("strict_json,expected_data", [(False, {"raw": ""}), (True, None)])
+async def test_empty_204_success_preserves_default_and_supports_strict_mode(http_server, strict_json, expected_data):
+    origin, requests = http_server(lambda _: (204, {}, b""))
+
+    response = await HttpAppBackendAdapter(
+        origin, trust_env=False, strict_json=strict_json,
+    ).request("DELETE", "/items/a")
+
+    assert response.success and response.status_code == 204
+    assert response.data == expected_data and response.error is None
+    assert len(requests) == 1 and requests[0]["method"] == "DELETE"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 409, 426, 429, 500, 502, 503, 504])
+async def test_http_failures_preserve_actual_status(http_server, status, caplog):
+    origin, requests = http_server(lambda _: (status, {}, b"test-private-error-body"))
+
+    response = await HttpAppBackendAdapter(
+        origin, trust_env=False, strict_json=True,
+    ).request("GET", "/read")
+
+    assert not response.success and response.status_code == status
+    assert response.data is None
+    assert response.error == (
+        "backend_unavailable" if status >= 500 else f"HTTP {status}: test-private-error-body"
+    )
+    assert "test-private-error-body" not in caplog.text
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [307, 308])
+async def test_post_redirect_never_replays_body_or_private_headers(http_server, monkeypatch, status):
+    destination, destination_requests = http_server(lambda _: _json_response(201, {}))
+    origin, origin_requests = http_server(lambda _: (status, {"Location": destination}, b""))
+    proxy, proxy_requests = http_server(lambda _: _json_response(200, {}))
+    _proxy_env(monkeypatch, proxy)
+
+    response = await HttpAppBackendAdapter(
+        origin, "test-private-key", trust_env=False, strict_json=True,
+    ).request("POST", "/items", json_body={"private": "body"}, headers={"X-Actor-Id": "actor"})
+
+    assert not response.success and response.status_code == status
+    assert len(origin_requests) == 1
+    assert json.loads(origin_requests[0]["body"]) == {"private": "body"}
+    assert destination_requests == [] and proxy_requests == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["POST", "DELETE"])
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("failure", ["http_503", "connect", "read_timeout"])
+async def test_mutation_failure_is_one_attempt_with_or_without_breaker(monkeypatch, method, enabled, failure):
+    requests = []
+
+    def fail(request):
+        requests.append(request)
+        if failure == "http_503":
+            return httpx.Response(503, text="test-private-error")
+        if failure == "connect":
+            raise httpx.ConnectError("test-private-error", request=request)
+        raise httpx.ReadTimeout("test-private-error", request=request)
+
+    _mock_transport(monkeypatch, fail)
+    response = await HttpAppBackendAdapter(
+        "http://localhost:9999", strict_json=True, circuit_breaker_enabled=enabled,
+    ).request(method, "/items/a", json_body={"id": "a"})
+
+    assert not response.success and response.error == "backend_unavailable"
+    assert response.status_code == (503 if failure == "http_503" else 0)
+    assert len(requests) == 1 and requests[0].method == method
+    if not enabled:
+        assert circuit_breaker._breakers == {}
+
+
+@pytest.mark.asyncio
+async def test_disabled_breaker_bypasses_registry_and_existing_open_circuit(http_server, monkeypatch):
+    origin, requests = http_server(lambda _: _json_response(503, {"error": "unavailable"}))
+    enabled = HttpAppBackendAdapter(origin, trust_env=False)
+    for _ in range(2):
+        assert (await enabled.request("GET", "/read")).status_code == 503
+    assert (await enabled.request("GET", "/read")).error == "backend_circuit_open"
+    assert len(requests) == 2
+
+    def forbidden_registry_access(_name):
+        pytest.fail("Disabled circuit protection must not consult the shared registry")
+
+    monkeypatch.setattr(adapter_module, "get_circuit_breaker_sync", forbidden_registry_access)
+    disabled = HttpAppBackendAdapter(origin, trust_env=False, circuit_breaker_enabled=False)
+    for _ in range(3):
+        response = await disabled.request("POST", "/items", json_body={"id": "a"})
+        assert response.status_code == 503 and response.error == "backend_unavailable"
+    assert len(requests) == 5

@@ -26,6 +26,10 @@ logger = logging.getLogger("mozaiksai.adapters.http_app_backend")
 _DEFAULT_BASE_URL = "http://localhost:8000"
 
 
+def _reject_json_constant(_value: str) -> None:
+    raise ValueError("Non-JSON numeric constant")
+
+
 class HttpAppBackendAdapter:
     """Generic HTTP adapter for any app backend.
 
@@ -37,6 +41,10 @@ class HttpAppBackendAdapter:
     proxies and certificate settings. An explicit empty ``internal_api_key``
     disables ambient key lookup. Circuit state is shared only by adapters for
     the same normalized base URL, independent of credentials and request paths.
+    The registry has no eviction; use fixed configured URLs rather than URLs
+    supplied per request. ``circuit_breaker_enabled=False`` bypasses it entirely.
+    ``strict_json=True`` rejects malformed successful responses instead of
+    returning raw text; an empty HTTP 204 succeeds with no data.
     """
 
     def __init__(
@@ -47,6 +55,8 @@ class HttpAppBackendAdapter:
         *,
         connect_timeout: float = 10.0,
         trust_env: bool = True,
+        strict_json: bool = False,
+        circuit_breaker_enabled: bool = True,
     ) -> None:
         self._base_url = (  # type: ignore[union-attr]
             base_url
@@ -58,6 +68,8 @@ class HttpAppBackendAdapter:
         )
         self._timeout = httpx.Timeout(timeout, connect=connect_timeout)
         self._trust_env = trust_env
+        self._strict_json = strict_json
+        self._circuit_breaker_enabled = circuit_breaker_enabled
         upstream = httpx.URL(self._base_url).copy_with(
             username="", password="", query=None, fragment=None,
         )
@@ -112,12 +124,23 @@ class HttpAppBackendAdapter:
             # sensitive URLs or headers, so retain the category, not their text.
             raise httpx.HTTPError(type(exc).__name__) from None
         if 200 <= resp.status_code < 300:
+            if self._strict_json and resp.status_code == 204 and not resp.content:
+                return BackendResponse(success=True, status_code=204)
             try:
-                data = resp.json()
+                data = (
+                    resp.json(parse_constant=_reject_json_constant)
+                    if self._strict_json else resp.json()
+                )
             except Exception:
                 logger.warning(
                     "BACKEND_RESPONSE_NON_JSON status=%d", resp.status_code,
                 )
+                if self._strict_json:
+                    return BackendResponse(
+                        success=False,
+                        status_code=resp.status_code,
+                        error="backend_invalid_response",
+                    )
                 data = {"raw": resp.text}
             return BackendResponse(success=True, status_code=resp.status_code, data=data)
         # Treat 5xx as errors so the circuit breaker counts them.
@@ -144,16 +167,22 @@ class HttpAppBackendAdapter:
     ) -> BackendResponse:
         url = f"{self._base_url}{path}"
         merged_headers = self._build_headers(user_token=user_token, extra=headers)
-        breaker = get_circuit_breaker_sync(self._circuit_name)
         try:
+            if not self._circuit_breaker_enabled:
+                return await self._do_request(method, url, merged_headers, json_body)
+            breaker = get_circuit_breaker_sync(self._circuit_name)
             result = await breaker.call(self._do_request, method, url, merged_headers, json_body)
             return result  # type: ignore[no-any-return]
         except CircuitOpenError:
             logger.warning("BACKEND_CIRCUIT_OPEN name=%s", self._circuit_name)
             return BackendResponse(success=False, error="backend_circuit_open")
-        except httpx.HTTPError:
+        except httpx.HTTPError as exc:
             logger.error("BACKEND_REQUEST_FAILED name=%s", self._circuit_name)
-            return BackendResponse(success=False, error="backend_unavailable")
+            return BackendResponse(
+                success=False,
+                status_code=exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else 0,
+                error="backend_unavailable",
+            )
 
     # ------------------------------------------------------------------
     # AppBackendPort.emit
