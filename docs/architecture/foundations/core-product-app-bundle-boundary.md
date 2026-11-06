@@ -70,6 +70,9 @@ access and existing open circuits, including circuits for the same upstream;
 it does not reset their state. Neither mode retries any request. With protection
 enabled, transport errors and 5xx responses count toward opening the circuit;
 2xx (including 207), 3xx/4xx, and strict JSON parse failures do not.
+A received 2xx counts as transport success even when strict JSON parsing fails,
+so it can close a half-open circuit. The circuit does not validate response
+syntax or the app's response contract.
 
 `BackendResponse.data` can hold any JSON value, including arrays, scalars and
 null. `strict_json` defaults to `False`: unparsable 2xx responses still succeed
@@ -79,6 +82,10 @@ empty or non-JSON 2xx bodies fail with the actual HTTP status,
 such as `NaN` and `Infinity` are rejected in this mode. An actually empty 204
 is the exception: it succeeds with `data=None`. Empty 200/201 responses fail;
 a valid JSON object containing a `raw` field remains ordinary successful data.
+A failed parse does not mean the server rejected or rolled back the request:
+a 2xx response, including 202, may follow acceptance or execution of a mutation.
+Do not automatically retry a mutation because its response failed strict parsing;
+reconcile its outcome through the app's operation contract.
 
 All returned HTTP failures preserve their actual status, including 5xx.
 Transport failures without an HTTP response and open-circuit rejections have
