@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+from hashlib import sha256
 from typing import Any
 
 import httpx
@@ -22,8 +23,6 @@ from mozaiksai.core.ports.app_backend import (
 
 logger = logging.getLogger("mozaiksai.adapters.http_app_backend")
 
-_BACKEND_CIRCUIT_NAME = "app_backend"
-
 _DEFAULT_BASE_URL = "http://localhost:8000"
 
 
@@ -33,6 +32,11 @@ class HttpAppBackendAdapter:
     Configuration (env vars):
         MOZAIKS_BACKEND_URL  — base URL of the app backend
         INTERNAL_API_KEY     — optional shared secret for service-to-service auth
+
+    Set ``trust_env=False`` for private transports that must ignore environment
+    proxies and certificate settings. An explicit empty ``internal_api_key``
+    disables ambient key lookup. Circuit state is shared only by adapters for
+    the same normalized base URL, independent of credentials and request paths.
     """
 
     def __init__(
@@ -40,13 +44,25 @@ class HttpAppBackendAdapter:
         base_url: str | None = None,
         internal_api_key: str | None = None,
         timeout: float = 30.0,
+        *,
+        connect_timeout: float = 10.0,
+        trust_env: bool = True,
     ) -> None:
         self._base_url = (  # type: ignore[union-attr]
             base_url
             or os.getenv("MOZAIKS_BACKEND_URL", _DEFAULT_BASE_URL)
         ).rstrip("/")
-        self._internal_key = internal_api_key or os.getenv("INTERNAL_API_KEY", "")
-        self._timeout = httpx.Timeout(timeout, connect=10.0)
+        self._internal_key = (
+            os.getenv("INTERNAL_API_KEY", "")
+            if internal_api_key is None else internal_api_key
+        )
+        self._timeout = httpx.Timeout(timeout, connect=connect_timeout)
+        self._trust_env = trust_env
+        upstream = httpx.URL(self._base_url).copy_with(
+            username="", password="", query=None, fragment=None,
+        )
+        # Registry names appear in logs; do not put URLs or credentials there.
+        self._circuit_name = f"app_backend:{sha256(str(upstream).encode()).hexdigest()}"
 
     # ------------------------------------------------------------------
     # Header helpers
@@ -79,20 +95,28 @@ class HttpAppBackendAdapter:
         json_body: dict[str, Any] | None,
     ) -> BackendResponse:
         """Inner HTTP call — wrapped by circuit breaker."""
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.request(
-                method=method,
-                url=url,
-                headers=merged_headers,
-                json=json_body,
-            )
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._timeout,
+                trust_env=self._trust_env,
+                follow_redirects=False,
+            ) as client:
+                resp = await client.request(
+                    method=method,
+                    url=url,
+                    headers=merged_headers,
+                    json=json_body,
+                )
+        except httpx.HTTPError as exc:
+            # The shared breaker logs exceptions. Transport messages can include
+            # sensitive URLs or headers, so retain the category, not their text.
+            raise httpx.HTTPError(type(exc).__name__) from None
         if 200 <= resp.status_code < 300:
             try:
                 data = resp.json()
-            except Exception as _json_exc:
+            except Exception:
                 logger.warning(
-                    "BACKEND_RESPONSE_NON_JSON method=%s url=%s status=%d: %s",
-                    method, url, resp.status_code, _json_exc,
+                    "BACKEND_RESPONSE_NON_JSON status=%d", resp.status_code,
                 )
                 data = {"raw": resp.text}
             return BackendResponse(success=True, status_code=resp.status_code, data=data)
@@ -120,15 +144,15 @@ class HttpAppBackendAdapter:
     ) -> BackendResponse:
         url = f"{self._base_url}{path}"
         merged_headers = self._build_headers(user_token=user_token, extra=headers)
-        breaker = get_circuit_breaker_sync(_BACKEND_CIRCUIT_NAME)
+        breaker = get_circuit_breaker_sync(self._circuit_name)
         try:
             result = await breaker.call(self._do_request, method, url, merged_headers, json_body)
             return result  # type: ignore[no-any-return]
-        except CircuitOpenError as exc:
-            logger.warning("BACKEND_CIRCUIT_OPEN path=%s: %s", path, exc)
+        except CircuitOpenError:
+            logger.warning("BACKEND_CIRCUIT_OPEN name=%s", self._circuit_name)
             return BackendResponse(success=False, error="backend_circuit_open")
-        except httpx.HTTPError as exc:
-            logger.error("Backend request failed %s %s: %s", method, path, exc)
+        except httpx.HTTPError:
+            logger.error("BACKEND_REQUEST_FAILED name=%s", self._circuit_name)
             return BackendResponse(success=False, error="backend_unavailable")
 
     # ------------------------------------------------------------------

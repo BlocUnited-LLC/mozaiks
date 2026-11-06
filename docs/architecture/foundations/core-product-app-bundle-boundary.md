@@ -33,6 +33,41 @@ Current framework contract in this repo:
 - `mozaiksai/core/ports/app_backend.py`
 - `mozaiksai/core/adapters/http_app_backend.py`
 
+The HTTP adapter owns transport mechanics for optional external backends. Apps
+can configure private transport without copying an HTTP client:
+
+```python
+backend = HttpAppBackendAdapter(
+    base_url=backend_url,
+    internal_api_key=resolved_key,
+    timeout=15.0,
+    connect_timeout=3.0,
+    trust_env=False,
+)
+```
+
+`trust_env` defaults to `True`, retaining HTTPX environment proxy/certificate
+configuration for existing consumers. Private callers can explicitly disable
+it. Redirects are never followed. `timeout` controls response, write and pool
+timeouts; `connect_timeout` controls connection establishment. Their defaults
+remain 30 and 10 seconds respectively. An omitted/`None` internal key uses
+`INTERNAL_API_KEY`; an explicit empty string sends no default key. Additional
+headers and user tokens apply only to the current request.
+
+Circuit state belongs to the normalized configured base URL, including its path
+prefix. Separate upstreams do not share failure counts; adapters for the same
+upstream share protection across request paths and credentials. Registry names
+hash that identity so circuit logs do not contain the URL. Transport failures
+are logged by category, without raw exception text, request paths or bodies.
+
+App-owned clients still validate their allowed origins/actions, trusted caller
+context and response contracts. The generic response contract remains unchanged:
+non-JSON 2xx responses become `data={"raw": ...}`, non-5xx errors include up to
+500 response-text characters in `BackendResponse.error`, and network/5xx
+failures return `backend_unavailable`. A private client must reject malformed
+successful data and map errors to safe product errors before exposing them.
+Transport reuse grants no authority and does not replace those app boundaries.
+
 ### 2. AI runtime core
 
 Owns generic workflow and orchestration capabilities:
