@@ -618,6 +618,8 @@ def _materialize_table_response_keys(document: Any, contracts: dict[str, dict[st
         if not isinstance(config, dict):
             continue
         endpoint = config.get("api_endpoint")
+        if not isinstance(endpoint, str):
+            continue
         key = contract_key_for_endpoint(endpoint)
         if key is None:
             continue

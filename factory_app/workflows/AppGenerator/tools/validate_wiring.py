@@ -617,15 +617,15 @@ async def validate_wiring(
             ask_pages.extend(manifest["pages"])
     action_contracts = _generated_module_action_contracts(contract_files)
     binding_documents = list(app_pages)
-    for path, content in contract_files.items():
-        if path.startswith("modules/") and path.endswith("/contracts/admin.yaml"):
+    for contract_path, content in contract_files.items():
+        if contract_path.startswith("modules/") and contract_path.endswith("/contracts/admin.yaml"):
             try:
                 admin = yaml.safe_load(content)
             except yaml.YAMLError:
                 continue  # The module contract validator reports malformed YAML.
             for panel in admin.get("panels", []) if isinstance(admin, dict) else []:
                 if isinstance(panel, dict) and panel.get("sections"):
-                    binding_documents.append({"name": f"{path}:{panel.get('id')}", "sections": panel["sections"]})
+                    binding_documents.append({"name": f"{contract_path}:{panel.get('id')}", "sections": panel["sections"]})
     action_index: dict[str, frozenset[str]] = {}
     for key in known_actions:
         if "/" in key:
