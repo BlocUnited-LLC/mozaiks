@@ -252,7 +252,7 @@ references, required input parameters and uncontracted response keys fail
 validation. Both typed module admin output and authored admin YAML use the
 same rules. Runtime admin configuration checks a full module panel against the
 active module contracts when it declares automatic `api_endpoint` data in the
-`/api/admin/modules` namespace, including malformed read paths. Legacy public
+`/api/admin/modules` namespace, including malformed read paths. Existing public
 data and explicit-action-only panels retain their existing serving contract;
 generated bundles and standalone page schemas remain strictly validated.
 

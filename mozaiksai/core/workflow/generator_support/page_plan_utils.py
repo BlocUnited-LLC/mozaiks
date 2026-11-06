@@ -841,6 +841,9 @@ def normalize_planned_page_content(
     Materialized page content is written from the same map it is validated
     from, so the correction has to reach the content rather than only the
     validation - otherwise the file on disk keeps the rejected primitive.
+    Module-bound pages require their declared inventory; omitted or empty
+    ``modules`` grants no action references. Use ``normalize_page_structure``
+    when only structural correction is intended.
     """
     try:
         document = yaml.safe_load(content)

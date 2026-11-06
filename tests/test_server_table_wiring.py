@@ -124,10 +124,21 @@ async def test_server_table_cannot_call_internal_action(surface):
 
 
 @pytest.mark.asyncio
-async def test_malformed_surface_returns_a_persisted_failure_report():
+@pytest.mark.parametrize("surface", [[], ["public"], {}, {"surface": "public"}, False, 7, "unknown"])
+async def test_malformed_surface_returns_a_persisted_failure_report(surface):
     action, page = bundle()
-    action["api_surface"] = ["public"]
-    assert not (await check(action, page))["passed"]
+    action["api_surface"] = surface
+    result = await check(action, page)
+    assert not result["passed"]
+    assert "wiring_page_action" in {failure["test"] for failure in result["failed_tests"]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", [None, "public", "public_readonly"])
+async def test_server_table_preserves_declared_public_surfaces(surface):
+    action, page = bundle()
+    action["api_surface"] = surface
+    assert (await check(action, page))["passed"]
 
 
 @pytest.mark.asyncio

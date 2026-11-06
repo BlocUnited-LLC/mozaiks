@@ -1119,11 +1119,13 @@ def validate_page_endpoint_bindings(
                 eligible = automatic and contract is not None and admin_read_action_eligible(contract)
             elif admin_action_match:
                 eligible = (
-                    not automatic and action_type in {"submit", "delete"}
+                    not automatic and action_type in ("submit", "delete")
                     and contract is not None and contract.get("api_surface") == "admin_internal"
                 )
             elif contract is not None:
-                eligible = contract.get("api_surface") not in {"internal", "admin_internal"}
+                # Wiring also checks raw generated YAML before ModuleLoader has
+                # validated its types. Unknown values must produce diagnostics.
+                eligible = contract.get("api_surface") in (None, "public", "public_readonly")
             if not eligible:
                 diagnostics.append(PageSchemaDiagnostic(
                     code="page_schema.ineligible_action_binding", location=location,

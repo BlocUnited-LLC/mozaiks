@@ -354,13 +354,13 @@ def test_admin_config_preserves_explicit_writer_button(boundary):
 
 
 @pytest.mark.parametrize("public_action", ["public_read", "list_rows"])
-def test_admin_config_preserves_legacy_public_panel_and_explicit_action(boundary, monkeypatch, public_action):
+def test_admin_config_preserves_existing_public_panel_and_explicit_action(boundary, monkeypatch, public_action):
     from mozaiksai.core.admin import router as admin_config
 
     # ModuleAdminPanel has always accepted section dictionaries. This existing
     # public binding must not acquire a whole-panel migration gate merely
     # because the framework adds an opt-in automatic admin read operation.
-    sections = [{"id": "legacy", "primitive": "DataTable", "config": {
+    sections = [{"id": "public_rows", "primitive": "DataTable", "config": {
         "api_endpoint": f"/api/modules/inventory/{public_action}", "api_params": {"limit": 10},
         "data_key": "items", "columns": [{"key": "name", "label": "Name"}],
         "actions": [{"label": "Run checks", "action_type": "submit", "href": f"{_BASE}/run_checks"}],
@@ -376,7 +376,7 @@ def test_admin_config_preserves_legacy_public_panel_and_explicit_action(boundary
     assert response.json()["module_panels"][0]["sections"] == sections
     assert boundary.loaded.handler.reads == []
     assert boundary.loaded.handler.history == []
-    # Serving compatibility grants no additional dispatch authority: a legacy
+    # Serving an existing panel grants no additional dispatch authority: its
     # public URL targeting an admin action remains unavailable through GET.
     expected_status = 200 if public_action == "public_read" else 404
     assert boundary.client.get(f"/api/modules/inventory/{public_action}").status_code == expected_status
