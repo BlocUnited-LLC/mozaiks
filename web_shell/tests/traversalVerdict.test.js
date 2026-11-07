@@ -36,7 +36,7 @@ const chats = new Set(['chat-a']);
 const bundle = { chat_id: 'chat-a', workflow: 'AppGenerator', file_count: 12 };
 const artifact = (over = {}) => ({
   artifact_version_id: 'av_1', source_chat_id: 'chat-a', lifecycle_status: 'current',
-  app_validation_status: 'passed', file_count: 12, ...over,
+  build_family: 'app_bundle', app_validation_status: 'passed', file_count: 12, ...over,
 });
 
 test('a blocked run fails', async () => {
@@ -114,6 +114,21 @@ test('only an accepted, validated artifact passes', async () => {
   assert.equal(v.ok, true);
   assert.equal(v.outcome, 'VALIDATED_ARTIFACT');
   assert.match(v.summary, /av_1/);
+});
+
+test('accepted concept, theme, and design-docs versions are not the build', async () => {
+  // Live traversal 2026-11-02 (#1005): these are accepted early, before the app
+  // bundle exists, and never carry an app validation.
+  const judge = await loadJudge();
+  const upstream = ['concept', 'theme_capture', 'design_docs'].map((family, index) => artifact({
+    artifact_version_id: `av_up_${index}`, build_family: family, app_validation_status: null,
+  }));
+  const v = judge({
+    evidence: { bundles: [bundle], artifacts: upstream },
+    blocked: null, failedIn: null, chats,
+  });
+  assert.equal(v.ok, false);
+  assert.equal(v.outcome, 'NO_ACCEPTED_ARTIFACT');
 });
 
 test('the spec throws on a failing verdict', async () => {

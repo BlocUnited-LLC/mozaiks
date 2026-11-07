@@ -451,8 +451,11 @@ async def generate_and_download(
             "validation_errors": quality_gate.get("errors") or [],
         }
     from .outcome_materialization import materialize_workflow_outcomes
+    from .statusbar_materialization import materialize_workflow_statusbar
 
-    bundle_entries = [materialize_workflow_outcomes(entry) for entry in bundle_entries]
+    bundle_entries = [
+        materialize_workflow_statusbar(materialize_workflow_outcomes(entry)) for entry in bundle_entries
+    ]
     if context_variables is not None and hasattr(context_variables, "set"):
         by_name = {entry["workflow_name"]: entry for entry in bundle_entries}
         context_variables.set("workflow_bundle_results", {

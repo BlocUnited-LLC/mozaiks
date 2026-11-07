@@ -24,6 +24,7 @@ from factory_app.workflows._shared.workflow_integration import (
 from mozaiksai.core.workflow.context.frozen import detach
 
 from .outcome_materialization import materialize_workflow_outcomes
+from .statusbar_materialization import materialize_workflow_statusbar
 
 REQUIRED_WORKFLOW_FILES = {
     "orchestrator.yaml",
@@ -418,6 +419,10 @@ def validate_workflow_bundle_structure(
             entry = materialize_workflow_outcomes(entry)
         except (ValueError, TypeError, KeyError, yaml.YAMLError) as exc:
             report["errors"].append(f"outcome plan materialization failed: {exc}")
+        try:
+            entry = materialize_workflow_statusbar(entry)
+        except (ValueError, TypeError, KeyError, yaml.YAMLError) as exc:
+            report["errors"].append(f"statusbar materialization failed: {exc}")
 
         files = _files_by_name(entry, errors=report["errors"])
         emitted_files = set(files)
@@ -451,6 +456,7 @@ def validate_workflow_bundle_structure(
             ("middleware.yaml", parse_middleware_config),
             ("ui_config.yaml", parse_ui_config),
             ("a2a.yaml", parse_a2a_config),
+            ("extended_orchestration/task_batches.yaml", parse_task_batches_config),
         ):
             if filename not in payloads:
                 continue
@@ -468,11 +474,15 @@ def validate_workflow_bundle_structure(
             validate_workflow_context_contract(
                 workflow_name=workflow_name,
                 workflow_config={
+                    "agents": parsed_payloads["agents.yaml"]["agents"],
+                    "middleware": parsed_payloads["middleware.yaml"],
+                    "a2a": parsed_payloads.get("a2a.yaml", {}),
                     "context_variables": parsed_payloads["context_variables.yaml"],
                     "transition_graph": parsed_payloads["transition_graph.yaml"],
                     "structured_outputs": parsed_payloads["structured_outputs.yaml"],
                     "tools": parsed_payloads["tools.yaml"]["tools"],
                 },
+                task_batches=parsed_payloads.get("extended_orchestration/task_batches.yaml"),
             )
         except ValueError as exc:
             report["errors"].append(str(exc))
@@ -571,7 +581,7 @@ def validate_workflow_bundle_structure(
             report["errors"].append("required extended_orchestration/task_batches.yaml missing")
         if isinstance(task_batches, dict):
             try:
-                parsed = parse_task_batches_config(task_batches)
+                parsed = parsed_payloads["extended_orchestration/task_batches.yaml"]
                 validate_workflow_tool_outcomes({
                     "tools": (payloads.get("tools.yaml") or {}).get("tools", []),
                     "context_variables": payloads.get("context_variables.yaml") or {},
@@ -830,7 +840,9 @@ def run_workflow_bundle_quality_gate(
         expected_workflows=expected,
     )
     if structure.get("valid"):
-        bundle_entries = [materialize_workflow_outcomes(entry) for entry in bundle_entries]
+        bundle_entries = [
+            materialize_workflow_statusbar(materialize_workflow_outcomes(entry)) for entry in bundle_entries
+        ]
     semantic_drift = validate_agentgenerator_semantic_drift(
         bundle_entries=bundle_entries,
         expected_workflows=expected,
