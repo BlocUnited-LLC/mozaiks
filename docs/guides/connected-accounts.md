@@ -14,7 +14,9 @@ connected account belongs to one user.
 
 When an installed plugin declares a connection, the profile page gets a
 **Connected accounts** tab at `/me?tab=connected-accounts`. It lists the
-connections the app offers, with the user's status for each:
+connections the app offers, with the user's status for each. Connections
+belong to signed-in users, so the tab needs an app with sign-in. With
+authentication off, the routes below still work for local development.
 
 | Status | Meaning |
 |--------|---------|
@@ -70,8 +72,9 @@ try {
 
 ## What the app's admins control
 
-The admin portal's **Settings** page has a **Connected accounts** panel, backed
-by `GET /api/admin/connected-accounts` and
+The admin portal's **Settings** page (`/admin/settings` in a generated app)
+has a **Connected accounts** panel, backed by
+`GET /api/admin/connected-accounts` and
 `PUT /api/admin/connected-accounts/{connection_id}`. These routes use the same
 gate as the rest of `/api/admin`: the `admin` role, or a verified email on the
 `app.json` admins list.
