@@ -14,6 +14,19 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Agent replies rejected by structured-output validation now write an
+  `agent.output.rejected` audit record from the runtime turn, network WAL, and
+  task-batch paths, attributed to the initiating user. The record carries the
+  agent, workflow, chat, trace id, failure category, error types with the
+  field paths they apply to, and a SHA-256 digest of the reply. A path keeps
+  only what the schema proves (declared fields and list or tuple indexes);
+  mapping keys and any component the schema cannot prove become
+  `<redacted-field>`. The reply and Pydantic's input-quoting message are never
+  stored. A packet checked by both the turn and the WAL is deduplicated on a
+  best-effort basis: the cache is per process and holds 4,096 entries, so an
+  eviction or a restart can record the same rejection twice. This is not a
+  durable or cross-process exactly-once guarantee. Validation still fails
+  closed, and an audit failure cannot change that.
 - Workflows can opt individual local agents into AG2's transient status context
   through `middleware.yaml`. Each model attempt receives fresh values from
   explicitly selected, model-visible context variables. AgentGenerator validates

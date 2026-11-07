@@ -1903,6 +1903,7 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
     assert captured["initial_agent_name"] == "PackBuildCoordinator"
     assert captured["initial_message"] == "Approved, proceed."
     assert captured["idle_timeout_seconds"] == idle_timeout_seconds
+    assert captured["user_id"] == "user-1"
     assert persistence.completed == [("chat-reentry", "app-1")]
 
     captured.clear()
