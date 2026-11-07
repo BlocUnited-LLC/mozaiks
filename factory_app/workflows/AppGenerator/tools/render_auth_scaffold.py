@@ -68,7 +68,12 @@ def materialize_auth_scaffold(
             config = yaml.safe_load(config.replace("{{AUTH_DEFAULT_ROUTE}}", "/"))
             config["routes"]["post_login_default"] = route
         else:
-            config = yaml.safe_load(generated["config/auth.yaml"])
+            try:
+                config = yaml.safe_load(generated["config/auth.yaml"])
+            except yaml.YAMLError:
+                raise AppAuthContractError("Cannot read valid YAML from config/auth.yaml") from None
+        if not isinstance(config, dict):
+            raise AppAuthContractError("config/auth.yaml must be a YAML object")
         if policy is not None:
             config["authorization"] = {"roles": compiled_role_grants(policy)}
         validate_app_auth_contract(config)

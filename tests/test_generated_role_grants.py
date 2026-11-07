@@ -11,6 +11,7 @@ from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_
 from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import materialize_auth_scaffold
 from mozaiksai.core.adapters.ag2_task_batch_runner import AG2TaskBatchRunnerResult
 from mozaiksai.core.ports.orchestration import RunStatus
+from mozaiksai.core.runtime.app.auth_contract import AppAuthContractError
 from mozaiksai.core.workflow import task_batches
 from mozaiksai.core.workflow.generator_support.code_files import extract_code_file_map_from_payload
 from mozaiksai.core.workflow.generator_support.design_access_policy import access_policy_sha256
@@ -114,6 +115,16 @@ def test_auth_scaffold_compiles_grants_without_giving_every_user_their_union():
     assert revised["authorization"]["roles"] == []
     assert revised["routes"]["post_login_default"] == "/tasks"
     assert "calendar.read" in revised["frontend"]["default_scopes"]
+
+
+@pytest.mark.parametrize("content", ["broken: [", "[]", "null", "true"])
+def test_reviewed_policy_preserves_invalid_auth_for_gate_diagnostics(content):
+    files = {"app.json": json.dumps({"authRequired": True}), "config/auth.yaml": content}
+    before = dict(files)
+    args = {k: v for k, v in _arguments().items() if k != "app_build_plan"}
+    with pytest.raises(AppAuthContractError, match="config/auth.yaml"):
+        materialize_auth_scaffold(files, **args)
+    assert files == before
 
 
 def test_candidate_cannot_self_grant_even_alongside_an_approved_policy():
