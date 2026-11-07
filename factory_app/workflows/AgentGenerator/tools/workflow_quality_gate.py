@@ -218,9 +218,9 @@ def _validate_bundle_implementations(
         stage.get("id") for stage in ((ui_config or {}).get("progress") or {}).get("stages", [])
         if isinstance(stage, dict)
     }
-    for filename, module in modules.items():
+    for filename, parsed_module in modules.items():
         progress_imports: set[str] = set()
-        for node in ast.walk(module):
+        for node in ast.walk(parsed_module):
             if isinstance(node, ast.ImportFrom):
                 for alias in node.names:
                     if node.module == "mozaiksai.core.workflow.ui_tools" and alias.name == "emit_tool_progress_event":
@@ -231,7 +231,7 @@ def _validate_bundle_implementations(
                 for alias in node.names:
                     if alias.name == "mozaiksai.core.workflow.ui_tools":
                         progress_imports.add(f"{alias.asname or alias.name}.emit_tool_progress_event")
-        for call in ast.walk(module):
+        for call in ast.walk(parsed_module):
             if not (isinstance(call, ast.Call) and ast.unparse(call.func) in progress_imports):
                 continue
             stage = next((kw.value for kw in call.keywords if kw.arg == "stage_id"), None)
