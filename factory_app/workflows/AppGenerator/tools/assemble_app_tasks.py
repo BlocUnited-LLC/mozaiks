@@ -152,7 +152,7 @@ def _apply_planned_page_contracts(
                 },
                 baseline_files=(
                     detach(context_variables.get("generated_files"))
-                    if context_variables is not None and context_variables.get("build_mode") == "revision" else None
+                    if revision_baseline_required(context_variables) else None
                 ),
                 verified_pack_routes=verified_pack_routes,
             )
