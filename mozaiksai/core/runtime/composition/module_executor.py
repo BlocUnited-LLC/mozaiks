@@ -433,6 +433,7 @@ class ModuleExecutor:
         # The token guard loads runtime app contracts. Importing it while this
         # module is initialized creates a cycle when a consumer imports the
         # wallet directly before any runtime module.
+        from mozaiksai.core.connected_accounts.errors import AccountConnectionRequired
         from mozaiksai.core.tokens.guard import TokenUsageDenied
 
         dispatch_authority = request.authority
@@ -767,6 +768,23 @@ class ModuleExecutor:
                 success=False,
                 error="Permission denied.",
                 error_code="PERMISSION_DENIED",
+            )
+        except AccountConnectionRequired as exc:
+            # The user must connect (or reconnect) their own account; the metadata carries the
+            # connection and where to connect it, never a credential.
+            logger.info(
+                "MODULE_ACCOUNT_CONNECTION_REQUIRED: module=%s action=%s connection=%s reason=%s",
+                request.module, request.action, exc.connection_id, exc.reason,
+            )
+            await self._finalize_dispatch_audit(
+                replace(dispatch_audit, outcome="denied", reason="account connection required"),
+                error=exc.error_code,
+            )
+            return ModuleResult(
+                success=False,
+                data={"extra_data": exc.to_error_metadata()},
+                error=str(exc),
+                error_code=exc.error_code,
             )
         except TokenUsageDenied as exc:
             error_code = exc.decision.error_code or "TOKEN_USAGE_DENIED"

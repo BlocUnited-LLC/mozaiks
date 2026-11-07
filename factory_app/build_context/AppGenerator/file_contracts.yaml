@@ -76,6 +76,7 @@ task_contracts:
       - Custom route error handling must use err.error_code (and err.code) from the caught error object to branch on backend states. The generated moduleApi.js preserves structured error fields on thrown errors. Do not parse raw response text or HTTP status codes to infer error state.
       - Custom routes that launch LLM-backed or token-metered actions/workflows must detect INSUFFICIENT_TOKENS with isInsufficientTokensError(err), call insufficientTokensRecoveryPath(err), and navigate only when it returns a route. If it returns null, stay on the current page with inline administrator-contact guidance. Return without automatically retrying; never navigate to null.
       - Custom routes that call entitlement-gated module actions must detect ENTITLEMENT_REQUIRED with isEntitlementRequiredError(err), navigate to entitlementUpgradePath(err), and return without retrying automatically. Both helpers are exported from ui/lib/moduleApi.js.
+      - Custom routes that call plugin actions using the user's own connected account (for example Google Calendar or Gmail) must detect ACCOUNT_CONNECTION_REQUIRED with isAccountConnectionRequiredError(err), show the error message with a link to accountConnectionPath(err), and return without retrying automatically. Both helpers are exported from ui/lib/moduleApi.js. Never ask the user for a password, API key or token for their account.
 
   module_contract:
     owner_agent: ConfigMiddlewareAgent

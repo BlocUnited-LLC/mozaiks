@@ -20,6 +20,7 @@ contracts when the module needs that surface.
 | `policy_hooks.yaml` | Declared policy hook entry points. |
 | `service.yaml` | Stable service boundary metadata for generated apps, operators, external clients, or other modules. |
 | `commercial.yaml` | Module-owned commercial metadata such as fees, placement terms, payout rules, or service terms. |
+| `account_connections.yaml` | Third-party accounts each user connects for this module, such as their Google Calendar. See [Connected Accounts](../connected-accounts.md). |
 
 ## Ownership Rules
 

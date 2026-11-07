@@ -1,0 +1,8 @@
+schema_version: mozaiks.account_connections.v1
+connections:
+  - id: gmail_send
+    provider: google
+    label: Gmail
+    description: Send email from your Gmail address when you ask this app to. The app cannot read your email.
+    scopes:
+      - https://www.googleapis.com/auth/gmail.send

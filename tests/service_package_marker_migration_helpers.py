@@ -25,6 +25,10 @@ POST_BASELINE_FAMILY_PATHS = SERVICE_PACKAGE_MARKER_PATHS | frozenset({
     "config/profile.yaml",
     # Build-time smoke fixtures were registered after these historical captures.
     "modules/{module_id}/contracts/fixtures.yaml",
+    # A plugin module's declaration of the end-user account connection it
+    # needs (connected accounts), at app scope and module scope.
+    "modules/{module_id}/contracts/account_connections.yaml",
+    "contracts/account_connections.yaml",
 })
 
 

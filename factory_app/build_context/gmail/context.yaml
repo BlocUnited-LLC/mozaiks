@@ -1,0 +1,21 @@
+context_id: gmail
+applies_to_workflows:
+  - AppGenerator
+assets:
+  - path: contract.yaml
+    kind: contract
+  - path: templates/
+    kind: templates
+pack:
+  id: gmail
+  version: "0.1.0"
+  status: active
+  capability_source: generated_module
+  description: >
+    Lets each signed-in user connect their own Gmail and send email from their
+    address when they ask the app to. Send-only: the app cannot read the user's
+    mailbox. Users connect from their profile (Connected accounts); the app's
+    admins choose whether the app offers it.
+capabilities:
+  - capability_id: gmail.send
+    facade_recommended: gmail
