@@ -126,6 +126,7 @@ The worker emits a single `WorkflowBundleBuilderOutput` structured output:
 ```yaml
 workflow_name: str
 outcome_plans: []
+statusbar_middleware: []
 files:
   - filename: orchestrator.yaml
     content: "..."
@@ -182,6 +183,26 @@ Factory or its build-time plans. Hand-authored workflows use the same runtime
 `tools[].outcome` contract documented in
 [Workflow Authoring Contracts](../workflows/workflow-authoring-contracts.md#operation-outcomes).
 
+`statusbar_middleware` is a typed list of `{agent, variables}` entries. Use `[]`
+when no agent needs a concise view of current workflow state. Each entry names
+one exact local agent and a nonempty, unique list of existing context names.
+The names must be defined, exposed to that agent in `context_variables.yaml`,
+and effectively `model_visible`. Remote A2A agents and hidden context are invalid.
+
+`statusbar_materialization.py` validates entries through the runtime's shared
+`StatusbarMiddlewareSpec` and middleware parser, then writes the list into the
+existing `middleware.yaml` while preserving `prompt_middleware`. Workers omit
+the raw `statusbar_middleware` declaration; a conflicting raw declaration fails
+assembly. Without the typed field, existing raw middleware remains unchanged.
+An explicitly supplied empty list emits `statusbar_middleware: []`. Materialization
+is idempotent, and the quality gate validates agent, exposure, and visibility
+references using the same cross-file contract as runtime loading.
+
+Statusbars are transient model context. They do not create UI surfaces, context
+definitions, persisted plans, routing authority, or callback files. Generated
+bundles contain only the runtime middleware declaration and have no Factory
+dependency after assembly.
+
 ---
 
 ## workflow_bundle_results Structure
@@ -213,7 +234,7 @@ Keys starting with `_` are internal meta entries and are skipped during assembly
 
 Reads `workflow_bundle_results` directly from context. For each bundle entry:
 
-1. Materialize operation plans and validate the resulting workflow contracts.
+1. Materialize operation plans and statusbar middleware, then validate the resulting workflow contracts.
 2. On failure, schedule bounded workflow repair or return to user attention.
 3. `_write_bundle_to_disk(wf_name, files, base_dir)` writes accepted files under `base_dir/{wf_name}/`.
 4. `_build_pack_zip(bundle_dirs, output_path)` zips the workflow directories.

@@ -14,11 +14,21 @@ if TYPE_CHECKING:
 _CONTEXT_VARIABLE_REF = re.compile(r"\$\{([^}]+)\}")
 
 
+def _task_batches_at_path(workflow_path: Path) -> TaskBatchesConfig | None:
+    from .task_batches import parse_task_batches_config
+
+    path = workflow_path / "extended_orchestration" / "task_batches.yaml"
+    if not path.exists():
+        return None
+    return parse_task_batches_config(yaml.safe_load(path.read_text(encoding="utf-8")) or {})
+
+
 def validate_workflow_context_contract(
     *,
     workflow_name: str,
     workflow_config: dict[str, Any],
     workflow_path: Path | None = None,
+    task_batches: TaskBatchesConfig | None = None,
 ) -> None:
     """Validate context references, including on-disk task batches when supplied."""
 
@@ -66,13 +76,9 @@ def validate_workflow_context_contract(
                     f"transition_graph {source}->{target} references undeclared context variable {variable!r}"
                 )
 
-    task_batches = None
-    task_batches_path = workflow_path / "extended_orchestration" / "task_batches.yaml" if workflow_path else None
-    if task_batches_path is not None and task_batches_path.exists():
-        from mozaiksai.core.workflow.task_batches import parse_task_batches_config
-
-        raw = yaml.safe_load(task_batches_path.read_text(encoding="utf-8")) or {}
-        task_batches = parse_task_batches_config(raw)
+    if task_batches is None and workflow_path is not None:
+        task_batches = _task_batches_at_path(workflow_path)
+    if task_batches is not None:
         for batch in task_batches.batches:
             written_keys = [batch.result.context_key, batch.result.status_key]
             read_keys = []
@@ -91,6 +97,54 @@ def validate_workflow_context_contract(
         raise ValueError(f"{workflow_name} context_variables.yaml contract mismatch: {joined}")
 
     validate_workflow_tool_outcomes(workflow_config, task_batches=task_batches)
+    validate_workflow_statusbar_contract(
+        workflow_name=workflow_name, workflow_config=workflow_config, task_batches=task_batches,
+    )
+
+
+def validate_workflow_statusbar_contract(
+    *, workflow_name: str, workflow_config: dict[str, Any],
+    workflow_path: Path | None = None, task_batches: TaskBatchesConfig | None = None,
+) -> None:
+    """Close statusbar references against the existing agent visibility contract."""
+    from .context.authority import build_context_authority_policy, task_batch_written_context_keys
+    from .declarative.contracts import MiddlewareConfig
+
+    entries = MiddlewareConfig.model_validate(workflow_config.get("middleware") or {}).statusbar_middleware
+    if not entries:
+        return
+    if task_batches is None and workflow_path is not None:
+        task_batches = _task_batches_at_path(workflow_path)
+    roster = workflow_config.get("agents") or {}
+    if isinstance(roster, dict):
+        roster = roster.get("agents", roster)
+    agent_names = set(roster) if isinstance(roster, dict) else {item["name"] for item in roster}
+    remote_names = {
+        item["name"] for item in (workflow_config.get("a2a") or {}).get("agents", [])
+        if item.get("enabled", True)
+    }
+    context_config = workflow_config.get("context_variables") or {}
+    definitions = context_config.get("definitions") or {}
+    views = context_config.get("agents") or {}
+    policy = build_context_authority_policy(
+        workflow_name=workflow_name, definitions=definitions,
+        transition_rules=(workflow_config.get("transition_graph") or {}).get("transition_rules", []),
+        task_batch_context_keys=task_batch_written_context_keys(task_batches),
+    )
+    errors: list[str] = []
+    for entry in entries:
+        if entry.agent not in agent_names or entry.agent in remote_names:
+            errors.append(f"{entry.agent!r} must name a declared local agent")
+        exposed = set((views.get(entry.agent) or {}).get("variables") or [])
+        for key in entry.variables:
+            if key not in definitions:
+                errors.append(f"{entry.agent}.{key} is undeclared")
+            elif key not in exposed:
+                errors.append(f"{entry.agent}.{key} is absent from the agent's declared variables")
+            elif not policy.variables[key].model_visible:
+                errors.append(f"{entry.agent}.{key} is not model-visible")
+    if errors:
+        raise ValueError(f"{workflow_name} middleware.yaml statusbar contract mismatch: {'; '.join(errors)}")
 
 
 def validate_workflow_tool_outcomes(
@@ -200,4 +254,4 @@ def _context_expression_refs(expression: str) -> set[str]:
     }
 
 
-__all__ = ["validate_workflow_context_contract", "validate_workflow_tool_outcomes"]
+__all__ = ["validate_workflow_context_contract", "validate_workflow_statusbar_contract", "validate_workflow_tool_outcomes"]

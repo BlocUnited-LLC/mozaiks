@@ -14,7 +14,11 @@ from typing import Any
 from logs.logging_config import get_workflow_logger
 
 from .adapter import create_context_container
-from .authority import RUNTIME_SYSTEM_WRITER, build_context_authority_policy
+from .authority import (
+    RUNTIME_SYSTEM_WRITER,
+    build_context_authority_policy,
+    task_batch_written_context_keys,
+)
 from .data_entity import DataEntityManager
 from .db_adapters import get_db_adapter
 from .schema import (
@@ -450,15 +454,7 @@ def _task_batch_context_keys(workflow_name: str) -> set[str]:
         from ..task_batches import parse_task_batches_config
 
         raw = yaml.safe_load(task_batches_path.read_text(encoding="utf-8")) or {}
-        config = parse_task_batches_config(raw)
-        keys: set[str] = set()
-        for batch in config.batches:
-            keys.add(batch.result.context_key)
-            keys.add(batch.result.status_key)
-            if batch.recovery:
-                keys.add(batch.recovery.outcome_key)
-                keys.add(batch.recovery.status_key)
-        return {key for key in keys if key}
+        return task_batch_written_context_keys(parse_task_batches_config(raw))
     except Exception:
         return set()
 
