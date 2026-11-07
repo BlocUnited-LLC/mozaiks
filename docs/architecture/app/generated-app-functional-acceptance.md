@@ -232,6 +232,24 @@ cannot replace these record bindings. This identity check runs during module
 contract admission, before service generation; full cross-module and role
 closure still runs against the assembled bundle.
 
+A canonical update/delete fixture may also bind setup inputs to declared
+fields of that same observed row, for example to return an active loan
+before a returned-only deletion. Get/create/list/custom setup cannot use
+record inputs; get's missing-record probe keeps its existing independent
+lookup. Missing record context fails before setup calls. Preparation uses
+the real action boundary with its declared roles and the same trusted
+subject. It cannot replace the final target identity or remove the row
+under test. Update/delete storage checks take their baseline after setup:
+a prerequisite mutation cannot make a no-op target pass, and roleless
+target denial still checks storage after preparation.
+
+Update equality uses declared data field types. ISO date inputs match
+the same date stored as UTC-midnight BSON datetime; non-midnight values
+do not. Datetime values compare as UTC instants with BSON millisecond
+precision only for datetime storage. A timezone-required request retains
+that requirement; naive BSON datetimes use Mongo's UTC convention. Other
+fields keep exact equality. The same comparison rejects unchanged updates.
+
 The observer honors authored get request keys and list parameters without
 changing the app's API. Fixture reads preserve the stored lookup's declared
 type, including numeric and boolean keys. A missing-row probe must fit the

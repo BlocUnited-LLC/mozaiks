@@ -44,7 +44,7 @@ import time
 import traceback
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from typing import Any
@@ -1683,10 +1683,16 @@ async def _prepare_action_inputs(
     modules = {item.name: item for item in run.load.modules}
     path = f"modules/{module.name}/contracts/fixtures.yaml"
     try:
+        record_bindings = [binding for step in fixture.setup for binding in step.params
+                           if binding.source == "record"]
+        if record_bindings and (record is None or not identity
+                                or any(binding.record_field not in record for binding in record_bindings)
+                                or any(record.get(name) != value for name, value in identity.items())):
+            raise ValueError("setup requires the observer's existing canonical update/delete target record")
         for step in fixture.setup:
             step_module = modules[step.module]
             params = resolve_fixture_params(step.params, responses=responses, actor_subject=principal.user_id,
-                                            record=None, now=now)
+                                            record=record, now=now)
             _validate_fixture_input(step_module, step.action, params)
             actor = _fixture_principal(run, principal, step.roles, f"{module.name}.{action}/{step.id}")
             # Setup is input preparation, never independent proof that this target action works.
@@ -1704,6 +1710,45 @@ async def _prepare_action_inputs(
     except ValueError as exc:
         run.record(f"fixture.{module.name}.{action}", False, str(exc), path=path)
         return None
+
+
+def _stored_field_matches_input(
+    stored: Any, supplied: Any, field: Mapping[str, Any], request: Mapping[str, Any],
+) -> bool:
+    """Compare declared temporal values with Mongo's UTC/millisecond representation."""
+    kind = field.get("type")
+    if kind not in {"date", "datetime"}:
+        return bool(stored == supplied)
+    if stored is None or supplied is None:
+        return stored is supplied
+    if not isinstance(supplied, str):
+        return False
+    try:
+        if kind == "date":
+            expected_date = date.fromisoformat(supplied)
+            if isinstance(stored, datetime):
+                moment = stored.replace(tzinfo=UTC) if stored.tzinfo is None else stored.astimezone(UTC)
+                if any((moment.hour, moment.minute, moment.second, moment.microsecond)):
+                    return False
+                return moment.date() == expected_date
+            observed_date = date.fromisoformat(stored) if isinstance(stored, str) else stored
+            return isinstance(observed_date, date) and observed_date == expected_date
+        expected = datetime.fromisoformat(supplied)
+        observed = datetime.fromisoformat(stored) if isinstance(stored, str) else stored
+        if not isinstance(observed, datetime):
+            return False
+        if request.get("format") == "date-time" and (
+            expected.tzinfo is None or (isinstance(stored, str) and observed.tzinfo is None)
+        ):
+            return False
+        expected = expected.replace(tzinfo=UTC) if expected.tzinfo is None else expected.astimezone(UTC)
+        observed = observed.replace(tzinfo=UTC) if observed.tzinfo is None else observed.astimezone(UTC)
+        if isinstance(stored, datetime):
+            # BSON datetime values retain milliseconds, unlike stored ISO strings.
+            expected = expected.replace(microsecond=expected.microsecond // 1000 * 1000)
+        return observed == expected
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 def _changed_value(current: Any, prop: Mapping[str, Any], contract_field: Mapping[str, Any] | None, label: str) -> Any:
@@ -2321,6 +2366,13 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
         if prepared is None:
             continue
         actor, params = prepared
+        prepared_before = await _stored(run, entity, record_id)
+        if prepared_before is None:
+            run.record(f"fixture.{entity.module}.{action}", False,
+                       "Setup removed the observer's target record before the independent action check.",
+                       path=f"modules/{entity.module}/contracts/fixtures.yaml")
+            continue
+        before = prepared_before
         status, _body, summary = await run.call("POST", entity.module, action, actor, params)
         after = await _stored(run, entity, record_id)
         if status == 402:
@@ -2350,9 +2402,16 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
             if prepared is None:
                 return
             actor, params = prepared
+            prepared_before = await _stored(run, entity, record_id)
+            if prepared_before is None:
+                run.record(f"fixture.{entity.module}.{actions['update']}", False,
+                           "Setup removed the observer's target record before the independent action check.",
+                           path=f"modules/{entity.module}/contracts/fixtures.yaml")
+                return
+            before = prepared_before
             changed_fields = [name for name, value in params.items()
                               if name in fields and name not in {entity.id_field, entity.owner_field}
-                              and before.get(name) != value]
+                              and not _stored_field_matches_input(before.get(name), value, fields[name], update_props.get(name, {}))]
             if (getattr(run, "fixtures", {}).get((entity.module, actions["update"])) is not None
                     and update_field is not None and not changed_fields):
                 run.record(f"fixture.{entity.module}.{actions['update']}", False,
@@ -2365,7 +2424,10 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
                 run.record_positive_failure(f"{tag}.a_update",
                            f"{describe(actions['update'], 'A', params)} on its own record: expected 2xx, got {summary}.",
                            module=entity.module, action=actions["update"], status=status, path=failure_path())
-            elif changed_fields and any(after.get(name) != params[name] for name in changed_fields):
+            elif changed_fields and any(
+                not _stored_field_matches_input(after.get(name), params[name], fields[name], update_props.get(name, {}))
+                for name in changed_fields
+            ):
                 run.record(f"{tag}.a_update", False,
                            f"{describe(actions['update'], 'A', params)} returned {status} but the stored "
                            f"fields {changed_fields!r} do not match the requested changes.", path=path_repo)
@@ -2383,6 +2445,11 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
             if prepared is None:
                 return
             actor, params = prepared
+            if await _stored(run, entity, record_id) is None:
+                run.record(f"fixture.{entity.module}.{actions['delete']}", False,
+                           "Setup removed the observer's target record before the independent action check.",
+                           path=f"modules/{entity.module}/contracts/fixtures.yaml")
+                return
             status, _body, summary = await run.call(
                 "POST", entity.module, actions["delete"], actor, params,
             )

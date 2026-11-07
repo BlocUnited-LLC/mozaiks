@@ -430,6 +430,8 @@ const ChatPage = () => {
         previous
         && previousSender === 'agent'
         && nextSender === 'agent'
+        && !previous.toolCall
+        && !message.toolCall
         && previousEventType !== 'activity'
         && nextEventType !== 'activity'
         && !previous.isThinking

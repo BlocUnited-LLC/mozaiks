@@ -30,7 +30,11 @@ module request/response schemas and compiled auth grants remain authoritative.
 Cross-module setup requires the relevant contract dependencies; full reference
 closure occurs against the assembled bundle before any observer action runs.
 The existing contained runtime observer consumes the file as declarative input
-and retains independent CRUD, role and storage checks. See
+and retains independent CRUD, role and storage checks. Canonical
+update/delete setup may bind declared fields of the observer's same
+existing row for a required lifecycle transition; get/create/list/custom
+setup cannot. Target identity remains fixed and preparation never counts
+as the target's storage mutation. See
 [stateful action inputs](../app/generated-app-functional-acceptance.md#runtime-smoke-gate)
 for the supported bindings and evidence limits.
 
@@ -1704,6 +1708,41 @@ Do not:
 
 Without this split, AppGenerator either under-specifies visual/media control or mixes styling, shell behavior, and asset inventory.
 The contract above keeps bundle generation deterministic, keeps ThemeCapture reusable, and gives the runtime a stable set of artifacts to consume.
+
+### Service dependencies and mutation order
+
+DesignDocs chooses module boundaries around business invariants. One module may
+own multiple collections whose lifecycle requires synchronous conditional claims,
+linked writes and recovery. Separate record types do not require separate
+modules, and one module does not imply a multi-document transaction. AppGenerator
+preserves the approved ownership; changing an already approved decomposition
+requires design review without dropping business rules, roles or pages.
+
+An approved cross-module service dependency uses the existing
+`modules.<module_id>.backend.service` import path and its admitted function
+signature. The runtime loader binds `modules` to the active workspace and any
+explicitly composed defaults. Dispatched handlers have separate synthetic
+package roots, so deriving a sibling path from `__package__` is not a supported
+import convention. Calling an internal service function preserves the original
+context; it does not grant permissions, create another action dispatch, or change
+the action's declared event authority.
+
+Each event's producer must match its declaring module. Importing another
+module's service cannot publish that module's events under the caller's context;
+copying foreign event declarations or retagging their producer is not a repair.
+Declared events/reactions are the existing loose-coupling contract when they fit
+the approved lifecycle. A design requiring synchronous foreign action authority
+without an exposed dispatcher must be reported for review, not implemented with
+an invented context method or a silent lifecycle reorder.
+
+Generation preserves the approved order of conditional claims and dependent
+writes, including the authoritative record values, stable operation identity and
+permitted recovery states. A result's unique index does not by itself prevent a
+concurrent edit or cancellation of the source record. Exception cleanup also
+does not establish recovery after process interruption. Missing dependency or
+persistence contracts must be reported to their owner. These are generation
+instructions: source review and runtime concurrency/recovery checks still need
+to establish that the emitted implementation follows them.
 
 ### Interactive page materialization
 

@@ -23,6 +23,8 @@ Framework-owned operational data used by the runtime itself:
 - `ChatSessions`
 - `AG2StreamEvents`
 - `AG2StreamHeads`
+- `AG2NetworkKnowledge`
+- `AG2NetworkKnowledgeChunks`
 - `GeneralChatSessions`
 - `GeneralChatCounters`
 - `RuntimeUsageEvents`
@@ -73,8 +75,57 @@ Current implemented workflow-run persistence contract:
   waiter that remains live in the backend process; it does not recreate that
   waiter after a backend restart. The separate `last_artifact` cache restoration
   is not completion-aware and is outside this inline replay guarantee.
+- The chat transcript deduplicates ordinary repeated agent text separately from
+  tool calls. Distinct review event IDs retain separate cards even when their
+  text is identical or empty; replay of one event updates that event's card.
 - On startup, the runtime backfills pre-migration top-level workflow UI fields such as `last_artifact` and `pending_input_request` into `workflow_ui_state` and removes the old top-level fields. Runtime readers should not depend on those pre-migration top-level fields.
 - The current source of truth for this runtime contract is `mozaiksai/core/data/persistence/persistence_manager.py`, `mozaiksai/core/workflow/execution/run_bootstrap.py`, `mozaiksai/core/transport/run_replay.py`, `mozaiksai/hosts/runtime.py`, `mozaiksai/hosts/platform.py`, and the focused tests `tests/test_persistence_initial_messages.py`, `tests/test_orchestration_seed_persistence.py`, `tests/test_run_replay.py`, `tests/test_runtime_websocket_contract.py`, and `tests/test_platform_chat_meta_contract.py`.
+
+#### AG2 virtual-file storage
+
+`MongoAG2KnowledgeStore` implements AG2's existing `KnowledgeStore` protocol;
+AG2 still owns channel history, WAL records, hydration, and scheduling. Each
+virtual path has one small head in `AG2NetworkKnowledge`. Its immutable binary
+chunks live in `AG2NetworkKnowledgeChunks`, scoped by app, chat, and path. Each
+chunk contains at most 1 MiB and links to its predecessor; the head never
+accumulates an unbounded array. A single append or replacement may exceed
+MongoDB's 16 MiB document limit.
+
+An append stages every chunk before publishing a new head through a conditional
+update. The comparison binds the head identity and revision, including across
+independent adapter instances. Only a successful publication advances the
+committed byte length; append returns its previous UTF-8 byte offset.
+Replacement publishes a separate chain. Readers capture one head and follow
+immutable chunks, so concurrent replacement or deletion cannot change that
+snapshot. Range boundaries follow AG2's byte contract: callers must align UTF-8
+characters, and decoding is strict. Missing chunks, broken offsets, or unknown
+storage formats fail instead of returning truncated history.
+
+The adapter checks the existing chat lease before staging and immediately
+before publication. A rejected conditional update can discard its unpublished
+chunks and retry against the current head. An ambiguous Mongo acknowledgement
+is surfaced without retry or chunk deletion: publication may have succeeded.
+Interrupted staging can leave unreachable chunks, but cannot expose partial
+content. Restart uses the committed head and needs no in-process chunk state.
+
+Existing inline `content` records remain readable without mutation. Their next
+successful append converts the full previous bytes and new bytes atomically;
+replacement preserves ordinary file replacement semantics. Stop older hosts
+before deploying this storage change. There is no background rewrite or
+truncation of existing histories.
+
+Normal `delete()` removes the visible path heads and retains their chunks,
+including replaced chains and interrupted uploads, because an already-started
+reader may still hold an old head. This is logical deletion, **not physical
+erasure**. The adapter's explicit maintenance method `purge_namespace()` removes
+only one app/chat's heads and chunks after its owner has stopped all readers and
+writers. It requires the canonical distributed chat execution lease (`required` mode),
+rejects process-local locking for this operation, and checks the lease before
+each deletion; the lease excludes host writers but does not itself drain
+read-only snapshots. Call it only after that quiescence precondition is met.
+An interrupted purge can leave unreachable chunks and can be rerun. There is no
+automatic purge or TTL, and no claim that retained bytes have been erased until
+this scoped cleanup succeeds.
 
 Runtime usage surfaces:
 

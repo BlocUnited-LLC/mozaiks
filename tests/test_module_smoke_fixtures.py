@@ -790,3 +790,73 @@ def test_native_list_reference_proof_stays_conservative_without_schema_resolutio
     before = deepcopy(schema)
     assert module_smoke_fixtures._default_read_inputs_compatible(schema, "list") is False
     assert schema == before
+
+
+@pytest.mark.parametrize("operation", ["update", "delete"])
+def test_same_record_lifecycle_setup_closes_and_round_trips(operation):
+    fixture = _fixture()
+    fixture.update(action=f"{operation}_borrow_request", roles=["member"])
+    fixture["setup"] = [{"id": "prepare", "module": "borrowing", "action": "approve_borrow_request",
+                         "roles": ["admin"], "params": [
+                             {"field": "borrow_request_id", "source": "record", "record_field": "borrow_request_id"}]}]
+    fixture["params"] = [{"field": "borrow_request_id", "source": "record", "record_field": "borrow_request_id"}]
+    if operation == "update":
+        fixture["params"].append(_literal("reason", "A distinct change after preparation"))
+    files = _files(fixture)
+    if operation == "delete":
+        module = yaml.safe_load(files["modules/borrowing/module.yaml"])
+        module["actions"].append(_action("delete_borrow_request", "requests.update",
+                                         _schema(borrow_request_id="string"), _schema(deleted="boolean")))
+        files["modules/borrowing/module.yaml"] = yaml.safe_dump(module)
+    original = deepcopy(files)
+    bound = load_module_smoke_fixtures(files)["borrowing", fixture["action"]]
+    now = datetime(2026, 11, 7, tzinfo=UTC)
+    params = resolve_fixture_params(bound.setup[0].params, responses={}, actor_subject="verified-subject",
+                                    record={"borrow_request_id": "actual-row"}, now=now)
+    assert params == {"borrow_request_id": "actual-row"}
+    assert files == original
+    config = yaml.safe_load((ROOT / "factory_app/workflows/AppGenerator/structured_outputs.yaml").read_text(encoding="utf-8"))
+    model = build_models_from_config(config["models"])["ModuleSmokeFixtures"]
+    document = {"schema_version": SCHEMA_VERSION, "fixtures": [fixture]}
+    typed = model.model_validate(document).model_dump(mode="json")
+    rendered = extract_code_file_map_from_payload({"module_contract": {"module_id": "borrowing", "fixtures_yaml": typed}})
+    assert yaml.safe_load(rendered[PATH]) == document
+
+
+@pytest.mark.parametrize("action", ["get_borrow_requests", "list_borrow_requests", "create_borrow_request", "approve_borrow_request"])
+def test_record_setup_without_canonical_write_target_rejects_during_admission(action):
+    from mozaiksai.core.workflow.generator_support.module_smoke_fixtures import (
+        validate_module_fixture_record_identities,
+    )
+
+    fixture = _fixture()
+    fixture["action"] = action
+    fixture["setup"][0]["params"] = [{"field": "name", "source": "record", "record_field": "reason"}]
+    if action == "get_borrow_requests":
+        fixture["params"] = [{"field": "id", "source": "record", "record_field": "_id"}]
+    data = json.loads(_files()["data/contract.json"])
+    with pytest.raises(ValueError, match="setup record source.*canonical update/delete"):
+        validate_module_fixture_record_identities("borrowing", {"schema_version": SCHEMA_VERSION, "fixtures": [fixture]},
+                                                  data_contract=data)
+
+
+def test_setup_record_field_and_type_close_without_relaxing_target_identity():
+    fixture = _fixture()
+    fixture.update(action="update_borrow_request", roles=["member"])
+    fixture["setup"] = [{"id": "prepare", "module": "borrowing", "action": "approve_borrow_request",
+                         "roles": ["admin"], "params": [
+                             {"field": "borrow_request_id", "source": "record", "record_field": "unknown"}]}]
+    fixture["params"] = [{"field": "borrow_request_id", "source": "record", "record_field": "borrow_request_id"},
+                         _literal("reason", "After preparation")]
+    with pytest.raises(ValueError, match="declared field"):
+        load_module_smoke_fixtures(_files(fixture))
+    fixture["setup"][0]["params"][0]["record_field"] = "reason"
+    files = _files(fixture)
+    data = json.loads(files["data/contract.json"])
+    data["surfaces"][0]["collections"][0]["fields"][1]["type"] = "integer"
+    files["data/contract.json"] = json.dumps(data)
+    with pytest.raises(ValueError, match="type"):
+        load_module_smoke_fixtures(files)
+    fixture["params"][0] = _response("borrow_request_id", "prepare", ["loan_id"])
+    with pytest.raises(ValueError, match="source=record"):
+        load_module_smoke_fixtures(_files(fixture))

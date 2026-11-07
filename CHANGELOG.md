@@ -356,6 +356,19 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AG2 virtual files use bounded immutable Mongo chunks with atomic head
+  publication, preserving UTF-8 append offsets and restart reads beyond 16 MiB.
+  Existing inline history converts on mutation; logical deletion retains chunks
+  until explicit namespace purge after readers and writers have stopped.
+- Revised workflow approval cards remain visible and actionable after requesting
+  changes, even when successive cards have identical or empty message text.
+  Replaying the same event still updates its existing card.
+- Runtime-smoke fixtures can prepare the same update/delete record through its
+  declared lifecycle actions. Preparation cannot satisfy the target mutation
+  check; declared date and datetime writes compare using Mongo's storage format.
+- Factory guidance keeps coordinated records under their approved module owner,
+  preserves conditional mutation and recovery order, and rejects invented
+  cross-module action or event authority.
 - Generated pages reject client pagination over declared bounded responses and
   unsupported table-refresh filter payloads before materialization. The same
   query contract is checked at final wiring; custom query interactions retain

@@ -418,3 +418,183 @@ async def test_contained_observer_uses_fixtures_without_candidate_python_in_obse
     assert checks["role.task_management.approve_task.holder_allowed"]["status"] == "passed"
     denial = checks["role.task_management.approve_task.non_holder_denied"]
     assert denial["status"] == "passed" and denial["details"]["records_unchanged"] is True
+
+
+def lifecycle_fixture_bundle(*, broken_delete=False, delete_in_setup=False, setup_does_update=False):
+    """A reviewed local test app: active loans may be deleted only after return."""
+    files = fixture_bundle()
+    data = json.loads(files["data/contract.json"])
+    collection = next(s for s in data["surfaces"] if s["surface_id"] == "task_management")["collections"][0]
+    collection.update(tenancy="app_wide", owner_field=None)
+    files["data/contract.json"] = json.dumps(data)
+    document = yaml.safe_load(files[FIXTURE_PATH])
+    preparation = {"id": "return_current", "module": "task_management", "action": "approve_task",
+                   "roles": ["reviewer"], "params": [record("task_id"),
+                     {"field": "expected_owner", "source": "actor_subject"}, tomorrow("review_date")]}
+    target = next(f for f in document["fixtures"] if f["action"] == ("update_task" if setup_does_update else "delete_task"))
+    target["setup"] = [preparation]
+    if setup_does_update:
+        target["params"] = [record("task_id"), literal("status", "completed")]
+    files[FIXTURE_PATH] = yaml.safe_dump(document)
+    service = "modules/task_management/backend/service.py"
+    files[service] += '''
+
+async def before_delete_task(ctx, record):
+    if record['status'] != 'completed':
+        raise ModuleInputValidationError('Active loan must be returned before deletion')
+'''
+    if broken_delete:
+        files[service] = files[service].replace("    await repo.delete_task(ctx, id)", "    pass  # deliberately broken target")
+    if delete_in_setup:
+        files[service] = files[service].replace("    item = schemas.serialize_task(updated)",
+                                               "    await repo.delete_task(ctx, task_id)\n    item = schemas.serialize_task(updated)")
+    # Keep the existing real app fixture/HTTP/persistence contracts, named for this lifecycle.
+    def rename(text):
+        for old, new in (("approve_task", "mark_loan_returned"), ("task_management", "loan_lifecycle"),
+                         ("task_id", "loan_id"), ("tasks", "loans"), ("Task", "Loan"),
+                         ("task", "loan"), ("pending", "active"), ("completed", "returned")):
+            text = text.replace(old, new)
+        return text
+    return {rename(path): rename(content) for path, content in files.items()}
+
+
+@pytest.mark.asyncio
+async def test_same_observed_active_loan_is_returned_before_returned_only_delete(mongo):
+    result = await _smoke(lifecycle_fixture_bundle(), mongo.uri)
+    assert result["passed"] is True, result["failed_tests"]
+    checks = _by_check(result)
+    for operation in ("a_create", "a_update", "a_delete"):
+        assert checks[f"crud.loan_lifecycle.loans.{operation}"]["status"] == "passed"
+    denial = checks["role.loan_lifecycle.delete_loan.non_holder_denied"]
+    assert denial["status"] == "passed" and denial["details"]["records_unchanged"] is True
+    assert checks["role.loan_lifecycle.mark_loan_returned.holder_allowed"]["status"] == "passed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["broken_delete", "delete_in_setup", "setup_does_update"])
+async def test_lifecycle_setup_cannot_satisfy_target_storage_proof(mongo, failure):
+    result = await _smoke(lifecycle_fixture_bundle(**{failure: True}), mongo.uri)
+    assert result["passed"] is False
+    checks = _by_check(result)
+    if failure == "broken_delete":
+        assert checks["crud.loan_lifecycle.loans.a_delete"]["status"] == "failed"
+        assert "still stored" in checks["crud.loan_lifecycle.loans.a_delete"]["message"]
+    else:
+        action = "update_loan" if failure == "setup_does_update" else "delete_loan"
+        rejection = checks[f"fixture.loan_lifecycle.{action}"]
+        assert rejection["status"] == "failed"
+        assert ("must change" if failure == "setup_does_update" else "removed the observer") in rejection["message"]
+        assert checks.get(f"crud.loan_lifecycle.loans.a_{action.split('_')[0]}", {}).get("status") != "passed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("record_value,identity", [(None, {"loan_id": "actual"}),
+                                                   ({"loan_id": "actual"}, {"loan_id": "other"})])
+async def test_lifecycle_setup_requires_actual_identity_before_any_request(tmp_path, record_value, identity):
+    root = tmp_path / "app"
+    _write_files_to_dir(root, lifecycle_fixture_bundle())
+    run = smoke._SmokeRun(root, None, "unused", lambda *_args, **_kwargs: None)
+    smoke._probe_contracts(run)
+    module = next(m for m in run.load.modules if m.name == "loan_lifecycle")
+    calls = []
+
+    async def request(*args):
+        calls.append(args)
+        raise AssertionError("No setup request is allowed without the actual target identity")
+
+    run._request = request
+    prepared = await smoke._prepare_action_inputs(run, module, "delete_loan", run.principal("A"), {},
+                                                  record=record_value, identity=identity)
+    assert prepared is None and not calls
+    assert "existing canonical" in run.outcomes[-1].message
+
+
+@pytest.mark.parametrize("kind,stored,supplied,input_schema,expected", [
+    ("date", "2026-11-10", "2026-11-10", {}, True),
+    ("date", "2026-11-09", "2026-11-10", {}, False),
+    ("date", "invalid", "invalid", {}, False),
+    ("date", "2026-11-10T00:00:00", "2026-11-10", {}, False),
+    ("datetime", "2026-11-10T10:00:00+02:00", "2026-11-10T08:00:00Z", {"format": "date-time"}, True),
+    ("datetime", "2026-11-10T08:00:00", "2026-11-10T08:00:00Z", {"format": "date-time"}, False),
+    ("datetime", "2026-11-10T08:00:00Z", "2026-11-10T08:00:00", {"format": "date-time"}, False),
+    ("datetime", "2026-11-10T08:00:00.123000Z", "2026-11-10T08:00:00.123001Z", {}, False),
+    ("string", "2026-11-10T10:00:00+02:00", "2026-11-10T08:00:00Z", {}, False),
+    ("integer", 1, "1", {}, False),
+])
+def test_temporal_storage_comparison_is_declared_and_strict(kind, stored, supplied, input_schema, expected):
+    assert smoke._stored_field_matches_input(stored, supplied, {"type": kind}, input_schema) is expected
+
+
+def test_bson_temporal_values_use_utc_midnight_and_millisecond_precision():
+    from datetime import UTC, datetime, timedelta, timezone
+
+    compare = smoke._stored_field_matches_input
+    field = {"type": "date"}
+    assert compare(datetime(2026, 11, 10), "2026-11-10", field, {})
+    assert compare(datetime(2026, 11, 9, 19, tzinfo=timezone(-timedelta(hours=5))), "2026-11-10", field, {})
+    assert not compare(datetime(2026, 11, 10, 12), "2026-11-10", field, {})
+    assert not compare(datetime(2026, 11, 9), "2026-11-10", field, {})
+    field = {"type": "datetime"}
+    stored = datetime(2026, 11, 10, 8, microsecond=123000)
+    assert compare(stored, "2026-11-10T10:00:00.123999+02:00", field, {"format": "date-time"})
+    assert not compare(stored, "2026-11-10T08:00:00.124000Z", field, {})
+    assert not compare(stored.replace(microsecond=123456), "2026-11-10T08:00:00.123000Z", field, {})
+    assert not compare(stored.replace(microsecond=123456), "2026-11-10T08:00:00.123456Z", field, {})
+    assert not compare(stored, "2026-11-10T08:00:00.123000", field, {"format": "date-time"})
+    assert not compare(stored.replace(tzinfo=UTC), "bad", field, {})
+
+
+def date_storage_fixture_bundle(*, unchanged=False):
+    files = fixture_bundle()
+    data = json.loads(files["data/contract.json"])
+    collection = next(s for s in data["surfaces"] if s["surface_id"] == "task_management")["collections"][0]
+    next(f for f in collection["fields"] if f["name"] == "description")["type"] = "date"
+    files["data/contract.json"] = json.dumps(data)
+    module = yaml.safe_load(files[MODULE_YAML])
+    module["actions"] = [a for a in module["actions"] if a["id"] != "approve_task"]
+    files[MODULE_YAML] = yaml.safe_dump(module)
+    fixtures = yaml.safe_load(files[FIXTURE_PATH])
+    fixtures["fixtures"] = [f for f in fixtures["fixtures"] if f["action"] != "approve_task"]
+    update = next(f for f in fixtures["fixtures"] if f["action"] == "update_task")
+    update["params"] = [record("task_id"), {"field": "description", "source": "relative_date",
+                                            "offset_days": 1 if unchanged else 2}]
+    files[FIXTURE_PATH] = yaml.safe_dump(fixtures)
+    # Reviewed local test implementation stores the declared date in Mongo as UTC midnight.
+    files["modules/task_management/backend/service.py"] += '''
+
+def _date_storage(values):
+    from datetime import datetime, timezone
+    if 'description' in values:
+        values['description'] = datetime.fromisoformat(values['description']).replace(tzinfo=timezone.utc)
+    return values
+
+async def before_create_task(ctx, values):
+    return _date_storage(values)
+
+async def before_update_task(ctx, record, changes):
+    return _date_storage(changes)
+'''
+    # Date fields have no string-only assertion in canonical generated event DTOs.
+    events = "modules/task_management/contracts/events.yaml"
+    document = yaml.safe_load(files[events])
+    for event in document["events"]:
+        props = event.get("payload_schema", {}).get("properties", {})
+        if "description" in props:
+            props["description"] = {}
+    files[events] = yaml.safe_dump(document)
+    return files
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unchanged", [False, True])
+async def test_real_bson_date_write_matches_input_but_unchanged_date_cannot_pass(mongo, unchanged):
+    result = await _smoke(date_storage_fixture_bundle(unchanged=unchanged), mongo.uri)
+    checks = _by_check(result)
+    if unchanged:
+        assert result["passed"] is False
+        assert checks["fixture.task_management.update_task"]["status"] == "failed"
+        assert "must change" in checks["fixture.task_management.update_task"]["message"]
+        assert checks.get("crud.task_management.tasks.a_update", {}).get("status") != "passed"
+    else:
+        assert result["passed"] is True, result["failed_tests"]
+        assert checks["crud.task_management.tasks.a_update"]["status"] == "passed"

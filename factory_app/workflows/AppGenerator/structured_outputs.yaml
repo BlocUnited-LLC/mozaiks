@@ -3243,7 +3243,7 @@ models:
         description: For relative_date or relative_datetime only, explicit whole-day offset from the observer's fixed UTC clock, between -3650 and 3650.
       record_field:
         type: optional_str
-        description: For record only, a declared field from the observer's currently tested collection row. Target canonical get/update/delete only; never setup or arbitrary database access.
+        description: For record only, a declared field from the observer's currently tested collection row. Target canonical get/update/delete, or setup of a canonical update/delete fixture on that same observed row. No record setup for get/create/list/custom targets or arbitrary database access.
   SmokeFixtureSetup:
     type: model
     fields:
@@ -3263,7 +3263,7 @@ models:
       params:
         type: list
         items: SmokeFixtureParam
-        description: Complete required inputs and only declared input fields. At most 64 bindings. No record source in setup.
+        description: Complete required inputs and only declared input fields. At most 64 bindings. record may bind the existing canonical update/delete target row for lifecycle preparation; other fixture targets cannot use record in setup.
   ModuleSmokeFixture:
     type: model
     fields:
@@ -3277,7 +3277,7 @@ models:
       setup:
         type: list
         items: SmokeFixtureSetup
-        description: At most 24 ordered public action calls creating valid prerequisites. Every setup call must succeed; it never satisfies independent target-action coverage.
+        description: At most 24 ordered public action calls creating valid prerequisites or preparing the same observed update/delete row. Every setup call must succeed; it never satisfies independent target-action coverage.
       params:
         type: list
         items: SmokeFixtureParam

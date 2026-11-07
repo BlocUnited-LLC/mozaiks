@@ -107,8 +107,6 @@ class SmokeFixtureSetup(_FixtureModel):
     def unique_inputs(self) -> Self:
         _unique(self.roles, "setup role")
         _unique([param.field for param in self.params], "setup input field")
-        if any(param.source == "record" for param in self.params):
-            raise ValueError("smoke fixture setup cannot access the observer's target record")
         return self
 
 
@@ -349,6 +347,16 @@ def validate_module_fixture_record_identities(
     failures = []
     for fixture in fixtures:
         target = records.get((module_id, fixture.action))
+        for step in fixture.setup:
+            for setup_binding in step.params:
+                if setup_binding.source == "record" and (
+                    target is None or target[2] not in {"update", "delete"}
+                    or setup_binding.record_field not in target[0]
+                ):
+                    failures.append(
+                        f"{module_id}: setup record source requires a declared field of "
+                        "the canonical update/delete target; get/create/list/custom setup has no target row"
+                    )
         if target is not None:
             try:
                 fixture_record_identity(fixture, collection=target[1], operation=target[2])
@@ -426,14 +434,16 @@ def load_module_smoke_fixtures(files: Mapping[str, str | bytes]) -> dict[tuple[s
             target = _action(modules, module, fixture.action)
             _validate_roles(fixture.roles, target, grants, scopes)
             responses: dict[str, Mapping[str, Any]] = {}
+            record_target = records.get((module, fixture.action))
+            setup_fields = (record_target[0] if record_target is not None
+                            and record_target[2] in {"update", "delete"} else {})
             for step in fixture.setup:
                 action = _action(modules, step.module, step.action)
                 _validate_roles(step.roles, action, grants, scopes)
-                _validate_params(step.params, action.get("input_schema", {}), responses, {})
+                _validate_params(step.params, action.get("input_schema", {}), responses, setup_fields)
                 output = action.get("output_schema", {})
                 Draft7Validator.check_schema(output)
                 responses[step.id] = output
-            record_target = records.get((module, fixture.action))
             _validate_params(fixture.params, target.get("input_schema", {}), responses,
                              record_target[0] if record_target else {})
             if record_target is not None:

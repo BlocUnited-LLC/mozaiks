@@ -349,6 +349,7 @@ agents:
       Rules:
       - Use `module` for durable deterministic business logic under `app/modules/*`.
       - For every `module` surface, describe the deterministic action boundary clearly enough for downstream generation of `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and `backend/schemas.py`.
+      - Choose module boundaries around the business invariants they own, not one module per entity noun. One module may own multiple collections and their synchronous, ordered lifecycle actions. Keep strongly coupled claims, linked records, availability and recovery state under one module owner when they must be coordinated within an action; separate record types do not require separate modules. This does not create a multi-document transaction: still specify conditional writes, durable identities and interruption recovery using supported persistence operations. Use declared events/reactions for cross-module coordination only when that loose coupling fits the required behavior. Do not assume a synchronous child-action API or transfer event-producer authority through service imports. Preserve the requested business rules, role restrictions and page experience; an already approved decomposition must return through design review before ownership changes.
       - Use `workflow` for agentic orchestration lanes.
       - Declare a `workflow` surface only when the approved concept asks for one.
         `agentic_capabilities` on the approved concept blueprint records whether the
