@@ -629,3 +629,134 @@ def test_the_cli_reports_plans_and_drift_with_contract_exit_codes(tmp_path: Path
     assert drift.returncode == 1 and "modified_owned_file modules/stock_ledger/module.yaml" in drift.stdout
     assert blocked.returncode == 1 and json.loads(blocked.stdout)["status"] == "blocked"
     assert invalid.returncode == 2 and "app.json not found" in invalid.stdout
+
+
+# --------------------------------------------------------------------------------------
+# The library's workflow tool calls its module in process, with the live session's authority
+# --------------------------------------------------------------------------------------
+
+
+async def _live_stock_lookup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, scopes: list[str], surface=None):
+    """Wire the installed library's shared workflow tool to a live socket principal, as a workflow run does."""
+    import importlib.util
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from starlette.websockets import WebSocketState
+
+    from mozaiksai.core.auth.adapters.base import UserClaims
+    from mozaiksai.core.auth.websocket_auth import WebSocketUser
+    from mozaiksai.core.runtime.app.loader import AppLoader
+    from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor
+    from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
+    from mozaiksai.core.transport.simple_transport import SimpleTransport
+    from mozaiksai.core.workflow import module_tools
+    from mozaiksai.core.workflow.agents.factory import (
+        ContextVariablesBridge,
+        _wrap_tool_with_context,
+    )
+    from mozaiksai.core.workflow.context.authority import build_context_authority_policy
+    from mozaiksai.core.workflow.context.schema import load_context_variables_config
+
+    roots = _install(tmp_path)
+    loaded = await AppLoader.load(str(roots.app_root))
+    [module] = [item for item in loaded.modules if item.name == "stock_ledger"]
+    executor = ModuleExecutor()
+    executor.register_loaded_module(module)
+    surfaces = {action.id: action.api_surface for action in module.definition.actions}
+    if surface is not None:
+        surfaces["list_items"] = surface
+    principal = WebSocketUser.from_claims(UserClaims(
+        user_id="clerk_1", app_id="shop", tenant_id="tenant_1", workspace_id="workspace_1",
+        scopes=scopes, provider="keycloak", raw_claims={"exp": 9_999_999_999},
+    ))
+    app = SimpleNamespace(state=SimpleNamespace(
+        executor_registry=SimpleNamespace(module_executor=executor),
+        module_action_surfaces={"stock_ledger": surfaces},
+    ))
+    socket = SimpleNamespace(
+        state=SimpleNamespace(user=principal), app=app,
+        client_state=WebSocketState.CONNECTED, application_state=WebSocketState.CONNECTED,
+    )
+    transport = SimpleNamespace(connections={"chat_1": {"websocket": socket, "active": True, "app_id": "shop", "user_id": "clerk_1"}})
+    monkeypatch.setattr(SimpleTransport, "get_instance", AsyncMock(return_value=transport))
+    monkeypatch.setattr(module_tools, "is_auth_enabled", lambda: True)
+    monkeypatch.setattr(module_tools, "get_platform_hooks", PlatformHookRegistry)
+    policy = build_context_authority_policy(workflow_name="StockReview", definitions=load_context_variables_config({}).definitions)
+    bridge = ContextVariablesBridge({"app_id": "shop", "user_id": "clerk_1"}, authority_policy=policy)
+    bridge._bind_run(("StockReview", "shop", "chat_1"), policy)
+    spec = importlib.util.spec_from_file_location(
+        "installed_stock_lookup", roots.workflows_root / "_shared" / "tools" / "stock_lookup.py",
+    )
+    tool_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool_module)
+    return _wrap_tool_with_context(tool_module.stock_lookup, bridge)
+
+
+@pytest.mark.asyncio
+async def test_the_installed_workflow_tool_reads_through_the_module_with_the_session_principal(tmp_path, monkeypatch) -> None:
+    tool = await _live_stock_lookup(tmp_path, monkeypatch, scopes=["stock.read"])
+
+    assert json.loads(await tool()) == {"status": "success", "data": {"items": [], "low_stock_threshold": 5}}
+
+
+@pytest.mark.asyncio
+async def test_a_denied_workflow_read_is_reported_never_returned_as_empty_data(tmp_path, monkeypatch) -> None:
+    tool = await _live_stock_lookup(tmp_path, monkeypatch, scopes=[])
+
+    result = json.loads(await tool())
+
+    assert result["status"] == "error" and "stock.read" in result["error"]
+    assert "data" not in result
+
+
+@pytest.mark.asyncio
+async def test_operator_only_actions_are_not_dispatchable_from_workflows_yet(tmp_path, monkeypatch) -> None:
+    tool = await _live_stock_lookup(tmp_path, monkeypatch, scopes=["stock.read"], surface="admin_internal")
+
+    assert json.loads(await tool()) == {"status": "error", "error": "workflow_module_action_unavailable"}
+
+
+@pytest.mark.asyncio
+async def test_workflow_context_cannot_grant_a_permission(tmp_path, monkeypatch) -> None:
+    from mozaiksai.core.workflow.context.authority import ContextAuthorityError
+
+    tool = await _live_stock_lookup(tmp_path, monkeypatch, scopes=[])
+
+    with pytest.raises(ContextAuthorityError):
+        await tool(context_variables={"permissions": ["stock.read"]})
+
+
+# --------------------------------------------------------------------------------------
+# A pack AppGenerator materialized keeps the base lifecycle's upgrade path
+# --------------------------------------------------------------------------------------
+
+
+def test_a_generator_materialized_pack_upgrades_through_the_base_lifecycle(tmp_path: Path) -> None:
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        install_verified_local_pack,
+    )
+    from tests.test_community_component_lifecycle import (
+        GREETINGS,
+        _greetings_v2,
+        _write_app_root_from_pack,
+    )
+
+    roots = _ordinary_app(tmp_path / "shop")
+    install_verified_local_pack(pack_source_path=GREETINGS, build_context_root=roots.build_context_root)
+    _write_app_root_from_pack(roots.app_root, GREETINGS, "greetings")
+    candidate = _greetings_v2(tmp_path)
+
+    plan = plan_workspace_upgrade(source=PackSource(directory=candidate), roots=roots).to_dict()
+    report = verify_installed_components(roots=roots)
+    [status] = installed_component_status(roots=roots)["packs"]
+    applied = apply_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+
+    assert plan["status"] == "ready" and plan["to"]["version"] == "0.2.0"
+    assert "modules/greetings/backend/service.py" in plan["files"]["write"]
+    assert [warning["kind"] for warning in plan["warnings"]] == ["generator_provenance"]
+    assert report == {"status": "clean", "packs": [{"pack_id": "greetings", "version": "0.1.0", "findings": [], "verifiable": False}]}
+    assert status["ownership"] == "generator"
+    assert applied.status == "applied"
+    pins = json.loads((roots.build_context_root / ".mozaiks" / "installed_components.json").read_text(encoding="utf-8"))
+    assert pins["components"][0]["version"] == "0.2.0"
