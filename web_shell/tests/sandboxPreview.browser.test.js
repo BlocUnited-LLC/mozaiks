@@ -992,8 +992,9 @@ test('standalone shell identifies drafts through loading and navigation without 
       plugins: [{name: 'shell-bootstrap-fixture', setup(builder) {
         builder.onResolve({filter: /^@mozaiks\/chat-ui$/}, () => ({path:'chat-ui', namespace:'fixture'}));
         builder.onResolve({filter: /^@platform\/extensions$/}, () => ({path:'extensions', namespace:'fixture'}));
+        builder.onResolve({filter: /^virtual:mozaiks-module-ui$/}, () => ({path:'module-ui', namespace:'fixture'}));
         builder.onLoad({filter: /.*/, namespace:'fixture'}, ({path: kind}) => ({
-          resolveDir: shell, loader:'jsx', contents: kind === 'extensions' ? 'export {};' : `
+          resolveDir: shell, loader:'jsx', contents: kind === 'module-ui' ? 'export default {};' : kind === 'extensions' ? 'export {};' : `
             import React, {useState} from 'react';
             export const componentRegistry = {hasComponent: () => true};
             export class WebSocketApiAdapter {}
