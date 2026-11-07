@@ -41,8 +41,9 @@ test('theme bootstrap paints the app only after its own brand is ready', async t
     plugins: [{ name: 'auth-and-app-fixture', setup(builder) {
       builder.onResolve({ filter: /^@mozaiks\/chat-ui$/ }, () => ({ path: 'chat-ui', namespace: 'fixture' }));
       builder.onResolve({ filter: /^@platform\/extensions$/ }, () => ({ path: 'extensions', namespace: 'fixture' }));
+      builder.onResolve({ filter: /^virtual:mozaiks-module-ui$/ }, () => ({ path: 'module-ui', namespace: 'fixture' }));
       builder.onLoad({ filter: /.*/, namespace: 'fixture' }, ({ path: kind }) => ({
-        resolveDir: shell, loader: 'jsx', contents: kind === 'extensions' ? 'export {};' : `
+        resolveDir: shell, loader: 'jsx', contents: kind === 'module-ui' ? 'export default {};' : kind === 'extensions' ? 'export {};' : `
           import React, { useState } from 'react';
           import * as themeProvider from ${JSON.stringify(path.join(chatUi, 'styles/themeProvider.js'))};
           import { useTheme } from ${JSON.stringify(path.join(chatUi, 'styles/useTheme.js'))};

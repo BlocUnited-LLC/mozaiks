@@ -1,0 +1,26 @@
+schema_version: mozaiks.module.v1
+module:
+  id: stock_ledger
+  display_name: Stock Ledger
+  version: 1.0.0
+  description: Track stock items and flag low stock against an app-owned threshold.
+  handler: backend.handler:StockLedgerHandler
+permissions:
+  - id: stock.read
+    description: Read stock items.
+  - id: stock.manage
+    description: Record stock items.
+actions:
+  - id: list_items
+    description: List stock items with the app's low-stock threshold.
+    handler_method: list_items
+    permissions: [stock.read]
+  - id: record_item
+    description: Record a stock item.
+    handler_method: record_item
+    input_schema:
+      type: object
+      required: [sku]
+      properties:
+        sku: { type: string }
+    permissions: [stock.manage]

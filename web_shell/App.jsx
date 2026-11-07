@@ -9,6 +9,8 @@ import {
   themeProvider,
 } from '@mozaiks/chat-ui';
 import * as platformExtensions from '@platform/extensions';
+import moduleUi from 'virtual:mozaiks-module-ui';
+import { registerModuleUi } from './moduleUiRegistration.js';
 
 const apiBaseUrl = import.meta.env.VITE_API_URL ?? '';
 const wsBaseUrl = import.meta.env.VITE_WS_URL || (apiBaseUrl ? apiBaseUrl.replace(/^http/, 'ws') : undefined);
@@ -29,6 +31,8 @@ function bootstrap() {
         if (typeof register !== 'function') throw new Error('App UI register export must be a function');
         register(componentRegistry.registerComponent.bind(componentRegistry));
       }
+      // Module-owned components (installed libraries) register after the app, which keeps its own names.
+      registerModuleUi(moduleUi, componentRegistry);
       if (!componentRegistry.hasComponent('LoginPage')) componentRegistry.registerComponent('LoginPage', LoginPage);
       if (!componentRegistry.hasComponent('AuthCallbackPage')) componentRegistry.registerComponent('AuthCallbackPage', AuthCallbackPage);
       const apiAdapter = new WebSocketApiAdapter({

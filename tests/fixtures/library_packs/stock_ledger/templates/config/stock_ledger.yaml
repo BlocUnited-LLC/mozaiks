@@ -1,0 +1,2 @@
+# App-owned settings for the stock ledger library. Edit freely: upgrades never overwrite this file.
+low_stock_threshold: 5
