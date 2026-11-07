@@ -363,7 +363,7 @@ def _splice_json_container(
     items = member.items or []
     keys: list[str | None] = []
     for item in items:
-        found = None
+        found: str | None = None
         for key, value in (item.members or []) if item.kind == "object" else []:
             if key == key_field and value.kind == "scalar":
                 parsed = json.loads(text[value.start : value.end])
@@ -381,16 +381,17 @@ def _splice_json_container(
     removed = [key is not None and key in removals for key in keys]
     surviving = [item for item, gone in zip(items, removed, strict=True) if not gone]
     appended = [value for key, value in upserts.items() if key not in keys]
-    for first, last in _removal_runs(removed):
-        if first > 0:
-            edits.append((items[first - 1].end, items[last].end, ""))
-        elif last < len(items) - 1:
-            edits.append((items[0].start, items[last + 1].start, ""))
+    for run_start, run_end in _removal_runs(removed):
+        if run_start > 0:
+            edits.append((items[run_start - 1].end, items[run_end].end, ""))
+        elif run_end < len(items) - 1:
+            edits.append((items[0].start, items[run_end + 1].start, ""))
         elif not appended:
             edits.append((member.start + 1, member.end - 1, ""))
-    for item, key in zip(items, keys, strict=True):
-        if key is not None and key in upserts and key not in removals:
-            edits.append((item.start, item.end, _json_block(upserts[key], _line_indent(text, item.start), unit)))
+    for item, item_key in zip(items, keys, strict=True):
+        if item_key is not None and item_key in upserts and item_key not in removals:
+            replacement = _json_block(upserts[item_key], _line_indent(text, item.start), unit)
+            edits.append((item.start, item.end, replacement))
     if appended:
         blocks = (",\n" + item_indent).join(_json_block(value, item_indent, unit) for value in appended)
         if surviving:
@@ -503,15 +504,15 @@ def _splice_yaml_container(
     ]
     keys: list[str | None] = []
     for item in items:
-        found = None
+        yaml_key: str | None = None
         if isinstance(item, yaml.MappingNode):
             for item_key, item_value in item.value:
                 if (
                     isinstance(item_key, yaml.ScalarNode) and item_key.value == key_field
                     and isinstance(item_value, yaml.ScalarNode)
                 ):
-                    found = item_value.value
-        keys.append(found)
+                    yaml_key = item_value.value
+        keys.append(yaml_key)
     removed = [key is not None and key in removals for key in keys]
     appended = [value for key, value in upserts.items() if key not in keys]
     if all(removed) and not appended:

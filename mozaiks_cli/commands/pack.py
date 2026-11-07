@@ -162,12 +162,14 @@ def run(args: Any) -> int:
             return EXIT_OK
         source = _source(args)
         try:
-            if args.pack_action == "install":
-                operation = plan_component_install if args.dry_run else apply_component_install
-                plan = operation(source=source, roots=roots, adopt=args.adopt)
+            if args.pack_action == "install" and args.dry_run:
+                plan = plan_component_install(source=source, roots=roots, adopt=args.adopt)
+            elif args.pack_action == "install":
+                plan = apply_component_install(source=source, roots=roots, adopt=args.adopt)
+            elif args.dry_run:
+                plan = plan_workspace_upgrade(source=source, roots=roots)
             else:
-                operation = plan_workspace_upgrade if args.dry_run else apply_workspace_upgrade
-                plan = operation(source=source, roots=roots)
+                plan = apply_workspace_upgrade(source=source, roots=roots)
         except CommunityComponentConflictError as exc:
             blocked = getattr(exc, "plan", None)
             if blocked is None:
