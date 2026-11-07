@@ -727,3 +727,66 @@ def test_native_read_assertion_requires_fixture_without_rewriting_schema(asserti
     assert actual["input_schema"] == action["input_schema"]
     # This early default check adds no new restriction or schema support. The
     # existing full fixture schema/role/reference validator remains authoritative.
+
+
+@pytest.mark.parametrize("schema", [
+    {"type": "object"},
+    {"type": "object", "properties": {}},
+    {"type": "object", "properties": {}, "additionalProperties": True},
+    {"type": "object", "properties": {"filter": {"type": "string", "pattern": "^active$"}},
+     "minProperties": 0, "maxProperties": 1},
+    {"type": "object", "allOf": [{"maxProperties": 0}, {"not": {"required": ["filter"]}}]},
+])
+def test_native_list_empty_default_uses_runtime_schema_without_rewriting_manifest(schema):
+    from mozaiksai.core.runtime.composition.schema_validation import validate_json_schema
+    from mozaiksai.core.workflow.generator_support.module_write_actions import close_module_actions
+    from tests.test_generated_role_grants import _arguments, _closed
+
+    assert validate_json_schema({}, schema) is None
+    payload = _closed()
+    action = next(item for item in payload["module_contract"]["module_yaml"]["actions"] if item["id"] == "list_tasks")
+    action["input_schema"] = deepcopy(schema)
+    before = deepcopy(payload)
+    result = close_module_actions(payload, **_arguments())
+    assert payload == before
+    actual = next(item for item in result["module_contract"]["module_yaml"]["actions"] if item["id"] == "list_tasks")
+    assert actual["input_schema"] == schema
+    assert result["module_contract"].get("fixtures_yaml") is None
+
+
+@pytest.mark.parametrize("schema", [
+    {"type": "object", "required": ["filter"], "properties": {"filter": {"type": "string"}}},
+    {"type": "object", "minProperties": 1},
+    {"type": "object", "not": {"maxProperties": 0}},
+    {"type": "object", "enum": [{"filter": "active"}]},
+    {"type": "object", "required": "filter"},
+])
+def test_native_list_empty_default_preserves_assertion_and_schema_failures(schema):
+    from mozaiksai.core.runtime.composition.schema_validation import validate_json_schema
+    from mozaiksai.core.workflow.generator_support.module_write_actions import close_module_actions
+    from tests.test_generated_role_grants import _arguments, _closed
+
+    assert validate_json_schema({}, schema) is not None
+    payload = _closed()
+    action = next(item for item in payload["module_contract"]["module_yaml"]["actions"] if item["id"] == "list_tasks")
+    action["input_schema"] = deepcopy(schema)
+    before = deepcopy(payload)
+    with pytest.raises(ValueError, match="list_tasks.*observer default.*fixtures_yaml"):
+        close_module_actions(payload, **_arguments())
+    assert payload == before
+
+
+@pytest.mark.parametrize("schema", [
+    {"$ref": "https://example.invalid/schema.json"},
+    {"type": "object", "allOf": [{"$ref": "#/definitions/empty"}], "definitions": {"empty": {"type": "object"}}},
+])
+def test_native_list_reference_proof_stays_conservative_without_schema_resolution(monkeypatch, schema):
+    from mozaiksai.core.workflow.generator_support import module_smoke_fixtures
+
+    def unexpected_validation(*args, **kwargs):
+        pytest.fail("reference-bearing default proof must not resolve a schema")
+
+    monkeypatch.setattr(module_smoke_fixtures, "validate_json_schema", unexpected_validation)
+    before = deepcopy(schema)
+    assert module_smoke_fixtures._default_read_inputs_compatible(schema, "list") is False
+    assert schema == before

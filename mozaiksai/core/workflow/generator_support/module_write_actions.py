@@ -891,13 +891,13 @@ def close_module_actions(
     closed = output["module_contract"]
     from .module_smoke_fixtures import validate_module_fixture_record_identities
 
-    validate_module_fixture_record_identities(
-        module_id, closed.get("fixtures_yaml"), data_contract=contract, manifest=closed["module_yaml"],
-    )
     _require_declared_design_actions(module_id, closed["module_yaml"], design_surface_map)
     _close_user_data_scope(module_id, closed["module_yaml"], plan, contract)
     if validate_generated_permissions:
         assert_generated_action_permissions(module_id, closed["module_yaml"], plan, granted)
+    validate_module_fixture_record_identities(
+        module_id, closed.get("fixtures_yaml"), data_contract=contract, manifest=closed["module_yaml"],
+    )
     events = close_module_events(
         module_id, closed["module_yaml"], closed.get("events_yaml"),
         {key: closed[key] for key in _COMPANION_PATHS if isinstance(closed.get(key), dict)},

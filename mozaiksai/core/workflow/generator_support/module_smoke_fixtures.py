@@ -15,6 +15,7 @@ from jsonschema import Draft7Validator
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mozaiksai.core.runtime.app.auth_contract import AppAuthContract
+from mozaiksai.core.runtime.composition.schema_validation import validate_json_schema
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
 from mozaiksai.core.semantics.closed_contracts import ObjectContract, ScalarContract
@@ -296,6 +297,23 @@ def _record_targets(
 
 def _default_read_inputs_compatible(schema: dict[str, Any], operation: str) -> bool:
     """Prove finite defaults without treating descriptive annotations as assertions."""
+    if operation == "list":
+        # This one concrete input can use the runtime's native schema semantics.
+        # Keep references conservative: early input proof must not fetch schemas.
+        pending: list[Any] = [schema]
+        seen: set[int] = set()
+        while pending:
+            node = pending.pop()
+            if not isinstance(node, (dict, list)) or id(node) in seen:
+                continue
+            seen.add(id(node))
+            if isinstance(node, dict):
+                if "$ref" in node:
+                    return False
+                pending.extend(node.values())
+            else:
+                pending.extend(node)
+        return validate_json_schema({}, schema) is None
     projection = deepcopy(schema)
     stack = [projection]
     visited: set[int] = set()
@@ -317,8 +335,6 @@ def _default_read_inputs_compatible(schema: dict[str, Any], operation: str) -> b
     if not isinstance(contract, ObjectContract):
         return False
     required = {prop.name for prop in contract.properties if prop.required}
-    if operation == "list":
-        return not required
     identifier = next((prop.contract for prop in contract.properties if prop.name == "id"), None)
     return (isinstance(identifier, ScalarContract) and identifier.kind == "string"
             and identifier.enum is None and not identifier.nullable and required <= {"id"})
@@ -341,7 +357,7 @@ def validate_module_fixture_record_identities(
     if manifest is not None:
         from .code_files import _materialize_schema_contract
 
-        actions = {action["id"]: action for action in manifest.get("actions") or []}
+        actions = {action["id"]: action for action in manifest.get("actions") or [] if action.get("id")}
         supplied = {fixture.action for fixture in fixtures}
         for (owner, _), (_, collection, operation) in records.items():
             if owner != module_id or operation != "get" or not collection.get("entity"):

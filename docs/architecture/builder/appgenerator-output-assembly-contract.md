@@ -15,6 +15,14 @@ contract task unless another task explicitly owns it. Read admission requires
 exact bindings when the ordinary observer defaults cannot fit the action's
 declared inputs; it does not infer business prerequisites from action names.
 
+Canonical design, action and permission validation precedes this observational
+input proof. For list actions, the fixed default `{}` is checked by the same
+native JSON Schema validator as runtime; an open object alone does not require a
+fixture. Reference-bearing schemas remain conservative and require an explicit
+fixture, without remote schema resolution during this proof. Get actions still
+require compatibility with arbitrary string IDs, including a missing-record
+probe. These checks never rewrite the admitted schema or its assertions.
+
 Fixtures name exact actions and roles and supply bounded prerequisite calls
 and parameter bindings. They do not grant permissions, change approved domain
 requirements, define success criteria or introduce runtime services. Accepted
