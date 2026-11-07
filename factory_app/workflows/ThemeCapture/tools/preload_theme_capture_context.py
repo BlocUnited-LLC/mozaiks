@@ -407,7 +407,7 @@ async def _restore_approved_genesis_concept(context_variables: Any) -> None:
     )
     if not records:
         return
-    # Never search backward for an older approval if the current proposal is unapproved.
+    # An unapproved current proposal must not resolve to an older approval.
     record = records[0]
     summary = extract_summary_payload(record)
     if (
