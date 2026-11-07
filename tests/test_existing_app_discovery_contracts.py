@@ -282,7 +282,7 @@ def test_existing_app_discovery_before_chat_tools_registered() -> None:
 def test_existing_app_discovery_progress_uses_inline_ui_surface_helper() -> None:
     source = _read_text("factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py")
 
-    assert "from mozaiksai.core.workflow.ui_tools import emit_ui_surface" in source
+    assert "from mozaiksai.core.workflow.ui_tools import emit_tool_progress_event, emit_ui_surface" in source
     assert "emit_ui_surface(" in source
     assert "_emit_app_intelligence_progress_card" in source
     assert "emit_workflow_activity" not in source
@@ -439,18 +439,26 @@ def test_existing_app_preload_progress_emits_visible_inline_status(monkeypatch) 
     )
 
     emitted: list[dict[str, Any]] = []
+    status_updates: list[dict[str, Any]] = []
+
+    async def _fake_progress(**kwargs):
+        status_updates.append(kwargs)
 
     async def _fake_emit(component, payload, **kwargs):
         emitted.append({"component": component, "payload": payload, "kwargs": kwargs})
         return f"ui_progress_{len(emitted)}"
 
     monkeypatch.setattr(module, "emit_ui_surface", _fake_emit)
+    monkeypatch.setattr(module, "emit_tool_progress_event", _fake_progress)
 
     context = _Context(chat_id="chat_app_intelligence_progress", app_id="app_1")
     module._set_app_intelligence_progress(context, "collecting_evidence")
     result = asyncio.run(module._emit_app_intelligence_progress_card(context))
 
     assert result["success"] is True
+    assert status_updates[-1]["stage_id"] == "collecting_evidence"
+    assert "completed" not in status_updates[-1]
+    assert "progress_percent" not in status_updates[-1]
     assert emitted
     event = emitted[-1]
     payload = event["payload"]
@@ -488,6 +496,7 @@ def test_existing_app_preload_progress_emits_visible_inline_status(monkeypatch) 
         "fetching_source_files",
         message="Downloading selected source files from GitHub (60/120).",
         percent=48,
+        details={"downloaded_file_count": 60, "fetch_candidate_count": 120},
     )
     result = asyncio.run(module._emit_app_intelligence_progress_card(context))
 
@@ -496,6 +505,18 @@ def test_existing_app_preload_progress_emits_visible_inline_status(monkeypatch) 
     assert download_payload["status"] == "working"
     assert download_payload["progress_percent"] == 48
     assert "Downloading selected source files from GitHub (60/120)." in download_payload["message"]
+    assert status_updates[-1]["completed"] == 60
+    assert status_updates[-1]["total"] == 120
+    assert "progress_percent" not in status_updates[-1]
+
+    async def _unavailable_status(**kwargs):
+        raise RuntimeError("Chat status transport unavailable")
+
+    monkeypatch.setattr(module, "emit_tool_progress_event", _unavailable_status)
+    emitted_before = len(emitted)
+    result = asyncio.run(module._emit_app_intelligence_progress_card(context))
+    assert result["success"] is True
+    assert len(emitted) == emitted_before + 1
 
 
 def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
@@ -507,7 +528,7 @@ def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
     core_ui_index = _read_text("chat-ui/src/core/ui/index.js")
 
     assert "!data.type.startsWith('ui.')" in source
-    assert "shouldShowToolProgress(data)" in source
+    assert "applyChatProgressEvent(current" in source
     assert "buildInlineToolCallMessageFromEvent" not in source
     assert "upsertInlineToolCallMessage(" in source
     assert "cacheWorkflowTranscriptMessage(inlineMessage" in source
@@ -564,9 +585,8 @@ def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
     assert "awaiting_response: awaitingResponse" in inline_helper
     assert "SystemStatusCard" in core_ui_index
     assert "SystemActivityCard" not in core_ui_index
-    assert "const userVisibleToolProgress = shouldShowToolProgress(data)" in source
-    assert "agentName: tool" in source
-    assert "shouldShowToolProgress(data)" in source
+    assert "shouldShowToolProgress" not in source
+    assert "progress_percent" not in source
     assert "ActivityRenderer" not in chat_message
     assert "resolveActivityComponent" not in chat_message
     assert "AppIntelligenceProgressCard" not in chat_message

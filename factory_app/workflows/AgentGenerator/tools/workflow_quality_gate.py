@@ -194,7 +194,9 @@ def _read_agent_names(agents_payload: Any) -> list[str]:
     return []
 
 
-def _validate_bundle_implementations(files: dict[str, str], tools: dict[str, Any]) -> list[str]:
+def _validate_bundle_implementations(
+    files: dict[str, str], tools: dict[str, Any], ui_config: dict[str, Any] | None = None,
+) -> list[str]:
     from mozaiksai.core.validation.functional_generated_app import scan_placeholder_implementations
 
     errors: list[str] = []
@@ -212,6 +214,29 @@ def _validate_bundle_implementations(files: dict[str, str], tools: dict[str, Any
             f"workflows/generated/{path}": files[path] for path in modules
         })
     )
+    stage_ids = {
+        stage.get("id") for stage in ((ui_config or {}).get("progress") or {}).get("stages", [])
+        if isinstance(stage, dict)
+    }
+    for filename, module in modules.items():
+        progress_imports: set[str] = set()
+        for node in ast.walk(module):
+            if isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if node.module == "mozaiksai.core.workflow.ui_tools" and alias.name == "emit_tool_progress_event":
+                        progress_imports.add(alias.asname or alias.name)
+                    elif node.module == "mozaiksai.core.workflow" and alias.name == "ui_tools":
+                        progress_imports.add(f"{alias.asname or alias.name}.emit_tool_progress_event")
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "mozaiksai.core.workflow.ui_tools":
+                        progress_imports.add(f"{alias.asname or alias.name}.emit_tool_progress_event")
+        for call in ast.walk(module):
+            if not (isinstance(call, ast.Call) and ast.unparse(call.func) in progress_imports):
+                continue
+            stage = next((kw.value for kw in call.keywords if kw.arg == "stage_id"), None)
+            if isinstance(stage, ast.Constant) and stage.value not in stage_ids:
+                errors.append(f"{filename}: progress stage {stage.value!r} is not declared in ui_config.yaml")
     for binding in [*tools["tools"], *tools["lifecycle_tools"]]:
         filename = str(binding["file"]).replace("\\", "/")
         if not filename.startswith("tools/"):
@@ -481,13 +506,16 @@ def validate_workflow_bundle_structure(
                     "transition_graph": parsed_payloads["transition_graph.yaml"],
                     "structured_outputs": parsed_payloads["structured_outputs.yaml"],
                     "tools": parsed_payloads["tools.yaml"]["tools"],
+                    "progress": parsed_payloads["ui_config.yaml"].get("progress"),
                 },
                 task_batches=parsed_payloads.get("extended_orchestration/task_batches.yaml"),
             )
         except ValueError as exc:
             report["errors"].append(str(exc))
 
-        report["errors"].extend(_validate_bundle_implementations(files, parsed_payloads["tools.yaml"]))
+        report["errors"].extend(_validate_bundle_implementations(
+            files, parsed_payloads["tools.yaml"], parsed_payloads.get("ui_config.yaml"),
+        ))
 
         orchestrator = payloads.get("orchestrator.yaml")
         if isinstance(orchestrator, dict):

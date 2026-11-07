@@ -18,6 +18,9 @@ This project follows a practical pre-1.0 changelog format:
   through `middleware.yaml`. Each model attempt receives fresh values from
   explicitly selected, model-visible context variables. AgentGenerator validates
   and exports the same declaration; existing workflows keep their prompt behavior.
+- Workflows can declare public progress stages for the shared chat status strip.
+  Long-running tools report measured item counts or an indeterminate stage;
+  progress stays separate from token usage and execution completion.
 - Chats show connection and run status beside the composer, with measured token
   usage for the current run when available. Ask and workflow receipts stay
   scoped to their owning chat; the wallet balance remains in the Tokens tab.

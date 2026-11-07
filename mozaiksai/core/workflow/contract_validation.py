@@ -79,6 +79,9 @@ def validate_workflow_context_contract(
     if task_batches is None and workflow_path is not None:
         task_batches = _task_batches_at_path(workflow_path)
     if task_batches is not None:
+        from .task_batches import validate_task_batch_progress
+
+        validate_task_batch_progress(task_batches, workflow_config)
         for batch in task_batches.batches:
             written_keys = [batch.result.context_key, batch.result.status_key]
             read_keys = []

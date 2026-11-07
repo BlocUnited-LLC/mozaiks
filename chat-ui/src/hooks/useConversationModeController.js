@@ -26,7 +26,6 @@ const scoreWorkflowTranscriptMessages = (messageList) => {
   const summary = summarizeWorkflowMessages(messageList);
   return (
     summary.uiMessageCount * 100
-    + summary.toolProgressCount * 50
     + summary.total
   );
 };

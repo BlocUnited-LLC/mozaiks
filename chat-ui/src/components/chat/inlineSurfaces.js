@@ -139,17 +139,6 @@ export function upsertInlineToolCallMessage(messageList, inlineMessage) {
   return [...messagesList, inlineMessage];
 }
 
-export function shouldShowToolProgress(data) {
-  return (
-    data.ui_visibility === 'user'
-    || data.metadata?.ui_visibility === 'user'
-    || data.display_variant
-    || data.metadata?.display_variant
-    || data.component_type
-    || data.metadata?.component_type
-  );
-}
-
 export function buildComposerArtifactContext(artifactContext) {
   if (!artifactContext || typeof artifactContext !== 'object') {
     return null;

@@ -161,6 +161,18 @@ It also checks context references, transition compilation, and task-batch
 contracts. Duplicate filenames, retired declarative JSON/YML variants, and
 unrendered `.j2` files block export.
 
+For long work, the bundle builder can declare `ui_config.yaml` `progress.stages`
+and implement reporting through the runtime's `emit_tool_progress_event` helper.
+The canonical `WorkflowProgressConfig` JSON schema is injected into its prompt.
+There is no duplicate progress plan in the outer response. The quality gate
+validates the YAML, literal tool stage references, and task-batch `progress_stage`
+references before packaging. Dynamic tool stage ids are checked when emitted.
+Counts come from executing code, not another model turn. A custom `progress_stepper`
+remains available for detailed workflow UI; the shared status strip stays owned by
+the framework. AppGenerator and AgentGenerator dogfood accepted task counts, while
+ExistingAppDiscovery reports indexing stages and settled source-file checks,
+including failed fetch attempts; these counts do not claim successful downloads.
+
 Declared tools must have an included Python file and matching top-level function.
 Python syntax errors and unfinished tool implementations block export. Workers
 must implement the tool behavior; there is no later tool-implementation stage.

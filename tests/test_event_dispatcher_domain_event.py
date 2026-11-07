@@ -130,20 +130,28 @@ def test_build_outbound_event_envelope_maps_tool_progress_to_chat_namespace() ->
     envelope = dispatcher.build_outbound_event_envelope(
         raw_event={
             "kind": "tool_progress",
+            "chat_id": "chat-progress",
+            "workflow_name": "ExistingAppDiscovery",
             "tool_name": "App Intelligence",
-            "progress_percent": 58,
-            "status_message": "Extracting symbols.",
-            "ui_visibility": "user",
+            "stage_id": "fetching_source_files",
+            "stage_label": "Reading source files",
+            "completed": 12,
+            "total": 40,
+            "unit": "files",
         },
         chat_id="chat-progress",
         workflow_name="ExistingAppDiscovery",
+        get_sequence_cb=lambda _: 19,
     )
 
     assert envelope is not None
     assert envelope["type"] == "chat.tool_progress"
     assert envelope["data"]["tool_name"] == "App Intelligence"
-    assert envelope["data"]["progress_percent"] == 58
-    assert envelope["data"]["ui_visibility"] == "user"
+    assert envelope["data"]["stage_id"] == "fetching_source_files"
+    assert envelope["data"]["completed"] == 12
+    assert envelope["data"]["total"] == 40
+    assert envelope["data"]["sequence"] == 19
+    assert "progress_percent" not in envelope["data"]
 
 
 def test_serialize_event_content_normalizes_enum_to_value() -> None:
