@@ -25,6 +25,10 @@ This project follows a practical pre-1.0 changelog format:
 - Generated apps can grant module permissions to approved design roles through
   `mozaiks.auth.v2`. Staff actions use verified role membership while preserving
   record ownership; build tasks cannot authorize their own grants.
+- Workflows can opt individual local agents into AG2's transient status context
+  through `middleware.yaml`. Each model attempt receives fresh values from
+  explicitly selected, model-visible context variables. AgentGenerator validates
+  and exports the same declaration; existing workflows keep their prompt behavior.
 - Chats show connection and run status beside the composer, with measured token
   usage for the current run when available. Ask and workflow receipts stay
   scoped to their owning chat; the wallet balance remains in the Tokens tab.
@@ -49,6 +53,9 @@ This project follows a practical pre-1.0 changelog format:
 - Design permission repair identifies every conflicting action/collection
   binding together. Factory guidance keeps one permission anchor per action
   and describes cross-user review without bypassing record ownership.
+- Updated the AG2 runtime, provider extras and ACP proof images to 1.3.0.
+  Native descendant usage remains covered by the existing token watchdog;
+  status context does not replace runtime budget or permission enforcement.
 - Updated the AG2 runtime and provider extras to 1.2.2. OpenAI workflows keep
   Chat Completions through the explicit `OpenAICompletionsConfig`; Responses
   workflows keep their selected API. Anthropic no longer receives the shared

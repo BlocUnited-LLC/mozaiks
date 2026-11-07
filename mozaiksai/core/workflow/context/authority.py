@@ -11,9 +11,12 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+if TYPE_CHECKING:
+    from ..task_batches import TaskBatchesConfig
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
 _CONTEXT_REF_RE = re.compile(r"\$\{([^}]+)\}")
@@ -431,6 +434,16 @@ def resolve_declared_context_writer(
     return base_writer
 
 
+def task_batch_written_context_keys(config: TaskBatchesConfig | None) -> set[str]:
+    """Return the task-owned outputs used by canonical authority inference."""
+    keys: set[str] = set()
+    for batch in config.batches if config is not None else ():
+        keys.update((batch.result.context_key, batch.result.status_key))
+        if batch.recovery:
+            keys.update((batch.recovery.outcome_key, batch.recovery.status_key))
+    return {key for key in keys if key}
+
+
 def build_context_authority_policy(
     *,
     workflow_name: str,
@@ -799,5 +812,6 @@ __all__ = [
     "ScopedContextWriter",
     "require_unchanged_runtime_authority",
     "build_context_authority_policy",
+    "task_batch_written_context_keys",
     "validate_transition_context_authority",
 ]

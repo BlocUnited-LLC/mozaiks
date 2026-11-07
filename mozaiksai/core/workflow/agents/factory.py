@@ -650,6 +650,18 @@ async def create_agents(
     agent_plan_map = load_context_variables_config(
         workflow_config.get("context_variables") or {},
     ).agents
+    from ..contract_validation import validate_workflow_statusbar_contract
+    from ..declarative.contracts import MiddlewareConfig
+
+    statusbar_entries = MiddlewareConfig.model_validate(workflow_config.get("middleware") or {}).statusbar_middleware
+    if statusbar_entries:
+        validate_workflow_statusbar_contract(
+            workflow_name=workflow_name, workflow_config=workflow_config,
+            workflow_path=workflow_manager.resolve_workflow_path(workflow_name),
+        )
+    statusbar_views = {
+        entry.agent: entry.variables for entry in statusbar_entries
+    }
 
     agents: dict[str, Agent] = {}
 
@@ -697,10 +709,12 @@ async def create_agents(
         unprojected_system_message = system_message
         agent_plan = (agent_plan_map or {}).get(agent_name)
         agent_variables = list(getattr(agent_plan, "variables", []) or [])
+        statusbar_variables = statusbar_views.get(agent_name, [])
+        prompt_variables = [key for key in agent_variables if key not in statusbar_variables]
 
-        if agent_variables:
+        if prompt_variables:
             system_message = _apply_context_exposures(
-                system_message, [], context_dict, agent_variables,
+                system_message, [], context_dict, prompt_variables,
             )
 
         _log_existing_app_discovery_projection(
@@ -952,7 +966,7 @@ async def create_agents(
         except Exception as watchdog_err:
             logger.debug("[AGENTS] AG2 token watchdog observers skipped for '%s': %s", agent_name, watchdog_err)
 
-        if prompt_middleware_functions or agent_variables:
+        if prompt_middleware_functions or prompt_variables:
             from ..execution.middleware import build_prompt_middleware
 
             middleware.append(
@@ -962,7 +976,7 @@ async def create_agents(
                     base_system_message=unprojected_system_message,
                     context_bridge=context_bridge,
                     context_exposures=[],
-                    context_variables=agent_variables,
+                    context_variables=prompt_variables,
                 )
             )
 
@@ -971,6 +985,14 @@ async def create_agents(
         # this factory only supplies the validated response_schema.
         if beta_response_schema is not None:
             middleware.append(RetryMiddleware(max_retries=2))
+
+        if statusbar_variables:
+            from ..execution.middleware import build_statusbar_middleware
+
+            # Inside retry: every provider attempt sees the current bridge state.
+            middleware.append(build_statusbar_middleware(
+                context_bridge=context_bridge, variables=statusbar_variables,
+            ))
 
         # Innermost: preflight and prompt projection run before UI activity,
         # and every actual model call (including a retry) gets a fresh signal.

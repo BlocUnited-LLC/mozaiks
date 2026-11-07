@@ -779,8 +779,39 @@ class PromptMiddlewareSpec(DeclarativeModel):
         return _required_text(value, field_name="filename")
 
 
+class StatusbarMiddlewareSpec(DeclarativeModel):
+    agent: str
+    variables: list[str] = Field(min_length=1)
+
+    @field_validator("agent")
+    @classmethod
+    def _validate_agent(cls, value: str) -> str:
+        name = _required_text(value, field_name="agent")
+        if name == "all":
+            raise ValueError("statusbar requires a specific local agent, not 'all'")
+        return name
+
+    @field_validator("variables")
+    @classmethod
+    def _validate_variables(cls, value: list[str]) -> list[str]:
+        names = [_required_text(name, field_name="variable") for name in value]
+        if len(set(names)) != len(names):
+            raise ValueError("statusbar variables must be unique")
+        for name in names:
+            require_application_context_name_allowed(name, where="middleware.yaml statusbar_middleware.variables")
+        return names
+
+
 class MiddlewareConfig(DeclarativeModel):
     prompt_middleware: list[PromptMiddlewareSpec] = Field(default_factory=list)
+    statusbar_middleware: list[StatusbarMiddlewareSpec] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_statusbar_agents(self) -> MiddlewareConfig:
+        names = [entry.agent for entry in self.statusbar_middleware]
+        if len(set(names)) != len(names):
+            raise ValueError("statusbar_middleware must contain at most one entry per agent")
+        return self
 
 
 class UIConfig(DeclarativeModel):

@@ -2370,6 +2370,18 @@ models:
         items: WorkflowOutcomeRoute
         description: Unique exhaustive operation results and their next agents.
 
+  WorkflowStatusbarMiddleware:
+    type: model
+    description: Bounded projection of existing model-visible context for one local agent.
+    fields:
+      agent:
+        type: str
+        description: Exact local agent name from agents.yaml; one statusbar entry per agent.
+      variables:
+        type: list
+        items: str
+        description: Nonempty unique context names already defined and exposed to this agent, with effective model_visible enabled.
+
   WorkflowBundleBuilderOutput:
     type: model
     description: >
@@ -2396,6 +2408,14 @@ models:
           Typed failure-handling plans for workflow operations. The factory materializes
           their tool outcome bindings, protected context definitions, and graph routes.
           Use [] only for workflows with no outcome-dependent operations.
+      statusbar_middleware:
+        type: list
+        items: WorkflowStatusbarMiddleware
+        default: []
+        description: >
+          Optional current-state context summaries for local agents. The factory writes
+          these declarations into middleware.yaml using the shared runtime schema.
+          Use [] when unnecessary; omit this key from the raw middleware file.
       files:
         type: list
         items: CodeFile
@@ -2403,7 +2423,7 @@ models:
           Ordered list of workflow bundle files. Must include at minimum:
           orchestrator.yaml, agents.yaml, transition_graph.yaml, tools.yaml,
           context_variables.yaml, structured_outputs.yaml, middleware.yaml, ui_config.yaml.
-          middleware.yaml is a prompt middleware declaration file.
+          middleware.yaml declares prompt middleware and materialized statusbar middleware.
           Complete Python tool implementations go under tools/<name>.py; unfinished stubs block export.
           UI components go under ui/<WorkflowName>/<Component>.jsx.
   PackBuildCoordinatorOutput:

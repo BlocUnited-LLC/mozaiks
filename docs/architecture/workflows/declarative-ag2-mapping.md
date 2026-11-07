@@ -27,7 +27,7 @@ Those are Mozaiks layers that exist before a workflow starts.
 | `transition_graph.yaml` | routing rules inside the workflow | AG2 1.0 WorkflowAdapter / TransitionGraph |
 | `context_variables.yaml` | workflow state bindings | AG2-native container plus Mozaiks adapters |
 | `tools.yaml` | tool declarations | AG2 tool calling plus Mozaiks wrappers |
-| `middleware.yaml` | prompt injection declarations | Mozaiks declarations compiled to AG2 1.0 middleware |
+| `middleware.yaml` | prompt injection and transient status context | Mozaiks declarations compiled to AG2 middleware |
 | `structured_outputs.yaml` | typed runtime validation | Mozaiks layer |
 | `ui_config.yaml` | frontend exposure metadata | frontend-only |
 | `extended_orchestration/task_batches.yaml` | workflow-local deterministic task DAG contract | Mozaiks contract layer executed through AG2 where possible |
@@ -207,9 +207,8 @@ lifecycle_tools: []
 
 ### `middleware.yaml`
 
-Maps to Mozaiks prompt-injection declarations. Runtime registration is AG2 1.0
-agent middleware, not prior hook registration style. Lifecycle behavior belongs
-in `tools.yaml` `lifecycle_tools`.
+Maps to prompt-injection declarations and optional AG2 1.3 statusbar middleware.
+Lifecycle behavior belongs in `tools.yaml` `lifecycle_tools`.
 
 Canonical shape:
 
@@ -218,7 +217,17 @@ prompt_middleware:
   - agent: AgentName
     filename: hook_file.py
     function: update_state
+statusbar_middleware:
+  - agent: AgentName
+    variables: [current_phase]
 ```
+
+Statusbar entries select existing per-agent model-visible context keys. Runtime
+validation rejects undeclared/unexposed keys, duplicates and remote agents.
+Selected values are read from the live context bridge on every provider attempt
+and sent through `statusbar_middleware(..., persist=False)` as transient model
+input, instead of duplicating them in the ordinary system-prompt projection.
+This declares no UI, persistence, routing, or new state authority.
 
 ## Mozaiks-Only Workflow Layers
 

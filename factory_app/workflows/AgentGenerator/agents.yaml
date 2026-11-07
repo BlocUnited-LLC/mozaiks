@@ -501,7 +501,7 @@ agents:
       - `tools.yaml` — tools[] and lifecycle_tools[] matching the agent tools planned below
       - `context_variables.yaml` — definitions + agents exposure sections
       - `structured_outputs.yaml` — schema_version: mozaiks.structured_outputs.v1, models + registry (agents → output model)
-      - `middleware.yaml` — prompt middleware declarations. Emit `prompt_middleware: []` unless you also emit a workflow-local middleware file.
+      - `middleware.yaml` — prompt middleware declarations. Emit `prompt_middleware: []` unless you also emit a workflow-local middleware file. The factory adds typed statusbar_middleware declarations from the bundle output.
       - `ui_config.yaml` — visual_agents list. This file is required for every
         workflow, including BackendOnly/headless workflows. BackendOnly
         workflows must still emit `ui_config.yaml` with `visual_agents: []`.
@@ -608,6 +608,21 @@ agents:
       - Keep exact identifiers in declarative roster, routing, tool, and output
         registry fields. When a tool requires an agent identifier, describe it as
         a routing argument with its allowed values, not as a source of knowledge.
+  - id: statusbar_context
+    heading: '[STATUSBAR MODEL CONTEXT]'
+    content: |-
+      Include statusbar_middleware in WorkflowBundleBuilderOutput. Use [] unless a
+      local agent needs a concise current-state summary from existing workflow context.
+      Each entry is {agent, variables}: name an exact local agents.yaml agent once
+      and a nonempty list of unique context names. Every variable must already have
+      a context_variables.yaml definition, be exposed in that agent's variables list,
+      and have effective model_visible enabled. Never reference a remote A2A agent,
+      hidden/tool-only data, or undeclared state.
+      The factory writes this list into middleware.yaml and preserves prompt_middleware.
+      Omit statusbar_middleware from the raw middleware file to avoid conflicting
+      declarations. This is transient model context, not a UI status bar, workflow
+      plan, routing authority, or new persistence. Do not generate callback files or
+      new context definitions just to populate a statusbar.
   - id: operation_outcomes
     heading: '[OPERATION OUTCOMES]'
     content: |-
@@ -971,6 +986,8 @@ agents:
       - `workflow_name`: PascalCase name
       - `agent_message`: one sentence confirming generation
       - `pattern_id` and `pattern_name`: from your brief
+      - `outcome_plans`: typed operation outcomes, or [] when unnecessary
+      - `statusbar_middleware`: typed current-state context projections, or [] when unnecessary
       - `files[]`: every YAML + Python file as a CodeFile
 
       Each CodeFile:
@@ -1107,6 +1124,9 @@ agents:
         same `- name:` item
       - middleware.yaml `prompt_middleware` is a list of objects or []; never a
         list of strings
+      - statusbar_middleware entries name unique local agents and nonempty unique
+        variable lists; every variable is defined, exposed to that agent, and
+        effectively model_visible. Keep these declarations in the typed output.
       - tools.yaml entries have matching workflow-local tools/<name>.py files
       - tools.yaml entries use agent, file, function, description, tool_type, and
         optional auto_tool_call; never name-only entries
@@ -1123,6 +1143,8 @@ agents:
         "agent_message": "<one sentence confirmation>",
         "pattern_id": <int>,
         "pattern_name": "<label>",
+        "outcome_plans": [],
+        "statusbar_middleware": [],
         "files": [
           {
             "filename": "orchestrator.yaml",
