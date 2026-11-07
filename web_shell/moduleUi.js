@@ -31,8 +31,8 @@ export function moduleUiPlugin({ appDir }) {
     resolveId(id) { return id === publicId ? resolvedId : undefined; },
     load(id) {
       if (id !== resolvedId) return undefined;
-      const modulesDir = path.join(appDir, 'modules');
-      if (fs.existsSync(modulesDir)) this.addWatchFile(modulesDir);
+      // Only existing barrel files are watched: in the dev server a watched path becomes an
+      // import of this module, and a directory cannot be imported.
       const imports = [];
       const entries = [];
       Object.entries(resolveModuleUiBarrels(appDir)).forEach(([moduleId, filename], index) => {
