@@ -1,9 +1,12 @@
 import json
 import re
 from collections.abc import Mapping
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, Literal
+from uuid import uuid4
 
 import yaml
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
 
 from factory_app.workflows._shared.platform.build_target import require_build_binding
 from factory_app.workflows._shared.surface_ownership import (
@@ -26,14 +29,82 @@ from mozaiksai.core.workflow.generator_support.data_contract_fields import (
     normalize_structured_defaults,
     validate_collection_fields,
 )
+from mozaiksai.core.workflow.generator_support.design_access_policy import access_policy_sha256
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     canonical_read_actions_for_surface,
 )
+from mozaiksai.core.workflow.generator_support.module_role_grants import validate_access_policy
 from mozaiksai.core.workflow.generator_support.persistence_artifacts import (
     normalize_data_contract_indexes,
 )
+from mozaiksai.core.workflow.ui_tools import use_ui_tool
 
 logger = get_workflow_logger("design_docs")
+
+
+class _AccessPolicyResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["approve", "request_changes"]
+    approved: StrictBool
+    review_id: StrictStr
+    rationale: StrictStr = Field(default="", max_length=4000)
+    status: Literal["submitted"] = "submitted"
+    workflow_name: Literal["DesignDocs"] = "DesignDocs"
+    ui_event_id: str | None = None
+
+
+class _AccessPolicyCancellation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["cancel"]
+    status: Literal["cancelled"]
+    ui_event_id: str | None = None
+
+
+async def _review_access_policy(policy: dict[str, Any], *, binding: Any, context_variables: Any) -> dict[str, Any]:
+    receipt = {
+        "status": "not_required", "policy_sha256": access_policy_sha256(policy),
+        "target_app_id": binding.target_app_id, "build_id": binding.build_id,
+    }
+    if not policy["grants"]:
+        return receipt
+    user_id, chat_id = _cv_get(context_variables, "user_id"), _cv_get(context_variables, "chat_id")
+    if not user_id or not chat_id:
+        raise ValueError("Role grants require an authenticated owner review in this chat")
+    review_id = uuid4().hex
+    labels = {role["role_id"]: role["label"] for role in policy["roles"]}
+    checkpoints = [f"{role['label']} ({role['role_id']}): {role['description']}" for role in policy["roles"]]
+    checkpoints.extend(
+        f"{labels[grant['role_id']]} may {', '.join(grant['actions'])} on {grant['collection']}."
+        for grant in policy["grants"]
+    )
+    raw_response = await use_ui_tool(
+        "save_design_docs_bundle",
+        {
+            "title": "Review app role permissions",
+            "summary": "Approve who may change these records. People without a granted role cannot perform these actions. Record ownership still applies.",
+            "review_id": review_id, "checkpoints": checkpoints,
+            "actions": [
+                {"id": action, "label": label, "variant": variant, "approved": action == "approve",
+                 "payload": {"review_id": review_id}}
+                for action, label, variant in (
+                    ("approve", "Approve permissions", "primary"),
+                    ("request_changes", "Request changes", "secondary"),
+                )
+            ],
+        },
+        chat_id=str(chat_id), workflow_name="DesignDocs", display="inline",
+    )
+    if isinstance(raw_response, dict) and raw_response.get("status") == "cancelled":
+        _AccessPolicyCancellation.model_validate(raw_response)
+        return {**receipt, "status": "cancel"}
+    response = _AccessPolicyResponse.model_validate(raw_response)
+    if response.review_id != review_id or response.approved is not (response.action == "approve"):
+        raise ValueError("Role permission review does not match this design")
+    return {
+        **receipt, "status": response.action, "review_id": review_id,
+        "reviewed_by": str(user_id), "reviewed_at": datetime.now(UTC).isoformat(),
+        "rationale": response.rationale.strip(),
+    }
 
 
 class DesignDocKinds:
@@ -985,6 +1056,9 @@ async def save_design_docs_bundle(
         ownership_normalizations += _mirror_collection_kinds(data_contract, surface_map)
         _drop_canonical_custom_reads(ownership_normalizations, surface_map, data_contract)
         field_normalizations = _validate_design_collections(data_contract, surface_map, context_variables)
+        access_policy = validate_access_policy(
+            bundle.get("access_policy"), data_contract=data_contract, design_surface_map=surface_map,
+        )
         if not frontend_markdown or not backend_markdown or not database_markdown:
             raise ValueError("DesignDocsBundle must include all three Markdown documents")
         normalization_messages = [
@@ -1086,12 +1160,31 @@ async def save_design_docs_bundle(
                 + "\n".join(f"- `{message}`" for message in field_normalizations)
             )
         backend_markdown = _inject_backend_surface_map(backend_markdown, surface_map)
+        backend_markdown += "\n\n## App role permissions\n\n```yaml\n" + yaml.safe_dump(
+            {"access_policy": access_policy}, sort_keys=False,
+        ) + "```\n"
         # Generate human-readable YAML for agents that consume ui_schema as a string
         ui_schema_content = _experience_spec_to_yaml(experience_spec, surface_map)
         if ownership_normalizations:
             ui_schema_content += yaml.safe_dump({"ownership_normalizations": ownership_normalizations}, sort_keys=False)
     except Exception as err:
         return _refused(context_variables, "invalid_design_docs_bundle", str(err))
+
+    try:
+        access_policy_review = await _review_access_policy(
+            access_policy, binding=binding, context_variables=context_variables,
+        )
+    except Exception as err:
+        return _refused(context_variables, "access_policy_review_failed", str(err), outcome="blocked")
+    if access_policy_review["status"] == "request_changes":
+        return _refused(
+            context_variables, "access_policy_changes_requested",
+            access_policy_review["rationale"] or "Revise the proposed role permissions before requesting review again.",
+        )
+    if access_policy_review["status"] == "cancel":
+        return _refused(context_variables, "access_policy_review_cancelled", "Role permission review was cancelled.", outcome="blocked")
+    if access_policy_review["status"] == "approve":
+        access_policy_review["status"] = "approved"
 
     pm = AG2PersistenceManager()
     store = BuilderArtifactStore(pm=pm)
@@ -1107,7 +1200,9 @@ async def save_design_docs_bundle(
 
     docs: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
         (DesignDocKinds.FRONTEND, frontend_markdown, None),
-        (DesignDocKinds.BACKEND, backend_markdown, {"surface_map": surface_map}),
+        (DesignDocKinds.BACKEND, backend_markdown, {
+            "surface_map": surface_map, "access_policy": access_policy, "access_policy_review": access_policy_review,
+        }),
         (DesignDocKinds.DATABASE, database_markdown, None),
         # Store human-readable YAML as content; typed ExperienceSpec in extra_fields
         # so AppPlanAgent can load it as a structured object via the experience_spec field.
@@ -1153,6 +1248,8 @@ async def save_design_docs_bundle(
             "experience_spec": experience_spec,
             "surface_map": surface_map,
             "data_contract": data_contract,
+            "access_policy": access_policy,
+            "access_policy_review": access_policy_review,
             "ownership_normalizations": ownership_normalizations,
             **({"field_normalizations": field_normalizations} if field_normalizations else {}),
         },
@@ -1181,6 +1278,7 @@ async def save_design_docs_bundle(
     _cv_set(context_variables, "experience_spec", experience_spec)
     _cv_set(context_variables, "design_surface_map", surface_map)
     _cv_set(context_variables, "data_contract", data_contract)
+    _cv_set(context_variables, "access_policy", access_policy)
     for message in normalization_messages:
         logger.info(message)
 

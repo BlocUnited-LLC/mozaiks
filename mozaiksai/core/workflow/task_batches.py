@@ -20,6 +20,9 @@ from mozaiksai.core.adapters.ag2_task_batch_runner import (
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.context.authority import ContextAuthorityPolicy
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_design_access_policy,
+)
 
 from .dependency_graph import deterministic_topological_order
 from .generator_support.code_files import (
@@ -1144,14 +1147,20 @@ async def _run_one_task(
                         task.get("task_id"), agent_name, discarded,
                     )
                 authored_python = _authored_python_files(output)
+                approved_access_policy = resolve_design_access_policy(base_context)
+                if approved_access_policy and approved_access_policy["grants"]:
+                    for key in ("data_contract", "design_surface_map"):
+                        if detach(task_context.get(key)) != detach(base_context.get(key)):
+                            raise ValueError(f"Task context cannot replace {key} beneath approved role grants")
                 subscription_contract = resolve_subscription_contract(task_context)
-                companion_files = dict(task_context.get("generated_files") or {})
+                companion_files = dict(base_context.get("generated_files") or {})
                 for dependency in (task_context.get("dependency_task_outputs") or {}).values():
                     companion_files.update(extract_code_file_map_from_payload(dependency))
                 output = cast(dict[str, Any], close_module_actions(
-                    output, app_build_plan=task_context.get("app_build_plan"),
+                    output, app_build_plan=base_context.get("app_build_plan"),
                     data_contract=task_context.get("data_contract"),
                     design_surface_map=task_context.get("design_surface_map"),
+                    access_policy=approved_access_policy,
                     subscription_contract=subscription_contract, companion_files=companion_files,
                 ))
                 canonical_code_files = extract_code_file_entries_from_payload(
@@ -1213,6 +1222,8 @@ async def _run_one_task(
                     read_sources, app_build_plan=task_context.get("app_build_plan"),
                     data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
                     subscription_contract=subscription_contract,
+                    access_policy=approved_access_policy,
+                    design_surface_map=task_context.get("design_surface_map"),
                 ))
                 canonical_file_map = compile_module_entitlement_gates(
                     canonical_file_map,

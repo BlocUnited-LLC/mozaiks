@@ -344,6 +344,8 @@ async def _load_data_reference_value(
     
     adapter = get_db_adapter(source)
     if not adapter:
+        if definition.authorization:
+            raise ValueError(f"Authorization data reference {name!r} has no database adapter")
         business_logger.warning(
             "Skipping data_reference variable %s (no suitable db adapter found)", name
         )
@@ -377,6 +379,8 @@ async def _load_data_reference_value(
         return _coerce_value(definition, doc)
     except Exception as err:
         business_logger.error("Failed loading data_reference '%s': %s", name, err, exc_info=True)
+        if definition.authorization:
+            raise
         return None
 
 

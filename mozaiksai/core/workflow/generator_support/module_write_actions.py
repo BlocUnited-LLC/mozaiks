@@ -234,12 +234,14 @@ def _canonical_read_ids(module_id: str, plan: dict[str, Any], contract: Any) -> 
 
 def auth_contract_scopes(
     files: Mapping[str, str], *, app_build_plan: Any = None, data_contract: Any = None,
+    include_role_grants: bool = True,
 ) -> frozenset[str]:
     """Resolve declared scopes from admitted auth or its approved default scaffold.
 
     Requested scopes establish generation intent, not proof of an issuer grant.
-    The runtime still enforces the caller's token scopes. Plan roles and module
-    permission catalogues do not supply a role-to-permission grant mapping.
+    The runtime still enforces the caller's scopes and held-role grants. Plan
+    roles and module permission catalogues do not grant permissions. Runtime
+    smoke uses include_role_grants=False for ordinary test-user token scopes.
     Before auth scaffolding runs, authenticated generation uses that scaffold's
     actual template; a supplied auth file always takes precedence.
     """
@@ -266,10 +268,14 @@ def auth_contract_scopes(
         return frozenset()
     frontend = document.get("frontend")
     scopes = frontend.get("default_scopes") if isinstance(frontend, dict) else None
-    return frozenset(scope for scope in scopes if isinstance(scope, str)) if isinstance(scopes, list) else frozenset()
+    granted = {scope for scope in scopes if isinstance(scope, str)} if isinstance(scopes, list) else set()
+    if include_role_grants:
+        for role in (document.get("authorization") or {}).get("roles") or []:
+            granted.update(role.get("permissions") or [])
+    return frozenset(granted)
 
 
-def _validate_generated_action_permissions(
+def assert_generated_action_permissions(
     module_id: str, manifest: Mapping[str, Any], plan: Mapping[str, Any], scopes: frozenset[str],
 ) -> None:
     """Reject unresolved restrictions after bounded canonical CRUD normalization."""
@@ -301,7 +307,7 @@ def _validate_generated_action_permissions(
             raise ValueError(
                 f"modules/{module_id}/module.yaml: action {action['id']!r} has unresolved permissions "
                 f"{unresolved!r} in the approved generated auth contract; declared scopes={sorted(scopes)!r}. "
-                "Resolve the reference against config/auth.yaml frontend.default_scopes or its approved "
+                "Resolve the reference against config/auth.yaml frontend.default_scopes, authorization.roles or its approved "
                 "auth scaffold. Preserve the intended restriction, api_surface and entitlement_gate; "
                 "do not remove permissions or substitute an unrelated scope just to pass validation. "
                 "If no declared scope expresses the approved policy, revise the authorization contract "
@@ -434,6 +440,7 @@ def _drop_stripped_permission_declarations(
 def _close_manifest_writes(
     module_id: str, manifest: dict[str, Any], plan: dict[str, Any], contract: Any, *,
     subscription_contract: Any, granted: frozenset[str], companions: Mapping[str, Any],
+    role_permissions: Mapping[str, str],
 ) -> None:
     collections = _write_collections(module_id, plan, contract)
     if not collections:
@@ -445,9 +452,19 @@ def _close_manifest_writes(
     for collection in collections:
         shape = collection_record_shape(module_id, collection)
         write_ids = [canonical_write_action_id(shape["entity"], operation) for operation in CANONICAL_WRITE_OPERATIONS]
+        for operation, action_id in zip(CANONICAL_WRITE_OPERATIONS, write_ids, strict=True):
+            if action_id not in role_permissions:
+                continue
+            if action_id not in existing:
+                action = _write_action(shape, operation)
+                actions.append(action)
+                existing[action_id] = action
+            existing[action_id]["permissions"] = [role_permissions[action_id]]
         protected = _protected_siblings(
             actions, read_ids, module_id=module_id, subscription_contract=subscription_contract,
-        ) if collection["tenancy"] == "app_wide" else []
+        ) if collection["tenancy"] == "app_wide" and not all(
+            action_id in role_permissions for action_id in write_ids
+        ) else []
         if protected:
             # An app-wide collection beside restricted actions never receives open writes:
             # each write must be explicitly declared and itself restricted, or it is rejected.
@@ -519,13 +536,15 @@ def _companions_from_files(module_id: str, files: Mapping[str, str]) -> dict[str
 
 def _built_write_shapes(
     module_id: str, manifest: dict[str, Any], plan: dict[str, Any], contract: Any, subscription_contract: Any,
+    role_permissions: Mapping[str, str],
 ) -> list[dict[str, Any]]:
     """Record shapes of the collections whose canonical writes code constructs and implements."""
     actions = manifest.get("actions") or []
     read_ids = _canonical_read_ids(module_id, plan, contract)
     shapes = []
     for collection in _write_collections(module_id, plan, contract):
-        if collection["tenancy"] == "app_wide" and _protected_siblings(
+        if not all(canonical_write_action_id(collection["entity"], op) in role_permissions
+                   for op in CANONICAL_WRITE_OPERATIONS) and collection["tenancy"] == "app_wide" and _protected_siblings(
             actions, read_ids, module_id=module_id, subscription_contract=subscription_contract,
         ):
             continue  # Explicitly declared protected app-wide writes keep their authored contract.
@@ -699,6 +718,7 @@ def close_module_actions(
     payload: Any, *, app_build_plan: Any, data_contract: Any = None, design_surface_map: Any = None,
     subscription_contract: Any = None, declared_auth_scopes: frozenset[str] | None = None,
     companion_files: Mapping[str, str] | None = None, validate_generated_permissions: bool = True,
+    access_policy: Any = None,
 ) -> Any:
     """Return detached output with every canonical write and read declared.
 
@@ -730,9 +750,17 @@ def close_module_actions(
     if contract is not None and not isinstance(contract, dict):
         raise ValueError("Write action closure requires a structured data_contract")
     companion_files = dict(companion_files or {})
+    from mozaiksai.core.workflow.generator_support.module_role_grants import (
+        approved_module_role_permissions,
+    )
+
+    role_grants = approved_module_role_permissions(
+        access_policy, data_contract=contract, design_surface_map=design_surface_map,
+    )
     granted = declared_auth_scopes if declared_auth_scopes is not None else auth_contract_scopes(
         companion_files, app_build_plan=plan, data_contract=contract,
     )
+    granted = granted | frozenset(permission for actions in role_grants.values() for permission in actions.values())
     bundle = output.get("module_contract")
     if not isinstance(bundle, dict):
         files = extract_code_file_map_from_payload(output)
@@ -750,6 +778,7 @@ def close_module_actions(
             module_inputs, app_build_plan=plan, data_contract=contract,
             design_surface_map=design_surface_map, subscription_contract=subscription_contract,
             declared_auth_scopes=granted,
+            access_policy=access_policy,
         )
         # A manifest's events companion travels with it: code declares canonical write events.
         changes = {
@@ -771,9 +800,20 @@ def close_module_actions(
     companions = {
         key: bundle[key] for key in _COMPANION_PATHS if isinstance(bundle.get(key), dict)
     } or _companions_from_files(module_id, companion_files)
+    role_permissions = role_grants.get(module_id, {})
+    if role_permissions:
+        declarations = manifest.setdefault("permissions", [])
+        known = {entry["id"] for entry in declarations}
+        for action_id, permission in sorted(role_permissions.items()):
+            if permission not in known:
+                declarations.append({"id": permission, "description": f"Approved role access to {action_id}."})
+                known.add(permission)
+    for action in manifest.get("actions") or []:
+        if action.get("id") in role_permissions:
+            action["permissions"] = [role_permissions[action["id"]]]
     _close_manifest_writes(
         module_id, manifest, plan, contract, subscription_contract=subscription_contract, granted=granted,
-        companions=companions,
+        companions=companions, role_permissions=role_permissions,
     )
     output = close_module_read_actions(
         output, app_build_plan=plan, data_contract=contract, design_surface_map=design_surface_map,
@@ -783,11 +823,11 @@ def close_module_actions(
     _require_declared_design_actions(module_id, closed["module_yaml"], design_surface_map)
     _close_user_data_scope(module_id, closed["module_yaml"], plan, contract)
     if validate_generated_permissions:
-        _validate_generated_action_permissions(module_id, closed["module_yaml"], plan, granted)
+        assert_generated_action_permissions(module_id, closed["module_yaml"], plan, granted)
     events = close_module_events(
         module_id, closed["module_yaml"], closed.get("events_yaml"),
         {key: closed[key] for key in _COMPANION_PATHS if isinstance(closed.get(key), dict)},
-        shapes=_built_write_shapes(module_id, closed["module_yaml"], plan, contract, subscription_contract),
+        shapes=_built_write_shapes(module_id, closed["module_yaml"], plan, contract, subscription_contract, role_permissions),
         aliases=canonical_write_event_aliases(contract), design_surface_map=design_surface_map,
     )
     if events is not None or closed.get("events_yaml") is not None:
@@ -825,6 +865,7 @@ def materialize_module_actions(
     design_surface_map: Any = None, subscription_contract: Any = None,
     declared_auth_scopes: frozenset[str] | None = None,
     pack_owned_manifest_paths: frozenset[str] = frozenset(),
+    access_policy: Any = None,
 ) -> dict[str, str]:
     """Render closed module manifests and their event companions for an admitted app bundle."""
     changed: dict[str, str] = {}
@@ -860,6 +901,7 @@ def materialize_module_actions(
             design_surface_map=design_surface_map, subscription_contract=subscription_contract,
             declared_auth_scopes=granted, companion_files=files_map,
             validate_generated_permissions=path not in pack_owned_manifest_paths,
+            access_policy=access_policy,
         )["module_contract"]
         expanded = closed["module_yaml"]
         for action in expanded.get("actions") or []:
@@ -1331,6 +1373,7 @@ _ID_FILTER = (
 def materialize_module_write_implementations(
     files: Mapping[str, str], *, app_build_plan: Any, data_contract: Any = None,
     owned_paths: list[str] | set[str] | None = None, subscription_contract: Any = None,
+    access_policy: Any = None, design_surface_map: Any = None,
 ) -> dict[str, str]:
     """Compile canonical write functions within task-owned handler/service/repo paths.
 
@@ -1345,6 +1388,13 @@ def materialize_module_write_implementations(
     if not isinstance(plan, dict):
         return {}
     contract = detach(data_contract)
+    from mozaiksai.core.workflow.generator_support.module_role_grants import (
+        approved_module_role_permissions,
+    )
+
+    role_grants = approved_module_role_permissions(
+        access_policy, data_contract=contract, design_surface_map=design_surface_map,
+    )
     aliases = canonical_write_event_aliases(contract)
     changed: dict[str, str] = {}
     allowed = set(owned_paths) if owned_paths is not None else None
@@ -1372,7 +1422,8 @@ def materialize_module_write_implementations(
             if service_source:
                 validate_write_hooks(f"modules/{module_id}/backend/service.py", service_source, identifiers)
         for collection in collections:
-            if collection["tenancy"] == "app_wide" and _protected_siblings(
+            if not all(canonical_write_action_id(collection["entity"], op) in role_grants.get(module_id, {})
+                       for op in CANONICAL_WRITE_OPERATIONS) and collection["tenancy"] == "app_wide" and _protected_siblings(
                 actions, read_ids, module_id=module_id, subscription_contract=subscription_contract,
             ):
                 continue  # Explicitly declared protected app-wide writes keep their authored implementation.

@@ -439,7 +439,7 @@ Enabled feature: auth
 Updated /path/to/my-app/app/app.json
 
 Next Steps:
-  - Add or review app/config/auth.yaml (schema_version: mozaiks.auth.v1)
+  - Add or review app/config/auth.yaml (schema_version: mozaiks.auth.v2)
   - Configure provider-neutral OIDC/JWT env handles in .env
   - Update authRequired in app/app.json
 

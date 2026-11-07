@@ -403,6 +403,39 @@ models:
         items: UIPage
         description: App-owned persistent page designs. For enabled greenfield subscription concepts, the save boundary completes the approved inventory from the MozaiksPay facade page declarations and assigns billing_portal ownership, preserving designs already on those routes. Other enabled monetization requires a designed Pricing page at /pricing. Free apps do not acquire monetization pages. Sign-in pages owned by a platform authentication surface (an auth contract route, a route one nests under, or a credential Form) duplicate the auth contract and are removed from the saved inventory; typed navigation to them points at the login route. A page listing such a surface's user accounts is removed because the platform administers users; typed navigation to it is removed. Any other page owned by such a surface is rejected with the app-owned surface it must move to, never dropped. Every saved page has one primary surface_map owner.
 
+  DesignAccessRole:
+    type: model
+    fields:
+      role_id:
+        type: str
+        description: Stable snake_case app role id held in verified identity claims. The reserved admin role also honors the app admin allowlist.
+      label:
+        type: str
+        description: Human-readable role name shown during access review.
+      description:
+        type: str
+        description: Which people should hold this role and why they need its authority. This does not assign role membership.
+  DesignAccessGrant:
+    type: model
+    fields:
+      role_id:
+        type: str
+        description: Exact role_id declared in access_policy.roles.
+      collection:
+        type: str
+        description: Exact app-owned module collection name in data_contract. Platform and hosted collections cannot receive app grants.
+      actions:
+        type: list[str]
+        description: Non-empty explicit canonical create/update/delete action ids or surface_map owned_mutations for this collection. No permission strings or wildcards.
+  DesignAccessPolicy:
+    type: model
+    fields:
+      roles:
+        type: list[DesignAccessRole]
+        default: []
+      grants:
+        type: list[DesignAccessGrant]
+        default: []
   DesignDocsBundle:
     type: model
     fields:
@@ -427,4 +460,9 @@ models:
       data_contract:
         type: DataContractBundle
         description: Canonical typed database ownership and migration contract persisted separately and staged as data/contract.json in generated app bundles.
+      access_policy:
+        type: union
+        variants: [DesignAccessPolicy, 'null']
+        default: null
+        description: Proposed app roles and collection mutation grants. Non-empty grants require an explicit owner review before downstream compilation; empty lists grant no role authority.
 

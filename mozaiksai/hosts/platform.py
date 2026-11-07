@@ -48,6 +48,7 @@ from mozaiksai.core.runtime.app.ai_config import resolve_runtime_ai_config
 from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
 from mozaiksai.core.runtime.app.loader import AppLoader, AppLoadError
 from mozaiksai.core.runtime.app.module_loader import ModuleLoadError
+from mozaiksai.core.runtime.app.module_permissions import resolve_module_permissions
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
 from mozaiksai.core.runtime.composition.extensions import (
     StartupServiceProfileError,
@@ -98,6 +99,8 @@ executor_registry = ExecutorRegistry()
 app.state.executor_registry = executor_registry
 app.state.subscriptions_config = None
 app.state.metrics_config = None
+app.state.auth_contract = None
+app.state.app_admin_emails = ()
 app.state.startup_degraded = False
 app.state.startup_degraded_reason: str | None = None
 app.state.failed_module_names: list[str] = []
@@ -274,6 +277,8 @@ async def _platform_startup() -> None:
     app.state.startup_degraded_reason = None
     app.state.failed_module_names = []
     app.state.loaded_app_root = None
+    app.state.auth_contract = None
+    app.state.app_admin_emails = ()
     app.state.loaded_app_id = None
     app.state.loaded_app_name = None
     app_root = resolve_app_root()
@@ -296,6 +301,8 @@ async def _platform_startup() -> None:
         app.state.loaded_app_name = load_result.definition.config.get("appName")
         app.state.subscriptions_config = load_result.subscriptions_config
         app.state.metrics_config = load_result.metrics_config
+        app.state.auth_contract = load_result.auth_contract
+        app.state.app_admin_emails = tuple(load_result.definition.config.get("admins") or ())
         app.state.page_schemas = {
             name: schema.model_dump(mode="json", exclude_none=True)
             for name, schema in sorted(load_result.page_schemas.items())
@@ -539,6 +546,8 @@ async def _platform_shutdown() -> None:
             module_event_router.unregister()
             del app.state.module_event_router
         app.state.loaded_app_root = None
+        app.state.auth_contract = None
+        app.state.app_admin_emails = ()
         app.state.loaded_app_id = None
         app.state.loaded_app_name = None
 
@@ -1070,21 +1079,24 @@ def _normalize_relationship_row(
     return normalized
 
 
-async def _profile_persistence_principal(
+async def _profile_dispatch_scope(
     principal: UserPrincipal, persistence_principal: PersistencePrincipal | None,
     *, app_id: str, user_id: str, module_name: str, action: str, params: dict[str, Any],
-) -> PersistencePrincipal | None:
-    if persistence_principal is None:
-        return None
+    request: Request | None = None,
+) -> dict[str, Any]:
     scope = await get_platform_hooks().call_module_scope(
         principal=principal, module_name=module_name, action_name=action,
         requested_scope={
             "app_id": app_id, "user_id": user_id,
-            "tenant_id": principal.tenant_id, "workspace_id": persistence_principal.workspace_id,
+            "tenant_id": principal.tenant_id,
+            "workspace_id": principal.workspace_id,
         },
-        params=params, default_permissions=list(principal.scopes), fail_closed=True,
+        params=params, request=request,
+        default_permissions=resolve_module_permissions(principal, app=app), fail_closed=True,
     )
-    return persistence_principal.with_host_scope(scope)
+    if scope.get("app_id") != app_id or scope.get("user_id") != user_id:
+        raise PermissionError("Profile module scope must preserve the loaded app and viewer")
+    return scope
 
 
 @app.get("/api/me/profile-panels")
@@ -1142,6 +1154,10 @@ async def get_profile_panels(
                     app_id=app_id,
                     subject_user_id=subject_user_id,
                 )
+                dispatch_scope = await _profile_dispatch_scope(
+                    principal, persistence_principal, app_id=resolved_app_id, user_id=viewer_user_id,
+                    module_name=module_name, action=action, params=action_params,
+                )
                 req = ModuleRequest(
                     module=module_name,
                     action=action,
@@ -1156,12 +1172,11 @@ async def get_profile_panels(
                         permission_mode="enforce",
                         reason="platform profile panel hydration",
                         actor_id=viewer_user_id,
-                        permissions=tuple(principal.scopes) if principal else (),
+                        permissions=tuple(dispatch_scope.get("permissions") or ()),
                     ),
                     provenance=ModuleDispatchProvenance(surface="profile_panel"),
-                    persistence_principal=await _profile_persistence_principal(
-                        principal, persistence_principal, app_id=resolved_app_id, user_id=viewer_user_id,
-                        module_name=module_name, action=action, params=action_params,
+                    persistence_principal=(
+                        persistence_principal.with_host_scope(dispatch_scope) if persistence_principal else None
                     ),
                 )
                 result = await module_executor.execute(req, context=None)
@@ -1256,6 +1271,10 @@ async def get_profile_tabs(
                     app_id=app_id,
                     subject_user_id=subject_user_id,
                 )
+                dispatch_scope = await _profile_dispatch_scope(
+                    principal, persistence_principal, app_id=resolved_app_id, user_id=viewer_user_id,
+                    module_name=module_name, action=action, params=action_params,
+                )
                 req = ModuleRequest(
                     module=module_name,
                     action=action,
@@ -1270,12 +1289,11 @@ async def get_profile_tabs(
                         permission_mode="enforce",
                         reason="platform profile tab hydration",
                         actor_id=viewer_user_id,
-                        permissions=tuple(principal.scopes) if principal else (),
+                        permissions=tuple(dispatch_scope.get("permissions") or ()),
                     ),
                     provenance=ModuleDispatchProvenance(surface="profile_tab"),
-                    persistence_principal=await _profile_persistence_principal(
-                        principal, persistence_principal, app_id=resolved_app_id, user_id=viewer_user_id,
-                        module_name=module_name, action=action, params=action_params,
+                    persistence_principal=(
+                        persistence_principal.with_host_scope(dispatch_scope) if persistence_principal else None
                     ),
                 )
                 result = await module_executor.execute(req, context=None)
@@ -1403,20 +1421,10 @@ async def get_profile_pages(
                     app_id=app_id,
                     subject_user_id=subject_user_id,
                 )
-                dispatch_scope = await get_platform_hooks().call_module_scope(
-                    principal=principal,
-                    module_name=module_name,
-                    action_name=action,
-                    requested_scope={
-                        "app_id": resolved_app_id,
-                        "user_id": viewer_user_id,
-                        "tenant_id": str(principal.tenant_id) if principal.tenant_id else None,
-                        "workspace_id": str(principal.workspace_id) if principal.workspace_id else None,
-                    },
-                    params=action_params,
+                dispatch_scope = await _profile_dispatch_scope(
+                    principal, persistence_principal, app_id=resolved_app_id, user_id=viewer_user_id,
+                    module_name=module_name, action=action, params=action_params,
                     request=request,
-                    default_permissions=list(principal.scopes),
-                    fail_closed=True,
                 )
                 req = ModuleRequest(
                     module=module_name,
@@ -1579,6 +1587,10 @@ async def get_current_user_relationships(
             continue
 
         try:
+            dispatch_scope = await _profile_dispatch_scope(
+                principal, persistence_principal, app_id=resolved_app_id, user_id=user_id,
+                module_name=module_id, action=action, params={},
+            )
             req = ModuleRequest(
                 module=module_id,
                 action=action,
@@ -1593,12 +1605,11 @@ async def get_current_user_relationships(
                     permission_mode="enforce",
                     reason="platform relationship provider hydration",
                     actor_id=user_id,
-                    permissions=tuple(principal.scopes) if principal else (),
+                    permissions=tuple(dispatch_scope.get("permissions") or ()),
                 ),
                 provenance=ModuleDispatchProvenance(surface="relationship_provider"),
-                persistence_principal=await _profile_persistence_principal(
-                    principal, persistence_principal, app_id=resolved_app_id, user_id=user_id,
-                    module_name=module_id, action=action, params={},
+                persistence_principal=(
+                    persistence_principal.with_host_scope(dispatch_scope) if persistence_principal else None
                 ),
             )
             result = await module_executor.execute(req, context=None)

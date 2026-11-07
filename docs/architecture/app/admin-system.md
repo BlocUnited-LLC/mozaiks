@@ -70,6 +70,15 @@ There is no app-level `admin.json` contract anymore.
 Admin bootstrap and access are owned by `app/app.json` `admins` plus the normal
 auth role model.
 
+For ordinary module actions, `config/auth.yaml` (`mozaiks.auth.v2`) grants
+permissions through `authorization.roles`. A matching `app.json` admin email
+contributes only the reserved `admin` role's declared permissions, after the
+runtime verifies the email or admits local development access. Matching rejects
+non-ASCII addresses and is case-insensitive. The allowlist belongs to the loaded
+app. It does not grant unrelated roles, bypass module permission checks or data
+ownership, or confer the separate platform-operator authority required by
+`/api/admin/modules/*`.
+
 Runtime/operator panels are framework-owned defaults surfaced by same-host
 `/api/admin/*` endpoints. Feature panels and app-business panels use their own
 contracts described above. The same-host `/api/admin/*` endpoints are internal

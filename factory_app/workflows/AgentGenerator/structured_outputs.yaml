@@ -225,6 +225,15 @@ models:
         - 'null'
         description: Whether to hide the agent's text output from the user UI (agent_text
           triggers only). True = hide token (e.g. NEXT), False = show message.
+  ContextDataSort:
+    type: model
+    fields:
+      field:
+        type: str
+        description: Canonical stored field path to order by, such as version_number or created_at.
+      direction:
+        type: literal
+        values: [asc, desc]
   ContextVariableSource:
     type: model
     fields:
@@ -301,6 +310,10 @@ models:
         description: 'When to refresh data: ''once'' (cache indefinitely), ''per_module''
           (refresh each module), ''on_demand'' (refresh when requested). Data_reference
           sources only.'
+      sort:
+        type: optional_list
+        items: ContextDataSort
+        description: Ordered data_reference sort fields. Artifact versions use version_number desc followed by created_at desc; random IDs do not establish recency.
       entity_schema:
         type: union
         variants:

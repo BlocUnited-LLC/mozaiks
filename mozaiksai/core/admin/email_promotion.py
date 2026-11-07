@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 
 from logs.logging_config import get_core_logger
@@ -52,7 +53,7 @@ def get_admin_emails() -> list[str]:
         return []
 
 
-def is_admin_by_email(email: str | None) -> bool:
+def is_admin_by_email(email: str | None, *, admin_emails: Iterable[str] | None = None) -> bool:
     """Return True if email is in the app.json admins allowlist.
 
     Membership alone grants nothing: the caller must also require that the
@@ -61,7 +62,10 @@ def is_admin_by_email(email: str | None) -> bool:
     """
     if not email or not email.isascii():
         return False
-    return email.lower().strip() in get_admin_emails()
+    allowed = get_admin_emails() if admin_emails is None else admin_emails
+    return email.lower().strip() in {
+        value.lower().strip() for value in allowed if isinstance(value, str) and value.strip() and value.isascii()
+    }
 
 
 def _resolve_app_config_path() -> Path:

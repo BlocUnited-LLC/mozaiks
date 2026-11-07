@@ -67,8 +67,12 @@ task.
      only canonical write ids and approved `owned_mutations` for that
      collection.
 
-   `save_design_docs_bundle` validates every reference deterministically. An
-   empty policy is valid and means no app has staff roles.
+   `save_design_docs_bundle` validates every reference deterministically. A
+   nonempty grant policy is reviewed through the shipped ApprovalCard and UI
+   tool response boundary before saving its approval receipt. A saved or
+   CURRENT summary alone is not approval: genesis summaries previously became
+   CURRENT without human review. The receipt binds the reviewed policy digest,
+   app, build and responding user. An empty policy grants no app role authority.
 2. **Code-derived permission ids.** For each granted action, code sets the
    action's `permissions` to `["{collection}.{action_id}"]`, the same way
    approved entitlement gates are compiled onto actions. The model authors
@@ -110,9 +114,10 @@ task.
 ## Reason
 
 This unblocks the most common shape of staff-managed app without weakening
-the rule that a candidate cannot grant itself access. The approval gate
-already exists (DesignDocs review), and the compilation pattern already
-exists (subscription entitlement gates). The change connects the two through
+the rule that a candidate cannot grant itself access. DesignDocs adds an
+enforced policy review using the existing UI tool approval mechanism; its
+previous HITL prompt flag was not an approval gate. The compilation pattern
+already exists (subscription entitlement gates). The change connects them through
 the one contract, `config/auth.yaml`, that both generation and runtime already
 read.
 

@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.auth.dependencies import validate_path_id
+from mozaiksai.core.runtime.app.module_permissions import resolve_module_permissions
 from mozaiksai.core.runtime.composition.platform_hooks import (
     ModuleScopeResolutionError,
     get_platform_hooks,
@@ -77,7 +78,7 @@ async def _verified_notification_scope(
             },
             params={},
             request=request,
-            default_permissions=list(principal.scopes),
+            default_permissions=resolve_module_permissions(principal, app=request.app),
             fail_closed=True,
         )
     except ModuleScopeResolutionError:

@@ -21,6 +21,7 @@ from mozaiksai.core.auth import UserPrincipal, optional_user
 from mozaiksai.core.auth.adapters.registry import is_auth_enabled
 from mozaiksai.core.auth.dependencies import ANONYMOUS_ACCESS_REFUSAL_STATE
 from mozaiksai.core.metrics.usage_instrumentation import record_action_invocation
+from mozaiksai.core.runtime.app.module_permissions import resolve_module_permissions
 from mozaiksai.core.runtime.composition.module_authority import (
     ModuleDispatchAuthority,
     ModuleDispatchAuthorityKind,
@@ -258,7 +259,7 @@ async def _resolve_module_dispatch_scope(
     fail_closed: bool = False,
     platform_hooks: PlatformHookRegistry | None = None,
 ) -> dict[str, Any]:
-    default_permissions = list(principal.scopes) if principal else []
+    default_permissions = resolve_module_permissions(principal, app=request.app if request else None)
     hooks = platform_hooks if platform_hooks is not None else get_platform_hooks()
     return await hooks.call_module_scope(
         principal=principal,
@@ -427,18 +428,19 @@ async def _execute_module_action(
             workspace_id=str(workspace_id) if workspace_id else None,
             user_id=str(user_id) if user_id else None,
             params=params,
-            fail_closed=(lane == "admin"),
+            fail_closed=True,
             platform_hooks=environment.platform_hooks,
         )
     except ModuleScopeResolutionError as exc:
-        # A crashed narrowing hook must deny privileged dispatch, not widen it.
+        # A failed membership hook cannot restore the original token/role grants.
         logger.exception(
-            "ADMIN_DISPATCH_SCOPE_RESOLUTION_FAILED: module=%s action=%s",
+            "MODULE_DISPATCH_SCOPE_RESOLUTION_FAILED: module=%s action=%s",
             module_name,
             action_name,
         )
         raise HTTPException(
-            status_code=403, detail="Operator scope resolution failed"
+            status_code=403,
+            detail="Operator scope resolution failed" if lane == "admin" else "Module scope resolution failed",
         ) from exc
     if dispatch_scope.get("app_id") != app_id:
         raise HTTPException(status_code=403, detail="Resolved app ID does not match the loaded app")

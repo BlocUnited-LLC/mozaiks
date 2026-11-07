@@ -218,7 +218,7 @@ other operator capabilities.
 - `app/config/integrations.yaml` declares external services and hosted
   capability requirements.
 - `app/config/auth.yaml` (authenticated apps only) is the canonical
-  provider-neutral auth behavior contract. Schema: `mozaiks.auth.v1`. It
+  provider-neutral auth behavior contract. Schema: `mozaiks.auth.v2`. It
   declares whether auth is required, the strategy (`oidc`), app-local login /
   callback / logout routes, public frontend `VITE_OIDC_*` env handles, backend
   `AUTH_*` / `MOZAIKS_OIDC_*` env handles, optional upstream identity provider

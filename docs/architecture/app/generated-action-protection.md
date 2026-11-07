@@ -29,6 +29,31 @@ deployment: rows 5 to 10 below assume a host that authenticates callers.
 
 ## What An Action Reaches
 
+### Approved role grants
+
+`config/auth.yaml` uses `mozaiks.auth.v2`. Its optional `authorization.roles`
+contains `{id, permissions}` entries. Module dispatch combines token scopes
+with grants from roles the verified principal actually holds, before deployer
+scope hooks narrow the result. The reserved `admin` role also honors the
+loaded app's admin email allowlist only for verified email or admitted local
+development access. A role grants action permission, never another user's
+persistence identity.
+
+For generated apps, DesignDocs owns `access_policy`: roles have `role_id`,
+`label`, and `description`; grants name a role, an app-owned collection and
+approved mutation ids. Nonempty grants require the existing UI approval tool
+to return approval for that policy. AppGenerator resolves the persisted,
+bound review receipt, then code derives `{collection}.{action_id}` permissions
+on module actions and auth role entries. A role-managed collection must cover
+all canonical writes explicitly. Candidate tasks cannot edit auth or use
+their own role declarations as authorization.
+
+Generation admission can inspect the union of declared grants. Runtime smoke
+keeps that union out of ordinary users' token scopes and checks role-holder
+success and role-less denial through authenticated dispatch.
+
+## Collection reach
+
 Runtime persistence does not bind an app module to its own collections, so an
 action's reach is every collection its module can address:
 

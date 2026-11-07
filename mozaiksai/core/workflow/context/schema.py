@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from mozaiksai.core.utils.sequences import dedupe_strings
 
 from ..declarative import parse_context_variables_config
+from ..declarative.contracts import ContextDataSortSpec
 from ..reserved_context_keys import require_application_context_name_allowed
 from .authority import ContextAuthorityClass, ContextWriterId
 
@@ -96,6 +97,7 @@ class ContextVariableSource(ContextModel):
     collection: str | None = None
     query_template: dict[str, Any] | None = None
     fields: list[str] | None = None
+    sort: list[ContextDataSortSpec] | None = Field(default=None, min_length=1)
     refresh_strategy: Literal["once", "per_phase", "on_demand"] | None = None
 
     entity_schema: dict[str, Any] | None = Field(default=None, alias="schema", serialization_alias="schema")

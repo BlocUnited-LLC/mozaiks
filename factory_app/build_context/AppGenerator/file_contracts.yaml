@@ -18,7 +18,7 @@ description: >
   before every app validation, outside AppBuildPlan build_tasks. config/auth.yaml
   cannot be owned or emitted by a generated build task; admitted auth or the
   canonical scaffold supplies permission choices for generated actions. The
-  auth contract validates against the shared mozaiks.auth.v1 model;
+  auth contract validates against the shared mozaiks.auth.v2 model;
   ui/auth/authAdapter.js
   delegates to @mozaiks/chat-ui/auth. Do not generate OIDC, token storage, or
   local demo identity implementations. Backend configuration selects auth mode.

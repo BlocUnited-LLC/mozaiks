@@ -137,7 +137,7 @@ async def test_readiness_user_reply_materializes_auth_before_real_validation(con
         assert validations[0]["app_runtime_load_result"]["passed"] is True
         assert validations[0]["bundle_scan_result"]["passed"] is True
         generated = admitted_app_file_map(result.context_variables)
-        assert "schema_version: mozaiks.auth.v1" in generated["config/auth.yaml"]
+        assert "schema_version: mozaiks.auth.v2" in generated["config/auth.yaml"]
         assert {page["path"] for page in json.loads(generated["ui/route_manifest.json"])["pages"]} == {
             "/orders", "/login", "/auth/callback",
         }

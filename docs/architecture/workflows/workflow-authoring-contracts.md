@@ -346,6 +346,15 @@ Rules:
   - `file`
   - `build_context`
 
+`data_reference` sources may declare an ordered `sort` list, with each entry
+containing a field path and `direction: asc` or `direction: desc`. For example,
+artifact lookups use `sort: [{field: version_number, direction: desc},
+{field: created_at, direction: desc}]` to select the newest matching version.
+Without `sort`, MongoDB references retain descending `_id` ordering; random
+string IDs do not establish chronology. Authorization data-reference lookup
+errors abort context loading instead of being treated as missing data or
+falling back to an older policy.
+
 ### `structured_outputs.yaml`
 
 ```yaml

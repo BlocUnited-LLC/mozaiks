@@ -9,7 +9,7 @@ actions as synthetic signed-in principals.
 Every check is derived from the bundle's own contracts: ``data/contract.json``
 collections and their canonical action ids, ``module.yaml`` schemas, gates and
 surfaces, ``config/subscriptions.yaml`` plans and assignment store, and the
-token scopes ``config/auth.yaml`` grants. Nothing is configured per app.
+token scopes and role permissions ``config/auth.yaml`` grants. Nothing is configured per app.
 
 The trusted-fixture child path starts this module with a restricted environment,
 uses a disposable host database and enforces a hard time limit. Production
@@ -41,7 +41,7 @@ import threading
 import time
 import traceback
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
@@ -936,6 +936,7 @@ class _Principal:
     token: str
     workspace_id: str | None
     extra_scopes: tuple[str, ...] = ()
+    roles: tuple[str, ...] = ()
 
 
 @dataclass
@@ -1025,6 +1026,9 @@ class _SmokeRun:
         self.workspace_claims = False
         self.last_exception_path: str | None = None
         self.permission_denials: set[tuple[str, str]] = set()
+        self.role_denials_checked: set[tuple[str, str]] = set()
+        self.role_successes: set[tuple[str, str]] = set()
+        self.role_responses: dict[tuple[str, str], str] = {}
         # (module, action, rejection) for every emitted event the runtime rejected.
         self.rejected_events: list[tuple[str, str, Any]] = []
         self.reported_rejections: set[tuple[str, str, str, str, str]] = set()
@@ -1089,33 +1093,105 @@ class _SmokeRun:
         if label not in self.principals:
             self.principals[label] = _Principal(
                 label=label, user_id=principal.user_id, token=f"{principal.token}-{uuid4().hex[:8]}",
-                workspace_id=principal.workspace_id, extra_scopes=tuple(scopes),
+                workspace_id=principal.workspace_id, extra_scopes=tuple(scopes), roles=principal.roles,
             )
         return self.principals[label]
+
+    def role_grants(self) -> dict[str, set[str]]:
+        contract = getattr(self.load, "auth_contract", None)
+        return {role.id: set(role.permissions) for role in contract.authorization.roles} if contract else {}
+
+    def _with_action_roles(self, principal: _Principal, required: list[str]) -> _Principal:
+        missing = set(required) - set(self.scopes) - set(principal.extra_scopes)
+        held = set(principal.roles)
+        for role, grants in sorted(self.role_grants().items()):
+            if missing & grants:
+                held.add(role)
+                missing -= grants
+        if not held or held == set(principal.roles):
+            return principal
+        roles = tuple(sorted(held))
+        label = f"{principal.label} roles={','.join(roles)}"
+        if label not in self.principals:
+            self.principals[label] = replace(principal, label=label, roles=roles,
+                                             token=f"{principal.token}-{uuid4().hex[:8]}")
+        return self.principals[label]
+
+    async def _data_snapshot(self) -> dict[str, list[dict[str, Any]]]:
+        """Declared app records only; audit records and request metrics are not app mutations."""
+        from mozaiksai.core.runtime.persistence import MongoPersistenceContext
+        from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
+
+        names = MongoPersistenceContext(app_id=self.app_id, database_name=self.database_name,
+                                        client=self.client, data_contract=self.load.data_contract)
+        collections = {
+            names.collection_name(owner, str(collection["name"]))
+            for owner, _kind, collection in iter_data_contract_collections(
+                self.load.data_contract, require_complete_ownership=False,
+            )
+        }
+        return {name: await self.database[name].find({}).sort("_id", 1).to_list(length=None)
+                for name in sorted(collections)}
+
+    async def _deny_roleless(
+        self, method: str, module: str, action: str, principal: _Principal, params: dict[str, Any],
+    ) -> None:
+        key = (module, action)
+        self.role_denials_checked.add(key)
+        label = f"{principal.label} without roles for {module}.{action}"
+        ordinary = replace(principal, label=label, roles=(), extra_scopes=(),
+                           token=f"smoke-roleless-{uuid4().hex}")
+        self.principals[label] = ordinary
+        before = await self._data_snapshot()
+        status, body, summary = await self._request(method, module, action, ordinary, params)
+        after = await self._data_snapshot()
+        detail = body.get("detail") if isinstance(body, dict) else None
+        denied = status == 403 and isinstance(detail, dict) and detail.get("error_code") == "PERMISSION_DENIED"
+        unchanged = before == after
+        self.record(
+            f"role.{module}.{action}.non_holder_denied", denied and unchanged,
+            f"Same user and workspace without roles: {summary}; declared app records "
+            f"{'unchanged' if unchanged else 'CHANGED'}.",
+            path=None if denied and unchanged else f"modules/{module}/module.yaml",
+            user_id=ordinary.user_id, roles=[], records_unchanged=unchanged,
+        )
 
     async def call(
         self, method: str, module: str, action: str, principal: _Principal, params: dict[str, Any],
     ) -> tuple[int, Any, str]:
         """Call one module action as ``principal``; return status, JSON body and a one-line summary.
 
-        A permission module.yaml requires but config/auth.yaml never grants
-        denies every signed-in user. That is recorded once per action as its
+        Declared role grants produce explicit role-bearing callers, with a
+        role-less denial checked against unchanged storage. A permission that
+        config/auth.yaml never grants is recorded once per action as its
         own failure, and the call is repeated for the same user with exactly
         the missing permissions granted, so the defects behind the permission
         wall are reported in the same pass.
         """
         loaded = next((item for item in self.load.modules if item.name == module), None)
         required = list((loaded.action_permissions_map.get(action) or []) if loaded is not None else [])
-        missing = [item for item in required if item not in self.scopes]
+        role_permissions = set().union(*self.role_grants().values())
+        missing = [item for item in required if item not in set(self.scopes) | role_permissions]
+        principal = self._with_action_roles(principal, required)
+        role_protected = bool((set(required) - set(self.scopes)) & role_permissions)
+        if role_protected and (module, action) not in self.role_denials_checked:
+            await self._deny_roleless(method, module, action, principal, params)
         if missing and (module, action) in self.permission_denials:
             principal = self._with_scopes(principal, missing)
         status, body, summary = await self._request(method, module, action, principal, params)
+        if role_protected and not principal.extra_scopes:
+            self.role_responses[(module, action)] = summary
+            if 200 <= status < 300 and (module, action) not in self.role_successes:
+                self.role_successes.add((module, action))
+                self.record(f"role.{module}.{action}.holder_allowed", True,
+                            f"Role-bearing principal executed {module}.{action}: {summary}.",
+                            user_id=principal.user_id, roles=list(principal.roles))
         if missing and status == 403 and (module, action) not in self.permission_denials:
             self.permission_denials.add((module, action))
             self.record(
                 f"permission.{module}.{action}", False,
                 f"{module}.{action} requires permissions {missing} that no signed-in user holds: config/auth.yaml "
-                f"grants token scopes {self.scopes} and declares no roles, so every call is denied ({summary}). "
+                f"grants token scopes {self.scopes} and no declared role grants the missing permissions ({summary}). "
                 "The remaining checks repeat such calls with those permissions granted to test the action itself.",
                 path=f"modules/{module}/module.yaml",
             )
@@ -1164,6 +1240,7 @@ class _SmokeRun:
                 "nonce": self.probe_nonce, "user_id": principal.user_id,
                 "workspace_id": principal.workspace_id, "label": principal.label,
                 "extra_scopes": list(principal.extra_scopes),
+                "roles": list(principal.roles),
             }
             headers["X-Mozaiks-Smoke-Principal"] = base64.urlsafe_b64encode(
                 json.dumps(assertion, separators=(",", ":")).encode("utf-8")
@@ -1364,10 +1441,13 @@ async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
     app.state.module_action_surfaces = {module.name: module.action_api_surface_map for module in load.modules}
     app.state.failed_module_names = sorted(load.failed_module_names)
     app.state.data_contract = contract
+    app.state.auth_contract = load.auth_contract
+    app.state.app_admin_emails = tuple(load.definition.config.get("admins") or ())
     app.include_router(module_router.router)
     auth_yaml = run.app_root / "config" / "auth.yaml"
     run.scopes = sorted(auth_contract_scopes(
-        {"config/auth.yaml": auth_yaml.read_text(encoding="utf-8")} if auth_yaml.is_file() else {}
+        {"config/auth.yaml": auth_yaml.read_text(encoding="utf-8")} if auth_yaml.is_file() else {},
+        include_role_grants=False,
     ))
 
     async def resolve_principal(request: Request) -> UserPrincipal | None:
@@ -1383,11 +1463,13 @@ async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
                         or not isinstance(data.get("label"), str)
                         or not isinstance(data.get("extra_scopes"), list)
                         or not all(isinstance(scope, str) for scope in data["extra_scopes"])
+                        or not isinstance(data.get("roles"), list)
+                        or not all(isinstance(role, str) and role in run.role_grants() for role in data["roles"])
                         or data.get("workspace_id") is not None
                         and not isinstance(data["workspace_id"], str)):
                     return None
                 principal = _Principal(data["label"], data["user_id"], "",
-                                       data.get("workspace_id"), tuple(data["extra_scopes"]))
+                                       data.get("workspace_id"), tuple(data["extra_scopes"]), tuple(data["roles"]))
             except (ValueError, UnicodeError):
                 return None
         else:
@@ -1397,7 +1479,7 @@ async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
         if principal is None:
             return None
         return UserPrincipal(
-            user_id=principal.user_id, email=None, name=principal.label, roles=[],
+            user_id=principal.user_id, email=None, name=principal.label, roles=list(principal.roles),
             scopes=[*run.scopes, *principal.extra_scopes],
             raw_claims={"sub": principal.user_id, "app_id": run.app_id}, provider="runtime_smoke",
             app_id=run.app_id, workspace_id=principal.workspace_id, auth_provenance="token_validated",
@@ -2175,6 +2257,37 @@ async def _entitlements(run: _SmokeRun, entities: list[_Entity]) -> None:
             )
 
 
+async def _remaining_role_checks(run: _SmokeRun, entities: list[_Entity]) -> None:
+    """Exercise declared role actions outside CRUD; never claim unobserved success."""
+    granted = set().union(*run.role_grants().values()) - set(run.scopes)
+    for module in run.load.modules:
+        for action, permissions in sorted(module.action_permissions_map.items()):
+            if not granted.intersection(permissions or ()):
+                continue
+            key = (module.name, action)
+            tag = f"role.{module.name}.{action}"
+            if module.action_api_surface_map.get(action) in _UNREACHABLE_SURFACES:
+                run.not_run(tag, "This role action is not on a user-callable HTTP surface.")
+                continue
+            if key not in run.role_denials_checked:
+                principal = run.principal(f"role check {module.name}.{action}")
+                gate = module.action_entitlement_map.get(action)
+                if gate and run.load.subscriptions_config is not None:
+                    choice = _granting_plan(run.load.subscriptions_config, {gate})
+                    if choice:
+                        await _seed_assignment(run, principal, choice[0], choice[1])
+                method, params = await _gated_params(run, module, action, principal, entities)
+                await run.call(method, module.name, action, principal, params)
+            if key not in run.role_successes:
+                run.record(
+                    f"{tag}.holder_allowed", False,
+                    f"No successful role-bearing execution was observed for {module.name}.{action}; "
+                    f"last response: {run.role_responses.get(key, 'not run')}. "
+                    "A denied non-holder alone does not prove that the authorized action works.",
+                    path=f"modules/{module.name}/backend/service.py",
+                )
+
+
 # --------------------------------------------------------------------------- entry point
 
 
@@ -2251,6 +2364,7 @@ async def _child_run(request: Mapping[str, Any], emit: Callable[..., None], init
             for entity in entities:
                 await _crud(run, entity)
             await _entitlements(run, entities)
+            await _remaining_role_checks(run, entities)
     except Exception as exc:  # report the gate's own failure as a check, never a silent pass
         run.record("smoke.error", False, f"The runtime smoke could not complete: {type(exc).__name__}: {exc}")
     finally:
@@ -2263,7 +2377,7 @@ async def _child_run(request: Mapping[str, Any], emit: Callable[..., None], init
         app_id=run.app_id,
         principals={
             label: {"user_id": principal.user_id, "workspace_id": principal.workspace_id,
-                    "scopes": [*run.scopes, *principal.extra_scopes]}
+                    "scopes": [*run.scopes, *principal.extra_scopes], "roles": list(principal.roles)}
             for label, principal in run.principals.items()
         },
         events_emitted=sorted(set(run.events)),
@@ -2316,6 +2430,7 @@ def _probe_contracts(run: _SmokeRun) -> None:
     """Load only copied declarative files; B has no imported Python mount."""
     import yaml
 
+    from mozaiksai.core.runtime.app.auth_contract import load_app_auth_contract
     from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
     from mozaiksai.core.runtime.app.subscriptions_loader import load_subscriptions_config
     from mozaiksai.core.runtime.persistence.intent_loader import (
@@ -2338,12 +2453,14 @@ def _probe_contracts(run: _SmokeRun) -> None:
     run.load = SimpleNamespace(
         modules=modules, data_contract=contract,
         subscriptions_config=load_subscriptions_config(root),
+        auth_contract=load_app_auth_contract(root, auth_required=app_config.get("authRequired", False)),
         definition=SimpleNamespace(config=app_config),
     )
     run.app_id = _app_id(run.load)
     auth_yaml = root / "config" / "auth.yaml"
     run.scopes = sorted(auth_contract_scopes(
-        {"config/auth.yaml": auth_yaml.read_text(encoding="utf-8")} if auth_yaml.is_file() else {}
+        {"config/auth.yaml": auth_yaml.read_text(encoding="utf-8")} if auth_yaml.is_file() else {},
+        include_role_grants=False,
     ))
     run.workspace_claims = any(
         collection.get("tenancy") == "per_workspace"
@@ -2393,6 +2510,7 @@ async def _probe_imported_app(database_name: str, observer_nonce: str,
             for entity in entities:
                 await _crud(run, entity)
             await _entitlements(run, entities)
+            await _remaining_role_checks(run, entities)
     except Exception as exc:
         run.record("smoke.error", False,
                    f"The external observer could not complete: {type(exc).__name__}: {exc}")
@@ -2403,7 +2521,7 @@ async def _probe_imported_app(database_name: str, observer_nonce: str,
         "done", app_id=run.app_id,
         principals={
             label: {"user_id": principal.user_id, "workspace_id": principal.workspace_id,
-                    "scopes": [*run.scopes, *principal.extra_scopes]}
+                    "scopes": [*run.scopes, *principal.extra_scopes], "roles": list(principal.roles)}
             for label, principal in run.principals.items()
         },
         events_emitted=[],

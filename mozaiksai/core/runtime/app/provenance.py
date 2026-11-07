@@ -22,7 +22,7 @@ AppProvenanceMode = Literal["factory", "cli", "import", "manual", "refinement"]
 DEFAULT_APP_CONTRACTS: dict[str, str] = {
     "app": "mozaiks.app.v1",
     "asset_manifest": "mozaiks.asset_manifest.v1",
-    "auth": "mozaiks.auth.v1",
+    "auth": "mozaiks.auth.v2",
     "dashboard": "mozaiks.dashboard.v1",
     "data": "mozaiks.data_contract.v1",
     "module": "mozaiks.module.v1",

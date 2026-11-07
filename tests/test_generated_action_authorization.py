@@ -497,6 +497,22 @@ def test_selected_pack_template_manifest_keeps_its_permission_owner():
     assert next(action for action in manifest["actions"] if action["id"] == ACTION)["permissions"] == ["pack.tasks.read"]
 
 
+def test_unbacked_operator_template_declaration_cannot_exempt_generated_permissions():
+    files = extract_code_file_map_from_payload(_payload("tasks.unapproved"))
+    context = {
+        "app_build_plan": _plan(),
+        "operator_contracts": [{
+            "contract_id": MODULE,
+            "required_outputs": [{"path": MANIFEST, "owner": "templates"}],
+        }],
+    }
+    with pytest.raises(ValueError, match="unresolved permissions.*tasks.unapproved"):
+        _merge_code_files(
+            [{"code_files": [{"filename": path, "content": content} for path, content in files.items()]}],
+            app_build_plan=_plan(), context_variables=context,
+        )
+
+
 @pytest.mark.asyncio
 async def test_approved_permission_still_requires_actual_dispatch_authority(monkeypatch):
     admitted = close_module_actions(_payload("tasks.view"), app_build_plan=_plan(), companion_files=_auth("tasks.view"))

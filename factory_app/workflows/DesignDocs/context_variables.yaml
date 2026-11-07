@@ -1,4 +1,11 @@
 definitions:
+  access_policy:
+    type: object
+    authority_class: tool_only_information
+    authorization: true
+    writer_ids: [deterministic_tool]
+    description: Validated role grants written only after the matching owner review; absent while a proposal is awaiting review.
+    source: {type: computed, default: null}
   operator_capabilities:
     type: array
     description: Trusted operator-selected pack identifiers resolved against installed public build-context declarations.

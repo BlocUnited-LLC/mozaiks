@@ -314,6 +314,13 @@ class ContextTriggerSpec(DeclarativeModel):
         return self
 
 
+class ContextDataSortSpec(DeclarativeModel):
+    """One ordered field in a data-reference lookup."""
+
+    field: str = Field(strict=True, pattern=r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
+    direction: Literal["asc", "desc"]
+
+
 class ContextVariableSourceSpec(DeclarativeModel):
     type: Literal["config", "data_reference", "data_entity", "computed", "state", "external", "file", "build_context", "runtime"]
     env_var: str | None = None
@@ -323,6 +330,7 @@ class ContextVariableSourceSpec(DeclarativeModel):
     collection: str | None = None
     query_template: dict[str, Any] | None = None
     fields: list[str] | None = None
+    sort: list[ContextDataSortSpec] | None = Field(default=None, min_length=1)
     refresh_strategy: Literal["once", "per_phase", "on_demand"] | None = None
     entity_schema: dict[str, Any] | None = Field(default=None, alias="schema", serialization_alias="schema")
     indexes: list[dict[str, Any]] | None = None

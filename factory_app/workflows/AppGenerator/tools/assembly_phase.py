@@ -16,6 +16,8 @@ import json
 import logging
 from typing import Any
 
+import yaml
+
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     admitted_module_file_map,
     extract_code_file_entries_from_payload,
@@ -32,6 +34,9 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     materialize_collection_auth,
     materialize_data_contract,
 )
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_design_access_policy,
+)
 from mozaiksai.core.workflow.generator_support.module_account_data import (
     materialize_module_account_handlers,
 )
@@ -41,6 +46,7 @@ from mozaiksai.core.workflow.generator_support.module_read_actions import (
     materialize_module_read_implementations,
 )
 from mozaiksai.core.workflow.generator_support.module_write_actions import (
+    assert_generated_action_permissions,
     auth_contract_scopes,
     materialize_module_actions,
     materialize_module_schemas,
@@ -267,6 +273,12 @@ def _merge_code_files(
     file_map = materialize_collection_auth(file_map, data_contract=data_contract)
     # Selected pack manifests come from registered templates, never model tasks.
     pack_paths = pack_owned_outputs(context_variables)
+    pack_manifests = frozenset(
+        item["filename"] for pack in inventory for item in pack["files"]
+        if item["filename"] in pack_paths
+        and item["filename"].startswith("modules/") and item["filename"].endswith("/module.yaml")
+        and file_map.get(item["filename"]) == item["content"]
+    )
     template_modules = verified_template_module_ids(file_map, inventory)
     # A complete verified template backend owns its participant-aware policy and
     # action implementations. All other modules retain canonical CRUD synthesis.
@@ -288,9 +300,8 @@ def _merge_code_files(
         design_surface_map=design_surface_map,
         subscription_contract=subscription_contract,
         declared_auth_scopes=admitted_scopes,
-        pack_owned_manifest_paths=frozenset(
-            path for path in pack_paths if path.startswith("modules/") and path.endswith("/module.yaml")
-        ),
+        access_policy=resolve_design_access_policy(context_variables),
+        pack_owned_manifest_paths=pack_manifests,
     ))
     synthesis_files.update(materialize_module_policies(synthesis_files, data_contract))
     synthesis_files.update(materialize_module_schemas(synthesis_files, app_build_plan=app_build_plan, data_contract=data_contract))
@@ -316,10 +327,33 @@ def _merge_code_files(
     synthesis_files.update(materialize_module_write_implementations(
         synthesis_files, app_build_plan=app_build_plan, data_contract=data_contract, owned_paths=service_paths,
         subscription_contract=subscription_contract,
+        access_policy=resolve_design_access_policy(context_variables),
+        design_surface_map=design_surface_map,
     ))
     file_map.update(synthesis_files)
     if "app.json" in file_map:
-        file_map.update(materialize_auth_scaffold(file_map, data_contract=data_contract))
+        approved_policy = resolve_design_access_policy(context_variables)
+        # Model outputs cannot set scopes or provider behavior while approved
+        # roles are compiled. Render exclusively from the admitted auth source.
+        candidate_auth = file_map.pop("config/auth.yaml", None)
+        admitted_auth = admitted_module_file_map(context_variables).get("config/auth.yaml")
+        if admitted_auth is not None:
+            file_map["config/auth.yaml"] = admitted_auth
+        file_map.update(materialize_auth_scaffold(
+            file_map, data_contract=data_contract, design_surface_map=design_surface_map,
+            access_policy=approved_policy,
+        ))
+        if candidate_auth is not None:
+            allowed_auth = [yaml.safe_load(file_map.get("config/auth.yaml", "null"))]
+            if admitted_auth is not None:
+                allowed_auth.append(yaml.safe_load(admitted_auth))
+            if yaml.safe_load(candidate_auth) not in allowed_auth:
+                raise ValueError("Generated assembly cannot author config/auth.yaml; only admitted auth and the approved scaffold may supply it")
+        if app_build_plan is not None:
+            final_grants = auth_contract_scopes(file_map, app_build_plan=app_build_plan, data_contract=data_contract)
+            for path, content in synthesis_files.items():
+                if path.startswith("modules/") and path.endswith("/module.yaml") and path not in pack_manifests:
+                    assert_generated_action_permissions(path.split("/")[1], yaml.safe_load(content), app_build_plan, final_grants)
         file_map.setdefault("ui/lib/moduleApi.js", get_module_api_template())
     return [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
 

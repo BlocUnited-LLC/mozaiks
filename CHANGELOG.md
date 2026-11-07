@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Generated apps can grant module permissions to approved design roles through
+  `mozaiks.auth.v2`. Staff actions use verified role membership while preserving
+  record ownership; build tasks cannot authorize their own grants.
 - Chats show connection and run status beside the composer, with measured token
   usage for the current run when available. Ask and workflow receipts stay
   scoped to their owning chat; the wallet balance remains in the Tokens tab.

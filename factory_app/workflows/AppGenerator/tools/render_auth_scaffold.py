@@ -16,6 +16,13 @@ from mozaiksai.core.runtime.app.auth_contract import (
 )
 from mozaiksai.core.workflow.context.context_utils import context_to_dict
 from mozaiksai.core.workflow.generator_support.code_files import materialize_collection_auth
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_design_access_policy,
+)
+from mozaiksai.core.workflow.generator_support.module_role_grants import (
+    compiled_role_grants,
+    validate_access_policy,
+)
 from mozaiksai.resources import resolve_factory_app_root
 
 from .code_file_utils import (
@@ -27,6 +34,7 @@ from .code_file_utils import (
 
 def materialize_auth_scaffold(
     files: dict[str, str], *, data_contract: Any = None,
+    design_surface_map: Any = None, access_policy: Any = None,
 ) -> dict[str, str]:
     """Render the canonical auth file delta for a constructed app bundle."""
     generated = dict(files)
@@ -37,6 +45,12 @@ def materialize_auth_scaffold(
     manifest = json.loads(generated["app.json"])
     if not isinstance(manifest, dict):
         raise AppAuthContractError("Auth scaffolding requires app.json to be an object")
+    policy = validate_access_policy(
+        access_policy, data_contract=data_contract, design_surface_map=design_surface_map,
+    ) if access_policy is not None else None
+    if policy and policy["grants"]:
+        manifest["authRequired"] = True
+        generated["app.json"] = json.dumps(manifest, indent=2) + "\n"
     rendered: dict[str, str] = {}
     if generated["app.json"] != original_manifest:
         rendered["app.json"] = generated["app.json"]
@@ -53,8 +67,14 @@ def materialize_auth_scaffold(
             config = (templates / "config" / "auth.yaml").read_text(encoding="utf-8")
             config = yaml.safe_load(config.replace("{{AUTH_DEFAULT_ROUTE}}", "/"))
             config["routes"]["post_login_default"] = route
-            validate_app_auth_contract(config)
-            rendered["config/auth.yaml"] = yaml.safe_dump(config, sort_keys=False)
+        else:
+            config = yaml.safe_load(generated["config/auth.yaml"])
+        if policy is not None:
+            config["authorization"] = {"roles": compiled_role_grants(policy)}
+        validate_app_auth_contract(config)
+        encoded = yaml.safe_dump(config, sort_keys=False)
+        if "config/auth.yaml" not in generated or policy is not None:
+            rendered["config/auth.yaml"] = encoded
         if "ui/auth/authAdapter.js" not in generated:
             rendered["ui/auth/authAdapter.js"] = (templates / "ui" / "auth" / "authAdapter.js").read_text(encoding="utf-8")
         generated.update(rendered)
@@ -67,7 +87,7 @@ def materialize_auth_scaffold(
 async def save_auth_scaffold(
     context_variables: Any, *, revision_baseline: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Fill missing auth files and compose routes without replacing declared auth.
+    """Fill auth files and compile approved roles while preserving provider setup.
 
     ``revision_baseline`` is the bound revision source the caller loaded
     (:func:`load_revision_baseline`). An admitted repair copy of a
@@ -80,6 +100,8 @@ async def save_auth_scaffold(
     rendered = materialize_auth_scaffold(
         admitted_app_file_map(context_variables, revision_baseline=revision_baseline),
         data_contract=context.get("data_contract"),
+        design_surface_map=context.get("design_surface_map"),
+        access_policy=resolve_design_access_policy(context),
     )
     for path in overlay_pack_composed_roots(context_variables) & rendered.keys():
         rendered.pop(path)

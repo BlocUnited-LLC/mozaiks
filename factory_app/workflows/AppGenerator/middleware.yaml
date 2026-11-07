@@ -1,4 +1,10 @@
 prompt_middleware:
+- agent: AppPlanAgent
+  filename: ../_shared/design_access_policy.py
+  function: inject_design_access_policy
+- agent: ConfigMiddlewareAgent
+  filename: ../_shared/design_access_policy.py
+  function: inject_design_access_policy
 - agent: all
   filename: ../_shared/context_graph/hook_context_graph.py
   function: inject_context_graph_context
