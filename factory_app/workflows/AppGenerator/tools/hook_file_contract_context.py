@@ -12,8 +12,17 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import _ALLOWED_TAS
 from mozaiksai.core.runtime.persistence.adapter import PersistenceCollection
 from mozaiksai.core.runtime.persistence.naming import collection_name_for
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.generator_support.code_files import planned_page_path
+from mozaiksai.core.workflow.generator_support.code_files import (
+    extract_code_file_map_from_payload,
+    planned_page_path,
+)
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_design_access_policy,
+)
 from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
+from mozaiksai.core.workflow.generator_support.module_write_actions import (
+    module_write_implementation_ownership,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +215,36 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
                 )
 
     if agent_name == "ServiceAgent":
+        if module_id:
+            import yaml
+
+            # Match task compilation: admitted dependencies override the base file inventory.
+            sources = dict(_context_get(context, "generated_files", {}) or {})
+            for dependency in (_context_get(context, "dependency_task_outputs", {}) or {}).values():
+                sources.update(extract_code_file_map_from_payload(dependency))
+            source = sources.get(f"modules/{module_id}/module.yaml")
+            if source is not None:
+                module = yaml.safe_load(source)
+            if module and (module.get("module") or {}).get("id") != module_id:
+                raise ValueError(f"Write ownership context does not belong to module {module_id!r}")
+        if module_id and module:
+            ownership = module_write_implementation_ownership(
+                module_id, module, app_build_plan=_context_get(context, "app_build_plan"),
+                data_contract=_context_get(context, "data_contract"),
+                subscription_contract=_context_get(context, "subscription_contract"),
+                design_surface_map=_context_get(context, "design_surface_map"),
+                access_policy=resolve_design_access_policy(context),
+            )
+            lines.extend(_format_list_block(
+                "Code-owned write methods; omit their handler/service/repo bodies and use declared hooks only:",
+                ownership["code_owned"],
+            ))
+            lines.extend(_format_list_block(
+                "Authored protected write actions; implement their declared handler methods, service and repo "
+                "bodies in owned_paths. Preserve the admitted request schemas and permissions; supply omitted "
+                "record fields from trusted server context and enforce lifecycle rules before persistence:",
+                ownership["authored"],
+            ))
         lines.append(
             "module_contract.python_stubs, downstream_python_defaults, and current_build_task.owned_paths "
             "describe the final artifact inventory, not a request to author every file. "
@@ -218,7 +257,7 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
             if str(path).endswith("/backend/policy.py")
         ]
         lines.extend(_format_list_block(
-            "Code-rendered policy artifacts; omit from python_files and code_files:", policy_paths,
+            "Code-rendered policy artifacts; omit from python_files:", policy_paths,
         ))
         methods = [
             f"async {name}{inspect.signature(method)}"

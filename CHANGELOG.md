@@ -334,6 +334,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- ServiceAgent emits Python source once through its typed output; code builds the
+  assembly representation without asking the model to duplicate every file.
+- Role-granted shared-record submissions preserve explicit narrowed request
+  contracts and authored implementations, so server-derived requester identity
+  does not become required form input. Ordinary CRUD remains code-owned and
+  approved permission enforcement stays unchanged.
 - Free-app plans and optional page/image hints now accept JSON `null` for
   absent selections. Provider names and UI choices remain finite, and string
   sentinels such as `"null"` are rejected instead of standing in for absence.

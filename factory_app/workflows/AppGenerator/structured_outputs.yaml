@@ -6518,10 +6518,6 @@ models:
         description: >
           Implemented module backend stub files. These are the typed source of truth
           for ServiceAgent-owned Python outputs and must align with module_contract.python_stubs.
-      code_files:
-        type: list
-        items: CodeFileEntry
-        description: Serialized file mirror. Extraction may rebuild canonical files from python_files.
       deleted_files:
         type: optional_list
         items: str

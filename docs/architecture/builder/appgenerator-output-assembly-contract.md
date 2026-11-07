@@ -1,5 +1,22 @@
 # AppGenerator Output Assembly Contract
 
+## Service Source Ownership
+
+ServiceAgent emits each Python file once in `ServiceOutput.python_files`.
+`ServiceOutput` has no model-authored `code_files` mirror. The canonical extractor
+serializes the typed files into the internal `code_files` representation used by
+task admission, assembly, repair persistence and export. File ownership, Python
+validation and contained runtime acceptance still apply to those exact files.
+
+The injected write-ownership inventory uses the same compiler decision as
+materialization. It names code-owned CRUD methods to omit and protected app-wide
+writes whose accepted input contracts require authored handler, service and repo
+implementations. Approved role permissions remain compiler-owned for both.
+An authored submission can therefore derive requester identity from `ctx.user_id`
+without exposing that field as required form input. The service must enforce
+ownership and allowed state transitions before persistence; role grants alone do
+not enforce those business rules.
+
 ## Typed Intake Readiness
 
 Guided intake returns `AppInterviewResult`: a short `agent_message` and an

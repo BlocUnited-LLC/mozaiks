@@ -362,6 +362,70 @@ def _authored_write(prior: dict[str, Any] | None) -> bool:
     return prior is not None and _AUTHORED_ACCESS_KEYS.issubset(prior)
 
 
+def _authored_role_write_contracts(
+    module_id: str, collection: dict[str, Any], actions: list[dict[str, Any]],
+) -> bool:
+    """Recognize explicit client-field subsets without mistaking rendered CRUD for authored code.
+
+    Required stored fields may be omitted from an authored request when its service
+    supplies them. Retained fields keep their canonical type and requiredness;
+    update/delete still address the canonical record id. No new schema dialect or
+    persisted ownership flag is introduced.
+    """
+    shape = collection_record_shape(module_id, collection)
+    existing = {action["id"]: action for action in actions if action.get("id")}
+    narrowed = False
+    write_ids = []
+    for operation in CANONICAL_WRITE_OPERATIONS:
+        expected = _write_action(shape, operation)
+        action_id = expected["id"]
+        write_ids.append(action_id)
+        prior = existing.get(action_id)
+        if prior is None or "input_schema" not in prior:
+            continue
+        schema = _materialize_schema_contract(prior["input_schema"], closed_request=True)
+        import_closed_contract_schema(schema)
+        canonical = expected["input_schema"]
+        properties = schema.get("properties", {})
+        required = set(schema.get("required", []))
+        invalid = (
+            schema.get("type") != "object"
+            or not set(properties) <= set(canonical["properties"])
+            or any(value != canonical["properties"].get(name) for name, value in properties.items())
+            or not (set(canonical.get("required", [])) & set(properties)) <= required
+            or (operation != "create" and shape["id_field"] not in required)
+        )
+        if invalid:
+            raise ValueError(
+                f"{module_id}: authored role write {action_id!r} must use a closed subset of its canonical "
+                "request fields, retaining their types, enums and requiredness and the required record id "
+                "for update/delete. Omit server-supplied fields entirely; do not widen the request contract."
+            )
+        narrowed |= set(properties) != set(canonical["properties"]) or required != set(canonical.get("required", []))
+    if narrowed and not all(_authored_write(existing.get(action_id)) for action_id in write_ids):
+        raise ValueError(
+            f"{module_id}: collection {collection['name']!r} has an authored role write request; explicitly "
+            f"declare all canonical writes {write_ids!r} with handler_method, input_schema, output_schema, "
+            "permissions and api_surface so ServiceAgent implements the complete protected write contract."
+        )
+    return narrowed
+
+
+def _uses_authored_writes(
+    module_id: str, collection: dict[str, Any], actions: list[dict[str, Any]], read_ids: set[str], *,
+    subscription_contract: Any, role_permissions: Mapping[str, str],
+) -> bool:
+    """One ownership decision for action closure, events, implementations and prompt projection."""
+    if collection["tenancy"] != "app_wide":
+        return False
+    if all(canonical_write_action_id(collection["entity"], operation) in role_permissions
+           for operation in CANONICAL_WRITE_OPERATIONS):
+        return _authored_role_write_contracts(module_id, collection, actions)
+    return bool(_protected_siblings(
+        actions, read_ids, module_id=module_id, subscription_contract=subscription_contract,
+    ))
+
+
 def _apply_prior_access(
     module_id: str, collection: dict[str, Any], prior: dict[str, Any], action: dict[str, Any],
     granted: frozenset[str],
@@ -452,7 +516,14 @@ def _close_manifest_writes(
     for collection in collections:
         shape = collection_record_shape(module_id, collection)
         write_ids = [canonical_write_action_id(shape["entity"], operation) for operation in CANONICAL_WRITE_OPERATIONS]
+        authored = _uses_authored_writes(
+            module_id, collection, actions, read_ids,
+            subscription_contract=subscription_contract, role_permissions=role_permissions,
+        )
         for operation, action_id in zip(CANONICAL_WRITE_OPERATIONS, write_ids, strict=True):
+            prior = existing.get(action_id)
+            if prior is not None and prior.get("api_surface") in _ANONYMOUS_SURFACES:
+                _apply_prior_access(module_id, collection, prior, _write_action(shape, operation), granted)
             if action_id not in role_permissions:
                 continue
             if action_id not in existing:
@@ -460,12 +531,7 @@ def _close_manifest_writes(
                 actions.append(action)
                 existing[action_id] = action
             existing[action_id]["permissions"] = [role_permissions[action_id]]
-        protected = _protected_siblings(
-            actions, read_ids, module_id=module_id, subscription_contract=subscription_contract,
-        ) if collection["tenancy"] == "app_wide" and not all(
-            action_id in role_permissions for action_id in write_ids
-        ) else []
-        if protected:
+        if authored:
             # An app-wide collection beside restricted actions never receives open writes:
             # each write must be explicitly declared and itself restricted, or it is rejected.
             gates = _approved_gates(module_id, subscription_contract)
@@ -475,6 +541,9 @@ def _close_manifest_writes(
                 or not _restricted_declaration(existing[action_id], gates, granted)
             ]
             if open_writes:
+                protected = _protected_siblings(
+                    actions, read_ids, module_id=module_id, subscription_contract=subscription_contract,
+                )
                 raise ValueError(
                     f"{module_id}: app_wide collection {collection['name']!r} has protected actions "
                     f"{protected!r}; canonical writes {open_writes!r} are not constructed open. Explicitly declare "
@@ -543,9 +612,9 @@ def _built_write_shapes(
     read_ids = _canonical_read_ids(module_id, plan, contract)
     shapes = []
     for collection in _write_collections(module_id, plan, contract):
-        if not all(canonical_write_action_id(collection["entity"], op) in role_permissions
-                   for op in CANONICAL_WRITE_OPERATIONS) and collection["tenancy"] == "app_wide" and _protected_siblings(
-            actions, read_ids, module_id=module_id, subscription_contract=subscription_contract,
+        if _uses_authored_writes(
+            module_id, collection, actions, read_ids,
+            subscription_contract=subscription_contract, role_permissions=role_permissions,
         ):
             continue  # Explicitly declared protected app-wide writes keep their authored contract.
         shapes.append(collection_record_shape(module_id, collection))
@@ -1422,9 +1491,9 @@ def materialize_module_write_implementations(
             if service_source:
                 validate_write_hooks(f"modules/{module_id}/backend/service.py", service_source, identifiers)
         for collection in collections:
-            if not all(canonical_write_action_id(collection["entity"], op) in role_grants.get(module_id, {})
-                       for op in CANONICAL_WRITE_OPERATIONS) and collection["tenancy"] == "app_wide" and _protected_siblings(
-                actions, read_ids, module_id=module_id, subscription_contract=subscription_contract,
+            if _uses_authored_writes(
+                module_id, collection, actions, read_ids,
+                subscription_contract=subscription_contract, role_permissions=role_grants.get(module_id, {}),
             ):
                 continue  # Explicitly declared protected app-wide writes keep their authored implementation.
             shape = collection_record_shape(module_id, collection)
@@ -1496,6 +1565,35 @@ def canonical_write_shapes(module_id: str, *, app_build_plan: Any, data_contract
     ]
 
 
+def module_write_implementation_ownership(
+    module_id: str, manifest: dict[str, Any], *, app_build_plan: Any, data_contract: Any,
+    subscription_contract: Any = None, access_policy: Any = None, design_surface_map: Any = None,
+) -> dict[str, list[str]]:
+    """Project the compiler's write ownership into ServiceAgent's admitted task context."""
+    from mozaiksai.core.workflow.generator_support.module_role_grants import (
+        approved_module_role_permissions,
+    )
+
+    plan, contract = detach(app_build_plan), detach(data_contract)
+    result: dict[str, list[str]] = {"code_owned": [], "authored": []}
+    if not isinstance(plan, dict):
+        return result
+    role_permissions = approved_module_role_permissions(
+        access_policy, data_contract=contract, design_surface_map=design_surface_map,
+    ).get(module_id, {})
+    actions = manifest.get("actions") or []
+    read_ids = _canonical_read_ids(module_id, plan, contract)
+    for collection in _write_collections(module_id, plan, contract):
+        authored = _uses_authored_writes(
+            module_id, collection, actions, read_ids,
+            subscription_contract=subscription_contract, role_permissions=role_permissions,
+        )
+        result["authored" if authored else "code_owned"].extend(
+            canonical_write_action_id(collection["entity"], operation) for operation in CANONICAL_WRITE_OPERATIONS
+        )
+    return result
+
+
 __all__ = [
     "canonical_write_shapes",
     "close_module_actions",
@@ -1503,6 +1601,7 @@ __all__ = [
     "collection_record_shape",
     "auth_contract_scopes",
     "materialize_module_actions",
+    "module_write_implementation_ownership",
     "materialize_module_schemas",
     "materialize_module_write_implementations",
     "materialize_task_module_schemas",

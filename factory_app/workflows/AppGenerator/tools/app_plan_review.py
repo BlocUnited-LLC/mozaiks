@@ -1372,8 +1372,10 @@ def _restate_handler_split(plan: dict[str, Any], context: Any) -> list[str]:
                 ),
             }[source]
             canonical = (
-                f" Code adds the canonical create/update/delete and list/get methods to {handler_class} "
-                "and their service.py and repo.py functions; author them in neither class."
+                f" Code adds constructed CRUD and read methods to {handler_class} "
+                "and their service.py and repo.py functions. The accepted write-ownership inventory "
+                "identifies code-owned writes to omit and protected app-wide writes to implement "
+                "with their declared request contracts; implement authored dispatch in the base class."
                 if collections else ""
             )
             note = (

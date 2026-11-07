@@ -333,7 +333,8 @@ owner fields, timestamps and scope metadata are never client input, and
 structured (array/object) fields reach records only through defaults, hooks or
 custom mutations. Per-user and per-workspace canonical actions require login and
 owner filtering, without a role permission. A permission on a canonical action
-survives only when `config/auth.yaml` `frontend.default_scopes` declares it;
+survives only when `config/auth.yaml` `frontend.default_scopes` or an approved
+`authorization.roles` grant declares it;
 other permissions are removed with a logged normalization on owner-scoped
 collections (and their unreferenced declarations dropped) and rejected on
 app_wide collections. An authored `api_surface` of `internal` or
@@ -345,9 +346,25 @@ canonical writes or reads: ConfigMiddlewareAgent declares each of them
 explicitly with its access policy and ServiceAgent implements them. Ordinary
 canonical implementations remain code-owned.
 
+For a role-managed app-wide collection, a complete explicit create/update/delete
+trio may narrow the writable input fields while keeping their canonical types,
+enums and requiredness. Update/delete must retain the required record id. The
+compiler preserves that authored contract and its implementations, then attaches
+the exact approved role permission to each action. It rejects unknown or widened
+fields, incomplete narrowed declarations and anonymous write exposure. Omitted
+writes and requests equivalent to ordinary CRUD remain code-owned, including
+after repeated closure and serialization. One ownership decision also controls
+event materialization and the ServiceAgent instruction inventory.
+
+Required stored fields are distinct from client input. When a protected
+submission excludes requester identity or initial state, its authored service
+derives and validates those values before persistence. The compiler never infers
+trusted identity from a field name, changes the approved tenancy, or weakens
+runtime input validation to make a form submit.
+
 After this bounded CRUD normalization, every remaining action permission on a
 `generated_module` or model-owned module contract must resolve against the admitted `config/auth.yaml`
-`frontend.default_scopes`. Before that file is materialized, an authenticated
+`frontend.default_scopes` or code-compiled approved role grants. Before that file is materialized, an authenticated
 plan or owner-scoped data contract uses the scopes in the canonical
 `webapp_builder` auth template. Module permission catalogues and plan roles are
 not grant mappings, and a candidate cannot approve its own restriction by
