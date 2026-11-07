@@ -120,8 +120,10 @@ def test_normalization_compiles_nested_sections_and_actions():
     assert "href: /api/modules/habits_registry/create_habit" in out
 
 
-def test_assembly_never_retargets_a_compiled_url():
+def test_assembly_rejects_unknown_compiled_url_instead_of_retargeting_it():
     page = _page()
     page["sections"][0]["config"] = {"api_endpoint": "/api/modules/habits/list_habits"}
     content = yaml.safe_dump(page)
-    assert normalize_planned_page_content(content, path="ui/pages/dashboard.yaml", modules=_index()) == content
+    with pytest.raises(ValueError, match="unknown module"):
+        normalize_planned_page_content(content, path="ui/pages/dashboard.yaml", modules=_index())
+    assert yaml.safe_load(content)["sections"][0]["config"]["api_endpoint"] == "/api/modules/habits/list_habits"

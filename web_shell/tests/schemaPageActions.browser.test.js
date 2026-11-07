@@ -8,6 +8,7 @@ import { build } from 'esbuild';
 import { chromium } from '@playwright/test';
 import postcss from 'postcss';
 import tailwindcss from '@tailwindcss/postcss';
+import { registerAdminReadTests } from './fixtures/adminReadBrowser.js';
 
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const root = path.dirname(shell);
@@ -18,6 +19,8 @@ const styles = postcss([tailwindcss()]).process(
     + `\n@source "${path.join(root, 'chat-ui/src/ui').replaceAll('\\', '/')}";`,
   { from: path.join(shell, 'styles.css') },
 ).then(async result => result.css + '\n' + await fs.readFile(path.join(root, 'chat-ui/src/components/layout/header-styles.css'), 'utf8'));
+
+registerAdminReadTests(test, { root, shell, styles });
 
 for (const tablePrimitive of ['ResourceTable', 'DataTable']) {
 test(`${tablePrimitive} CRUD carries selection, authenticates and keeps failed dialogs open`, async (t) => {

@@ -15,12 +15,32 @@ it from, so the fix has to change the content itself.
 
 from __future__ import annotations
 
+import pytest
 import yaml
 
+from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    module_action_index,
     normalize_planned_page_content,
     promote_page_table_primitives,
 )
+
+
+@pytest.fixture
+def module_inventory():
+    manifest = {
+        "schema_version": "mozaiks.module.v1",
+        "module": {"id": "habits_module", "handler": "backend.handler:HabitsModule"},
+        "actions": [{
+            "id": "list_habits", "description": "List habits", "api_surface": "public_readonly",
+            "handler_method": "list_habits", "input_schema": {"type": "object"},
+            "output_schema": {"type": "array", "items": {
+                "type": "object", "properties": {"name": {"type": "string"}},
+            }},
+        }],
+    }
+    ModuleDefinition.model_validate(manifest)
+    return module_action_index({"modules/habits_module/module.yaml": yaml.safe_dump(manifest)})
 
 
 def _page(**config) -> dict:
@@ -42,10 +62,10 @@ def _page(**config) -> dict:
     }
 
 
-def test_content_is_rewritten_not_just_accepted() -> None:
+def test_content_is_rewritten_not_just_accepted(module_inventory) -> None:
     content = yaml.safe_dump(_page(default_filter="active", filters=[], default_sort="name"))
 
-    normalized = normalize_planned_page_content(content, path="ui/pages/habits.yaml")
+    normalized = normalize_planned_page_content(content, path="ui/pages/habits.yaml", modules=module_inventory)
 
     document = yaml.safe_load(normalized)
     assert document["sections"][1]["primitive"] == "ResourceTable"
@@ -53,10 +73,18 @@ def test_content_is_rewritten_not_just_accepted() -> None:
     assert document["sections"][1]["config"]["default_filter"] == "active"
 
 
-def test_a_page_needing_no_change_is_returned_untouched() -> None:
+def test_a_page_needing_no_change_is_returned_untouched(module_inventory) -> None:
     content = yaml.safe_dump(_page())
 
-    assert normalize_planned_page_content(content, path="ui/pages/habits.yaml") == content
+    assert normalize_planned_page_content(content, path="ui/pages/habits.yaml", modules=module_inventory) == content
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"modules": None}, {"modules": {}}],
+                         ids=["omitted", "none", "empty"])
+def test_module_bound_page_requires_declared_inventory(kwargs) -> None:
+    content = yaml.safe_dump(_page())
+    with pytest.raises(ValueError, match="unknown module"):
+        normalize_planned_page_content(content, path="ui/pages/habits.yaml", **kwargs)
 
 
 def test_nested_sections_are_promoted_too() -> None:
@@ -84,10 +112,10 @@ def test_nested_sections_are_promoted_too() -> None:
     assert document["sections"][0]["config"]["children"][0]["primitive"] == "ResourceTable"
 
 
-def test_server_pagination_is_left_for_the_validator() -> None:
+def test_server_pagination_is_left_for_the_validator(module_inventory) -> None:
     content = yaml.safe_dump(_page(default_sort="name", pagination_mode="server"))
 
-    normalized = normalize_planned_page_content(content, path="ui/pages/habits.yaml")
+    normalized = normalize_planned_page_content(content, path="ui/pages/habits.yaml", modules=module_inventory)
 
     assert yaml.safe_load(normalized)["sections"][1]["primitive"] == "DataTable"
 

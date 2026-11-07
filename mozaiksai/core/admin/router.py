@@ -623,13 +623,36 @@ def _resolve_admin_app_root() -> Path:
     return resolve_admin_app_root_path()
 
 
+def _has_admin_module_data_binding(value: Any) -> bool:
+    """Opt in automatic admin data, including malformed paths needing rejection."""
+    if isinstance(value, dict):
+        endpoint = value.get("api_endpoint")
+        if isinstance(endpoint, str):
+            path = endpoint.lstrip().split("?", 1)[0].split("#", 1)[0]
+            if path == "/api/admin/modules" or path.startswith("/api/admin/modules/"):
+                return True
+        return any(_has_admin_module_data_binding(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_has_admin_module_data_binding(item) for item in value)
+    return False
+
+
 def _load_module_admin_panels(app_root: Path) -> list[dict]:
     """Discover module panels from modules/{module}/contracts/admin.yaml."""
     from mozaiksai.core.runtime.app.module_loader import ModuleAdminManifest
+    from mozaiksai.core.runtime.app.page_schema import (
+        PageSchemaValidationError,
+        build_page_action_contracts_from_module_contracts,
+        build_page_action_index_from_module_contracts,
+        validate_page_schema,
+    )
 
     modules_dir = app_root / "modules"
     if not modules_dir.is_dir():
         return []
+
+    action_index = build_page_action_index_from_module_contracts(app_root)
+    action_contracts = build_page_action_contracts_from_module_contracts(app_root)
 
     panels: list[dict] = []
     for module_dir in sorted(modules_dir.iterdir(), key=lambda d: d.name.lower()):
@@ -645,6 +668,24 @@ def _load_module_admin_panels(app_root: Path) -> list[dict]:
             logger.warning("[admin] failed to read %s: %s", admin_path, exc)
             continue
         for manifest_panel in manifest.panels:
+            if manifest_panel.renderer == "schema" and _has_admin_module_data_binding(manifest_panel.sections):
+                try:
+                    validate_page_schema(
+                        {
+                            "schema_version": "mozaiks.app_page.v1",
+                            "name": manifest_panel.id,
+                            "route": "/admin",
+                            "title": manifest_panel.label,
+                            "page_type": "record_list",
+                            "layout": manifest_panel.layout,
+                            "sections": manifest_panel.sections,
+                        },
+                        action_index=action_index,
+                        action_contracts=action_contracts,
+                    )
+                except PageSchemaValidationError as exc:
+                    logger.warning("[admin] invalid schema panel in %s: %s", admin_path, exc)
+                    raise HTTPException(status_code=500, detail="Invalid admin panel configuration") from exc
             panel = manifest_panel.model_dump(mode="python")
             panel_id = panel.get("id")
             if not isinstance(panel_id, str) or not panel_id.strip():

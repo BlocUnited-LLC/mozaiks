@@ -7,9 +7,9 @@ import pytest
 import yaml
 
 from factory_app.workflows.AppGenerator.tools.validate_wiring import validate_wiring
+from mozaiksai.core.runtime.app.page_data_bindings import page_data_binding_errors
 from mozaiksai.core.runtime.app.page_schema import validate_page_schema
 from mozaiksai.core.usage.ledger import summarize_usage_events
-from mozaiksai.core.workflow.generator_support.page_data_bindings import page_data_binding_errors
 
 
 def _contracts():

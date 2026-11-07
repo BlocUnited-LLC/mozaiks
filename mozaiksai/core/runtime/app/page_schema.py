@@ -23,6 +23,8 @@ from pydantic_core import PydanticCustomError
 
 from mozaiksai.core.runtime.app.asset_manifest import asset_manifest_index, validate_asset_id
 from mozaiksai.core.runtime.app.module_loader import LoadedModule
+from mozaiksai.core.runtime.app.page_data_bindings import page_data_binding_errors
+from mozaiksai.core.runtime.composition.schema_validation import validate_json_schema
 from mozaiksai.core.workflow.ui_primitives import get_page_ui_primitive_names
 
 PAGE_SCHEMA_VERSION = "mozaiks.app_page.v1"
@@ -45,6 +47,8 @@ VALID_PAGE_TYPES = frozenset(
 
 _API_PATH_RE = re.compile(r"^/api/[A-Za-z0-9_./-]+$")
 _MODULE_API_RE = re.compile(r"^/api/modules/(?P<module>[A-Za-z0-9_-]+)/(?P<action>[A-Za-z0-9_-]+)$")
+_ADMIN_ACTION_API_RE = re.compile(r"^/api/admin/modules/(?P<module>[A-Za-z0-9_-]+)/(?P<action>[A-Za-z0-9_-]+)$")
+_ADMIN_READ_API_RE = re.compile(r"^/api/admin/modules/(?P<module>[A-Za-z0-9_-]+)/(?P<action>[A-Za-z0-9_-]+)/read$")
 _SAFE_ROUTE_RE = re.compile(r"^/[A-Za-z0-9_./:{}?-]*$")
 
 
@@ -215,6 +219,8 @@ class DataBackedConfig(PageContractModel):
     def _api_endpoint_is_safe(cls, value: str | None) -> str | None:
         if value is not None:
             _validate_api_endpoint(value)
+            if (value == "/api/admin/modules" or value.startswith("/api/admin/modules/")) and not _ADMIN_READ_API_RE.fullmatch(value):
+                raise PageContractRule("automatic admin data requires the canonical module/action/read endpoint")
         return value
 
 
@@ -699,6 +705,43 @@ def build_page_action_index(
     }
 
 
+def admin_read_action_eligible(action: Mapping[str, Any]) -> bool:
+    """Whether a declared action can back the parameterless admin-read operation."""
+    return (
+        action.get("api_surface") == "admin_internal"
+        and action.get("read_only") is True
+        and not action.get("emits")
+        and validate_json_schema({}, action.get("input_schema", {})) is None
+    )
+
+
+def build_page_action_contracts(modules: Iterable[LoadedModule]) -> dict[str, dict[str, Any]]:
+    return {
+        f"{module.name}/{action.id}": action.model_dump()
+        for module in modules for action in module.definition.actions
+    }
+
+
+def build_page_action_contracts_from_module_contracts(base_path: Path) -> dict[str, dict[str, Any]]:
+    """Read contract metadata without importing handlers while serving page config."""
+    contracts: dict[str, dict[str, Any]] = {}
+    for path in sorted((base_path / "modules").glob("*/module.yaml")):
+        try:
+            document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, yaml.YAMLError):
+            continue
+        if not isinstance(document, dict):
+            continue
+        module = document.get("module")
+        module_id = module.get("id") if isinstance(module, dict) else None
+        if not isinstance(module_id, str) or not module_id:
+            continue
+        for action in document.get("actions") or []:
+            if isinstance(action, dict) and isinstance(action.get("id"), str):
+                contracts[f"{module_id}/{action['id']}"] = action
+    return contracts
+
+
 def build_page_action_index_from_module_contracts(
     base_path: Path, *, ask_context_only: bool = False,
 ) -> dict[str, frozenset[str]]:
@@ -740,8 +783,17 @@ def load_and_validate_page_schema(
     expected_name: str | None = None,
     action_index: Mapping[str, frozenset[str]] | None = None,
     ask_context_index: Mapping[str, frozenset[str]] | None = None,
+    action_contracts: Mapping[str, Mapping[str, Any]] | None = None,
     asset_ids: Collection[str] | None = None,
 ) -> AppPageSchema:
+    if action_contracts is None and action_index is not None:
+        # Match only the two page layouts discovered by this runtime. Do not
+        # search arbitrary ancestors for an unrelated app's module authority.
+        pages_dir = page_path.parent
+        if page_path.name in {"page.yaml", "page.yml"} and pages_dir.name != "pages":
+            pages_dir = pages_dir.parent
+        if pages_dir.name == "pages" and pages_dir.parent.name == "ui":
+            action_contracts = build_page_action_contracts_from_module_contracts(pages_dir.parent.parent)
     try:
         raw = yaml.safe_load(page_path.read_text(encoding="utf-8"))
     except Exception as exc:
@@ -766,7 +818,7 @@ def load_and_validate_page_schema(
         )
     return validate_page_schema(
         raw, expected_name=expected_name, action_index=action_index, ask_context_index=ask_context_index,
-        asset_ids=asset_ids,
+        asset_ids=asset_ids, action_contracts=action_contracts,
     )
 
 
@@ -776,6 +828,7 @@ def validate_page_schema(
     expected_name: str | None = None,
     action_index: Mapping[str, frozenset[str]] | None = None,
     ask_context_index: Mapping[str, frozenset[str]] | None = None,
+    action_contracts: Mapping[str, Mapping[str, Any]] | None = None,
     asset_ids: Collection[str] | None = None,
 ) -> AppPageSchema:
     try:
@@ -802,7 +855,16 @@ def validate_page_schema(
                 message="Page schema name must match the requested page.",
             )
         )
-    diagnostics.extend(_validate_action_closure(page, action_index, ask_context_index))
+    diagnostics.extend(_validate_action_closure(page, action_index, ask_context_index, action_contracts))
+    if action_contracts is not None:
+        admin_contracts = {
+            key: contract for key, contract in action_contracts.items()
+            if contract.get("api_surface") == "admin_internal"
+        }
+        diagnostics.extend(
+            PageSchemaDiagnostic(code="page_schema.invalid_data_binding", location="$.sections", message=message)
+            for message in page_data_binding_errors(page.model_dump(mode="json", exclude_none=True), admin_contracts)
+        )
     diagnostics.extend(_validate_interaction_contracts(page))
     if asset_ids is not None:
         diagnostics.extend(_validate_asset_references(page.model_dump(), asset_ids))
@@ -909,7 +971,10 @@ def load_app_page_schemas(
     *,
     action_index: Mapping[str, frozenset[str]] | None = None,
     ask_context_index: Mapping[str, frozenset[str]] | None = None,
+    action_contracts: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, AppPageSchema]:
+    if action_contracts is None:
+        action_contracts = build_page_action_contracts_from_module_contracts(base_path)
     manifest_path = base_path / "ui/route_manifest.json"
     if action_index is not None and manifest_path.is_file():
         try:
@@ -942,7 +1007,7 @@ def load_app_page_schemas(
     pages = {
         name: load_and_validate_page_schema(
             path, expected_name=name, action_index=action_index, ask_context_index=ask_context_index,
-            asset_ids=assets.keys(),
+            asset_ids=assets.keys(), action_contracts=action_contracts,
         )
         for name, path in discover_page_schema_paths(base_path).items()
     }
@@ -1001,9 +1066,16 @@ def _validate_action_closure(
     page: AppPageSchema,
     action_index: Mapping[str, frozenset[str]] | None,
     ask_context_index: Mapping[str, frozenset[str]] | None = None,
+    action_contracts: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[PageSchemaDiagnostic]:
-    if action_index is None:
+    if action_index is None and action_contracts is None:
         return []
+    if action_index is None:
+        derived_index: dict[str, frozenset[str]] = {}
+        for key in action_contracts or {}:
+            module, _, action = key.partition("/")
+            derived_index[module] = derived_index.get(module, frozenset()) | {action}
+        action_index = derived_index
     diagnostics: list[PageSchemaDiagnostic] = []
     route_auth = page.meta.routeAuth if page.meta is not None else None
     if route_auth is not None:
@@ -1012,8 +1084,25 @@ def _validate_action_closure(
         diagnostics.extend(validate_ask_context_references(
             page.meta.ask_context or [], action_index=action_index, ask_context_index=ask_context_index,
         ))
-    for location, endpoint in _walk_api_endpoints(page.model_dump(mode="json", exclude_none=True)):
-        match = _MODULE_API_RE.fullmatch(endpoint)
+    diagnostics.extend(validate_page_endpoint_bindings(
+        page.model_dump(mode="json", exclude_none=True), action_index=action_index, action_contracts=action_contracts,
+    ))
+    return diagnostics
+
+
+def validate_page_endpoint_bindings(
+    document: Mapping[str, Any],
+    *,
+    action_index: Mapping[str, frozenset[str]],
+    action_contracts: Mapping[str, Mapping[str, Any]] | None,
+) -> list[PageSchemaDiagnostic]:
+    """Close data and explicit action endpoints using the same declared authority."""
+    diagnostics: list[PageSchemaDiagnostic] = []
+    for location, endpoint, action_type in _walk_api_endpoints(document):
+        public_match = _MODULE_API_RE.fullmatch(endpoint)
+        admin_read_match = _ADMIN_READ_API_RE.fullmatch(endpoint)
+        admin_action_match = _ADMIN_ACTION_API_RE.fullmatch(endpoint)
+        match = public_match or admin_read_match or admin_action_match
         if match:
             diagnostics.extend(
                 _validate_module_action(
@@ -1023,6 +1112,30 @@ def _validate_action_closure(
                     action_index,
                 )
             )
+            contract = (action_contracts or {}).get(f"{match.group('module')}/{match.group('action')}")
+            automatic = location.endswith(".api_endpoint")
+            eligible = True
+            if admin_read_match:
+                eligible = automatic and contract is not None and admin_read_action_eligible(contract)
+            elif admin_action_match:
+                eligible = (
+                    not automatic and action_type in ("submit", "delete")
+                    and contract is not None and contract.get("api_surface") == "admin_internal"
+                )
+            elif contract is not None:
+                # Wiring also checks raw generated YAML before ModuleLoader has
+                # validated its types. Unknown values must produce diagnostics.
+                eligible = contract.get("api_surface") in (None, "public", "public_readonly")
+            if not eligible:
+                diagnostics.append(PageSchemaDiagnostic(
+                    code="page_schema.ineligible_action_binding", location=location,
+                    message="Page action exposure or automatic read eligibility does not match the declared endpoint.",
+                ))
+        elif endpoint == "/api/admin/modules" or endpoint.startswith("/api/admin/modules/"):
+            diagnostics.append(PageSchemaDiagnostic(
+                code="page_schema.invalid_admin_endpoint", location=location,
+                message="Admin module endpoints must use a declared action or its admitted read operation.",
+            ))
     return diagnostics
 
 
@@ -1081,12 +1194,12 @@ def _validate_module_action(
     return []
 
 
-def _walk_api_endpoints(value: Any, location: str = "$") -> Iterable[tuple[str, str]]:
+def _walk_api_endpoints(value: Any, location: str = "$") -> Iterable[tuple[str, str, Any]]:
     if isinstance(value, Mapping):
         for key, item in value.items():
             child_location = f"{location}.{key}"
             if key in {"api_endpoint", "href"} and isinstance(item, str) and item.startswith("/api/"):
-                yield child_location, item
+                yield child_location, item, value.get("action_type")
             yield from _walk_api_endpoints(item, child_location)
     elif isinstance(value, list):
         for index, item in enumerate(value):
@@ -1249,6 +1362,9 @@ __all__ = [
     "PageSchemaValidationError",
     "VALID_PAGE_TYPES",
     "build_page_action_index",
+    "admin_read_action_eligible",
+    "build_page_action_contracts",
+    "build_page_action_contracts_from_module_contracts",
     "build_page_action_index_from_module_contracts",
     "validate_ask_context_references",
     "discover_page_schema_paths",
@@ -1256,4 +1372,5 @@ __all__ = [
     "load_app_page_schemas",
     "safe_page_schema_error_detail",
     "validate_page_schema",
+    "validate_page_endpoint_bindings",
 ]

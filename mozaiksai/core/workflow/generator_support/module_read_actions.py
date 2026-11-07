@@ -103,6 +103,7 @@ def _read_action(collection: dict[str, Any], operation: str) -> dict[str, Any]:
         "emits": [],
         "entitlement_gate": None,
         "ask_context_safe": False,
+        "read_only": True,
     }
 
 

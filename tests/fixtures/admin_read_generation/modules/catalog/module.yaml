@@ -1,0 +1,60 @@
+schema_version: mozaiks.module.v1
+module:
+  id: catalog
+  display_name: Catalog
+  version: 1.0.0
+  description: Neutral admin-read acceptance fixture
+  handler: backend.handler:CatalogModule
+permissions:
+  - id: catalog.read
+    description: Inspect catalog
+  - id: catalog.write
+    description: Change catalog
+actions:
+  - id: list_inventory
+    description: Read catalog inventory
+    handler_method: list_inventory
+    api_surface: admin_internal
+    read_only: true
+    permissions: [catalog.read]
+    input_schema:
+      type: object
+      additionalProperties: false
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, status]
+            properties:
+              name: {type: string}
+              status: {type: string}
+  - id: add_entry
+    description: Explicitly add an entry
+    handler_method: add_entry
+    api_surface: admin_internal
+    permissions: [catalog.write]
+    input_schema:
+      type: object
+      additionalProperties: false
+    output_schema:
+      type: object
+      properties:
+        created: {type: boolean}
+  - id: delete_entry
+    description: Explicitly delete an entry
+    handler_method: delete_entry
+    api_surface: admin_internal
+    permissions: [catalog.write]
+    input_schema:
+      type: object
+      additionalProperties: false
+    output_schema:
+      type: object
+      properties:
+        deleted: {type: boolean}

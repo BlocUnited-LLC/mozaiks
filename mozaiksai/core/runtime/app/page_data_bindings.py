@@ -1,8 +1,9 @@
-"""Close generated page reads against the declared module action response."""
+"""Close page reads against their declared module action response."""
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import re
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 
@@ -35,8 +36,12 @@ def schema_field_paths(schema: Any, prefix: str = "") -> list[str]:
 
 def contract_key_for_endpoint(endpoint: Any) -> str | None:
     """Return ``module/action`` for a compiled module endpoint, else None."""
-    if isinstance(endpoint, str) and endpoint.startswith("/api/modules/"):
-        return endpoint.removeprefix("/api/modules/")
+    if isinstance(endpoint, str):
+        if endpoint.startswith("/api/modules/"):
+            return endpoint.removeprefix("/api/modules/")
+        match = re.fullmatch(r"/api/admin/modules/([A-Za-z0-9_-]+/[A-Za-z0-9_-]+)/read", endpoint)
+        if match:
+            return match[1]
     return None
 
 
@@ -62,6 +67,9 @@ def iter_data_bound_sections(document: Any) -> Iterator[tuple[dict[str, Any], st
 
     if isinstance(document, dict):
         yield from visit(document.get("sections"), str(document.get("name") or "page"), None)
+        for panel in document.get("panels") or []:
+            if isinstance(panel, dict):
+                yield from visit(panel.get("sections"), f"panel/{panel.get('id') or '<no-id>'}", None)
 
 
 def section_metrics(section: dict[str, Any]) -> list[tuple[dict[str, Any], str]]:
@@ -81,7 +89,7 @@ def section_metrics(section: dict[str, Any]) -> list[tuple[dict[str, Any], str]]
     return []
 
 
-def page_data_binding_errors(document: Any, contracts: dict[str, dict[str, Any]]) -> list[str]:
+def page_data_binding_errors(document: Any, contracts: Mapping[str, Mapping[str, Any]]) -> list[str]:
     """Validate compiled Metric/SummaryStrip and table fields, including inherited data."""
     failures: list[str] = []
 

@@ -39,10 +39,10 @@ from factory_app.workflows.AppGenerator.tools.module_entitlement_gates import (
 )
 from factory_app.workflows.AppGenerator.tools.validate_wiring import validate_wiring
 from mozaiksai.core.runtime.app.loader import AppLoader
+from mozaiksai.core.runtime.app.page_data_bindings import schema_at_path
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
-from mozaiksai.core.workflow.generator_support.page_data_bindings import schema_at_path
 from scripts.appgenerator_fixture_replay import execute_file_replay
 
 DEFAULT_APP_ID = "subscription-reporting-live-smoke"

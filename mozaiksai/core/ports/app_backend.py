@@ -20,11 +20,16 @@ from typing import Any, Protocol, runtime_checkable
 
 @dataclass
 class BackendResponse:
-    """Result of a generic backend call."""
+    """Result of a generic backend call.
+
+    ``data`` may be any decoded JSON value: object, array, scalar or null.
+    ``None`` also represents an empty response or absent data on failure.
+    Callers validate the shape required by their own backend contract.
+    """
 
     success: bool
     status_code: int = 0
-    data: dict[str, Any] | None = None
+    data: Any = None
     error: str | None = None
 
 

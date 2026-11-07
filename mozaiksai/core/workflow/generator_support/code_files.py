@@ -517,8 +517,8 @@ def _materialize_module_contract_file_map(payload: dict[str, Any]) -> dict[str, 
                         if isinstance(hook.get(schema_key), dict):
                             hook[schema_key] = _materialize_schema_contract(hook[schema_key])
             elif key == "admin_yaml" and isinstance(value, dict):
-                # Admin panels share generated page sections and bind only to
-                # actions in the owning module's closed contract.
+                # Admin panels share the page compiler, including admitted reads
+                # and explicit mutations in the owning module's closed contract.
                 from .page_plan_utils import compile_page_data_sources, module_action_index
 
                 compile_page_data_sources(value, module_action_index(file_map), reject_api_endpoints=True)

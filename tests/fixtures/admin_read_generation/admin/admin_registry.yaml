@@ -1,0 +1,6 @@
+schema_version: mozaiks.admin.registry.v1
+pages:
+  - id: catalog_inventory
+    label: Catalog inventory
+    path: /admin/catalog
+    scope: workspace

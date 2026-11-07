@@ -18,9 +18,17 @@ import { authFetch } from '../../adapters/api.js';
 
 const DEFAULT_HEADERS = { 'Content-Type': 'application/json' };
 const SEARCH_DEBOUNCE_MS = 250;
+const ADMIN_READ_ENDPOINT = /^\/api\/admin\/modules\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/read$/;
 
 async function fetchEndpoint(endpoint, signal) {
-  const res = await authFetch(endpoint, { headers: DEFAULT_HEADERS, signal });
+  // Only the explicitly admitted read route may POST on mount or refresh.
+  // Ordinary module endpoints retain GET; actions still require user intent.
+  const read = ADMIN_READ_ENDPOINT.test(endpoint);
+  const res = await authFetch(endpoint, {
+    headers: DEFAULT_HEADERS,
+    signal,
+    ...(read ? { method: 'POST', body: '{}' } : {}),
+  });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
 }

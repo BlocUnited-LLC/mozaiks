@@ -51,15 +51,15 @@ The admin system has four distinct layers. Keep them separate:
 
 1. `app/app.json` `admins` is the admin bootstrap/access allowlist for the app.
   It matches verified emails only.
-2. The built-in admin section registry is framework-owned and defines the
-  semantic section ids, default labels, route paths, and default ordering for
-  the app admin route family.
+2. `app/admin/admin_registry.yaml` declares the app's AdminPortal pages, exact
+  page IDs, labels, paths, scope and ordering. The framework owns the shell
+  and renders these declarations through its existing route pipeline.
 3. `modules/{module}/contracts/admin.yaml` contributes feature-owned panels into those
-  semantic sections.
+  pages through an exact `page` reference.
 4. An optional connected app backend may contribute app-business panels through
   `GET {app_backend_url}/api/admin/config`.
 
-AdminPortal should resolve section rendering from those contracts. Studio
+AdminPortal resolves page and panel rendering from those contracts. Studio
 workspace/app navigation is a separate `WorkspaceLayout` concern and must not
 be mutated by module admin panels.
 
@@ -97,31 +97,32 @@ Generated app hosts may still mount framework-owned admin panels through
 `AdminPortal`, but generators must not create a separate app-admin page, route
 family, page schema, or admin React shell for Studio.
 
-## Built-In Section Registry
+## Page Registry and Identity
 
-The built-in admin sections are framework-owned. They provide the semantic
-taxonomy for:
+`admin/admin_registry.yaml` uses `mozaiks.admin.registry.v1`. Its enabled pages
+drive AdminPortal navigation and page selection. The shell has built-in content
+for `overview`, `access`, `usage`, `operations` and `settings`; additional
+registry pages render their module panels through the same shell.
 
-- internal admin shell route injection
-- sidebar and drawer navigation
-- section-level rendering inside `AdminPortal`
-- placement of runtime, module, and app-backend panels
-
-The canonical built-in ids are:
-
-```text
-overview | access | usage | operations | settings
+```yaml
+schema_version: mozaiks.admin.registry.v1
+pages:
+  - id: catalog_inventory
+    label: Catalog inventory
+    path: /admin/catalog
+    scope: workspace
 ```
 
-The taxonomy is fixed by the framework today. If a future product genuinely
-needs bounded app-level section overrides, add a new explicit contract rather
-than reintroducing `app/config/admin.json`.
+Page identity is distinct from its URL. A panel referencing `catalog_inventory`
+stays on that page; the loader must not convert it to `catalog-inventory`.
+The runtime projects the registry ID into `route.meta.adminPage`, and
+`AdminPage` uses that value. Existing Studio routes without this metadata keep
+their `/apps/:appId/<page>` selection behavior.
 
 Implementation rule:
 
-- runtime/platform code owns the canonical section metadata
-- frontend admin rendering must derive section routing from that canonical
-  metadata or from a payload resolved from it
+- runtime/platform code loads the canonical page registry
+- frontend admin rendering consumes its exact page identity
 - Studio navigation stays deterministic and product-scoped; admin panels do
   not add, rename, or reorder Studio nav items
 
@@ -135,11 +136,8 @@ admin registries normally omit `surfaces` and are mounted by the platform host.
 
 Feature-owned admin UI lives in `modules/{module}/contracts/admin.yaml`.
 
-Each panel must declare one semantic section:
-
-```text
-overview | access | billing | usage | activity | settings | integrations | support
-```
+Each panel declares `page`, referencing an enabled page in the app registry.
+There is no module-panel `section` taxonomy.
 
 The canonical module admin schema is `mozaiks.admin.v2`.
 
@@ -148,25 +146,26 @@ Example:
 ```yaml
 schema_version: mozaiks.admin.v2
 panels:
-  - id: campaigns.overview
-    label: Campaigns
-    description: Review and manage campaign activity.
-    section: usage
+  - id: catalog.inventory
+    label: Inventory
+    description: Review catalog inventory.
+    page: catalog_inventory
     order: 20
     renderer: schema
     layout: full-width
     sections:
-      - id: campaigns-table
+      - id: catalog-table
         primitive: DataTable
         config:
-          api_endpoint: /api/modules/campaigns/list_campaigns
+          api_endpoint: /api/admin/modules/catalog/list_inventory/read
+          data_key: items
           columns:
             - key: name
-              label: Campaign
+              label: Item
             - key: status
               label: Status
               type: badge
-    permissions: [campaigns.write]
+    permissions: [catalog.read]
 hooks: []
 ```
 
@@ -184,6 +183,97 @@ express the panel cleanly. In that case:
 
 Optional Python support for complex panel data belongs in
 `modules/{module}/backend/admin.py`.
+
+## Authenticated Automatic Reads
+
+`api_surface: admin_internal` describes exposure, not whether an action may
+run automatically. An admin action used by a schema section on mount or refresh
+must explicitly declare `read_only: true` in its canonical `module.yaml`:
+
+```yaml
+actions:
+  - id: list_inventory
+    description: Read catalog inventory
+    handler_method: list_inventory
+    api_surface: admin_internal
+    read_only: true
+    permissions: [catalog.read]
+    input_schema:
+      type: object
+      additionalProperties: false
+    output_schema:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              name: {type: string}
+              status: {type: string}
+```
+
+`read_only` is a strict boolean defaulting to false. It is independent of
+`ask_context_safe`, which serves a different grounding contract. Declaring
+`read_only: true` together with emitted domain events is rejected. This is an
+owner-declared eligibility contract; it does not sandbox arbitrary Python or
+prove that a falsely declared handler cannot perform a write.
+
+The schema renderer uses the existing authenticated HTTP helper to call:
+
+```http
+POST /api/admin/modules/catalog/list_inventory/read
+Content-Type: application/json
+
+{}
+```
+
+The operation lives in the existing admin module router. It requires the
+existing operator and admin-surface checks, registered literal `read_only=True`
+metadata, and an empty JSON object. Parameters, context overrides and query
+arguments are not part of this first read contract. It then uses the same
+module executor with its normal identity, permission, entitlement and audit
+checks. A parameterless writer is still ineligible; action-name prefixes do
+not grant read admission.
+
+AppGenerator authors the existing typed `config.data_source` pair:
+
+```yaml
+data_source:
+  module_id: catalog
+  action_id: list_inventory
+```
+
+Materialization resolves that reference to the `/read` endpoint only when the
+action is admin-internal, explicitly read-only and its input schema accepts
+`{}`. Data keys must resolve against the declared output schema. Unknown
+references, required input parameters and uncontracted response keys fail
+validation. Both typed module admin output and authored admin YAML use the
+same rules. Runtime admin configuration checks a full module panel against the
+active module contracts when it declares automatic `api_endpoint` data in the
+`/api/admin/modules` namespace, including malformed read paths. Existing public
+data and explicit-action-only panels retain their existing serving contract;
+generated bundles and standalone page schemas remain strictly validated.
+
+Automatic reads and explicit actions remain distinct:
+
+| Binding | HTTP behavior |
+| --- | --- |
+| Public module data binding | Existing GET `/api/modules/{module}/{action}` |
+| Admitted admin data binding | POST `/api/admin/modules/{module}/{action}/read`, fixed `{}` |
+| Explicit admin submit/delete button | Existing POST `/api/admin/modules/{module}/{action}` with its declared payload |
+
+The renderer recognizes only the exact canonical admin read path for automatic
+POST. There is no page-configurable HTTP method, arbitrary header map or
+authority payload. Existing server pagination remains a public GET contract;
+this slice does not add privileged query parameters or admin pagination.
+
+Admin config and panel data requests use the shared authenticated fetch helper.
+Refresh, cancellation and stale-response handling retain the section lifecycle;
+a failed read renders an error and retry state rather than a successful empty
+observation. Client role guards remain presentation checks; server enforcement
+is authoritative.
 
 ## Custom Admin UI vs Custom Admin Routes
 
@@ -210,8 +300,8 @@ be a new contract with explicit ownership, registration, and validation rules.
 "Fully componentized" in the admin system means:
 
 - the shell is presentation-first and consumes a resolved navigation model
-- built-in section ids and routes come from one canonical registry
-- module and app-backend panels plug into those sections through explicit
+- page IDs and paths come from the app's canonical admin registry
+- module and app-backend panels plug into the host shell through explicit
   contracts
 - custom React is a bounded extension point declared by contract, not an ad hoc
   frontend escape hatch
@@ -253,13 +343,14 @@ the host-owned generated-app admin shell behavior described here.
 
 - Populate `app/app.json` `admins` for admin bootstrap access.
 - Generate `modules/{module}/contracts/admin.yaml` only when the module needs feature-owned admin panels.
-- Every generated admin panel must set `section` to one of the semantic admin
-  sections listed above.
+- Every generated admin panel must set `page` to an enabled registry page ID.
 - Prefer `renderer: schema` with `layout + sections[]`.
 - Use `renderer: custom_component` only when the shipped primitive system
   cannot express the panel cleanly.
-- Mark admin-only module actions in `module.yaml.actions[]` with admin
-  permissions.
+- Mark admin-only module actions in `module.yaml.actions[]` with
+  `api_surface: admin_internal` and their required permissions. Add strict
+  `read_only: true` only for actions suitable for automatic reads; retain
+  explicit controls for mutations.
 - Do not generate admin page schemas, `/app-admin`, standalone admin servers,
   frontend admin shells, or ad hoc admin route families.
 

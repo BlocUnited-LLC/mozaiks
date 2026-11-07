@@ -15,7 +15,18 @@ from mozaiksai.core.runtime.app.auth_contract import (
     app_auth_route_entries,
     validate_app_auth_contract,
 )
-from mozaiksai.core.runtime.app.page_schema import PageSchemaValidationError, validate_page_schema
+from mozaiksai.core.runtime.app.page_data_bindings import (
+    contract_key_for_endpoint,
+    page_data_binding_errors,
+    schema_at_path,
+    schema_field_paths,
+)
+from mozaiksai.core.runtime.app.page_schema import (
+    PageSchemaValidationError,
+    admin_read_action_eligible,
+    validate_page_endpoint_bindings,
+    validate_page_schema,
+)
 from mozaiksai.core.workflow.context.frozen import detach
 
 from .code_files import (
@@ -28,7 +39,6 @@ from .code_files import (
 from .module_action_inventory import all_module_actions, pack_template_module_contracts
 from .page_action_bindings import generated_workflow_names, page_workflow_binding_errors
 from .page_binding_construction import construct_page_bindings
-from .page_data_bindings import page_data_binding_errors, schema_at_path, schema_field_paths
 
 logger = logging.getLogger(__name__)
 
@@ -553,7 +563,7 @@ def module_action_index(file_map: dict[str, str]) -> ModuleActionIndex:
             str(action.get("id")).strip(): action
             for action in (actions if isinstance(actions, list) else [])
             if isinstance(action, dict) and str(action.get("id") or "").strip()
-            and action.get("api_surface") not in {"internal", "admin_internal"}
+            and action.get("api_surface") != "internal"
         }
     return index
 
@@ -608,9 +618,12 @@ def _materialize_table_response_keys(document: Any, contracts: dict[str, dict[st
         if not isinstance(config, dict):
             continue
         endpoint = config.get("api_endpoint")
-        if not isinstance(endpoint, str) or not endpoint.startswith("/api/modules/"):
+        if not isinstance(endpoint, str):
             continue
-        output = contracts.get(endpoint.removeprefix("/api/modules/"), {}).get("output_schema")
+        key = contract_key_for_endpoint(endpoint)
+        if key is None:
+            continue
+        output = contracts.get(key, {}).get("output_schema")
         properties = output.get("properties") if isinstance(output, dict) else None
         if not isinstance(properties, dict):
             continue
@@ -619,6 +632,8 @@ def _materialize_table_response_keys(document: Any, contracts: dict[str, dict[st
         if arrays != ["items"] or not isinstance(total, dict) or total.get("type") != "integer":
             continue
         if config.get("data_key") != "items":
+            if endpoint.startswith("/api/admin/modules/") and config.get("data_key") is not None:
+                continue  # Invalid authored admin selectors fail closure; never rewrite them.
             config["data_key"] = "items"
             changed += 1
         current_total = schema_at_path(output, config.get("total_key"))
@@ -696,7 +711,22 @@ def compile_page_data_sources(
                 elif endpoint_key in node:
                     reference_errors.append(f"{location}: data_source cannot be combined with {endpoint_key}")
                 else:
-                    node[endpoint_key] = f"/api/modules/{module_id}/{action_id}"
+                    action = modules[module_id][action_id]
+                    surface = action.get("api_surface")
+                    if surface == "internal":
+                        reference_errors.append(f"{location}: internal actions cannot be bound to HTTP pages")
+                    elif surface == "admin_internal":
+                        if not mutation and not admin_read_action_eligible(action):
+                            reference_errors.append(
+                                f"{location}: automatic admin data requires read_only: true and an input schema accepting {{}}"
+                            )
+                        elif not mutation and node.get("pagination_mode") == "server":
+                            reference_errors.append(f"{location}: automatic admin data does not support server pagination")
+                        else:
+                            suffix = "" if mutation else "/read"
+                            node[endpoint_key] = f"/api/admin/modules/{module_id}/{action_id}{suffix}"
+                    else:
+                        node[endpoint_key] = f"/api/modules/{module_id}/{action_id}"
         elif mutation and reject_api_endpoints:
             reference_errors.append(f"{location}: {node['action_type']} actions require data_source")
         for key, child in node.items():
@@ -706,10 +736,19 @@ def compile_page_data_sources(
     contracts = {f"{module_id}/{action_id}": action for module_id, actions in modules.items() for action_id, action in actions.items()}
     normalized = _materialize_table_response_keys(document, contracts)
     constructed = construct_page_bindings(
-        document, contracts, data_contract=data_contract, design_surface_map=design_surface_map,
+        document, {key: action for key, action in contracts.items() if action.get("api_surface") != "admin_internal"},
+        data_contract=data_contract, design_surface_map=design_surface_map,
         workflow_names=workflow_names, page=label,
     )
     errors = page_data_binding_errors(document, contracts)
+    if isinstance(document, dict):
+        errors.extend(
+            f"{item.location}: {item.message}"
+            for item in validate_page_endpoint_bindings(
+                document, action_index={module: frozenset(actions) for module, actions in modules.items()},
+                action_contracts=contracts,
+            )
+        )
     errors.extend(page_workflow_binding_errors(document, workflow_names or set()))
     messages = list(reference_errors)
     if errors:
@@ -802,6 +841,9 @@ def normalize_planned_page_content(
     Materialized page content is written from the same map it is validated
     from, so the correction has to reach the content rather than only the
     validation - otherwise the file on disk keeps the rejected primitive.
+    Module-bound pages require their declared inventory; omitted or empty
+    ``modules`` grants no action references. Use ``normalize_page_structure``
+    when only structural correction is intended.
     """
     try:
         document = yaml.safe_load(content)
@@ -1005,7 +1047,10 @@ def pack_template_page_errors(
     expected_name = PurePosixPath(path).stem
     action_index = {module_id: frozenset(actions) for module_id, actions in modules.items()}
     try:
-        page = validate_page_schema(document, expected_name=expected_name, action_index=action_index)
+        page = validate_page_schema(
+            document, expected_name=expected_name, action_index=action_index,
+            action_contracts={f"{module}/{action}": contract for module, actions in modules.items() for action, contract in actions.items()},
+        )
         if planned is not None and page.route != planned.get("route"):
             errors.append(f"{path}: route {page.route!r} does not match the approved route {planned.get('route')!r}")
     except PageSchemaValidationError as error:

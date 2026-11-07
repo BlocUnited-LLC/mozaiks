@@ -31,7 +31,15 @@ from types import ModuleType
 from typing import Annotated, Any, Literal, cast
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.taxonomy import SemanticCategory, validate_registered_identifier
@@ -43,11 +51,17 @@ CANONICAL_EVENT_PREFIX_LABEL = "domain.*, platform.*, hosted.*, or mozaikspay.*"
 
 ActionTimeoutSeconds = Annotated[int, Field(strict=True, ge=1, le=3600)]
 _ACTION_TIMEOUT_ADAPTER: TypeAdapter[int | None] = TypeAdapter(ActionTimeoutSeconds | None)
+_ACTION_READ_ONLY_ADAPTER: TypeAdapter[bool] = TypeAdapter(StrictBool)
 
 
 def validate_action_timeout(value: Any) -> int | None:
     """Validate a server-declared async action budget at contract boundaries."""
     return _ACTION_TIMEOUT_ADAPTER.validate_python(value)
+
+
+def validate_action_read_only(value: Any) -> bool:
+    """Validate owner-declared read semantics without coercing strings or integers."""
+    return _ACTION_READ_ONLY_ADAPTER.validate_python(value)
 
 
 def _default_notification_channels() -> list[Literal["in_app", "email", "push", "sms"]]:
@@ -198,6 +212,9 @@ class ActionDef(ModuleContractModel):
     description: str
     handler_method: str
     api_surface: Literal["public", "public_readonly", "internal", "admin_internal"] | None = None
+    # Owner-declared read semantics; never grants exposure or authorization.
+    # Automatic admin reads require this opt-in in addition to admin_internal.
+    read_only: StrictBool = False
     timeout_seconds: ActionTimeoutSeconds | None = None
     input_schema: dict[str, Any] = Field(default_factory=dict)
     output_schema: dict[str, Any] = Field(default_factory=dict)
@@ -229,6 +246,12 @@ class ActionDef(ModuleContractModel):
     @classmethod
     def _entitlement_gate(cls, value: Any) -> str | None:
         return _optional_text(value)
+
+    @model_validator(mode="after")
+    def _read_only_has_no_domain_events(self) -> ActionDef:
+        if self.read_only and self.emits:
+            raise ValueError("read_only actions must not declare emitted domain events")
+        return self
 
 
 class ModuleCapability(ModuleContractModel):
@@ -278,6 +301,11 @@ class ModuleDefinition(ModuleContractModel):
     def action_api_surface_map(self) -> dict[str, str | None]:
         """Maps each action id to its declared external API surface metadata."""
         return {action.id: action.api_surface for action in self.actions}
+
+    @property
+    def action_read_only_map(self) -> dict[str, bool]:
+        """Maps each action id to its explicit owner-declared read eligibility."""
+        return {action.id: action.read_only for action in self.actions}
 
     @property
     def action_schemas_map(self) -> dict[str, dict[str, dict[str, Any]]]:
@@ -676,10 +704,9 @@ class ModuleAdminPanel(ModuleContractModel):
     @field_validator("page", mode="before")
     @classmethod
     def _page(cls, value: Any) -> str:
-        text = str(value or "").strip().lower().replace("_", "-")
-        if not text:
+        if not isinstance(value, str) or not value.strip():
             raise ValueError("admin panel 'page' must reference a non-empty page id")
-        return text
+        return value.strip()
 
     @field_validator("description", "component", mode="before")
     @classmethod
@@ -1125,6 +1152,10 @@ class LoadedModule:
     @property
     def action_api_surface_map(self) -> dict[str, str | None]:
         return self.definition.action_api_surface_map
+
+    @property
+    def action_read_only_map(self) -> dict[str, bool]:
+        return self.definition.action_read_only_map
 
     @property
     def action_schemas_map(self) -> dict[str, dict[str, dict[str, Any]]]:

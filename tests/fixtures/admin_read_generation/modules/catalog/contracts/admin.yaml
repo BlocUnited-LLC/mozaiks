@@ -1,0 +1,36 @@
+schema_version: mozaiks.admin.v2
+panels:
+  - id: catalog.inventory
+    label: Inventory
+    page: catalog_inventory
+    renderer: schema
+    layout: full-width
+    permissions: [catalog.read]
+    sections:
+      - id: catalog-table
+        primitive: DataTable
+        config:
+          data_source:
+            module_id: catalog
+            action_id: list_inventory
+          data_key: items
+          columns:
+            - key: name
+              label: Name
+            - key: status
+              label: Status
+          actions:
+            - id: add
+              label: Add entry
+              action_type: submit
+              data_source:
+                module_id: catalog
+                action_id: add_entry
+              payload: {}
+            - id: delete
+              label: Delete entry
+              action_type: delete
+              data_source:
+                module_id: catalog
+                action_id: delete_entry
+              payload: {}

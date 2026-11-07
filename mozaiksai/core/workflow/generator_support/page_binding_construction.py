@@ -39,6 +39,11 @@ import logging
 from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
+from mozaiksai.core.runtime.app.page_data_bindings import (
+    iter_data_bound_sections,
+    schema_at_path,
+    section_metrics,
+)
 from mozaiksai.core.runtime.persistence.intent_loader import (
     DataContractLoadError,
     iter_data_contract_collections,
@@ -53,7 +58,6 @@ from .module_action_inventory import (
     entity_identifier,
 )
 from .page_action_bindings import reachable_page_action_keys
-from .page_data_bindings import iter_data_bound_sections, schema_at_path, section_metrics
 
 logger = logging.getLogger(__name__)
 
