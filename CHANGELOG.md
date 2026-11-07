@@ -356,6 +356,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- ThemeCapture retries recover a missing approved concept from its current
+  artifact and matching completed owner/build session, without copying failed
+  execution state or replacing existing refinement inputs.
 - AG2 virtual files use bounded immutable Mongo chunks with atomic head
   publication, preserving UTF-8 append offsets and restart reads beyond 16 MiB.
   Existing inline history converts on mutation; logical deletion retains chunks

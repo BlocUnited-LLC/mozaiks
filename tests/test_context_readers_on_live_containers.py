@@ -513,6 +513,7 @@ def test_the_theme_collector_reads_the_parent_theme_on_the_production_container(
 ) -> None:
     context = _production_container("ThemeCapture", {
         **_BASE, "workflow_name": "ThemeCapture",
+        "run_build_binding": {**BINDING, "phase": "refinement"},
         "parent_theme_config": {"identity": {"app_name": "Ledger"}, "theme": {"appearance": "light"},
                                 "colors": {"primary": {"main": "#1144aa"}},
                                 "fonts": {"body": {"family": "Inter"}}},

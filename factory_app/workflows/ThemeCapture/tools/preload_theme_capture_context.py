@@ -12,6 +12,11 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from factory_app.workflows._shared.platform.build_target import require_build_binding
+from mozaiksai.core.artifacts.models import ArtifactLifecycleStatus
+from mozaiksai.core.artifacts.store import get_artifact_store
+from mozaiksai.core.artifacts.summary_artifacts import extract_summary_payload
+from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.workflow.context.frozen import detach
 
 logger = logging.getLogger(__name__)
@@ -381,9 +386,71 @@ async def _load_url_theme_snapshot(app_url: str) -> dict[str, Any]:
     }
 
 
+async def _restore_approved_genesis_concept(context_variables: Any) -> None:
+    """Recover only a current concept approved by this build's completed owner run."""
+    if (
+        _ctx_get(context_variables, "value_manifest") is not None
+        or _ctx_get(context_variables, "app_type", "greenfield_app") != "greenfield_app"
+        or not _ctx_get(context_variables, "run_build_binding")
+    ):
+        return
+    binding = require_build_binding(context_variables)
+    if binding.phase != "genesis":
+        return
+    execution_app_id = _ctx_get(context_variables, "app_id")
+    user_id = _ctx_get(context_variables, "user_id")
+    if not all(isinstance(value, str) and value.strip() for value in (execution_app_id, user_id)):
+        raise ValueError("Concept recovery requires the execution app and owner")
+    records = await get_artifact_store().list_build_records(
+        app_id=binding.target_app_id, build_family="concept", build_key="concept",
+        lifecycle_status=ArtifactLifecycleStatus.CURRENT, limit=1,
+    )
+    if not records:
+        return
+    # Never search backward for an older approval if the current proposal is unapproved.
+    record = records[0]
+    summary = extract_summary_payload(record)
+    if (
+        record.app_id != binding.target_app_id
+        or record.build_family != "concept" or record.build_key != "concept"
+        or record.lifecycle_status != ArtifactLifecycleStatus.CURRENT
+        or record.source_workflow != "ValueEngine"
+        or not record.source_chat_id
+        or record.commit_metadata.author_user_id != user_id
+        or not isinstance(summary, dict)
+        or summary.get("app_id") != binding.target_app_id
+        or summary.get("status") != "approved"
+        or not isinstance(summary.get("review_id"), str) or not summary["review_id"].strip()
+    ):
+        raise ValueError("The current concept does not carry an owned approval")
+
+    expected_source = {
+        "_id": record.source_chat_id, "app_id": execution_app_id, "user_id": user_id,
+        "workflow_name": "ValueEngine", "status": 1, "concept_review_outcome": "approved",
+        "run_build_binding": binding.model_dump(mode="json"),
+    }
+    collection = await AG2PersistenceManager()._coll()
+    source = await collection.find_one(
+        {**{key: value for key, value in expected_source.items() if key != "run_build_binding"},
+         **{f"run_build_binding.{key}": value for key, value in expected_source["run_build_binding"].items()}},
+        {key: 1 for key in (*expected_source, "value_manifest")},
+    )
+    if (
+        not isinstance(source, dict)
+        or any(source.get(key) != value for key, value in expected_source.items())
+        or source.get("value_manifest") != summary
+    ):
+        raise ValueError("The approved concept source does not match this owned build")
+    _ctx_set(context_variables, "value_manifest", detach(summary))
+    for key in ("app_name", "concept_overview", "value_proposition", "target_user"):
+        if _ctx_get(context_variables, key) is None:
+            _ctx_set(context_variables, key, summary.get(key))
+
+
 async def collect_prechat_theme_context(context_variables: Any | None = None) -> dict[str, Any]:
     """Populate ThemeCapture context with deterministic evidence before chat."""
     ctx = context_variables or {}
+    await _restore_approved_genesis_concept(ctx)
     app_url = _ctx_get(ctx, "app_url")
     css_snapshot = _ctx_get(ctx, "css_snapshot")
     screenshot_description = _ctx_get(ctx, "screenshot_description")
