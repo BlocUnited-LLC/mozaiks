@@ -1,6 +1,7 @@
 version: 1
 batches:
   - id: app_build_tasks
+    progress_stage: building_app
     trigger_agent: AppPlanAgent
     source:
       kind: context_variable

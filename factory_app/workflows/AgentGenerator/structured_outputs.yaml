@@ -2406,6 +2406,9 @@ models:
           orchestrator.yaml, agents.yaml, transition_graph.yaml, tools.yaml,
           context_variables.yaml, structured_outputs.yaml, middleware.yaml, ui_config.yaml.
           middleware.yaml declares prompt middleware and materialized statusbar middleware.
+          ui_config.yaml may declare progress.stages using the injected strict runtime
+          progress schema. Tools report actual counts through emit_tool_progress_event;
+          do not emit a workflow-local copy of the framework chat status bar.
           Complete Python tool implementations go under tools/<name>.py; unfinished stubs block export.
           UI components go under ui/<WorkflowName>/<Component>.jsx.
   PackBuildCoordinatorOutput:

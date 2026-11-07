@@ -35,6 +35,7 @@ import { useChatStartupEffects } from '../hooks/useChatStartupEffects';
 import { useWorkflowStart } from '../hooks/useWorkflowStart';
 import { isFailedWorkflowSession, useFailedWorkflowRetry } from '../hooks/useFailedWorkflowRetry';
 import { applyChatUsageDelta, emptyChatStatusUsage, resetChatStatusRun } from './chatStatusUsage';
+import { applyChatProgressEvent, beginChatStatusProgressTurn, clearChatStatusProgress, emptyChatStatusProgress, getChatStatusProgress } from './chatStatusProgress';
 import {
   clearStoredArtifactState,
   clearStoredChatCacheSeed,
@@ -83,7 +84,6 @@ import {
 } from '../utils/supportLinks';
 import {
   buildComposerArtifactContext,
-  shouldShowToolProgress,
   upsertInlineToolCallMessage,
 } from '../components/chat/inlineSurfaces';
 
@@ -109,6 +109,7 @@ const ChatPage = () => {
   const wsRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [chatStatusUsage, setChatStatusUsage] = useState(emptyChatStatusUsage);
+  const [chatStatusProgress, setChatStatusProgress] = useState(emptyChatStatusProgress);
   const setMessagesWithLogging = useCallback(updater => setMessages(prev => typeof updater==='function'?updater(prev):updater), []);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [transportType, setTransportType] = useState(null);
@@ -564,14 +565,6 @@ const ChatPage = () => {
           'server_sequence',
           metadata.workflow_name || toolCall.workflow_name || '',
           serverSequence,
-        ].join(':');
-      }
-      if (metadata.event_type === 'tool_progress') {
-        return [
-          'tool_progress',
-          metadata.workflow_name || '',
-          metadata.tool_name || toolCall.tool_name || '',
-          metadata.tool_call_id || toolCall.tool_call_id || '',
         ].join(':');
       }
       const toolCallId = metadata.toolCallId || metadata.tool_call_id || toolCall.tool_call_id || message?.tool_call_id || null;
@@ -2526,7 +2519,7 @@ const ChatPage = () => {
         if (inner.structured_output !== undefined && data.structured_output === undefined) data.structured_output = inner.structured_output;
         if (inner.structured_schema !== undefined && data.structured_schema === undefined) data.structured_schema = inner.structured_schema;
         // UI tool / component hints (input_request etc.) + error messages
-        ['component_type','tool_name','tool_call_id','request_id','progress_percent','prompt','success','interaction_type','activity_type','status','status_message','workflow_name','corr','call_id','payload','message','error_code','ui_visibility','trace_reason','trace_agent','sequence','stream_id','full_content','metadata','role','replay','index','timestamp'].forEach(f => {
+        ['component_type','tool_name','tool_call_id','request_id','prompt','success','interaction_type','activity_type','status','status_message','workflow_name','corr','call_id','payload','message','error_code','ui_visibility','trace_reason','trace_agent','sequence','stream_id','full_content','metadata','role','replay','index','timestamp'].forEach(f => {
           if (inner[f] !== undefined && data[f] === undefined) data[f] = inner[f];
         });
       }
@@ -2552,6 +2545,11 @@ const ChatPage = () => {
     } catch {}
 
     const evt = data.type.startsWith('chat.') ? data.type.slice(5) : data.type;
+    setChatStatusProgress(current => applyChatProgressEvent(current, {
+      mode: conversationModeRef.current,
+      chatId: currentChatIdRef.current,
+      workflowName: currentWorkflowNameRef.current,
+    }, data));
     switch (evt) {
       case 'mode_changed': {
         const payload = data.data || {};
@@ -3542,33 +3540,9 @@ const ChatPage = () => {
         
         return;
       }
-      case 'tool_progress': {
-        // Update or append progress for a long-running tool
-        const progress = Number(data.progress_percent || 0);
-        const tool = data.tool_name || 'tool';
-        const userVisibleToolProgress = shouldShowToolProgress(data);
-        if (!showSystemMessages && !userVisibleToolProgress) {
-          return;
-        }
-        const statusText = data.status_message || data.message || `${tool} progress`;
-        const progressComplete = progress >= 100 || ['complete', 'completed', 'ready', 'success', 'succeeded'].includes(String(data.status || '').toLowerCase());
-        const progressIcon = progressComplete ? '✓' : '⏳';
-        const progressContent = `${progressIcon} ${statusText}${Number.isFinite(progress) ? ` (${Math.round(progress)}%)` : ''}`;
-        setMessagesWithLogging(prev => {
-          const updated = [...prev];
-          for (let i = updated.length - 1; i >=0; i--) {
-            const m = updated[i];
-            if (m.metadata && m.metadata.event_type === 'tool_progress' && m.metadata.tool_name === tool) {
-              m.content = progressContent;
-              m.metadata.progress_percent = progress;
-              return updated;
-            }
-          }
-          updated.push({ id:`tool-progress-${Date.now()}`, sender:'system', agentName: tool, content: progressContent, isStreaming:false, metadata:{ event_type:'tool_progress', tool_name: tool, progress_percent: progress }});
-          return updated;
-        });
+      case 'tool_progress':
+        // Transient stages are rendered only by the shared status bar.
         return;
-      }
       case 'deployment_started': {
         const payload = data.data || {};
         const message = payload.message || 'Starting deployment to GitHub...';
@@ -4588,6 +4562,9 @@ const ChatPage = () => {
               return;
             }
             // console.debug('WebSocket connection established');
+            // Transport ordering is scoped to this socket's server process.
+            // The callback identity guard rejects events from replaced sockets.
+            setChatStatusProgress(emptyChatStatusProgress());
             setConnectionStatus('connected');
             setLoading(false);
             if (suppressHistoryReplay) {
@@ -5328,6 +5305,9 @@ const ChatPage = () => {
 
     const usageChatId = conversationMode === 'ask' ? activeGeneralChatId : currentChatId;
     setChatStatusUsage(current => resetChatStatusRun(current, { mode: conversationMode, chatId: usageChatId }));
+    setChatStatusProgress(current => beginChatStatusProgressTurn(current, {
+      mode: conversationMode, chatId: currentChatId, workflowName: currentWorkflowName,
+    }));
 
     const artifactContextPayload = buildComposerArtifactContext(
       messageContent?.artifactContext || currentArtifactContext || null
@@ -6102,16 +6082,28 @@ const ChatPage = () => {
   const pendingComposerInputToolCall = findPendingComposerInputRequestToolCall(messages);
   const activeThinkingMessage = [...messages].reverse().find(message => message?.isThinking);
   const activeThinkingAgent = activeThinkingMessage?.agentName;
-  const isWorking = loading || Boolean(activeThinkingMessage);
+  const progressScope = { mode: conversationMode, chatId: currentChatId, workflowName: currentWorkflowName };
+  const workflowProgress = getChatStatusProgress(chatStatusProgress, progressScope);
+  const isWorking = loading || Boolean(activeThinkingMessage) || Boolean(workflowProgress);
+  const waitingForInput = Boolean(pendingHarnessDecision || pendingWorkflowReply || pendingComposerInputToolCall);
+  useEffect(() => {
+    const scope = { mode: conversationMode, chatId: currentChatId, workflowName: currentWorkflowName };
+    setChatStatusProgress(current => {
+      const mustClear = connectionStatus !== 'connected' || waitingForInput
+        || failedWorkflowRetry.available || workflowCompleted
+        || (current.progress && !getChatStatusProgress(current, scope));
+      return mustClear ? clearChatStatusProgress(current, scope) : current;
+    });
+  }, [connectionStatus, waitingForInput, failedWorkflowRetry.available, workflowCompleted, conversationMode, currentChatId, currentWorkflowName]);
   const chatStatus = {
     phase: pendingHarnessDecision || pendingWorkflowReply || pendingComposerInputToolCall
       ? 'waiting'
-      : isWorking
-        ? 'working'
-        : failedWorkflowRetry.available
-          ? 'error'
-          : workflowCompleted
-            ? 'complete'
+      : failedWorkflowRetry.available
+        ? 'error'
+        : workflowCompleted
+          ? 'complete'
+          : isWorking
+            ? 'working'
             : 'idle',
     detail: pendingHarnessDecision
       ? 'Choose the next step'
@@ -6123,6 +6115,7 @@ const ChatPage = () => {
             : 'Processing your request'
           : '',
     totalTokens: chatStatusUsage.scopeKey === statusScopeKey ? chatStatusUsage.totalTokens : null,
+    progress: isWorking && !waitingForInput && !failedWorkflowRetry.available && !workflowCompleted ? workflowProgress : null,
   };
 
   const handleViewWidgetAsk = useCallback(() => {

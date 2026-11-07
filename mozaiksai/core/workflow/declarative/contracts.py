@@ -803,9 +803,38 @@ class MiddlewareConfig(DeclarativeModel):
         return self
 
 
+class WorkflowProgressStage(DeclarativeModel):
+    """A public activity label; tools supply counts from actual work."""
+
+    id: str = Field(strict=True, min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")
+    label: str = Field(strict=True, min_length=1, max_length=120)
+    unit: str | None = Field(default=None, strict=True, min_length=1, max_length=40)
+
+    @field_validator("label", "unit")
+    @classmethod
+    def _public_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not value.strip() or any(character in value for character in "\r\n\t"):
+            raise ValueError("progress labels and units must be non-empty single-line text")
+        return value.strip()
+
+
+class WorkflowProgressConfig(DeclarativeModel):
+    stages: list[WorkflowProgressStage] = Field(min_length=1, max_length=32)
+
+    @model_validator(mode="after")
+    def _unique_stages(self) -> WorkflowProgressConfig:
+        ids = [stage.id for stage in self.stages]
+        if len(ids) != len(set(ids)):
+            raise ValueError("progress stage ids must be unique")
+        return self
+
+
 class UIConfig(DeclarativeModel):
     # null means "hide all agents"; [] means "no filtering".
     visual_agents: list[str] | None = None
+    progress: WorkflowProgressConfig | None = None
 
     @field_validator("visual_agents")
     @classmethod
