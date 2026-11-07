@@ -60,6 +60,8 @@ test('the virtual module imports every barrel by module id', (t) => {
   assert.match(source, /import \* as moduleUi0 from ".*modules\/stock_ledger\/ui\/index\.jsx";/);
   assert.match(source, /export default \{"stock_ledger": moduleUi0\};/);
   assert.ok(watched.some((file) => file.endsWith(path.join('stock_ledger', 'ui', 'index.jsx'))));
+  // The dev server turns a watched path into an import; a directory would break the page.
+  assert.ok(watched.every((file) => fs.statSync(file).isFile()));
   assert.equal(plugin.resolveId('something-else'), undefined);
 });
 
