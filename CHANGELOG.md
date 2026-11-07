@@ -331,9 +331,10 @@ This project follows a practical pre-1.0 changelog format:
   collections together. Owner-requested permission changes no longer consume
   structural repair attempts; a rejected final counted attempt fails immediately
   with its original diagnostic.
-- Pending inline workflow approval cards survive browser reconnects even when
-  emitted before the first assistant message. Pending-call and transcript replay
-  retain the review identity and suppress resolved or terminal interactions.
+- Pending inline workflow approval cards survive browser reconnects and
+  workflow switches even when emitted before the first assistant message.
+  Pending-call and transcript replay retain the review identity and suppress
+  resolved or terminal interactions.
 - Malformed generated auth YAML stays rejected and reaches build diagnostics
   without replacing the submitted file bytes, including when role grants are applied.
 - The shell no longer offers Profile, Sign in, or Sign out when nobody can sign

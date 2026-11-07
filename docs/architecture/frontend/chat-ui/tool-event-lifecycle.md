@@ -48,6 +48,9 @@ including a first-turn inline card emitted before an assistant message is
 committed. A browser reconnect replays that pending card independently of the
 transcript cursor, with its original `tool_call_id` and payload. A review's
 `review_id` therefore still binds the response to the waiting tool invocation.
+WebSocket connection and workflow-switch replay both forward these calls as
+`chat.tool_call` events. Their transport adapters preserve the pending payload
+and correlation fields even when no transcript message is available.
 Calls already replayed through transcript metadata are not emitted twice;
 pending-call and transcript replay suppress actionable cards for responded or
 completed calls and terminal chats. This protects inline interactions such as

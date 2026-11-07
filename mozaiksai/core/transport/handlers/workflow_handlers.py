@@ -189,7 +189,16 @@ async def handle_switch_workflow(
                     return
 
                 kind = event_dict.get("kind")
-                if kind == "text":
+                if kind == "tool_call":
+                    from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
+
+                    envelope = get_event_dispatcher().build_outbound_event_envelope(
+                        raw_event=event_dict, chat_id=str(target_chat_id),
+                        workflow_name=str(active_context.workflow_name),
+                    )
+                    if envelope is not None:
+                        await send_event_envelope(websocket, transport._serialize_ag2_events(envelope))
+                elif kind == "text":
                     text_payload = {k: v for k, v in event_dict.items() if k != "kind"}
                     text_payload.setdefault("index", 0)
                     text_payload.setdefault("content", "")
