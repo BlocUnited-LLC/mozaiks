@@ -1,0 +1,9 @@
+contract_id: library.stock_ledger
+contract_type: build_pack_instructions
+required_outputs:
+  - path: config/stock_ledger.yaml
+    owner: workspace
+requires:
+  secrets:
+    - env: STOCK_SUPPLIER_API_KEY
+      purpose: Optional supplier price lookups.

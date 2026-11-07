@@ -31,6 +31,11 @@ from pydantic import ValidationError as PydanticValidationError
 
 from factory_app.workflows._shared.generated_ui_contract import resolve_registered_component_files
 from factory_app.workflows._shared.hook_utils import workflow_context_path
+from factory_app.workflows.AppGenerator.tools.community_component_composition import (
+    KEYED_APP_ROOT_PATHS,
+    KEYED_WORKFLOW_ROOT_PATHS,
+    OWNERSHIP_CONTENT_HASH,
+)
 from factory_app.workflows.AppGenerator.tools.module_persistence_guard import (
     scan_module_persistence,
 )
@@ -1738,6 +1743,10 @@ _PROVENANCE_PACK_REQUIRED_KEYS = frozenset(
         "materialized_owned_files",
     }
 )
+# Written by the component lifecycle for packs installed into an existing app:
+# content-hash ownership and the workflow-root files a pack owns.
+_PROVENANCE_PACK_OPTIONAL_KEYS = frozenset({"ownership", "materialized_workflow_files"})
+_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
@@ -1764,7 +1773,9 @@ def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
     missing_keys = _PROVENANCE_REQUIRED_KEYS - set(manifest.keys())
     for key in sorted(missing_keys):
         errors.append(f"{_PACK_PROVENANCE_PATH}: missing required field '{key}'")
-    unknown_keys = sorted(set(manifest.keys()) - _PROVENANCE_REQUIRED_KEYS - {"composed_outputs"})
+    unknown_keys = sorted(
+        set(manifest.keys()) - _PROVENANCE_REQUIRED_KEYS - {"composed_outputs", "composed_workflow_outputs"}
+    )
     for key in unknown_keys:
         errors.append(f"{_PACK_PROVENANCE_PATH}: unsupported field '{key}'")
 
@@ -1791,9 +1802,16 @@ def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
                     errors.append(
                         f"{_PACK_PROVENANCE_PATH}: packs[{i}] missing required field '{key}'"
                     )
-                unknown_pack_keys = sorted(set(entry.keys()) - _PROVENANCE_PACK_REQUIRED_KEYS)
+                unknown_pack_keys = sorted(
+                    set(entry.keys()) - _PROVENANCE_PACK_REQUIRED_KEYS - _PROVENANCE_PACK_OPTIONAL_KEYS
+                )
                 for key in unknown_pack_keys:
                     errors.append(f"{_PACK_PROVENANCE_PATH}: packs[{i}] unsupported field '{key}'")
+                if "ownership" in entry and entry["ownership"] != OWNERSHIP_CONTENT_HASH:
+                    errors.append(
+                        f"{_PACK_PROVENANCE_PATH}: packs[{i}].ownership must be {OWNERSHIP_CONTENT_HASH!r}"
+                    )
+                errors.extend(_scan_owned_file_rows(entry, i))
                 digest = str(entry.get("digest") or "")
                 if digest and not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
                     errors.append(
@@ -1814,35 +1832,95 @@ def _scan_pack_provenance_manifest(files_map: dict[str, str]) -> list[str]:
                             "recompose its shared roots."
                         )
 
-    composed = manifest.get("composed_outputs", {})
-    if not isinstance(composed, dict):
-        errors.append(f"{_PACK_PROVENANCE_PATH}: composed_outputs must be a JSON object")
-    else:
-        identities = {"pack_id", "version", "source", "digest"}
-        pack_entries = [entry for entry in packs if isinstance(entry, dict)] if isinstance(packs, list) else []
-        for path, contributors in composed.items():
-            location = f"{_PACK_PROVENANCE_PATH}: composed_outputs[{path!r}]"
-            if path not in SHARED_PACK_OUTPUT_PATHS or path not in files_map:
-                errors.append(f"{location} must identify a present shared composition root")
-            if not isinstance(contributors, list) or not contributors:
-                errors.append(f"{location} must contain pack contributors")
-                continue
-            seen = set()
-            for contributor in contributors:
-                if not isinstance(contributor, dict) or set(contributor) != identities or not all(
-                    isinstance(value, str) and value for value in contributor.values()
-                ):
-                    errors.append(f"{location} contributor must contain pack_id, version, source, and digest")
-                    continue
-                pack_id = contributor["pack_id"]
-                matches = [entry for entry in pack_entries if entry.get("pack_id") == pack_id]
-                if len(matches) != 1 or any(matches[0].get(key) != contributor[key] for key in identities):
-                    errors.append(f"{location} contributor must match one selected pack identity")
-                if pack_id in seen:
-                    errors.append(f"{location} contains duplicate contributors")
-                seen.add(pack_id)
+    pack_entries = [entry for entry in packs if isinstance(entry, dict)] if isinstance(packs, list) else []
+    for field, roots, require_present in (
+        ("composed_outputs", SHARED_PACK_OUTPUT_PATHS | KEYED_APP_ROOT_PATHS, True),
+        # The workflow registry lives beside the bundle, in the workspace workflow root.
+        ("composed_workflow_outputs", KEYED_WORKFLOW_ROOT_PATHS, False),
+    ):
+        errors.extend(
+            _scan_composed_contributors(
+                manifest.get(field, {}), field, roots, require_present, files_map, pack_entries,
+            )
+        )
 
     return errors
+
+
+def _scan_owned_file_rows(entry: dict[str, Any], index: int) -> list[str]:
+    """Owned-file rows a pack entry records; content hashes, when recorded, must be hex sha256."""
+    errors: list[str] = []
+    workflow_files = entry.get("materialized_workflow_files")
+    if workflow_files is not None and not isinstance(workflow_files, list):
+        errors.append(f"{_PACK_PROVENANCE_PATH}: packs[{index}].materialized_workflow_files must be a JSON array")
+    for field in ("materialized_owned_files", "materialized_workflow_files"):
+        rows = entry.get(field)
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                errors.append(f"{_PACK_PROVENANCE_PATH}: packs[{index}].{field} rows must be JSON objects")
+                continue
+            digest = row.get("sha256")
+            if digest is not None and not (isinstance(digest, str) and _SHA256_HEX_RE.fullmatch(digest)):
+                errors.append(
+                    f"{_PACK_PROVENANCE_PATH}: packs[{index}].{field} sha256 must be 64 lowercase hex digits"
+                )
+    return errors
+
+
+def _valid_entry_rows(entries: Any) -> bool:
+    return isinstance(entries, list) and all(
+        isinstance(row, dict)
+        and set(row) == {"container", "key", "sha256"}
+        and all(isinstance(row[name], str) and row[name] for name in ("container", "key"))
+        and isinstance(row["sha256"], str)
+        and bool(_SHA256_HEX_RE.fullmatch(row["sha256"]))
+        for row in entries
+    )
+
+
+def _scan_composed_contributors(
+    composed: Any,
+    field: str,
+    roots: frozenset[str],
+    require_present: bool,
+    files_map: dict[str, str],
+    pack_entries: list[dict[str, Any]],
+) -> list[str]:
+    if not isinstance(composed, dict):
+        return [f"{_PACK_PROVENANCE_PATH}: {field} must be a JSON object"]
+    errors: list[str] = []
+    identities = {"pack_id", "version", "source", "digest"}
+    for path, contributors in composed.items():
+        location = f"{_PACK_PROVENANCE_PATH}: {field}[{path!r}]"
+        if path not in roots or (require_present and path not in files_map):
+            errors.append(f"{location} must identify a present shared composition root")
+        if not isinstance(contributors, list) or not contributors:
+            errors.append(f"{location} must contain pack contributors")
+            continue
+        seen = set()
+        for contributor in contributors:
+            if not isinstance(contributor, dict):
+                errors.append(f"{location} contributor must contain pack_id, version, source, and digest")
+                continue
+            identity = {key: value for key, value in contributor.items() if key != "entries"}
+            if set(identity) != identities or not all(isinstance(value, str) and value for value in identity.values()):
+                errors.append(f"{location} contributor must contain pack_id, version, source, and digest")
+                continue
+            if "entries" in contributor and not _valid_entry_rows(contributor["entries"]):
+                errors.append(f"{location} contributor entries must list container, key and sha256")
+            pack_id = identity["pack_id"]
+            matches = [entry for entry in pack_entries if entry.get("pack_id") == pack_id]
+            if len(matches) != 1 or any(matches[0].get(key) != identity[key] for key in identities):
+                errors.append(f"{location} contributor must match one selected pack identity")
+            if pack_id in seen:
+                errors.append(f"{location} contains duplicate contributors")
+            seen.add(pack_id)
+    return errors
+
+
+def scan_pack_provenance(files_map: dict[str, str]) -> list[str]:
+    """Validate only ``.mozaiks/pack_provenance.json`` against the bundle paths given."""
+    return _scan_pack_provenance_manifest(files_map)
 
 
 def _scan_page_api_endpoint_alignment(files_map: dict[str, str]) -> list[str]:

@@ -1,0 +1,19 @@
+context_id: library.stock_ledger
+description: Stock ledger capability library, used to prove installing a library into an existing app.
+assets:
+  - path: contract.yaml
+    kind: contract
+  - path: templates/
+    kind: templates
+  - path: workflows/
+    kind: workflows
+pack:
+  id: library.stock_ledger
+  version: "1.0.0"
+  author: "Mozaiks test fixture"
+  license: "MIT"
+  source: "https://example.com/libraries/stock_ledger"
+  status: active
+  capability_source: generated_module
+capabilities:
+  - capability_id: stock.ledger

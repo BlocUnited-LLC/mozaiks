@@ -52,7 +52,8 @@ VALID_CAPABILITY_SOURCES: frozenset[str] = frozenset({
 })
 
 ALLOWED_ASSET_KEYS: frozenset[str] = frozenset({"path", "kind", "description", "projections"})
-VALID_ASSET_KINDS: frozenset[str] = frozenset({"catalog", "contract", "templates"})
+# ``workflows`` mirrors a workspace workflow root; only the component lifecycle places it.
+VALID_ASSET_KINDS: frozenset[str] = frozenset({"catalog", "contract", "templates", "workflows"})
 
 
 @dataclass

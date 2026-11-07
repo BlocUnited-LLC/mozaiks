@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import stat
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -597,9 +598,10 @@ def _validate_pack_contract_schema(pack_source_path: Path, contract: dict[str, A
     if requires is not None:
         if not isinstance(requires, dict):
             raise PackIntegrityError("contract.yaml requires must be a mapping")
-        unknown_requires = sorted(set(requires) - {"packs", "capabilities"})
+        unknown_requires = sorted(set(requires) - {"packs", "capabilities", "modules", "imports", "secrets"})
         if unknown_requires:
             raise PackIntegrityError(f"contract.yaml requires has unsupported fields: {unknown_requires}")
+        _validate_host_requirements(requires)
         packs = requires.get("packs")
         if packs is not None:
             if not isinstance(packs, list):
@@ -661,6 +663,43 @@ def _validate_pack_contract_schema(pack_source_path: Path, contract: dict[str, A
                     f"contract.yaml surface_ownership[{index}].facade_module {rule.facade_module!r} "
                     f"must reference a declared facades[].module_id; declared facades: {sorted(facade_ids)}"
                 )
+
+
+_HOST_IMPORT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$")
+
+
+def _validate_host_requirements(requires: dict[str, Any]) -> None:
+    """Shape of the host requirements an installed pack declares (checked against an app at install)."""
+    modules = requires.get("modules")
+    if modules is not None:
+        if not isinstance(modules, list):
+            raise PackIntegrityError("contract.yaml requires.modules must be a list")
+        for index, item in enumerate(modules):
+            if not isinstance(item, dict) or set(item) - {"module_id", "actions", "reason"}:
+                raise PackIntegrityError(
+                    f"contract.yaml requires.modules[{index}] must be a mapping of module_id, actions and reason"
+                )
+            if not _is_safe_identifier(str(item.get("module_id") or "")):
+                raise PackIntegrityError(f"contract.yaml requires.modules[{index}].module_id is invalid")
+            actions = item.get("actions") or []
+            if not isinstance(actions, list) or not all(isinstance(action, str) and action for action in actions):
+                raise PackIntegrityError(f"contract.yaml requires.modules[{index}].actions must be a list of action ids")
+    imports = requires.get("imports")
+    if imports is not None:
+        if not isinstance(imports, list):
+            raise PackIntegrityError("contract.yaml requires.imports must be a list")
+        for index, item in enumerate(imports):
+            if not isinstance(item, str) or not _HOST_IMPORT_RE.fullmatch(item):
+                raise PackIntegrityError(
+                    f"contract.yaml requires.imports[{index}] must be a dotted module path the app provides"
+                )
+    secrets = requires.get("secrets")
+    if secrets is not None:
+        if not isinstance(secrets, list):
+            raise PackIntegrityError("contract.yaml requires.secrets must be a list")
+        for index, item in enumerate(secrets):
+            if not isinstance(item, dict) or set(item) - {"env", "purpose"} or not str(item.get("env") or "").strip():
+                raise PackIntegrityError(f"contract.yaml requires.secrets[{index}] must be a mapping with env and purpose")
 
 
 def verify_pack_integrity(pack_source_path: Path, pack_id: str) -> dict[str, Any]:
@@ -1534,6 +1573,11 @@ def verified_pack_template_inventory(
     inventory = []
     for entry in verified_selected_pack_sources(capability_packs, context_variables=context_variables):
         root = Path(entry["source_path"])
+        if iter_context_assets(_read_pack_context(root, entry["pack_id"]), kind="workflows"):
+            raise ManagedCapabilityTemplateError(
+                f"Pack '{entry['pack_id']}' ships workflows, which only the component lifecycle "
+                "(mozaiks pack install) can place in a workspace; a generated app bundle cannot hold them."
+            )
         files = resolve_templates_for_pack(root, entry["pack_id"], context_variables=context_variables)
         inventory.append({**entry, "owner_map": _file_owner_map(root), "files": files})
     return inventory
