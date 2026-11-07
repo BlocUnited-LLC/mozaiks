@@ -580,12 +580,16 @@ def apply_component_upgrade(
 
     candidate = _component_entry_from_verified_pack(candidate_source, pack_id)
     # The candidate is an external source: select it with the identity just verified, as any external pack.
+    # The packs it requires are selected beside it from their installed pins, so selection validates;
+    # only the candidate's own provenance is kept.
     descriptors = [{
         "id": pack_id, "pack_id": pack_id, "pack_source_path": str(candidate_source),
         "version": candidate["version"], "digest": candidate["digest"],
-    }]
+    }, *resolve_installed_component_descriptors(
+        build_context_root=root, selected_pack_ids=_installed_dependency_closure(root, candidate),
+    )]
     rendered = _files_by_name(resolve_managed_capability_templates(descriptors))
-    provenance = _merged_provenance(app_root, json.loads(rendered.pop(_PROVENANCE_PATH)), pack_id)
+    provenance = _merged_provenance(app_root, _own_provenance(json.loads(rendered.pop(_PROVENANCE_PATH)), pack_id), pack_id)
     # Validate the upgraded provenance against the app as it will be, before anything is written.
     planned = _app_files(app_root)
     planned.update({path: rendered[path] for path in plan.added_files + plan.changed_files})
@@ -622,16 +626,52 @@ def apply_component_upgrade(
     return plan
 
 
-def _app_files(app_root: Path) -> dict[str, str]:
-    """The workspace app's text files by bundle-relative path, as the scanner reads them."""
-    return {
-        path.relative_to(app_root).as_posix(): path.read_text(encoding="utf-8")
-        for path in app_root.rglob("*")
-        if path.is_file()
-        and "__pycache__" not in path.parts
-        and ".pytest_cache" not in path.parts
-        and path.suffix not in {".pyc", ".pyo"}
+def _installed_dependency_closure(build_context_root: Path, candidate: dict[str, Any]) -> list[str]:
+    """Every installed pack the candidate requires, directly or through another required pack."""
+    installed = component_by_id(load_installed_components(build_context_root))
+    pending = [item["pack_id"] for item in candidate["dependencies"]["packs"]]
+    closure: list[str] = []
+    while pending:
+        dependency = pending.pop()
+        if dependency in closure or dependency == candidate["pack_id"] or dependency not in installed:
+            continue
+        closure.append(dependency)
+        pending.extend(item["pack_id"] for item in installed[dependency]["dependencies"]["packs"])
+    return sorted(closure)
+
+
+def _own_provenance(provenance: dict[str, Any], pack_id: str) -> dict[str, Any]:
+    """The resolver's provenance narrowed to one pack, dropping the dependencies rendered beside it."""
+    provenance["packs"] = [pack for pack in provenance.get("packs") or [] if pack.get("pack_id") == pack_id]
+    composed = {
+        path: [row for row in rows if row.get("pack_id") == pack_id]
+        for path, rows in (provenance.get("composed_outputs") or {}).items()
     }
+    provenance.pop("composed_outputs", None)
+    if any(composed.values()):
+        provenance["composed_outputs"] = {path: rows for path, rows in composed.items() if rows}
+    return provenance
+
+
+def _app_files(app_root: Path) -> dict[str, str]:
+    """The workspace app's text files by bundle-relative path, as the scanner reads them.
+
+    A file that is not UTF-8 text, such as an app's image asset, is not scanned.
+    """
+    files: dict[str, str] = {}
+    for path in app_root.rglob("*"):
+        if (
+            not path.is_file()
+            or "__pycache__" in path.parts
+            or ".pytest_cache" in path.parts
+            or path.suffix in {".pyc", ".pyo"}
+        ):
+            continue
+        try:
+            files[path.relative_to(app_root).as_posix()] = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+    return files
 
 
 __all__ = [
