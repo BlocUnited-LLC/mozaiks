@@ -13,10 +13,11 @@ Environment (optional)
 ----------------------
 LLM_CONFIG_CACHE_TTL   Seconds to keep raw provider list (default 300)
 DEFAULT_LLM_MODEL      Override fallback model name (default gpt-5-nano)
-OPENAI_MODEL_FALLBACK  Legacy OpenAI model order when LLM_PRIMARY_MODEL is absent
+OPENAI_MODEL_FALLBACK  OpenAI model order when LLM_PRIMARY_MODEL is absent
 LLM_PRIMARY_API_TYPE  Selected provider: openai (default), anthropic, google, ollama
 LLM_PRIMARY_MODEL     Explicit model for the selected provider
 LLM_MAX_TOKENS        Optional positive provider-native max_tokens limit
+LLM_STRUCTURED_OUTPUT_MODE  AG2 schema transport: native (default) or prompted
 
 Public API
 ----------
@@ -37,6 +38,7 @@ from pydantic import BaseModel
 from mozaiksai.core.adapters.llm_fallback import (
     MODEL_API_KEY_ENV_NAMES,
     build_fallback_config_list,
+    resolve_structured_output_mode,
 )
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, BuilderCollections
@@ -242,6 +244,7 @@ async def get_llm_config(
     the selected AG2 provider configuration.
     """
     extra_config = dict(extra_config or {})
+    extra_config["structured_output_mode"] = resolve_structured_output_mode(extra_config)
     raw_limit = os.getenv("LLM_MAX_TOKENS", "").strip()
     if raw_limit:
         try:

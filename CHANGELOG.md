@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Factory and auxiliary structured calls can explicitly select AG2 prompted
+  output with `LLM_STRUCTURED_OUTPUT_MODE=prompted` when a provider cannot
+  compile the native schema. Native remains the default; the same typed
+  validation still gates output and automatic tools, with no automatic fallback.
 - Generated apps can grant module permissions to approved design roles through
   `mozaiks.auth.v2`. Staff actions use verified role membership while preserving
   record ownership; build tasks cannot authorize their own grants.

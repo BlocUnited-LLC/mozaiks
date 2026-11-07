@@ -16,7 +16,11 @@ from typing import Any
 from ag2 import Agent
 from ag2.middleware.builtin import RetryMiddleware
 
-from mozaiksai.core.adapters.llm_fallback import llm_config_to_ag2_config
+from mozaiksai.core.adapters.llm_fallback import (
+    llm_config_to_ag2_config,
+    resolve_structured_output_mode,
+    response_schema_to_ag2,
+)
 from mozaiksai.core.media.ag2 import (
     build_ag2_image_generation_tools,
     image_generation_enabled,
@@ -504,6 +508,7 @@ def _prepare_response_schema_for_agent(
     structured_model_cls: Any,
     llm_config_dict: Mapping[str, Any] | None,
 ) -> Any:
+    mode = resolve_structured_output_mode(llm_config_dict)
     if structured_model_cls is None:
         if _structured_outputs_required(agent_config):
             raise ValueError(
@@ -511,6 +516,9 @@ def _prepare_response_schema_for_agent(
                 "structured_outputs_required: true but has no structured output registry entry"
             )
         return None
+
+    if mode == "prompted":
+        return response_schema_to_ag2(structured_model_cls, llm_config_dict)
 
     api_type = (
         ((llm_config_dict or {}).get("config_list") or [{}])[0].get("api_type")

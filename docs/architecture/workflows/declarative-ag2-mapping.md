@@ -244,6 +244,31 @@ models:
         type: str
 ```
 
+Schema transport is selected separately from this acceptance contract:
+
+- `LLM_STRUCTURED_OUTPUT_MODE=native` is the default and keeps the existing
+  provider-native schema preparation.
+- `LLM_STRUCTURED_OUTPUT_MODE=prompted` uses AG2's
+  [PromptedSchema](https://docs.ag2.ai/docs/user-guide/structured_output/).
+  AG2 includes the same declared model's JSON schema in the system prompt and
+  validates the response with that model, without sending a native output grammar.
+
+A top-level `llm_config.structured_output_mode` value overrides the environment;
+`get_llm_config(extra_config={"structured_output_mode": "prompted"})` resolves
+and caches that choice explicitly. Values other than `native` and `prompted`
+fail before a model call. This applies to Factory agents and the shared
+`AG2StructuredAgentRunner` used for auxiliary refinement and coding calls.
+Mode selection is explicit; provider errors do not switch modes automatically.
+
+Prompted mode preserves workflow context projection and local typed validation.
+Factory output must still pass the canonical acceptance model before an
+automatic save/tool event is emitted. Provider-native constraints are absent,
+so malformed responses can occur and must fail validation or use the caller's
+existing bounded schema-correction retries. An isolated provider/schema probe
+establishes transport and parsing behavior only; generated-app acceptance
+remains a separate check. See [local setup](../../local-setup.md#native-schema-compilation-errors)
+for provider complexity limits and configuration.
+
 ### `ui_config.yaml`
 
 Used for:

@@ -13,6 +13,7 @@ def isolated_config(monkeypatch):
         "LLM_PRIMARY_API_TYPE", "LLM_PRIMARY_MODEL", "LLM_PRIMARY_BASE_URL",
         "LLM_FALLBACK_MODELS", "LLM_FALLBACK_BASE_URLS", "LLM_FALLBACK_ENABLED",
         "OPENAI_MODEL_FALLBACK", "DEFAULT_LLM_MODEL", "LLM_MAX_TOKENS",
+        "LLM_STRUCTURED_OUTPUT_MODE",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("MOZAIKS_LLM_CONFIG_SKIP_MONGO", "true")
@@ -100,10 +101,10 @@ async def test_database_retains_provider_and_never_resolves_other_provider_key(m
 
 @pytest.mark.asyncio
 async def test_database_without_type_retains_openai_default(monkeypatch):
-    stored_config(monkeypatch, [{"Model": "stored-model", "OPENAI_API_KEY": "legacy-test-key"}])
+    stored_config(monkeypatch, [{"Model": "stored-model", "OPENAI_API_KEY": "stored-test-key"}])
     monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "anthropic")
     _, config = await llm_config.get_llm_config()
-    assert config["config_list"] == [{"api_type": "openai", "model": "stored-model", "api_key": "legacy-test-key"}]
+    assert config["config_list"] == [{"api_type": "openai", "model": "stored-model", "api_key": "stored-test-key"}]
 
 
 @pytest.mark.asyncio
@@ -214,3 +215,34 @@ def test_fallback_entries_preserve_selected_provider(monkeypatch):
         primary_model="one", primary_api_type="anthropic", fallback_models=["two"],
     )
     assert [entry["api_type"] for entry in config] == ["anthropic", "anthropic"]
+
+
+@pytest.mark.asyncio
+async def test_structured_output_mode_env_override_and_cache_are_explicit(monkeypatch):
+    _, native = await llm_config.get_llm_config()
+    assert native["structured_output_mode"] == "native"
+    monkeypatch.setenv("LLM_STRUCTURED_OUTPUT_MODE", "prompted")
+    _, prompted = await llm_config.get_llm_config()
+    assert prompted["structured_output_mode"] == "prompted"
+    _, overridden = await llm_config.get_llm_config(extra_config={"structured_output_mode": "native"})
+    assert overridden == native
+    assert prompted["config_list"] == native["config_list"]
+    assert len(llm_config._LLM_CONFIG_CACHE) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [None, "", "automatic", "PROMPTED", False, 1, []])
+async def test_invalid_structured_output_mode_fails_before_provider_loading(mode, monkeypatch):
+    async def forbidden_load():
+        raise AssertionError("Invalid transport must fail before provider resolution")
+
+    monkeypatch.setattr(llm_config, "_load_raw_config_list", forbidden_load)
+    with pytest.raises(ValueError, match="structured_output_mode"):
+        await llm_config.get_llm_config(extra_config={"structured_output_mode": mode})
+
+
+@pytest.mark.asyncio
+async def test_invalid_environment_structured_output_mode_fails_closed(monkeypatch):
+    monkeypatch.setenv("LLM_STRUCTURED_OUTPUT_MODE", "automatic")
+    with pytest.raises(ValueError, match="structured_output_mode"):
+        await llm_config.get_llm_config()

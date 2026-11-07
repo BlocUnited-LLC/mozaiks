@@ -36,7 +36,7 @@ set `MONGO_URI` and launch repo scripts with `-SkipInfra`.
 - Python 3.11+
 - Node.js 20.19+ or 22.12+ (required by the Vite 8 frontend toolchain)
 - MongoDB Atlas or a local MongoDB server
-- an OpenAI API key (`OPENAI_API_KEY`); builds call OpenAI only today
+- a credential and installed SDK for the selected LLM provider; OpenAI is the default
 
 Tree-sitter parser packages are installed with Mozaiks itself. They are the
 baseline parser path for source-backed App Intelligence; deterministic
@@ -343,6 +343,23 @@ which may be too small for a full generated design. Choose a limit supported by
 the selected model. Gemini uses `max_output_tokens` instead and rejects this
 `max_tokens` setting; configure its native field through the stored provider
 configuration or explicit LLM config.
+
+### Native schema compilation errors
+
+`LLM_STRUCTURED_OUTPUT_MODE` defaults to `native`. If the selected provider
+cannot compile a workflow's schema, explicitly set
+`LLM_STRUCTURED_OUTPUT_MODE=prompted` and restart the host. This selects AG2's
+prompted schema transport while retaining the same declared model and local
+validation before automatic save/tools. Invalid output still fails; Mozaiks
+does not switch modes automatically after a provider error.
+
+For example, Anthropic documents a limit of 16 union-typed parameters across
+strict schemas, counting both `anyOf` and type arrays. A schema with more
+nullable fields can exceed that limit even when the intended answer uses
+mostly empty lists. See [Anthropic's schema complexity limits](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
+and the [AG2 transport mapping](architecture/workflows/declarative-ag2-mapping.md#structured_outputsyaml).
+Prompted mode adds the schema to model input; a successful schema probe alone
+does not prove a complete workflow or generated app.
 
 ### Port already in use
 
