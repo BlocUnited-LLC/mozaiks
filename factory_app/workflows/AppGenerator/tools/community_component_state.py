@@ -169,11 +169,17 @@ def load_installed_components(build_context_root: Path) -> dict[str, Any]:
     return canonical_installed_state(components)
 
 
-def write_installed_components(build_context_root: Path, state: dict[str, Any]) -> Path:
+def installed_components_text(state: dict[str, Any]) -> str:
+    """The canonical serialized installed state, as :func:`write_installed_components` writes it."""
     canonical = canonical_installed_state(list(state.get("components") or []))
+    return json.dumps(canonical, indent=2, sort_keys=True) + "\n"
+
+
+def write_installed_components(build_context_root: Path, state: dict[str, Any]) -> Path:
+    text = installed_components_text(state)
     path = installed_components_path(build_context_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(canonical, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(text, encoding="utf-8")
     return path
 
 
@@ -209,9 +215,8 @@ def load_installed_component_sources(build_context_root: Path) -> dict[str, str]
     return result
 
 
-def write_installed_component_sources(build_context_root: Path, sources: dict[str, str]) -> Path:
-    path = installed_component_sources_path(build_context_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
+def installed_component_sources_text(sources: dict[str, str]) -> str:
+    """The serialized source sidecar, as :func:`write_installed_component_sources` writes it."""
     payload = {
         "schema_version": _SOURCES_SCHEMA_VERSION,
         "sources": [
@@ -219,7 +224,13 @@ def write_installed_component_sources(build_context_root: Path, sources: dict[st
             for pack_id in sorted(sources)
         ],
     }
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+
+def write_installed_component_sources(build_context_root: Path, sources: dict[str, str]) -> Path:
+    path = installed_component_sources_path(build_context_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(installed_component_sources_text(sources), encoding="utf-8")
     return path
 
 
@@ -233,7 +244,9 @@ __all__ = [
     "canonical_installed_state",
     "component_by_id",
     "installed_component_sources_path",
+    "installed_component_sources_text",
     "installed_components_path",
+    "installed_components_text",
     "load_installed_component_sources",
     "load_installed_components",
     "write_installed_component_sources",

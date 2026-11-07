@@ -1,0 +1,5 @@
+{
+  "workflows": [
+    {"id": "StockReview", "description": "Review stock levels and propose restocking. Proposal only; no orders are placed."}
+  ]
+}

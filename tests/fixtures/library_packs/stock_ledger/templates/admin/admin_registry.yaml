@@ -1,0 +1,8 @@
+schema_version: mozaiks.admin.registry.v1
+pages:
+  - id: stock_admin
+    label: Stock
+    path: /admin/stock_admin
+    scope: workspace
+    surfaces: [studio]
+    order: 500
