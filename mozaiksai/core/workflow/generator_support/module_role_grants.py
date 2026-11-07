@@ -99,14 +99,17 @@ def validate_access_policy(
                 raise ValueError(f"access_policy action {owner}.{action} names multiple collections")
             selected[name].add(action)
         # Other roles may supply the remaining canonical grants; check after all rows.
-    for name, actions in selected.items():
+    missing_grants: list[str] = []
+    for name, actions in sorted(selected.items()):
         _, collection = collections[name]
         required = {
             canonical_write_action_id(collection["entity"], operation)
             for operation in CANONICAL_WRITE_OPERATIONS
         } if collection_has_canonical_writes(collection) else set()
         if missing := required - actions:
-            raise ValueError(f"access_policy for {name!r} omits canonical write grants {sorted(missing)}")
+            missing_grants.append(f"access_policy for {name!r} omits canonical write grants {sorted(missing)}")
+    if missing_grants:
+        raise ValueError("; ".join(missing_grants))
     return policy
 
 

@@ -32,6 +32,7 @@ from mozaiksai.core.workflow.execution.network_graph import (
     compile_transition_rules_to_graph,
     resolve_next_agent,
 )
+from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
 from mozaiksai.core.workflow.validation.tool_outcomes import wrap_tool_outcome
 
 
@@ -227,6 +228,8 @@ async def test_live_materialized_outcomes_through_mozaiks_runtime(tmp_path, monk
     {"retry_on": ["blocked"]}, {"retry_on": ["unknown"]}, {"retry_on": []},
     {"error_value": "unknown"}, {"values": ["ready", "ready"]},
     {"attempts_key": "document_outcome"}, {"context_key": "structured_output"},
+    {"retry_without_attempt": ["blocked"]}, {"retry_without_attempt": ["unknown"]},
+    {"retry_without_attempt": ["ready"]}, {"retry_without_attempt": ["needs_revision", "needs_revision"]},
 ])
 def test_invalid_outcome_contract_rejected(change):
     with pytest.raises(ValueError):
@@ -269,6 +272,67 @@ def test_budget_survives_replay_and_stops_before_another_side_effect():
     assert calls == [1, 1]
 
 
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("prior_failures", [0, 1, 2])
+@pytest.mark.asyncio
+async def test_review_corrections_preserve_prior_failures_and_cannot_extend_repair_budget(asynchronous, prior_failures):
+    contract = ToolOutcomeSpec.model_validate({
+        **_contract().model_dump(), "max_attempts": 3,
+        "values": ["ready", "needs_revision", "review_changes", "blocked"],
+        "retry_on": ["needs_revision", "review_changes"], "retry_without_attempt": ["review_changes"],
+    })
+    context = _context(document_attempts=prior_failures, document_outcome="needs_revision")
+    result = {"status": "review_changes", "error": "Owner requested a correction"}
+    calls = []
+
+    def operation(context_variables):
+        calls.append(1)
+        return result
+
+    async def async_operation(context_variables):
+        return operation(context_variables)
+
+    wrapped = wrap_tool_outcome(async_operation if asynchronous else operation, contract)
+
+    async def invoke():
+        return await wrapped(context) if asynchronous else wrapped(context)
+
+    for _ in range(2):
+        assert (await invoke())["status"] == "review_changes"
+        assert context.get("document_attempts") == prior_failures
+    result = {"status": "needs_revision", "error": "Invalid structure", "diagnostics": ["field missing"]}
+    for attempt in range(prior_failures + 1, 4):
+        rejection = await invoke()
+        assert rejection["status"] == ("blocked" if attempt == 3 else "needs_revision")
+        assert rejection["error"] == "Invalid structure"
+        assert rejection["diagnostics"] == ["field missing"]
+        assert context.get("document_attempts") == attempt
+    assert rejection["outcome_error"] == "attempts_exhausted"
+    result = {"status": "review_changes"}
+    assert (await invoke())["outcome_error"] == "attempts_exhausted"
+    assert len(calls) == 2 + 3 - prior_failures
+    assert context.get("document_attempts") == 3
+
+
+@pytest.mark.parametrize("result", [{"status": "invented"}, {"status": "blocked"}])
+def test_unknown_or_terminal_outcome_never_refunds_or_reopens_review(result):
+    contract = ToolOutcomeSpec.model_validate({
+        **_contract().model_dump(), "retry_without_attempt": ["needs_revision"],
+    })
+    calls = []
+    context = _context()
+
+    def operation(context_variables):
+        calls.append(1)
+        return result
+
+    wrapped = wrap_tool_outcome(operation, contract)
+    assert wrapped(context)["status"] == "blocked"
+    assert context.get("document_attempts") == 1
+    assert wrapped(context)["outcome_error"] == "retry_not_permitted"
+    assert calls == [1]
+
+
 def test_success_does_not_authorize_a_second_operation():
     context = _context()
     wrapped = wrap_tool_outcome(lambda context_variables: {"status": "ready"}, _contract())
@@ -277,7 +341,8 @@ def test_success_does_not_authorize_a_second_operation():
 
 
 @pytest.mark.asyncio
-async def test_interruption_blocks_retry_and_preserves_attempt():
+@pytest.mark.parametrize("refund", [False, True])
+async def test_interruption_blocks_retry_and_preserves_attempt(refund):
     entered = asyncio.Event()
 
     async def operation(context_variables):
@@ -285,7 +350,10 @@ async def test_interruption_blocks_retry_and_preserves_attempt():
         entered.set()
         await asyncio.Event().wait()
 
-    wrapped = wrap_tool_outcome(operation, _contract())
+    contract = ToolOutcomeSpec.model_validate({
+        **_contract().model_dump(), "retry_without_attempt": ["needs_revision"] if refund else [],
+    })
+    wrapped = wrap_tool_outcome(operation, contract)
     context = _context()
     task = asyncio.create_task(wrapped(context))
     await entered.wait()
@@ -332,6 +400,23 @@ def test_materialization_is_repeatable_and_preserves_other_routes():
         context.set("document_outcome", "ready")
     with pytest.raises(ContextAuthorityError):
         context.set("document_attempts", 0)
+
+
+@pytest.mark.parametrize("refund", [False, True])
+def test_generated_structured_outcome_plan_round_trips_attempt_policy(refund):
+    entry = _entry()
+    raw = entry["outcome_plans"][0]
+    for route in raw["routes"]:
+        route.setdefault("termination_reason", None)
+    if refund:
+        raw["retry_without_attempt"] = ["needs_revision"]
+    models, _ = load_workflow_structured_outputs("AgentGenerator")
+    entry["outcome_plans"] = [models["WorkflowOutcomePlan"].model_validate(raw).model_dump(mode="json")]
+    expected = ["needs_revision"] if refund else []
+    assert entry["outcome_plans"][0]["retry_without_attempt"] == expected
+    config = _config(entry)
+    assert config["tools"][0]["outcome"]["retry_without_attempt"] == expected
+    validate_workflow_tool_outcomes(config)
 
 
 @pytest.mark.parametrize("workflow", ["AgentGenerator", "AppGenerator"])

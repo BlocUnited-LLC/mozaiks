@@ -219,8 +219,9 @@ def _refused(
     text is written to `design_docs_save_feedback`, because the retry turn reads
     the reason from context rather than from this return value.
 
-    `revise` means the agent can fix it and the transition graph gives it another
-    turn; `blocked` is terminal and reserved for what a retry cannot change, such
+    `revise` means a structural repair; `review_changes` follows a validated
+    owner correction and preserves the structural attempt count. Both route back
+    to the agent. `blocked` is terminal for what a retry cannot change, such
     as no bound target app. The outcome contract forbids retrying on the error
     value, so these have to be two different words.
     """
@@ -1180,6 +1181,7 @@ async def save_design_docs_bundle(
         return _refused(
             context_variables, "access_policy_changes_requested",
             access_policy_review["rationale"] or "Revise the proposed role permissions before requesting review again.",
+            outcome="review_changes",
         )
     if access_policy_review["status"] == "cancel":
         return _refused(context_variables, "access_policy_review_cancelled", "Role permission review was cancelled.", outcome="blocked")

@@ -327,6 +327,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Design review reports missing canonical write grants across all affected
+  collections together. Owner-requested permission changes no longer consume
+  structural repair attempts; a rejected final counted attempt fails immediately
+  with its original diagnostic.
 - Pending inline workflow approval cards survive browser reconnects even when
   emitted before the first assistant message. Pending-call and transcript replay
   retain the review identity and suppress resolved or terminal interactions.

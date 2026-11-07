@@ -65,6 +65,9 @@ agents:
       Grants do not change tenancy or authorize access to another user's records.
       If design_docs_save_feedback requests access changes, revise this typed
       policy and its explanation together. Every changed grant requires review.
+      An owner's Request changes response returns review_changes without consuming
+      a structural repair attempt. Structural validation failures still consume
+      the fixed repair budget; never reset or edit its protected counter.
   - id: monetization_surfaces
     heading: '[MONETIZATION SURFACES]'
     content: |-

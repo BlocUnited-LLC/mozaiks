@@ -305,7 +305,8 @@ def test_the_retryable_outcome_is_not_the_error_value() -> None:
 
     spec = ToolOutcomeSpec.model_validate(_save_outcome_spec())
     assert spec.max_attempts > 1, "one attempt cannot act on feedback"
-    assert spec.retry_on == ["revise"]
+    assert spec.retry_on == ["revise", "review_changes"]
+    assert spec.retry_without_attempt == ["review_changes"]
     assert spec.error_value == "blocked"
     assert spec.error_value not in spec.retry_on
 

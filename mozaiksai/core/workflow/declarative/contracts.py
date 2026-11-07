@@ -564,6 +564,7 @@ class ToolOutcomeSpec(DeclarativeModel):
     error_value: str
     max_attempts: int = Field(default=1, strict=True, ge=1, le=100)
     retry_on: list[str] = Field(default_factory=list)
+    retry_without_attempt: list[str] = Field(default_factory=list)
 
     @field_validator("context_key", "attempts_key", "result_field", "error_value")
     @classmethod
@@ -572,7 +573,7 @@ class ToolOutcomeSpec(DeclarativeModel):
             raise ValueError("outcome names must be non-empty and have no surrounding whitespace")
         return value
 
-    @field_validator("values", "retry_on")
+    @field_validator("values", "retry_on", "retry_without_attempt")
     @classmethod
     def _validate_values(cls, values: list[str]) -> list[str]:
         if len(set(values)) != len(values) or any(not v or v != v.strip() for v in values):
@@ -589,6 +590,8 @@ class ToolOutcomeSpec(DeclarativeModel):
             raise ValueError("outcome error_value must be declared in values")
         if not set(self.retry_on).issubset(self.values) or self.error_value in self.retry_on:
             raise ValueError("retry_on must contain declared outcomes excluding error_value")
+        if not set(self.retry_without_attempt).issubset(self.retry_on):
+            raise ValueError("retry_without_attempt must contain only retry_on outcomes")
         if bool(self.retry_on) != (self.max_attempts > 1):
             raise ValueError("retry_on requires max_attempts > 1, and vice versa")
         return self

@@ -45,7 +45,10 @@ approved mutation ids. Nonempty grants require the existing UI approval tool
 to return approval for that policy. AppGenerator resolves the persisted,
 bound review receipt, then code derives `{collection}.{action_id}` permissions
 on module actions and auth role entries. A role-managed collection must cover
-all canonical writes explicitly. Candidate tasks cannot edit auth or use
+all canonical writes explicitly. Validation reports missing grants for every
+incomplete role-managed collection together, so a single repair can address
+the complete omission without changing the policy automatically.
+Candidate tasks cannot edit auth or use
 their own role declarations as authorization.
 
 Generation admission can inspect the union of declared grants. Runtime smoke

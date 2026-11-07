@@ -100,7 +100,7 @@ def test_owner_approval_persists_exact_policy_and_projects_from_summary(monkeypa
     assert "role_id: coordinator" in backend["content"]
 
 
-@pytest.mark.parametrize("action,outcome", [("request_changes", "revise")])
+@pytest.mark.parametrize("action,outcome", [("request_changes", "review_changes")])
 def test_rejected_policy_never_becomes_an_artifact(monkeypatch, persistence, action, outcome):
     ui = _approve(monkeypatch, persistence, action=action)
     context = ownership._context(managed=False)
@@ -111,6 +111,69 @@ def test_rejected_policy_never_becomes_an_artifact(monkeypatch, persistence, act
     persistence[2].assert_not_awaited()
     assert context.get("access_policy") is None
     assert context.get("data_contract") is None
+
+
+@pytest.mark.parametrize("prior_failures", [0, 1, 2])
+def test_owner_corrections_preserve_structural_budget_and_still_require_fresh_approval(
+    monkeypatch, persistence, prior_failures,
+):
+    context = ownership._context(managed=False)
+    ui = _approve(monkeypatch, persistence, action="request_changes")
+    invalid = _bundle()
+    invalid["access_policy"]["grants"][0]["actions"] = ["create_report"]
+    for attempt in range(prior_failures):
+        assert inventory._save(context, invalid)["outcome"] == "revise"
+        assert context.get("design_docs_save_attempts") == attempt + 1
+    ui.assert_not_awaited()
+
+    for _ in range(2):
+        assert inventory._save(context, _bundle())["outcome"] == "review_changes"
+        assert context.get("design_docs_save_attempts") == prior_failures
+        assert context.get("access_policy") is None
+    assert len({call.args[1]["review_id"] for call in ui.await_args_list}) == 2
+    persistence[1].assert_not_called()
+    persistence[2].assert_not_awaited()
+
+    _approve(monkeypatch, persistence)
+    revised = _bundle()
+    revised["access_policy"]["roles"][0]["description"] = "Only the designated report coordinators."
+    assert inventory._save(context, revised)["outcome"] == "saved"
+    assert context.get("design_docs_save_attempts") == prior_failures + 1
+    summary = persistence[2].await_args.kwargs["summary_payload"]
+    assert summary["access_policy_review"]["policy_sha256"] == access_policy_sha256(revised["access_policy"])
+    assert summary["access_policy_review"]["status"] == "approved"
+
+
+def test_owner_correction_does_not_allow_an_extra_structural_failure(monkeypatch, persistence):
+    context = ownership._context(managed=False)
+    ui = _approve(monkeypatch, persistence, action="request_changes")
+    invalid = _bundle()
+    invalid["access_policy"]["grants"][0]["actions"] = ["create_report"]
+    for _ in range(2):
+        assert inventory._save(context, invalid)["outcome"] == "revise"
+    assert inventory._save(context, _bundle())["outcome"] == "review_changes"
+    assert context.get("design_docs_save_attempts") == 2
+
+    rejected = inventory._save(context, invalid)
+    assert rejected["outcome"] == "blocked"
+    assert rejected["outcome_error"] == "attempts_exhausted"
+    assert "omits canonical write grants" in rejected["error"]
+    assert context.get("design_docs_save_attempts") == 3
+    assert inventory._save(context, _bundle())["outcome_error"] == "attempts_exhausted"
+    ui.assert_awaited_once()
+    persistence[1].assert_not_called()
+    persistence[2].assert_not_awaited()
+
+
+@pytest.mark.parametrize("overrides", [{"review_id": "old-review"}, {"approved": True}, {"approved": "false"}])
+def test_invalid_owner_correction_never_refunds_attempt(monkeypatch, persistence, overrides):
+    context = ownership._context(managed=False)
+    _approve(monkeypatch, persistence, action="request_changes", overrides=overrides)
+    assert inventory._save(context, _bundle())["outcome"] == "blocked"
+    assert context.get("design_docs_save_attempts") == 1
+    assert inventory._save(context, _bundle())["outcome_error"] == "retry_not_permitted"
+    persistence[1].assert_not_called()
+    persistence[2].assert_not_awaited()
 
 
 def test_builtin_cancel_is_the_only_cancel_control_and_never_persists(monkeypatch, persistence):

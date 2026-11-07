@@ -78,6 +78,34 @@ def test_policy_cannot_grant_managed_facade_actions():
         validate_access_policy(_policy(), data_contract=_contract("app_wide"), design_surface_map=surface)
 
 
+def test_incomplete_policy_reports_every_collection_for_one_repair():
+    contract = _contract("app_wide")
+    template = contract["surfaces"][0]["collections"][0]
+    collections, grants = [], []
+    for name, entity in [("tasks", "Task"), ("notes", "Note"), ("archives", "Archive")]:
+        collection = deepcopy(template)
+        collection.update(name=name, entity=entity)
+        collections.append(collection)
+        grants.append({"role_id": "coordinator", "collection": name, "actions": [f"create_{entity.lower()}"]})
+    contract["surfaces"][0]["collections"] = collections
+    policy = {"roles": _policy()["roles"], "grants": grants}
+    before = deepcopy(policy)
+    expected = "; ".join([
+        "access_policy for 'archives' omits canonical write grants ['delete_archive', 'update_archive']",
+        "access_policy for 'notes' omits canonical write grants ['delete_note', 'update_note']",
+        "access_policy for 'tasks' omits canonical write grants ['delete_task', 'update_task']",
+    ])
+    for ordered in (grants, list(reversed(grants))):
+        with pytest.raises(ValueError) as error:
+            validate_access_policy({**policy, "grants": ordered}, data_contract=contract, design_surface_map=_surface())
+        assert str(error.value) == expected
+    assert policy == before
+    for grant in policy["grants"]:
+        entity = grant["actions"][0].removeprefix("create_")
+        grant["actions"].extend([f"update_{entity}", f"delete_{entity}"])
+    assert validate_access_policy(policy, data_contract=contract, design_surface_map=_surface()) == policy
+
+
 def test_approved_roles_close_shared_writes_and_compile_real_implementations():
     closed = _closed()
     manifest = closed["module_contract"]["module_yaml"]

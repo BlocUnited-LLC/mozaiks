@@ -151,8 +151,12 @@ def test_a_success_listed_in_retry_on_is_not_reported_as_a_failure(caplog) -> No
 
     wrapped = wrap_tool_outcome(fine, permissive)
     with caplog.at_level(logging.WARNING):
-        wrapped(context_variables=_Ctx(demo_attempts=1, demo_outcome="selected"))
+        context = _Ctx(demo_attempts=1, demo_outcome="selected")
+        result = wrapped(context_variables=context)
 
+    assert result == {"outcome": "selected"}
+    assert context.get("demo_outcome") == "selected"
+    assert context.get("demo_attempts") == 2
     assert "TOOL_OUTCOME" not in caplog.text, (
         "a successful outcome that permits a follow-up call is not a rejection"
     )

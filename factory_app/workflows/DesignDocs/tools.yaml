@@ -10,10 +10,11 @@ tools:
     context_key: design_docs_save_outcome
     attempts_key: design_docs_save_attempts
     result_field: outcome
-    values: [saved, revise, blocked]
+    values: [saved, revise, review_changes, blocked]
     error_value: blocked
     max_attempts: 3
-    retry_on: [revise]
+    retry_on: [revise, review_changes]
+    retry_without_attempt: [review_changes]
   ui:
     component: ApprovalCard
     mode: inline
