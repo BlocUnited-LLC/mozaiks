@@ -270,11 +270,13 @@ async def test_missing_browser_env_never_disables_backend_auth(monkeypatch, auth
 async def test_shell_projects_auth_contract_and_effective_local_mode(monkeypatch):
 
     monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.delenv("MOZAIKS_DEFAULT_USER_ID", raising=False)
     monkeypatch.setattr(shell_config, "resolve_app_root", lambda: FACTORY_APP)
     result = await shell_config.build_shell_config(surface="studio")
     assert result["auth"]["contract"]["routes"]["post_login_default"] == "/apps"
     assert result["auth"]["runtime"]["local_development"] is True
-    assert result["auth"]["runtime"]["user"]["id"] == "anonymous"
+    # The shared development identity is projected as the user Studio records belong to.
+    assert result["auth"]["runtime"]["user"]["id"] == "demo-user"
 
 
 PUBLIC_PROFILE_ROUTE = "/u/:username"

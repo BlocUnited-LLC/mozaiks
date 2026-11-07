@@ -71,6 +71,18 @@ const myBundle = () => {
   ) || null;
 };
 
+// ChatSessions.status (mozaiksai WorkflowStatus): 0 in progress, 1 completed, 2 failed.
+const WORKFLOW_FAILED_STATUS = 2;
+
+const myAcceptedAppBundle = () => {
+  const state = bundleState();
+  if (state === null) return undefined;
+  return (state.artifacts || []).find(
+    (a) => myChats.has(String(a.source_chat_id)) && a.build_family === 'app_bundle'
+      && a.lifecycle_status === 'current' && (a.file_count || 0) > 0,
+  ) || null;
+};
+
 // What was running, so a result can be tied to the code that produced it. A
 // whole session was once spent debugging fixes against a stack that did not
 // contain them; the run looked identical either way.
@@ -126,7 +138,12 @@ const judge = ({ evidence, blocked, failedIn, chats }) => {
   const ours = [...chats];
   const bundles = (evidence.bundles || []).filter((b) => ours.includes(String(b.chat_id)) && (b.file_count || 0) > 0);
   const artifacts = (evidence.artifacts || []).filter((a) => ours.includes(String(a.source_chat_id)));
-  const accepted = artifacts.filter((a) => a.lifecycle_status === 'current' && (a.file_count || 0) > 0);
+  // Only the app bundle is the build. Concept, theme, and design-docs versions
+  // are accepted early and never carry an app validation, so counting them
+  // reported "NOT VALIDATED" for a build that had not finished (2026-11-02).
+  const accepted = artifacts.filter(
+    (a) => a.build_family === 'app_bundle' && a.lifecycle_status === 'current' && (a.file_count || 0) > 0,
+  );
   // Absent is not a pass. app_validation_status is only set when a validation
   // actually ran, and "skipped" records that one deliberately did not.
   const validated = accepted.filter(
@@ -281,6 +298,7 @@ test('traversal: idea to accepted, validated artifact', async ({ page }) => {
   await page.waitForTimeout(8000);
 
   const seen = new Set();
+  let bundleNoted = false;
   let idx = 0, shots = 0, idle = 0, marker = 0, repliesHere = 0, failedIn = null;
   // A gate that changes nothing is not a gate. Clicking "Continue" ten times
   // because it stays on screen burned an entire run inside ThemeCapture while
@@ -340,10 +358,24 @@ test('traversal: idea to accepted, validated artifact', async ({ page }) => {
       break;
     }
 
+    // Files appear while AppGenerator is still running its tasks and recovery,
+    // so the first files are progress, not an end. The run ends when the build
+    // chat settles as failed or our app bundle is accepted (2026-11-02, #1005).
     const mine = myBundle();
-    if (mine) {
+    if (mine && !bundleNoted) {
+      bundleNoted = true;
       note('BUNDLE', `${mine.file_count} files for OUR chat ${String(mine.chat_id).slice(0, 8)}…`);
       await page.screenshot({ path: path.join(OUT, '90-bundle.png'), fullPage: true }).catch(() => {});
+    }
+    if (mine && Number(mine.status) === WORKFLOW_FAILED_STATUS) {
+      failedIn = String(mine.workflow || cur);
+      note('WORKFLOW_FAILED', `${failedIn} settled as failed`);
+      break;
+    }
+    const acceptedApp = myAcceptedAppBundle();
+    if (acceptedApp) {
+      note('ACCEPTED', `${acceptedApp.artifact_version_id} (${acceptedApp.file_count} files)`);
+      await page.screenshot({ path: path.join(OUT, '95-accepted.png'), fullPage: true }).catch(() => {});
       break;
     }
 

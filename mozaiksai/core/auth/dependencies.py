@@ -15,6 +15,7 @@ Usage:
         ...
 """
 
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -43,6 +44,15 @@ logger = get_core_logger("auth.dependencies")
 
 #: The user id of the shared anonymous principal when AUTH_ANON_USER_ID is unset.
 ANONYMOUS_USER_ID = "anonymous"
+
+
+def development_default_user_id() -> str:
+    """The one user the shared development identity acts for in a local Studio.
+
+    Studio and profile routes resolve it when a request names nobody, and the
+    shell projects it to the browser so every route names the same owner.
+    """
+    return os.getenv("MOZAIKS_DEFAULT_USER_ID", "").strip() or "demo-user"
 
 # FastAPI security scheme for OpenAPI docs
 bearer_scheme = HTTPBearer(auto_error=False)
