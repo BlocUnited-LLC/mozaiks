@@ -28,6 +28,8 @@ import WorkflowCompletion from '../ui/screens/WorkflowCompletion.jsx';
 
 // Token usage surfaces — profile tab + admin panels
 import TokenStatusTab from '../components/profile/TokenStatusTab.jsx';
+// Connected accounts: users connect their own accounts for plugins (Google Calendar, Gmail)
+import ConnectedAccountsTab from '../components/profile/ConnectedAccountsTab.jsx';
 import AdminMyUsagePanel from '../admin/components/AdminMyUsagePanel.jsx';
 import AdminAppUsagePanel from '../admin/components/AdminAppUsagePanel.jsx';
 
@@ -66,6 +68,11 @@ registerComponent('TokenStatusTab', TokenStatusTab, {
   description: 'Profile tab showing the signed-in user\'s AI token balance and usage bar. Receives { tab, data } from ProfilePage. Data shape: { wallets: [{ wallet_id, label, unit, balance, plan_allowances }] }.',
 });
 
+registerComponent('ConnectedAccountsTab', ConnectedAccountsTab, {
+  core: true,
+  description: 'Built-in profile tab (/me?tab=connected-accounts) where the signed-in user connects and disconnects their own third-party accounts for plugins. Fetches /api/me/connected-accounts.',
+});
+
 registerComponent('AdminMyUsagePanel', AdminMyUsagePanel, {
   core: true,
   description: 'Admin portal panel showing the signed-in admin\'s personal AI token balance. Fetches /api/me/tokens. Receives { panel, apiBaseUrl, auth }.',
@@ -76,5 +83,5 @@ registerComponent('AdminAppUsagePanel', AdminAppUsagePanel, {
   description: 'Admin portal panel showing aggregate AI token consumption across all app users. Fetches /api/admin/usage. Receives { panel, apiBaseUrl, auth }.',
 });
 
-export const CORE_COMPONENTS = ['ChatPage', 'SchemaPage', 'LauncherScreen', 'ConfirmScreen', 'ProfilePage', 'WorkflowCompletion', 'TokenStatusTab', 'AdminMyUsagePanel', 'AdminAppUsagePanel'];
+export const CORE_COMPONENTS = ['ChatPage', 'SchemaPage', 'LauncherScreen', 'ConfirmScreen', 'ProfilePage', 'WorkflowCompletion', 'TokenStatusTab', 'ConnectedAccountsTab', 'AdminMyUsagePanel', 'AdminAppUsagePanel'];
 

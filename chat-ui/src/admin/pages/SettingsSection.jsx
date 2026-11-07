@@ -5,6 +5,7 @@ import {
   EmptyState,
   AdminExtensionPanels,
 } from '../components/AdminPrimitives.jsx'
+import AdminConnectedAccountsPanel from '../components/AdminConnectedAccountsPanel.jsx'
 
 function ConfigRow({ label, value, mono = true }) {
   return (
@@ -40,6 +41,8 @@ export function SettingsSection({ extensionPanels }) {
         <ConfigRow label="Runtime API" value={displayedApiUrl} />
         <ConfigRow label="Backend URL" value={backendUrl} />
       </div>
+
+      <AdminConnectedAccountsPanel />
 
       {extensionPanels.length > 0 && (
         <>

@@ -37,6 +37,11 @@ from mozaiksai.core.auth.dependencies import (
 from mozaiksai.core.auth.dependencies import (
     validate_user_id_against_principal as _validate_user_id_against_principal,
 )
+from mozaiksai.core.connected_accounts.host import (
+    configure_for_app as configure_connected_accounts_for_app,
+)
+from mozaiksai.core.connected_accounts.host import profile_page as connected_accounts_profile_page
+from mozaiksai.core.connected_accounts.service import configure_connected_accounts
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.ports.entitlement import EntitlementPort
 from mozaiksai.core.profile.discovery import (
@@ -144,6 +149,7 @@ from mozaiksai.hosts.routers.account import router as _account_router  # noqa: E
 from mozaiksai.hosts.routers.admin_modules import router as _admin_modules_router  # noqa: E402
 from mozaiksai.hosts.routers.billing import router as _billing_router  # noqa: E402
 from mozaiksai.hosts.routers.chat import router as _chat_router  # noqa: E402
+from mozaiksai.hosts.routers.connected_accounts import router as _connected_accounts_router  # noqa: E402
 from mozaiksai.hosts.routers.media import router as _media_router  # noqa: E402
 from mozaiksai.hosts.routers.modules import router as _modules_router  # noqa: E402
 from mozaiksai.hosts.routers.notifications import router as _notifications_router  # noqa: E402
@@ -166,6 +172,7 @@ from mozaiksai.hosts.workflow_runnability import (
 app.include_router(_account_router)
 app.include_router(_admin_modules_router)
 app.include_router(_billing_router)
+app.include_router(_connected_accounts_router)
 app.include_router(_media_router)
 app.include_router(_modules_router)
 app.include_router(_notifications_router)
@@ -304,6 +311,10 @@ async def _platform_startup() -> None:
         app.state.database_index_readiness = None
         # Account export/deletion scopes handler persistence with the loaded contract.
         app.state.data_contract = load_result.data_contract
+        # Users' own third-party accounts for the plugins this app loaded (Google Calendar, Gmail).
+        configure_connected_accounts_for_app(
+            app_id=str(app.state.loaded_app_id), app_root=app_root, modules=load_result.modules,
+        )
         persistence_enabled = database_persistence_is_enabled(database_startup_policy)
         if load_result.data_contract and persistence_enabled:
             index_app_id = app.state.loaded_app_id
@@ -542,6 +553,7 @@ async def _platform_shutdown() -> None:
         app.state.loaded_app_root = None
         app.state.loaded_app_id = None
         app.state.loaded_app_name = None
+        configure_connected_accounts(None)
 
 
 @asynccontextmanager
@@ -1504,6 +1516,10 @@ async def get_profile_pages(
                 "source": "platform_builtin",
             }
         )
+
+    connected_accounts_page = connected_accounts_profile_page()
+    if connected_accounts_page is not None and connected_accounts_page["id"] not in builtin_ids:
+        hydrated.append(connected_accounts_page)
 
     hydrated.sort(key=lambda p: (p.get("order") if p.get("order") is not None else 100,))
 

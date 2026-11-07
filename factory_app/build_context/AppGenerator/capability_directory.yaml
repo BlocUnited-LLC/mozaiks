@@ -358,6 +358,53 @@ capabilities:
       - files.read
       - files.delete
 
+  - id: google_calendar_pack
+    label: Users' Own Google Calendar
+    capability_kind: operator_pack
+    recommendation_rank: 5
+    domains:
+      - calendar
+      - scheduling
+      - events
+    capabilities_provided:
+      - google_calendar.events.read
+      - google_calendar.events.create
+    intent_signals:
+      - Users want to see or add events on their own Google Calendar from the app.
+      - Product spec mentions Google Calendar, syncing to a user's calendar, or adding bookings to the user's calendar.
+    selection_aliases:
+      - google calendar
+      - my google calendar
+      - calendar sync
+      - add to calendar
+    generator_notes:
+      - Generate the google_calendar module from the pack templates. Each user connects their own Google account from their profile (Connected accounts); the module calls Google as that user through account_request.
+      - Do not generate OAuth routes, callback handlers, token storage, Google client libraries or credential fields. The platform runs the OAuth flow, stores the grant and refreshes tokens.
+      - Pages that call its actions handle ACCOUNT_CONNECTION_REQUIRED with isAccountConnectionRequiredError(err) and link to accountConnectionPath(err).
+      - The app's operators configure GOOGLE_ACCOUNTS_CLIENT_ID and GOOGLE_ACCOUNTS_CLIENT_SECRET; never generate their values.
+
+  - id: gmail_pack
+    label: Users' Own Gmail (send only)
+    capability_kind: operator_pack
+    recommendation_rank: 6
+    domains:
+      - email
+      - communication
+    capabilities_provided:
+      - gmail.send
+    intent_signals:
+      - Users send email from their own Gmail address through the app.
+      - Product spec mentions sending from the user's Gmail or own email account.
+    selection_aliases:
+      - gmail
+      - send from my gmail
+      - send from my email
+    generator_notes:
+      - Generate the gmail module from the pack templates. It is send-only and sends only on the user's own request; an AI workflow may draft a message for the user to send.
+      - Do not request Gmail read, search or label scopes; they are restricted by Google.
+      - Use the notifications pack, not this one, for email the app itself sends to users.
+      - Pages that call send_email handle ACCOUNT_CONNECTION_REQUIRED with isAccountConnectionRequiredError(err) and link to accountConnectionPath(err).
+
   - id: notifications_pack
     label: External Notification Delivery
     capability_kind: operator_pack

@@ -177,6 +177,23 @@ export function entitlementUpgradePath(err, fallback = '/pricing') {
   )
 }
 
+export function isAccountConnectionRequiredError(err) {
+  return (
+    err?.error_code === 'ACCOUNT_CONNECTION_REQUIRED' ||
+    err?.code === 'ACCOUNT_CONNECTION_REQUIRED' ||
+    err?.data?.error_code === 'ACCOUNT_CONNECTION_REQUIRED' ||
+    err?.data?.detail?.error_code === 'ACCOUNT_CONNECTION_REQUIRED' ||
+    err?.data?.extra_data?.error_code === 'ACCOUNT_CONNECTION_REQUIRED'
+  )
+}
+
+// Where the signed-in user connects the account an action needs (their own
+// Google Calendar, for example). Link there; never retry the action meanwhile.
+export function accountConnectionPath(err, fallback = '/me?tab=connected-accounts') {
+  const metadata = tokenRecoveryMetadata(err)
+  return appLocalRoute(metadata.connect_route) || appLocalRoute(fallback)
+}
+
 export async function moduleAction(moduleName, actionName, input = {}) {
   const response = await fetch(`${API_BASE}/api/modules/${moduleName}/${actionName}`, {
     method: 'POST',

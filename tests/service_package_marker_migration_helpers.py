@@ -23,6 +23,10 @@ POST_BASELINE_FAMILY_PATHS = SERVICE_PACKAGE_MARKER_PATHS | frozenset({
     # platform's profile-layout endpoint reads app/config/profile.yaml and the
     # scanner was rejecting it as noncanonical.
     "config/profile.yaml",
+    # A plugin module's declaration of the end-user account connection it
+    # needs (connected accounts), at app scope and module scope.
+    "modules/{module_id}/contracts/account_connections.yaml",
+    "contracts/account_connections.yaml",
 })
 
 

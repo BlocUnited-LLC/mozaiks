@@ -1,0 +1,22 @@
+context_id: google_calendar
+applies_to_workflows:
+  - AppGenerator
+assets:
+  - path: contract.yaml
+    kind: contract
+  - path: templates/
+    kind: templates
+pack:
+  id: google_calendar
+  version: "0.1.0"
+  status: active
+  capability_source: generated_module
+  description: >
+    Lets each signed-in user connect their own Google Calendar and use it in the
+    app: list upcoming events and add events. Users connect from their profile
+    (Connected accounts); the app's admins choose whether the app offers it.
+capabilities:
+  - capability_id: google_calendar.events.read
+    facade_recommended: google_calendar
+  - capability_id: google_calendar.events.create
+    facade_recommended: google_calendar

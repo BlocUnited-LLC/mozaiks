@@ -19,9 +19,25 @@ import { authFetch } from '../../adapters/api.js';
 const DEFAULT_HEADERS = { 'Content-Type': 'application/json' };
 const SEARCH_DEBOUNCE_MS = 250;
 
+// A plugin action that needs the user's own account (Google Calendar, for
+// example) says how to connect it; show that instead of a bare status line.
+async function accountConnectionMessage(res) {
+  if (res.status !== 403) return null;
+  try {
+    const detail = (await res.json())?.detail;
+    const extra = detail?.extra_data;
+    if (detail?.error_code !== 'ACCOUNT_CONNECTION_REQUIRED' || typeof extra?.recovery_message !== 'string') return null;
+    return extra.connect_route
+      ? `${extra.recovery_message} Connect it in your profile under Connected accounts.`
+      : extra.recovery_message;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchEndpoint(endpoint, signal) {
   const res = await authFetch(endpoint, { headers: DEFAULT_HEADERS, signal });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) throw new Error((await accountConnectionMessage(res)) || `${res.status} ${res.statusText}`);
   return res.json();
 }
 
