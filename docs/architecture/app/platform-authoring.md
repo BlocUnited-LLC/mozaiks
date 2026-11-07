@@ -46,6 +46,13 @@ module executor without copying their implementation into each workspace.
 The platform-only host loads only its active app modules. Config, services,
 data contracts, and app identity continue to come from the active workspace;
 module defaults do not replace those app families or grant permissions.
+
+The Studio `user_onboarding.get_onboarding_status` response includes
+`completed_at: null` while the tour is incomplete, including after dismissal.
+Completing every step sets an ISO timestamp string; repeated status reads and
+completion of an already completed step retain that timestamp. The module's
+output schema accepts those two values without changing per-user ownership.
+
 HTTP module execution uses the active bundle's resolved app identity. The host
 uses its data contract or `appId`/`app_id`, then the established `default`
 identity when an authored bundle omits them. AppGenerator assembly binds the

@@ -35,7 +35,7 @@ actions:
         dismissed: { type: boolean }
         steps: { type: object }
         progress: { type: integer }
-        completed_at: { type: string }
+        completed_at: { type: [string, "null"] }
     permissions: [onboarding.read]
 
   - id: complete_step
