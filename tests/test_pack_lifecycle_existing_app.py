@@ -62,14 +62,34 @@ APP_ADMIN = (
 
 
 @pytest.fixture(autouse=True)
-def _restore_import_state():
+def _restore_import_state(tmp_path: Path):
+    """Forget the installed apps' own modules (handlers, adapters) and their sys.path entries after each test.
+
+    Only modules loaded from this test's temporary workspace are dropped: removing a
+    framework module imported for the first time here would give later test files a
+    second copy of it, with different class identities.
+    """
     path_snapshot = list(sys.path)
     modules_snapshot = set(sys.modules)
     yield
     sys.path[:] = path_snapshot
-    for key in list(sys.modules):
-        if key not in modules_snapshot:
-            sys.modules.pop(key, None)
+    workspace = os.path.normcase(str(tmp_path.resolve()))
+
+    def loaded_from_workspace(module: object) -> bool:
+        locations = [getattr(module, "__file__", None) or ""]
+        try:
+            locations.extend(getattr(module, "__path__", None) or [])
+        except (KeyError, ImportError):  # a namespace path recomputed against a parent already gone
+            pass
+        return any(location and os.path.normcase(os.path.abspath(location)).startswith(workspace) for location in locations)
+
+    # Decide before removing anything: a child namespace package recomputes its path through its parent.
+    doomed = [
+        key for key, module in list(sys.modules.items())
+        if key not in modules_snapshot and module is not None and loaded_from_workspace(module)
+    ]
+    for key in doomed:
+        sys.modules.pop(key, None)
 
 
 def _ordinary_app(root: Path, *, registry: bool = True):
