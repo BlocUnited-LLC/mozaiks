@@ -35,6 +35,7 @@ from mozaiksai.core.auth.anonymous_access import (
 )
 from mozaiksai.core.auth.config import clear_auth_config_cache
 from mozaiksai.core.auth.dependencies import (
+    development_default_user_id,
     is_shared_development_identity,
     resolve_scope_from_principal,
     validate_user_id_against_principal,
@@ -1397,6 +1398,32 @@ def test_billing_fulfillment_local_branch_needs_development_access(monkeypatch) 
     _auth(monkeypatch, ENV="development")  # demo mode is never an explicit disable
     with pytest.raises(HTTPException):
         _authorize_fulfillment(request, _principal(provenance="local_development"))
+
+
+@pytest.mark.asyncio
+async def test_shell_projects_the_owner_studio_creates_records_for(monkeypatch) -> None:
+    """The browser names its projected id in journey requests and WebSocket
+    paths; Studio creates the draft app for the development default user. The
+    two must be one owner, or a local build cannot start (#1005)."""
+    from mozaiksai.core.runtime.app.auth_contract import build_app_auth_projection
+
+    async def projected_id() -> str:
+        runtime = (await build_app_auth_projection(None, client_scope=_scope(LOCAL, ("Host", "localhost:8000"))))["runtime"]
+        return runtime["user"]["id"]
+
+    development = _principal(provenance="local_development")
+    _off(monkeypatch)
+    monkeypatch.delenv("MOZAIKS_DEFAULT_USER_ID", raising=False)
+    studio_owner = resolve_scope_from_principal(development, default_user_id=development_default_user_id())[1]
+    assert await projected_id() == studio_owner == "demo-user"
+    # The journey route resolves the id the browser names to the same owner.
+    assert resolve_scope_from_principal(development, user_id=await projected_id())[1] == studio_owner
+
+    monkeypatch.setenv("MOZAIKS_DEFAULT_USER_ID", "local-owner")
+    assert await projected_id() == "local-owner"
+    # A local identity with its own id acts as itself, as before.
+    _off(monkeypatch, AUTH_ANON_USER_ID="dev-user")
+    assert await projected_id() == "dev-user"
 
 
 @pytest.mark.asyncio

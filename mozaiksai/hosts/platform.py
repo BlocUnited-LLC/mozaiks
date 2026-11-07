@@ -29,6 +29,7 @@ from mozaiksai.core.auth import (
     require_user_scope,
 )
 from mozaiksai.core.auth.dependencies import (
+    development_default_user_id,
     resolve_scope_from_principal,
     validate_path_app_id,
     validate_path_id,
@@ -124,7 +125,7 @@ async def add_api_version_header(request: Request, call_next):
     return response
 
 
-_DEFAULT_PROFILE_USER_ID = os.getenv("MOZAIKS_DEFAULT_USER_ID", "demo-user").strip() or "demo-user"
+_DEFAULT_PROFILE_USER_ID = development_default_user_id()
 _ACCOUNT_PROFILE_COLLECTION = "UserProfiles"
 _ACCOUNT_PREFERENCES_COLLECTION = "UserPreferences"
 _USER_SETTINGS_COLLECTION = "UserSettings"

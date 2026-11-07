@@ -274,10 +274,18 @@ async def build_app_auth_projection(
         ).development_access
     user = None
     if local_development:
+        from mozaiksai.core.auth.dependencies import ANONYMOUS_USER_ID, development_default_user_id
+
         claims = await get_auth_adapter().validate_token("")
+        # The shared development identity acts for the development default user:
+        # Studio creates its records for that owner, so the browser names it in
+        # every journey request and WebSocket path (live traversal, #1005).
+        acting_user_id = (
+            development_default_user_id() if claims.user_id == ANONYMOUS_USER_ID else claims.user_id
+        )
         user = {
-            "id": claims.user_id,
-            "user_id": claims.user_id,
+            "id": acting_user_id,
+            "user_id": acting_user_id,
             "email": claims.email,
             "name": claims.name,
             "roles": list(claims.roles),
