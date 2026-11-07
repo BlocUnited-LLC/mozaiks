@@ -248,6 +248,28 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
         "allowed_setup_lanes": ["connect_account", "bring_your_own_key"],
     },
     {
+        "id": "google_account_connections",
+        "name": "Google account connections",
+        "category": "auth",
+        "description": (
+            "The app's Google OAuth client for plugins that work with each user's own Google account "
+            "(Google Calendar, Gmail). Users connect from their profile; separate from Sign in with Google."
+        ),
+        "required_secrets": ["GOOGLE_ACCOUNTS_CLIENT_ID", "GOOGLE_ACCOUNTS_CLIENT_SECRET"],
+        "optional_secrets": ["MOZAIKS_CONNECTED_ACCOUNTS_REDIRECT_URI"],
+        "setup_steps": [
+            "Go to Google Cloud Console → APIs & Services and enable the APIs the app's plugins use "
+            "(Google Calendar API, Gmail API)",
+            "Configure the OAuth consent screen with the app's name, support email and the scopes its plugins request",
+            "Create an OAuth 2.0 Client ID (Web application type) and add the redirect URI shown in the app's "
+            "admin Settings under Connected accounts",
+            "Until Google verifies the app for its sensitive scopes, only the test users listed on the consent "
+            "screen can connect",
+        ],
+        "preferred_setup_lane": "bring_your_own_key",
+        "allowed_setup_lanes": ["bring_your_own_key"],
+    },
+    {
         "id": "microsoft_oauth",
         "name": "Microsoft OAuth",
         "category": "auth",

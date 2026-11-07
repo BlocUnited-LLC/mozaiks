@@ -286,6 +286,53 @@ def test_generated_token_recovery_honors_administrator_contact_without_inventing
     ]
 
 
+@pytest.mark.parametrize(
+    "source_path",
+    [
+        None,
+        "examples/canonical-apps/community/app/ui/lib/moduleApi.js",
+        "web_shell/playwright/fixtures/generated-app/app/ui/lib/moduleApi.js",
+    ],
+)
+def test_account_connection_errors_link_to_the_users_connected_accounts(source_path):
+    """A plugin action the user has not connected yet sends them to connect it, inside the app."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required to execute the generated browser helper")
+    js = _template_js() if source_path is None else (_WORKSPACE / source_path).read_text(encoding="utf-8")
+    connect = "/me?tab=connected-accounts&connect=google_calendar"
+    errors = [
+        {"status": 403, "error_code": "ACCOUNT_CONNECTION_REQUIRED",
+         "data": {"error_code": "ACCOUNT_CONNECTION_REQUIRED", "extra_data": {"connect_route": connect}}},
+        {"status": 403, "data": {"extra_data": {"error_code": "ACCOUNT_CONNECTION_REQUIRED"}}},
+        {"status": 403, "error_code": "ACCOUNT_CONNECTION_REQUIRED",
+         "data": {"extra_data": {"connect_route": "https://outside.example/connect"}}},
+        {"status": 403, "error_code": "ACCOUNT_CONNECTION_REQUIRED",
+         "data": {"extra_data": {"connect_route": "//outside.example/connect"}}},
+        {"status": 403, "error_code": "PERMISSION_DENIED"},
+        {"status": 402, "error_code": "ENTITLEMENT_REQUIRED"},
+    ]
+    script = (
+        js
+        + "\nconst errors = " + json.dumps(errors) + ";\n"
+        + "console.log(JSON.stringify(errors.map(err => ["
+        + "isAccountConnectionRequiredError(err), accountConnectionPath(err), isEntitlementRequiredError(err)])))\n"
+    )
+    completed = subprocess.run(
+        [node, "--input-type=module"], input=script, capture_output=True, text=True, timeout=15
+    )
+    assert completed.returncode == 0, completed.stderr
+    fallback = "/me?tab=connected-accounts"
+    assert json.loads(completed.stdout) == [
+        [True, connect, False],
+        [True, fallback, False],
+        [True, fallback, False],
+        [True, fallback, False],
+        [False, fallback, False],
+        [False, fallback, True],
+    ]
+
+
 def test_generated_entitlement_recovery_stays_inside_the_app():
     node = shutil.which("node")
     if node is None:

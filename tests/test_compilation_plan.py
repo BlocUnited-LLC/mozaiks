@@ -87,11 +87,15 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 # (config/targets.json). Aggregate identity moves because the registry digest
 # is part of it; test_service_package_markers_preserve_existing_units_and_gaps
 # proves all 61 unit bodies and all earlier gaps are still byte-identical.
-# Moved once since introduction, by registering config/profile.yaml as a
-# layout-registry family. The plan digest covers the registry, so any
-# deliberate family addition moves it; the property this test protects is
-# that a fresh interpreter derives the SAME digest, which is asserted below.
-_GOLDEN_PLAN_DIGEST = "fdc88e33746108a99f99db21707f69767e04b043180cf3d5487fe2223cb729be"
+# Moved since introduction by registering config/profile.yaml as a
+# layout-registry family, and again by registering the plugin account
+# connection contract (app and module scope; the module-scope row adds one
+# inapplicable scope-inactive unit, proven in
+# test_service_package_markers_preserve_existing_units_and_gaps). The plan
+# digest covers the registry, so any deliberate family addition moves it; the
+# property this test protects is that a fresh interpreter derives the SAME
+# digest, which is asserted below.
+_GOLDEN_PLAN_DIGEST = "2ae0f6cba45bc3567f0931ea6f30ce4ed29c722db7d6614cdfe6ec35318555ab"
 
 
 def _registry():
@@ -166,6 +170,7 @@ def test_cross_process_canonical_equality() -> None:
 
 
 def test_service_package_markers_preserve_existing_units_and_gaps() -> None:
+    from mozaiksai.core.semantics.compilation_plan import snapshot_layout_registry
     from tests.service_package_marker_migration_helpers import (
         POST_BASELINE_FAMILY_PATHS,
         SERVICE_PACKAGE_MARKER_PATHS,
@@ -176,12 +181,29 @@ def test_service_package_markers_preserve_existing_units_and_gaps() -> None:
     previous = corpus_plan_before_service_package_markers()
     current = _plan()
     assert previous.plan_digest == "9fe1d96e4c38fb8c6b061333deae1a9095626e4305b3ac8377b10ef0ae2b3737"
-    assert len(previous.units) == len(current.units) == 61
-    assert [unit.model_dump(mode="json") for unit in current.units] == [
+    # A module-scope family added after the baseline can only contribute an
+    # inapplicable scope-inactive unit to this app-scope corpus: no outputs,
+    # placeholders or sources. Every other unit is one of the historical 61.
+    post_baseline_rows = {
+        row.row_digest for row in snapshot_layout_registry(_registry()).rows
+        if row.path_template in POST_BASELINE_FAMILY_PATHS
+    }
+    added_units = [unit for unit in current.units if unit.family_identity_digest in post_baseline_rows]
+    for unit in added_units:
+        assert unit.unit_id == f"{unit.family_kind}/scope_inactive/{unit.family_identity_digest[:12]}"
+        assert unit.disposition is PlanDisposition.INAPPLICABLE
+        assert unit.outputs == unit.placeholder_values == unit.sources == unit.edge_sources == ()
+    historical_units = [unit for unit in current.units if unit not in added_units]
+    assert len(previous.units) == len(historical_units) == 61
+    assert [unit.model_dump(mode="json") for unit in historical_units] == [
         unit.model_dump(mode="json") for unit in previous.units
     ]
     restored = current.canonical_payload(include_digest=False)
     restored["registry_digest"] = previous.registry_digest
+    restored["units"] = [
+        unit for unit in restored["units"]
+        if unit["family_identity_digest"] not in post_baseline_rows
+    ]
     added_gaps = [gap for gap in current.gaps if gap not in previous.gaps]
     marker_gaps = [gap for gap in added_gaps if gap.path_template in SERVICE_PACKAGE_MARKER_PATHS]
     assert len(marker_gaps) == 5

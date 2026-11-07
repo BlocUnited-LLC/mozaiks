@@ -1,0 +1,65 @@
+contract_id: gmail
+contract_type: build_pack_instructions
+
+selection_rules:
+  - id: select_for_user_gmail_send
+    when:
+      intent_any:
+        - gmail
+        - connect gmail
+        - send email from my gmail
+        - send from my email address
+        - email from my own account
+    action: select_pack
+
+recommended_domains:
+  - email
+  - communication
+
+required_outputs:
+  - path: modules/gmail/module.yaml
+    owner: templates
+  - path: modules/gmail/contracts/account_connections.yaml
+    owner: templates
+  - path: modules/gmail/backend/__init__.py
+    owner: templates
+  - path: modules/gmail/backend/base_handler.py
+    owner: templates
+  - path: modules/gmail/backend/handler.py
+    owner: workspace  # preserved across regeneration; subclasses base_handler.py
+  - path: modules/gmail/backend/service.py
+    owner: templates
+
+forbidden_outputs:
+  - path_prefix: services/integrations/gmail
+  - path_prefix: modules/google_oauth/
+
+runtime_boundaries:
+  - id: send_only
+    rule: >
+      The connection requests the gmail.send scope only. Do not add reading,
+      searching or labelling mail: those scopes are restricted by Google and
+      need a security assessment.
+  - id: users_own_request
+    rule: >
+      Email is sent as the user only on the user's own request (their click in
+      the app). An AI workflow may draft a message for the user to send; the
+      generated service refuses workflow dispatch for send_email.
+  - id: users_own_account
+    rule: >
+      Each user connects their own Google account from their profile (Connected
+      accounts). The module never stores a token and never asks the user for a
+      password, API key or token. Do not generate OAuth routes or Google client
+      libraries.
+  - id: connection_required_errors
+    rule: >
+      When the user has not connected, the action fails with
+      ACCOUNT_CONNECTION_REQUIRED. Custom pages show the message with a link to
+      accountConnectionPath(err) from ui/lib/moduleApi.js and do not retry.
+  - id: no_bulk_mail
+    rule: >
+      This is personal email from the user's own address, at most 20 recipients
+      per message. It is not a newsletter, marketing or notification channel;
+      use the notifications pack for app-sent email.
+
+facades: []

@@ -1,0 +1,82 @@
+schema_version: mozaiks.module.v1
+module:
+  id: google_calendar
+  display_name: Google Calendar
+  version: 1.0.0
+  description: The signed-in user's own Google Calendar, through the account they connect in their profile. Lists upcoming events and adds events. Stores nothing.
+  owner: app
+  visibility: private
+  handler: backend.handler:GoogleCalendarHandler
+
+actions:
+  - id: list_upcoming_events
+    description: List the signed-in user's upcoming events from their primary Google Calendar.
+    handler_method: list_upcoming_events
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        max_results:
+          type: integer
+          minimum: 1
+          maximum: 50
+        days_ahead:
+          type: integer
+          minimum: 1
+          maximum: 90
+    output_schema:
+      type: object
+      required: [events, total]
+      properties:
+        events:
+          type: array
+        total:
+          type: integer
+
+  - id: create_event
+    description: Add an event to the signed-in user's primary Google Calendar.
+    handler_method: create_event
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [summary, start, end]
+      properties:
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 200
+        # start / end: ISO 8601 date-times with a UTC offset, or without one
+        # when time_zone is given (an IANA name such as Europe/Paris).
+        start:
+          type: string
+          maxLength: 64
+        end:
+          type: string
+          maxLength: 64
+        time_zone:
+          type: string
+          maxLength: 64
+        description:
+          type: string
+          maxLength: 4000
+        location:
+          type: string
+          maxLength: 300
+    output_schema:
+      type: object
+      required: [success, event]
+      properties:
+        success:
+          type: boolean
+        event:
+          type: object
+
+capabilities:
+  - capability_id: google_calendar.events.read
+    kind: action
+    target: list_upcoming_events
+    title: List upcoming Google Calendar events
+  - capability_id: google_calendar.events.create
+    kind: action
+    target: create_event
+    title: Add a Google Calendar event
