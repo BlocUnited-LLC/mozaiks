@@ -23,9 +23,11 @@ from uuid import uuid4
 import httpx
 import pytest
 import yaml
+from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import MongoClient
 from websockets.asyncio.client import connect
 
+from mozaiksai.core.adapters.ag2_knowledge_store import MongoAG2KnowledgeStore
 from scripts import run_live_workflow_smoke as smoke
 from tests import test_run_live_workflow_smoke_runtime_host as smoke_fixtures
 from tests.test_run_live_workflow_smoke_runtime_host import (
@@ -148,6 +150,20 @@ def _channels(database: Any, app_id: str, chat_id: str) -> set[str]:
     }
 
 
+async def _read_wal(uri: str, app_id: str, chat_id: str, path: str) -> str | None:
+    client = AsyncIOMotorClient(uri, serverSelectionTimeoutMS=2000)
+    try:
+        database = client["mozaiksai"]
+        store = MongoAG2KnowledgeStore(
+            app_id=app_id, chat_id=chat_id,
+            collection=database.AG2NetworkKnowledge,
+            chunks_collection=database.AG2NetworkKnowledgeChunks,
+        )
+        return await store.read(path)
+    finally:
+        client.close()
+
+
 @pytest.mark.parametrize("transport", ["http", "websocket"])
 def test_first_reply_after_process_restart_reaches_agent(
     transport: str,
@@ -214,14 +230,15 @@ def test_first_reply_after_process_restart_reaches_agent(
                 assert [item["model"] for item in resumed_requests] == ["FinishAgent"], resumed_requests
                 assert json.dumps(resumed_requests[0]["messages"]).count(reply) == 1
                 assert _channels(database, app_id, chat_id) == original_channels
-                wal = database.AG2NetworkKnowledge.find_one({
-                    "app_id": app_id, "chat_id": chat_id,
-                    "path": f"/channels/{next(iter(original_channels))}/wal.jsonl",
-                })
+                # Virtual-file decoding belongs to the canonical knowledge store.
+                wal = asyncio.run(_read_wal(
+                    mongo_uri, app_id, chat_id,
+                    f"/channels/{next(iter(original_channels))}/wal.jsonl",
+                ))
                 assert wal is not None
                 human_turns = [
                     event["event_data"]["text"]
-                    for line in wal["content"].splitlines()
+                    for line in wal.splitlines()
                     if (event := json.loads(line))["event_type"] == "ag2.msg.text"
                 ]
                 assert human_turns == [prompt, reply]
