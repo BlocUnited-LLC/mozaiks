@@ -73,6 +73,15 @@ structured output, and not separately exposed as an agent-callable tool. One
 `ConceptBlueprint` component displays the draft and collects its review; it
 does not emit a second display-only surface.
 
+Concept endpoint hints are advisory. For ordinary module-backed capabilities,
+`ConceptBlueprint.api_endpoints` is empty; `core_features` and
+`surface_candidate_hints` describe the intended behavior. Downstream declared
+module/action contracts own executable bindings. Endpoint hints are reserved for
+an explicit existing API or required custom integration boundary with a supplied
+method/path contract. If that contract is missing, the concept records the open
+requirement in `constraints` instead of inventing a route. These hints do not
+register routes or change module authorization.
+
 The operation persists a draft, then binds the structured response to a fresh
 `review_id`. `BuilderArtifactStore.finish_concept_review` applies the decision
 only to the current pending draft and its reviewer. A unique app index keeps one

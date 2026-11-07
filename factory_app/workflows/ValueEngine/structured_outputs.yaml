@@ -221,7 +221,11 @@ models:
       api_endpoints:
         type: optional_list
         items: ApiEndpointSpec
-        description: Planned API endpoints for the MVP.
+        description: >
+          Advisory existing API or required custom integration boundaries supported
+          by supplied contracts. Use [] for ordinary module-backed capabilities;
+          downstream module/action contracts own their executable bindings.
+          Do not invent REST paths from feature names.
       app_ui_requirements:
         type: optional_list
         items: str
@@ -274,10 +278,10 @@ models:
         description: HTTP method.
       path:
         type: str
-        description: API path (e.g., /api/users).
+        description: Exact API path from the supplied contract for this explicit integration boundary.
       description:
         type: str
-        description: What this endpoint does.
+        description: What the evidenced integration endpoint does; this hint does not create a runtime route.
 
   # =========================================================================
   # CAPABILITY & DECOMPOSITION MODELS
