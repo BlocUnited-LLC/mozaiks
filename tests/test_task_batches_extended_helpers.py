@@ -275,7 +275,7 @@ class TestOptionalTaskOutputPaths:
         optional path the guard does not know is a file the typed pipeline
         never materializes.
 
-        Two assertions on purpose. The literal pins the nine files the typed
+        Two assertions on purpose. The literal pins the ten files the typed
         pipeline materializes today, so a key dropped from the guard's map
         fails here instead of silently shrinking both sets together. The
         derived form pins that the set is taken from that map at all.
@@ -286,6 +286,7 @@ class TestOptionalTaskOutputPaths:
         assert result == {
             "modules/billing/contracts/admin.yaml",
             "modules/billing/contracts/events.yaml",
+            "modules/billing/contracts/fixtures.yaml",
             "modules/billing/contracts/notifications.yaml",
             "modules/billing/contracts/policy_hooks.yaml",
             "modules/billing/contracts/profile.yaml",
