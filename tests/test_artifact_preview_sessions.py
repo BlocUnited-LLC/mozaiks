@@ -718,6 +718,10 @@ def api_client(monkeypatch):
 
     adapter = FakeSandboxAdapter()
     manager = _manager(adapter)
+    # These tests exercise HTTP routing and error mapping, not queue expiry. With
+    # the 50 ms queue budget, a garbage-collection pause between reserving and the
+    # first status read expires the setup create, which then answers 429.
+    manager._queue_seconds = 5
     monkeypatch.setattr(sessions, "_manager", manager)
     principal = UserPrincipal(user_id="tester", app_id="factory", email=None, name=None, roles=[], scopes=[], raw_claims={})
 
