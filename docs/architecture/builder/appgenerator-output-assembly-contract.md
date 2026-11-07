@@ -185,8 +185,16 @@ contract is required. There is no `subscription_config` task type and no
 ConfigMiddleware mode for it; plan review and the plan cache release the path
 from any task that lists it (`release_subscriptions_config`) and drop a task left
 empty. `AppBuildPlan.monetization_provider` is validated against the approved
-contract's `contract_required`, not against a planned task. The file's
-`assignment_store` is constructed by code (`subscription_assignment_store`): the
+contract's `contract_required`, not against a planned task. The
+provider selection is `mozaiks_pay` or `entitlement_dispatch` when required,
+and JSON `null` otherwise. Both the plan and its nested monetization decision
+use this nullable enum; strings such as `"null"`, `"none"`, and `"free"` are
+invalid provider selections. Optional page-layout/page-type hints, image
+variants, and asset aspects likewise use JSON `null` for absence while keeping
+their declared non-null choices. JSON-schema type discriminators retain the
+literal `"null"` type name.
+
+The file's `assignment_store` is constructed by code (`subscription_assignment_store`): the
 runtime `SubscriptionAssignmentStoreDef` defaults, including `active_statuses`
 `[active, pending, trialing]`, with `data_alias: billing.subscriptions` and
 `user_id_field: user_id`, which both assignment writers key on. The designer does

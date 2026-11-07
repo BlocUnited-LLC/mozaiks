@@ -334,6 +334,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Free-app plans and optional page/image hints now accept JSON `null` for
+  absent selections. Provider names and UI choices remain finite, and string
+  sentinels such as `"null"` are rejected instead of standing in for absence.
 - Factory builds now preserve the explicitly selected provider, model, and
   credential through the existing AG2 configuration path. Stored provider
   changes invalidate cached configs, optional `LLM_MAX_TOKENS` reaches native

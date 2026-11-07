@@ -480,7 +480,7 @@ agents:
           present without either this module or a managed assignment writer.
         - If the resolved contract's `contract_required` is false, or neither
           `subscription_contract` nor `subscription_contract_artifact` carries a
-          contract at all, leave `monetization_provider` null; assembly emits no
+          contract at all, leave `monetization_provider` JSON null; assembly emits no
           config/subscriptions.yaml. A null `subscription_contract` on its own is
           not "absent": check the artifact before concluding there is no contract.
         - Set `monetization_provider` exactly when the resolved contract's

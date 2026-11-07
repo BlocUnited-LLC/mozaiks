@@ -373,7 +373,7 @@
    "readiness_profile": "saas_app",
    "revenue_model": "free",
    "monetization_plan": null,
-   "monetization_provider": "null",
+   "monetization_provider": null,
    "external_integrations": [
     {
      "name": "MozaiksPay",
@@ -1205,7 +1205,7 @@
    "readiness_profile": "saas_app",
    "revenue_model": "free",
    "monetization_plan": null,
-   "monetization_provider": "null",
+   "monetization_provider": null,
    "external_integrations": [
     {
      "name": "MozaiksPay",
@@ -2007,7 +2007,7 @@
    "readiness_profile": "saas_app",
    "revenue_model": "free",
    "monetization_plan": null,
-   "monetization_provider": "null",
+   "monetization_provider": null,
    "external_integrations": [
     {
      "name": "MozaiksPay",
