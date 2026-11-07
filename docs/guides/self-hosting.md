@@ -56,7 +56,9 @@ reach a container's address directly despite a `127.0.0.1` publish.
 !!! note "Using Anthropic instead of OpenAI?"
     Set `LLM_PRIMARY_API_TYPE=anthropic` and replace `OPENAI_API_KEY` with
     `ANTHROPIC_API_KEY="sk-ant-..."`. Supply the intended model through
-    `LLM_PRIMARY_MODEL`.
+    `LLM_PRIMARY_MODEL`. Install the `mozaiks[anthropic]` extra in the host
+    environment or image first. An optional positive `LLM_MAX_TOKENS` sets the
+    provider's output limit; leaving it unset preserves its default.
 
 For authenticated access, configure the issuer, audience, public browser client,
 and callback described in [Factory security](factory-security.md). The audience

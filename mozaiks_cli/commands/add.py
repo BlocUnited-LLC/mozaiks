@@ -117,7 +117,7 @@ def _show_next_steps(feature_or_preset, app_root_label: str):
         print("  - Add workflow triggers in orchestrator.yaml")
 
     if feature_or_preset == "auth" or feature_or_preset in ["integrated", "full"]:
-        print("  - Add or review app/config/auth.yaml (schema_version: mozaiks.auth.v1)")
+        print("  - Add or review app/config/auth.yaml (schema_version: mozaiks.auth.v2)")
         print("  - Configure provider-neutral OIDC/JWT env handles in .env")
         print(f"  - Update authRequired in {app_root_label}/app.json")
 

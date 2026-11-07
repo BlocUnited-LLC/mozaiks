@@ -231,7 +231,7 @@ class TestInjectCookieCutterContractsContext:
         self.mod.inject_cookie_cutter_contracts_context(agent, [])
         message = agent.system_message
         assert "final artifact inventory, not a request to author every file" in message
-        assert f"Code-rendered policy artifacts; omit from python_files and code_files:\n  - {policy}" in message
+        assert f"Code-rendered policy artifacts; omit from python_files:\n  - {policy}" in message
         assert "Do not emit a comment-only or pass stub" in message
         assert context.snapshot() == before
 

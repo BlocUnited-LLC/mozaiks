@@ -45,6 +45,7 @@ from mozaiksai.core.workflow.generator_support.code_files import planned_page_pa
 from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     PackFacadeDirectory,
+    all_module_actions,
     pack_facade_directories,
     pack_owned_output_paths,
 )
@@ -957,7 +958,9 @@ _SYNTHESIZED_TASK_BRIEFS = {
     ),
     "module_contract": (
         "Define the module contract that outlines the actions and relationships "
-        "for managing {subject}."
+        "for managing {subject}. Use the optional typed fixtures_yaml companion "
+        "only when valid smoke inputs need prerequisites beyond the input schemas; "
+        "fixtures are test inputs, not acceptance or authorization policy."
     ),
     "persistence_contract": (
         "Establish data ownership over the {subject} collection with its schema "
@@ -1209,19 +1212,22 @@ def _repair_contract_task_operations(plan: dict[str, Any], context: Any) -> list
 
     #634 covered the case where the planner omits a read entirely. This covers
     the larger one: the planner declared the operation and it never reached the
-    agent. Operations already named in the message are left alone, so the two
-    repairs compose rather than duplicate.
+    agent. When DesignDocs is present, its complete canonical action inventory
+    also overrides contradictory construction or naming advice in task prose.
     """
     repairs: list[str] = []
     tasks = plan.get("build_tasks") or []
 
+    inventory = all_module_actions(context)
+    inventory_note = "Approved module action inventory (DesignDocs and data_contract):"
+
     for pack in plan.get("capability_packs") or []:
         if pack.get("surface_kind") != "module" or pack.get("capability_source") != "generated_module":
             continue
-        operations = [str(op).strip() for op in (pack.get("operations") or []) if str(op).strip()]
+        module_id = str(_pack_id_from_descriptor(pack))
+        operations = inventory.get(module_id, [str(op).strip() for op in (pack.get("operations") or []) if str(op).strip()])
         if not operations:
             continue
-        module_id = str(_pack_id_from_descriptor(pack))
         contract = next(
             (
                 task
@@ -1236,22 +1242,22 @@ def _repair_contract_task_operations(plan: dict[str, Any], context: Any) -> list
         message = str(contract.get("initial_message") or "").rstrip()
         # Word-boundary, so record_checkin does not mask checkin.
         missing = [op for op in operations if not re.search(WORD + re.escape(op) + WORD, message)]
-        if not missing:
+        if not missing and (module_id not in inventory or inventory_note in message):
             continue
         named = ", ".join(f"`{op}`" for op in operations)
+        authority = inventory_note if module_id in inventory else "Actions for this module (authoritative, from the approved plan):"
         note = (
-            f"Actions for this module (authoritative, from the approved plan): {named}. "
+            f"{authority} {named}. "
             "Every action must appear in the final actions[] exactly once with these ids. "
-            "Declare approved writes and custom reads; code constructs canonical list/get reads. "
+            "Do not add alternate spellings or retain unapproved actions during repair. "
+            "Declare approved writes and custom reads; code constructs owner-scoped reads and ordinary unprotected app-wide reads. "
             "For app_wide collections with protected writes, explicitly declare the canonical "
             "reads and their permissions, API exposure, and handler policy. "
             "The prose above describes the module; this list defines it."
         )
         contract["initial_message"] = "\n\n".join(part for part in (message, note) if part)
-        repairs.append(
-            f"{module_id}: contract task {str(contract.get('task_id'))!r} did not name "
-            f"{missing}; added the approved operation list"
-        )
+        repairs.append(f"{module_id}: contract task {str(contract.get('task_id'))!r} "
+                       f"received the approved operation list; missing ids were {missing}")
     return repairs
 
 
@@ -1372,8 +1378,10 @@ def _restate_handler_split(plan: dict[str, Any], context: Any) -> list[str]:
                 ),
             }[source]
             canonical = (
-                f" Code adds the canonical create/update/delete and list/get methods to {handler_class} "
-                "and their service.py and repo.py functions; author them in neither class."
+                f" Code adds constructed CRUD and read methods to {handler_class} "
+                "and their service.py and repo.py functions. The accepted write-ownership inventory "
+                "identifies code-owned writes to omit and protected app-wide writes to implement "
+                "with their declared request contracts; implement authored dispatch in the base class."
                 if collections else ""
             )
             note = (

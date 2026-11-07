@@ -103,7 +103,7 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {}, aut
   if (!runtime.enabled) {
     throw new Error('Authentication is required but unavailable');
   }
-  if (contract?.schema_version !== 'mozaiks.auth.v1' || contract.strategy !== 'oidc'
+  if (contract?.schema_version !== 'mozaiks.auth.v2' || contract.strategy !== 'oidc'
       || contract.frontend?.adapter !== 'oidc_pkce') throw new Error('A canonical OIDC contract is required');
   if (authorizationTransport !== undefined && typeof authorizationTransport?.open !== 'function') {
     throw new Error('Authorization transport must provide open');

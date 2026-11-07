@@ -12,8 +12,24 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import _ALLOWED_TAS
 from mozaiksai.core.runtime.persistence.adapter import PersistenceCollection
 from mozaiksai.core.runtime.persistence.naming import collection_name_for
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.generator_support.code_files import planned_page_path
+from mozaiksai.core.workflow.generator_support.code_files import (
+    extract_code_file_map_from_payload,
+    planned_page_path,
+)
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_design_access_policy,
+)
 from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    all_module_actions,
+    canonical_read_actions_for_surface,
+)
+from mozaiksai.core.workflow.generator_support.module_read_actions import (
+    module_read_implementation_ownership,
+)
+from mozaiksai.core.workflow.generator_support.module_write_actions import (
+    module_write_implementation_ownership,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +150,35 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
         "The approved app_build_plan incorporates the latest interview decisions. Preserve its entity fields, optionality, ownership, actions, page routes, and exclusions. Older design documents and category defaults must not override it. Dependency outputs implement that plan, not a new product scope; report contradictions instead of silently copying them.",
     ]
 
+    if agent_name in {"AppPlanAgent", "ConfigMiddlewareAgent"}:
+        context = getattr(agent, "context_variables", None)
+        task = _context_get(context, "current_build_task", {}) or {}
+        module_id = str(task.get("capability_pack_id") or "")
+        inventory = all_module_actions(context)
+        surfaces = (_context_get(context, "design_surface_map", {}) or {}).get("surfaces") or []
+        for surface in surfaces:
+            surface_id = surface.get("surface_id")
+            if surface_id not in inventory or (agent_name == "ConfigMiddlewareAgent" and module_id and surface_id != module_id):
+                continue
+            lines.extend(_format_list_block(
+                f"Approved action ids for {surface_id}; this inventory overrides contradictory task prose:",
+                inventory[surface_id],
+            ))
+            reads = [action for action in canonical_read_actions_for_surface(surface, _context_get(context, "data_contract"))
+                     if action in inventory[surface_id]]
+            lines.extend(_format_list_block(
+                f"Exact canonical read ids for {surface_id}; preserve the collection name, including its plural spelling:",
+                reads,
+            ))
+        if inventory:
+            lines.append(
+                "Use only the listed action ids; do not infer alternate names from an entity or page, or keep obsolete spellings after a repair. "
+                "For app_wide collections with protected writes, declare every canonical read with its intended "
+                "permissions, api_surface, handler_method and input/output schemas; code does not infer read access. "
+                "Code constructs owner-scoped reads and ordinary unprotected app-wide reads. "
+                "These ids establish identity, not a permission or public-access grant."
+            )
+
     if agent_name == "AppPlanAgent":
         context = getattr(agent, "context_variables", None)
         experience = _context_get(context, "experience_spec", {}) or {}
@@ -206,6 +251,51 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
                 )
 
     if agent_name == "ServiceAgent":
+        if module_id:
+            import yaml
+
+            # Match task compilation: admitted dependencies override the base file inventory.
+            sources = dict(_context_get(context, "generated_files", {}) or {})
+            for dependency in (_context_get(context, "dependency_task_outputs", {}) or {}).values():
+                sources.update(extract_code_file_map_from_payload(dependency))
+            source = sources.get(f"modules/{module_id}/module.yaml")
+            if source is not None:
+                module = yaml.safe_load(source)
+            if module and (module.get("module") or {}).get("id") != module_id:
+                raise ValueError(f"Write ownership context does not belong to module {module_id!r}")
+        if module_id and module:
+            read_ownership = module_read_implementation_ownership(
+                module_id, module, app_build_plan=_context_get(context, "app_build_plan"),
+                data_contract=_context_get(context, "data_contract"),
+                subscription_contract=_context_get(context, "subscription_contract"),
+            )
+            lines.extend(_format_list_block(
+                "Code-owned read methods; omit their handler/service/repo bodies:",
+                read_ownership["code_owned"],
+            ))
+            lines.extend(_format_list_block(
+                "Authored read actions; implement each accepted handler_method, service and repo body in "
+                "owned_paths, preserving its input/output schema and access policy. These reads are not "
+                "rendered, even when permissions is empty and api_surface is null:",
+                read_ownership["authored"],
+            ))
+            ownership = module_write_implementation_ownership(
+                module_id, module, app_build_plan=_context_get(context, "app_build_plan"),
+                data_contract=_context_get(context, "data_contract"),
+                subscription_contract=_context_get(context, "subscription_contract"),
+                design_surface_map=_context_get(context, "design_surface_map"),
+                access_policy=resolve_design_access_policy(context),
+            )
+            lines.extend(_format_list_block(
+                "Code-owned write methods; omit their handler/service/repo bodies and use declared hooks only:",
+                ownership["code_owned"],
+            ))
+            lines.extend(_format_list_block(
+                "Authored protected write actions; implement their declared handler methods, service and repo "
+                "bodies in owned_paths. Preserve the admitted request schemas and permissions; supply omitted "
+                "record fields from trusted server context and enforce lifecycle rules before persistence:",
+                ownership["authored"],
+            ))
         lines.append(
             "module_contract.python_stubs, downstream_python_defaults, and current_build_task.owned_paths "
             "describe the final artifact inventory, not a request to author every file. "
@@ -218,7 +308,7 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
             if str(path).endswith("/backend/policy.py")
         ]
         lines.extend(_format_list_block(
-            "Code-rendered policy artifacts; omit from python_files and code_files:", policy_paths,
+            "Code-rendered policy artifacts; omit from python_files:", policy_paths,
         ))
         methods = [
             f"async {name}{inspect.signature(method)}"

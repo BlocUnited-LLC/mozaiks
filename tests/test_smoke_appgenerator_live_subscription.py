@@ -118,7 +118,9 @@ def test_model_schema_compiles_to_the_report_metric_binding() -> None:
     action["output_schema"] = {
         "type": "object", "description": None, "items_type": None,
         "properties": [
-            {"name": "items", "type": "array", "required": True, "items_type": "object", "description": None, "enum_values": None},
+            {"name": "items", "type": "array", "required": True, "items_type": "object", "description": None, "enum_values": None,
+             "items_properties": [{"name": name, "type": "string", "required": True, "items_type": None,
+                                   "description": None, "enum_values": None} for name in ("report_id", "topic")]},
             {"name": "total", "type": "integer", "required": True, "items_type": None, "description": None, "enum_values": None},
         ],
     }
@@ -134,7 +136,9 @@ def test_model_schema_compiles_to_the_report_metric_binding() -> None:
 
     assert not errors
     assert yaml.safe_load(content)["actions"][0]["output_schema"]["properties"] == {
-        "items": {"type": "array", "items": {"type": "object"}}, "total": {"type": "integer"},
+        "items": {"type": "array", "items": {"type": "object", "properties": {
+            "report_id": {"type": "string"}, "topic": {"type": "string"},
+        }, "required": ["report_id", "topic"]}}, "total": {"type": "integer"},
     }
     assert yaml.safe_load(content)["actions"][0]["output_schema"]["required"] == ["items", "total"]
     assert yaml.safe_load(content)["actions"][1]["input_schema"]["required"] == ["topic"]

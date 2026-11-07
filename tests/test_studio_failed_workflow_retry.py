@@ -316,12 +316,15 @@ async def test_retry_seed_runs_canonical_before_chat_baseline_loader(retry, monk
     monkeypatch.setattr(revision, "get_artifact_store", lambda: retry.store)
     monkeypatch.setattr(lifecycle, "resolve_workflow_path", lambda _: ROOT / "factory_app/workflows/AppGenerator")
     manager = lifecycle.get_lifecycle_manager("AppGenerator")
-    first_hook = manager.tools[lifecycle.LifecycleTrigger.BEFORE_CHAT][0]
-    assert first_hook.function == "hydrate_app_revision_context"
-    assert first_hook.file == "hydrate_app_revision_context.py"
-    monkeypatch.setitem(first_hook.callable.__globals__, "get_artifact_store", lambda: retry.store)
-    # Other lifecycle hooks have unrelated stores; execute the real first hook only.
-    manager.tools[lifecycle.LifecycleTrigger.BEFORE_CHAT] = [first_hook]
+    baseline_hooks = [
+        hook for hook in manager.tools[lifecycle.LifecycleTrigger.BEFORE_CHAT]
+        if hook.function == "hydrate_app_revision_context" and hook.file == "hydrate_app_revision_context.py"
+    ]
+    assert len(baseline_hooks) == 1
+    baseline_hook = baseline_hooks[0]
+    monkeypatch.setitem(baseline_hook.callable.__globals__, "get_artifact_store", lambda: retry.store)
+    # Other lifecycle hooks have unrelated stores; execute the real baseline hook only.
+    manager.tools[lifecycle.LifecycleTrigger.BEFORE_CHAT] = [baseline_hook]
     monkeypatch.setattr(manager, "_emit_lifecycle_event", AsyncMock())
     expected_error = None
     if fault == "missing_archive":

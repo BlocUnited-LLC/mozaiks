@@ -121,6 +121,9 @@ async def test_standalone_acceptance_still_rejects_missing_auth_scaffold():
     ("app.json", "[]"),
     ("config/auth.yaml", "schema_version: invalid\n"),
     ("config/auth.yaml", "broken: ["),
+    ("config/auth.yaml", "[]"),
+    ("config/auth.yaml", "null"),
+    ("config/auth.yaml", "true"),
     ("ui/auth/authAdapter.js", "export default {};"),
     ("ui/route_manifest.json", '{"pages":[{"path":"/login","component":"LoginPage","meta":{"requiresAuth":true}}]}'),
 ])

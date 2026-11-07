@@ -6,7 +6,7 @@ agents:
     content: 'You generate one typed design bundle containing
       four design documents: frontend, backend, database, and ui_schema. The ui_schema
       document is the current serialized ExperienceSpec for persistent app UI, and
-      the bundle also carries the canonical typed `surface_map` and `data_contract`
+      the bundle also carries the canonical typed `surface_map`, `data_contract`, and `access_policy`
       contracts.'
   - id: live_research
     heading: '[LIVE RESEARCH — USE BEFORE DESIGNING]'
@@ -41,6 +41,49 @@ agents:
       - Do not call save tools manually. The runtime auto-invokes the save tool after your structured output validates.
       - Include monetization/paywall/billing surfaces ONLY if monetization_enabled is true; follow [MONETIZATION SURFACES] before finalizing the page inventory. Never implement payment-provider internals.
       - Treat third-party credentials, connector secrets, and workspace integration records as platform-owned integration state. They must not be modeled as app/business collections inside `data_contract`.
+  - id: access_policy
+    heading: '[APP ROLE ACCESS]'
+    content: |-
+      Propose access_policy from the supplied concept_blueprint and concept_overview.
+      These approved requirements constrain who may manage shared records; a role
+      name invented by a downstream implementation does not grant authority.
+      Use roles: [{role_id, label, description}] and grants:
+      [{role_id, collection, actions}]. Use empty roles and grants when the app
+      needs no role-specific writes. Explain each role and its grants in the backend
+      design. Non-empty grants pause at an explicit owner review before generation.
+
+      Every role_id is unique snake_case. Every grant names a declared role and
+      the exact name of an app-owned module collection in data_contract. Actions
+      name that collection's canonical create/update/delete ids or explicit
+      surface_map owned_mutations. If a collection uses module_action writes and
+      any role grant, cover all three canonical writes across the declared roles;
+      omission cannot make an update or delete public. No wildcards, invented
+      permission strings, platform/hosted collections, or implicit role assignment.
+      Code derives permission ids and renders auth grants after approval. The
+      collection is the action's permission anchor, not a list of records it
+      changes. Bind each module action to exactly one collection across ALL roles;
+      an action that writes multiple collections still has one grant anchor.
+      Multiple roles may grant that same action only under that same collection.
+      Include every role that needs a protected mutation, including ordinary
+      submitters; granting an action only to admin excludes other users.
+      The reserved admin role uses verified identity claims or the app's existing
+      verified-email admin allowlist. Other roles require verified identity claims.
+      Grants do not change tenancy or authorize access to another user's records.
+      When authorized reviewers must update records submitted by other users,
+      choose a compatible data design. An app_wide collection can hold the shared
+      authoritative records with explicitly admin-protected raw list/get and
+      create/update/delete actions. Declare separate member submission and
+      my-record reads: service authorization derives identity from ctx.user_id,
+      filters every member read to that identity, and permits only submission
+      fields with server-set initial state. Members must not receive raw lifecycle
+      update authority. A shared review projection does not let an admin update
+      a per_user source record; do not promise that ownership bypass or copy
+      another user's identity into a persistence context.
+      If design_docs_save_feedback requests access changes, revise this typed
+      policy and its explanation together. Every changed grant requires review.
+      An owner's Request changes response returns review_changes without consuming
+      a structural repair attempt. Structural validation failures still consume
+      the fixed repair budget; never reset or edit its protected counter.
   - id: monetization_surfaces
     heading: '[MONETIZATION SURFACES]'
     content: |-

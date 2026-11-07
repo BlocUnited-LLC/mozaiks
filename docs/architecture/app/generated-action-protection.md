@@ -29,6 +29,50 @@ deployment: rows 5 to 10 below assume a host that authenticates callers.
 
 ## What An Action Reaches
 
+### Approved role grants
+
+`config/auth.yaml` uses `mozaiks.auth.v2`. Its optional `authorization.roles`
+contains `{id, permissions}` entries. Module dispatch combines token scopes
+with grants from roles the verified principal actually holds, before deployer
+scope hooks narrow the result. The reserved `admin` role also honors the
+loaded app's admin email allowlist only for verified email or admitted local
+development access. A role grants action permission, never another user's
+persistence identity.
+
+For generated apps, DesignDocs owns `access_policy`: roles have `role_id`,
+`label`, and `description`; grants name a role, an app-owned collection and
+approved mutation ids. Nonempty grants require the existing UI approval tool
+to return approval for that policy. AppGenerator resolves the persisted,
+bound review receipt, then code derives `{collection}.{action_id}` permissions
+on module actions and auth role entries. A role-managed collection must cover
+all canonical writes explicitly. Validation reports missing grants for every
+incomplete role-managed collection together, so a single repair can address
+the complete omission without changing the policy automatically.
+Candidate tasks cannot edit auth or use
+their own role declarations as authorization.
+
+Generation admission can inspect the union of declared grants. Runtime smoke
+keeps that union out of ordinary users' token scopes and checks role-holder
+success and role-less denial through authenticated dispatch.
+
+### Canonical read declarations
+
+Canonical read ids use the exact collection name: `get_{collection_name}` and
+`list_{collection_name}`. The Factory projects these ids and the complete
+approved action inventory into planner and module-contract prompts. An
+authoritative task suffix overrides contradictory naming or construction
+advice in model-authored prose.
+
+App-wide collections with protected writes require explicit read declarations,
+including permissions, API surface, handler and request/response contracts.
+Code does not infer their access policy. A rejection lists all missing read
+declarations together with any unapproved action ids, so a repair can address
+both omissions and alternate spellings. Validation does not rename actions,
+delete extra declarations, or select permissions automatically. Owner-scoped
+reads and ordinary unprotected app-wide reads retain their existing construction.
+
+## Collection reach
+
 Runtime persistence does not bind an app module to its own collections, so an
 action's reach is every collection its module can address:
 

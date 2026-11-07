@@ -65,6 +65,24 @@ Anthropic configs omit the shared `temperature` setting: Anthropic SDK 2.x
 rejects that sampling parameter. OpenAI and Gemini retain their supported
 temperature settings.
 
+The canonical Factory loader uses the existing provider config builder for
+`LLM_PRIMARY_API_TYPE` and `LLM_PRIMARY_MODEL`, with the matching secret handle.
+OpenAI's `DEFAULT_LLM_MODEL` and `OPENAI_MODEL_FALLBACK` order remain available
+when no explicit primary model is selected. Stored provider entries retain
+`api_type`, `base_url`, and native output/retry limits; an untyped stored entry
+keeps the historical OpenAI default. Provider order, type, URL, key, and limits
+participate in cache invalidation, and raw TTL refresh precedes derived-cache
+lookup. Config logs never include credential values.
+The Factory typed-config path selects the first configured entry; additional
+entries do not provide automatic provider failover in this path.
+
+`LLM_MAX_TOKENS` is an optional positive integer for the existing native
+`max_tokens` field. Explicit per-call limits override this environment default;
+stored provider-entry limits retain the adapter's precedence. AG2 validates
+provider support, so Gemini's distinct `max_output_tokens` field must be supplied
+through explicit config or a stored provider entry. No provider default changes
+when the environment setting is absent.
+
 ### `transition_graph.yaml`
 
 Maps to AG2 1.0 Network transition conditions and targets. Mozaiks compiles
@@ -234,6 +252,31 @@ models:
       field_name:
         type: str
 ```
+
+Schema transport is selected separately from this acceptance contract:
+
+- `LLM_STRUCTURED_OUTPUT_MODE=native` is the default and keeps the existing
+  provider-native schema preparation.
+- `LLM_STRUCTURED_OUTPUT_MODE=prompted` uses AG2's
+  [PromptedSchema](https://docs.ag2.ai/docs/user-guide/structured_output/).
+  AG2 includes the same declared model's JSON schema in the system prompt and
+  validates the response with that model, without sending a native output grammar.
+
+A top-level `llm_config.structured_output_mode` value overrides the environment;
+`get_llm_config(extra_config={"structured_output_mode": "prompted"})` resolves
+and caches that choice explicitly. Values other than `native` and `prompted`
+fail before a model call. This applies to Factory agents and the shared
+`AG2StructuredAgentRunner` used for auxiliary refinement and coding calls.
+Mode selection is explicit; provider errors do not switch modes automatically.
+
+Prompted mode preserves workflow context projection and local typed validation.
+Factory output must still pass the canonical acceptance model before an
+automatic save/tool event is emitted. Provider-native constraints are absent,
+so malformed responses can occur and must fail validation or use the caller's
+existing bounded schema-correction retries. An isolated provider/schema probe
+establishes transport and parsing behavior only; generated-app acceptance
+remains a separate check. See [local setup](../../local-setup.md#native-schema-compilation-errors)
+for provider complexity limits and configuration.
 
 ### `ui_config.yaml`
 

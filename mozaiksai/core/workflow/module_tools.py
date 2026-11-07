@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import math
 import time
+from dataclasses import replace
 from typing import Any
 
 from starlette.websockets import WebSocketState
@@ -11,6 +12,7 @@ from starlette.websockets import WebSocketState
 from mozaiksai.core.auth.adapters import get_auth_adapter
 from mozaiksai.core.auth.adapters.registry import is_auth_enabled
 from mozaiksai.core.auth.websocket_auth import WebSocketUser
+from mozaiksai.core.runtime.app.module_permissions import resolve_module_permissions
 from mozaiksai.core.runtime.composition.module_authority import (
     ModuleDispatchProvenance,
     workflow_user_authority,
@@ -71,22 +73,27 @@ def _live_session(transport: Any, *, app_id: str, chat_id: str, user_id: str) ->
     return connection, websocket, principal
 
 
-async def session_permissions(principal: WebSocketUser) -> list[str]:
+async def session_permissions(principal: WebSocketUser, *, app: Any = None) -> list[str]:
     """Module permissions a live session's socket principal dispatches with."""
     if principal.has_local_development_access:
         # The development path-user binding supplies identity only. Resolve
         # local permissions from the configured adapter, as HTTP local mode does.
-        return list((await get_auth_adapter().validate_token("")).scopes)
+        claims = await get_auth_adapter().validate_token("")
+        principal = replace(
+            principal, scopes=list(claims.scopes), roles=list(claims.roles),
+            email=claims.email, email_verified=claims.email_verified,
+        )
     # Token users carry their token's scopes; anonymous visitors carry only the
     # visitor scopes they were minted with.
-    return list(principal.scopes)
+    return resolve_module_permissions(principal, app=app)
 
 
 def _principal_scope(principal: WebSocketUser) -> tuple[Any, ...]:
     return (
         principal.user_id, principal.app_id, principal.chat_id,
         principal.tenant_id, principal.workspace_id, tuple(principal.scopes),
-        tuple(principal.roles), principal.provider,
+        tuple(principal.roles), principal.provider, principal.auth_provenance,
+        principal.email, principal.email_verified,
     )
 
 
@@ -136,7 +143,7 @@ async def _prepare_live_dispatch(
     # missing entry has no loaded contract and must never imply public access.
     if action not in module_surfaces or module_surfaces[action] not in {None, "public", "public_readonly"}:
         raise PermissionError("workflow_module_action_unavailable")
-    permissions = await session_permissions(principal)
+    permissions = await session_permissions(principal, app=websocket.app)
 
     scope = await get_platform_hooks().call_module_scope(
         principal=principal, module_name=module, action_name=action,
@@ -144,7 +151,7 @@ async def _prepare_live_dispatch(
             "app_id": app_id, "user_id": principal.user_id,
             "tenant_id": principal.tenant_id, "workspace_id": principal.workspace_id,
         },
-        params=params, request=websocket, default_permissions=permissions,
+        params=params, request=websocket, default_permissions=permissions, fail_closed=True,
     )
     # Hooks may narrow tenant/workspace membership; they cannot turn a workflow
     # dispatch into a different actor or app.

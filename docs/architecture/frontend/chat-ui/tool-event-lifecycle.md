@@ -43,6 +43,25 @@ The important point is that the wire contract is `chat.tool_call`, and the
 frontend now preserves that shape through rendering instead of inventing a
 second event type.
 
+Pending calls also persist in `ChatSessions.workflow_ui_state.tool_calls`,
+including a first-turn inline card emitted before an assistant message is
+committed. A browser reconnect replays that pending card independently of the
+transcript cursor, with its original `tool_call_id` and payload. A review's
+`review_id` therefore still binds the response to the waiting tool invocation.
+WebSocket connection and workflow-switch replay both forward these calls as
+`chat.tool_call` events. Their transport adapters preserve the pending payload
+and correlation fields even when no transcript message is available.
+Calls already replayed through transcript metadata are not emitted twice;
+pending-call and transcript replay suppress actionable cards for responded or
+completed calls and terminal chats. This protects inline interactions such as
+the DesignDocs role review. The separate `last_artifact` cache can still render
+an artifact-display card after completion; this change does not make that cache
+completion-aware.
+
+This covers browser reload and reconnect while the backend response waiter is
+still live. Persisting the card does not recreate an interrupted waiter after
+a backend-process restart.
+
 ### 2. Auto-tool and fire-and-forget surfaces
 
 Auto-tool execution uses the same render lane, but without waiting for user

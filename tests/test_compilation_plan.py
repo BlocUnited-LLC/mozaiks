@@ -91,7 +91,10 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 # layout-registry family. The plan digest covers the registry, so any
 # deliberate family addition moves it; the property this test protects is
 # that a fresh interpreter derives the SAME digest, which is asserted below.
-_GOLDEN_PLAN_DIGEST = "fdc88e33746108a99f99db21707f69767e04b043180cf3d5487fe2223cb729be"
+# The optional module smoke-fixture companion adds exactly one registry row
+# and one reports-module input gap. The row-isolation proof below recovers
+# the preceding hash and preserves all 61 unit bodies and earlier gaps.
+_GOLDEN_PLAN_DIGEST = "da71c10a82922bbf0fce2fd4d570ada3223f3aa398f9b9eda84a25190ee49305"
 
 
 def _registry():
@@ -209,6 +212,49 @@ def test_service_package_markers_preserve_existing_units_and_gaps() -> None:
         row.kind.value == "app_service_support" and row.requirement.value == "optional"
         for row in marker_rows
     )
+
+
+def test_module_smoke_fixture_row_preserves_existing_units_and_gaps() -> None:
+    from mozaiksai.core.runtime.app.layout_registry import AppLayoutRegistry, _stable_digest
+
+    path = "modules/{module_id}/contracts/fixtures.yaml"
+    current_registry = _registry()
+    previous_rows = tuple(
+        row for row in current_registry.families if row.path_template != path
+    )
+    assert len(previous_rows) == 132
+    assert len(current_registry.families) == 133
+    previous_registry = AppLayoutRegistry(
+        families=previous_rows,
+        registry_digest=_stable_digest({
+            "schema_version": current_registry.schema_version,
+            "families": [row.identity_payload for row in previous_rows],
+        }),
+    )
+    graph, payloads = _corpus_graph()
+    previous = derive_compilation_plan(
+        graph=graph, payloads=payloads, registry=previous_registry,
+    )
+    current = _plan()
+    assert previous.plan_digest == "fdc88e33746108a99f99db21707f69767e04b043180cf3d5487fe2223cb729be"
+    assert current.plan_digest == _GOLDEN_PLAN_DIGEST
+    assert len(previous.units) == len(current.units) == 61
+    assert [unit.model_dump(mode="json") for unit in current.units] == [
+        unit.model_dump(mode="json") for unit in previous.units
+    ]
+    assert [gap for gap in current.gaps if gap.path_template != path] == list(previous.gaps)
+    assert [gap.model_dump(mode="json") for gap in current.gaps if gap.path_template == path] == [{
+        "code": "renderer_input_incomplete",
+        "family_kind": "module_contract",
+        "path_template": path,
+        "subject": "reports",
+        "adr_slice": 4,
+    }]
+    restored = current.canonical_payload(include_digest=False)
+    restored["registry_digest"] = previous.registry_digest
+    restored["gaps"] = [gap for gap in restored["gaps"] if gap["path_template"] != path]
+    assert restored == previous.canonical_payload(include_digest=False)
+    assert canonical_digest(restored) == previous.plan_digest
 
 
 def test_inputs_are_never_mutated() -> None:

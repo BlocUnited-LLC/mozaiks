@@ -637,7 +637,8 @@ agents:
       operation whose success or failure determines the workflow's next step, including
       validation, persistence, and external actions. Use [] only when none exist.
       Each plan names agent, function, context_key, attempts_key, result_field,
-      error_value, max_attempts, retry_on, and routes [{value, target_agent}].
+      error_value, max_attempts, retry_on, retry_without_attempt, and routes
+      [{value, target_agent}].
       Use one registered structured-output agent and one auto-invoked tool per planned
       operation. Its implementation accepts context_variables and returns a mapping
       containing the declared result_field with one of the route values.
@@ -654,8 +655,15 @@ agents:
       explicitly ending the workflow.
       Default to max_attempts=1 and retry_on=[]. Permit retries only for named results
       known to occur before side effects, or operations whose implementation prevents
-      duplicate effects. max_attempts includes the first invocation; the runtime owns
-      the counter. Unexpected exceptions and unknown outcomes never authorize retries.
+      duplicate effects. max_attempts includes the first counted invocation; the
+      runtime owns the counter. Default retry_without_attempt to []; use only a
+      subset of retry_on for explicit external review corrections validated by the
+      tool. Those outcomes refund just their invocation, retaining prior failures.
+      Ordinary validation failures, exceptions, and unknown outcomes stay counted.
+      A retryable result carrying a nonempty error becomes error_value when its
+      final counted attempt is spent, preserving the diagnostic. Healthy outcomes
+      without error keep their route even when they permit later follow-up calls.
+      Unexpected exceptions and unknown outcomes never authorize retries.
       A timeout may mean an external action already succeeded. Reconcile that state
       through a separate declared operation before attempting the action again.
       Use app-specific outcome names for app-specific recovery. Keep business checks

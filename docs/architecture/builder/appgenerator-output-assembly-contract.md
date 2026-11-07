@@ -1,5 +1,42 @@
 # AppGenerator Output Assembly Contract
 
+## Runtime Smoke Fixture Ownership
+
+`ModuleContractBundle.fixtures_yaml` is the optional typed source for
+`modules/{module}/contracts/fixtures.yaml`. The module contract task reserves
+that companion path when domain prerequisites need explicit inputs; ordinary
+schema-driven CRUD does not require it. The file catalog, layout registry,
+carry-forward readers and preservation inventory use the same path. Raw
+companion files cannot substitute for typed output.
+
+Fixtures name exact actions and roles and supply bounded prerequisite calls
+and parameter bindings. They do not grant permissions, change approved domain
+requirements, define success criteria or introduce runtime services. Accepted
+module request/response schemas and compiled auth grants remain authoritative.
+Cross-module setup requires the relevant contract dependencies; full reference
+closure occurs against the assembled bundle before any observer action runs.
+The existing contained runtime observer consumes the file as declarative input
+and retains independent CRUD, role and storage checks. See
+[stateful action inputs](../app/generated-app-functional-acceptance.md#runtime-smoke-gate)
+for the supported bindings and evidence limits.
+
+## Service Source Ownership
+
+ServiceAgent emits each Python file once in `ServiceOutput.python_files`.
+`ServiceOutput` has no model-authored `code_files` mirror. The canonical extractor
+serializes the typed files into the internal `code_files` representation used by
+task admission, assembly, repair persistence and export. File ownership, Python
+validation and contained runtime acceptance still apply to those exact files.
+
+The injected write-ownership inventory uses the same compiler decision as
+materialization. It names code-owned CRUD methods to omit and protected app-wide
+writes whose accepted input contracts require authored handler, service and repo
+implementations. Approved role permissions remain compiler-owned for both.
+An authored submission can therefore derive requester identity from `ctx.user_id`
+without exposing that field as required form input. The service must enforce
+ownership and allowed state transitions before persistence; role grants alone do
+not enforce those business rules.
+
 ## Typed Intake Readiness
 
 Guided intake returns `AppInterviewResult`: a short `agent_message` and an
@@ -185,8 +222,16 @@ contract is required. There is no `subscription_config` task type and no
 ConfigMiddleware mode for it; plan review and the plan cache release the path
 from any task that lists it (`release_subscriptions_config`) and drop a task left
 empty. `AppBuildPlan.monetization_provider` is validated against the approved
-contract's `contract_required`, not against a planned task. The file's
-`assignment_store` is constructed by code (`subscription_assignment_store`): the
+contract's `contract_required`, not against a planned task. The
+provider selection is `mozaiks_pay` or `entitlement_dispatch` when required,
+and JSON `null` otherwise. Both the plan and its nested monetization decision
+use this nullable enum; strings such as `"null"`, `"none"`, and `"free"` are
+invalid provider selections. Optional page-layout/page-type hints, image
+variants, and asset aspects likewise use JSON `null` for absence while keeping
+their declared non-null choices. JSON-schema type discriminators retain the
+literal `"null"` type name.
+
+The file's `assignment_store` is constructed by code (`subscription_assignment_store`): the
 runtime `SubscriptionAssignmentStoreDef` defaults, including `active_statuses`
 `[active, pending, trialing]`, with `data_alias: billing.subscriptions` and
 `user_id_field: user_id`, which both assignment writers key on. The designer does
@@ -739,9 +784,41 @@ omits it when no properties are required. The retired typed required-name list
 is rejected, including when it agrees with the flags; there is no precedence
 rule or compatibility normalization. Runtime JSON Schema maps retain their
 standard `required` lists, including schemas shipped in pack templates.
-Action/capability requests use the existing closed-contract importer: unknown
-keys are rejected, and
-unrepresentable nested/open request objects fail instead of being weakened.
+An object property declares a nonempty `properties` list; an object-array
+property declares a nonempty `items_properties` list. Each list contains
+`JsonSchemaLeafProperty` members: scalars or arrays of scalars, with no further
+object nesting. The root contract's array form uses the same terminal member
+list, while collection actions keep an object envelope. Member names are exact
+response keys, including fields produced by custom joins. Descriptions cannot
+substitute for declarations. Empty object rows, duplicate names, wrong-kind
+member lists and unsupported nesting fail module contract admission before
+pages or services consume the contract. Action schema diagnostics name all
+invalid actions in that module's candidate; the input candidate remains unchanged.
+
+`nullable: true` on an output property or terminal member admits JSON null;
+`required` independently controls whether the key must be present. String
+enums retain their declared values and admit null only when explicitly nullable.
+Action/capability requests retain the existing exact-type closed-contract
+profile: nullable unions are rejected, every object level has
+`additionalProperties: false`, and unknown keys fail validation. Event and
+policy-hook schemas use the same finite renderer with their existing validation
+boundaries. Native runtime JSON Schema and page binding validation are unchanged.
+
+Custom/joined service responses must return those declared fields and wire
+types. Their source remains `ServiceOutput.python_files`; optional local typing
+does not become another response authority. The code-owned `schemas.py` remains
+derived from storage records and write inputs, so custom responses must not
+invent imports from it. Page columns and fixture response paths resolve against
+the admitted native schema, never service source or descriptive text.
+
+The canonical read compiler also projects ServiceAgent's read implementation
+ownership from the admitted module contract and approved data contract. Service
+prompts list exact code-owned and authored read actions; canonical list/get names
+and empty permissions do not imply a generated implementation. Shared app-wide
+collections with protected actions retain their explicitly declared read
+implementation, while ordinary scoped reads remain rendered. The static file
+contract defers read/write implementation ownership to these projections; final
+module implementation validation still rejects missing authored handlers.
 
 Workflow/module/page contracts use `.yaml`. Browser manifests, app identity,
 data contracts, migrations, and tooling manifests retain their canonical `.json`

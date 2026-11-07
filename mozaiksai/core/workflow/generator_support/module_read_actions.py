@@ -22,7 +22,9 @@ from mozaiksai.core.workflow.generator_support.data_contract_fields import (
     record_id_field,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    all_module_actions,
     canonical_read_action_id,
+    unapproved_module_actions_error,
 )
 from mozaiksai.core.workflow.generator_support.module_authored_code import (
     parse_rendered_python,
@@ -162,8 +164,44 @@ def _authored_app_wide_access(action: dict[str, Any]) -> bool:
     )
 
 
+def _uses_authored_read(
+    collection: Mapping[str, Any], action: dict[str, Any] | None, *, protected_writes: bool,
+) -> bool:
+    return collection["tenancy"] == "app_wide" and (
+        protected_writes or (action is not None and _authored_app_wide_access(action))
+    )
+
+
+def module_read_implementation_ownership(
+    module_id: str, manifest: dict[str, Any], *, app_build_plan: Any, data_contract: Any,
+    subscription_contract: Any = None,
+) -> dict[str, list[str]]:
+    """Project the read compiler's ownership into the admitted service task."""
+    plan, contract = detach(app_build_plan), detach(data_contract)
+    result: dict[str, list[str]] = {"code_owned": [], "authored": []}
+    if not isinstance(plan, dict):
+        return result
+    collections = _owned_collections(module_id, plan, contract)
+    actions = manifest.get("actions") or []
+    action_map = {action["id"]: action for action in actions}
+    canonical_ids = {
+        canonical_read_action_id(collection["name"], operation)
+        for collection in collections for operation in ("get", "list")
+    }
+    protected = _protected_writes(
+        actions, canonical_ids, module_id=module_id, subscription_contract=subscription_contract,
+    )
+    for collection in collections:
+        for operation in ("get", "list"):
+            action_id = canonical_read_action_id(collection["name"], operation)
+            authored = _uses_authored_read(collection, action_map.get(action_id), protected_writes=protected)
+            result["authored" if authored else "code_owned"].append(action_id)
+    return result
+
+
 def _close_manifest(
     module_id: str, manifest: dict[str, Any], plan: dict[str, Any], contract: Any, subscription_contract: Any,
+    design_surface_map: Any,
 ) -> None:
     collections = _owned_collections(module_id, plan, contract)
     if not collections:
@@ -177,23 +215,38 @@ def _close_manifest(
     protected = _protected_writes(
         actions, canonical_ids, module_id=module_id, subscription_contract=subscription_contract,
     )
+    diagnostics = []
+    for collection in sorted(collections, key=lambda item: item["name"]):
+        if collection["tenancy"] != "app_wide" or not protected:
+            continue
+        for operation in ("get", "list"):
+            action_id = canonical_read_action_id(collection["name"], operation)
+            prior = existing.get(action_id)
+            if prior is None or not {
+                "handler_method", "input_schema", "output_schema", "permissions", "api_surface",
+            }.issubset(prior):
+                diagnostics.append(
+                    f"{module_id}: app_wide collection {collection['name']!r} has protected writes; "
+                    f"explicitly declare {action_id!r} in module.yaml.actions with handler_method, "
+                    "input_schema, output_schema, permissions (use [] only for deliberate unrestricted "
+                    "role access), and api_surface (null, public, public_readonly, internal, or admin_internal)."
+                )
+    if diagnostics:
+        surface_map = detach(design_surface_map) or {}
+        approved = all_module_actions({
+            "design_surface_map": {"surfaces": [surface for surface in surface_map.get("surfaces") or []
+                                                 if surface.get("surface_id") == module_id]},
+            "data_contract": contract,
+        })
+        if unapproved := unapproved_module_actions_error(module_id, existing, approved):
+            diagnostics.append(unapproved)
+        diagnostics.append("Canonical reads remain ungated; declare paid behavior as a separate custom read.")
+        raise ValueError(" ".join(diagnostics))
     for collection in collections:
         for operation in ("get", "list"):
             action = _read_action(collection, operation)
             prior = existing.get(action["id"])
-            if collection["tenancy"] == "app_wide" and protected:
-                if prior is None or not {
-                    "handler_method", "input_schema", "output_schema", "permissions", "api_surface",
-                }.issubset(prior):
-                    raise ValueError(
-                        f"{module_id}: app_wide collection {collection['name']!r} has protected writes; "
-                        f"explicitly declare {action['id']!r} in module.yaml.actions with handler_method, "
-                        "input_schema, output_schema, permissions (use [] only for deliberate unrestricted "
-                        "role access), and api_surface (null, public, public_readonly, internal, or admin_internal). "
-                        "Canonical reads remain ungated; declare paid behavior as a separate custom read."
-                    )
-                continue
-            if collection["tenancy"] == "app_wide" and prior is not None and _authored_app_wide_access(prior):
+            if _uses_authored_read(collection, prior, protected_writes=protected):
                 continue
             # Canonical owner-scoped reads never inherit roles from sibling writes.
             # Preserve authored gates so the gate compiler can reject forbidden read gates.
@@ -235,7 +288,7 @@ def close_module_read_actions(
     module_id = str(bundle.get("module_id") or "")
     if manifest.get("module", {}).get("id") != module_id:
         raise ValueError("Read action closure requires matching module_contract and module.yaml identities")
-    _close_manifest(module_id, manifest, plan, contract, subscription_contract)
+    _close_manifest(module_id, manifest, plan, contract, subscription_contract, design_surface_map)
     # Approved custom actions are checked once both canonical families are closed
     # (module_write_actions.close_module_actions), so DesignDocs may omit code-owned writes.
     return output
@@ -477,13 +530,13 @@ def materialize_module_read_implementations(
         )
         functions: list[dict[str, str]] = [{}, {}, {}]
         for collection in collections:
-            if collection["tenancy"] == "app_wide" and protected:
+            if _uses_authored_read(collection, None, protected_writes=protected):
                 continue  # Explicit protected reads keep their authored access implementation.
             for operation in ("get", "list"):
                 method = canonical_read_action_id(collection["name"], operation)
                 if method not in action_map:
                     raise ValueError(f"{module_id}: construct {method!r} in module.yaml before its implementation")
-                if collection["tenancy"] == "app_wide" and _authored_app_wide_access(action_map[method]):
+                if _uses_authored_read(collection, action_map[method], protected_writes=protected):
                     continue
                 for layer, source in zip(functions, _read_functions(module_id, collection, operation), strict=True):
                     layer[method] = source

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 
 from tests.import_utils import import_module_directly
@@ -7,6 +11,90 @@ from tests.import_utils import import_module_directly
 _replay_mod = import_module_directly("mozaiksai.core.transport.run_replay")
 
 WorkflowRunReplayer = _replay_mod.WorkflowRunReplayer
+
+
+def _pending_review_replayer(monkeypatch, *, history=(), status=0, **state_overrides):
+    state = {
+        "tool_call_id": "review-original", "tool_name": "review_policy",
+        "component_type": "ApprovalCard", "workflow_name": "DesignDocs", "display": "inline",
+        "tool_call_status": "pending", "tool_call_completed": False, "awaiting_response": True,
+        "payload": {"review_id": "policy-original", "checkpoints": ["Member may submit"],
+                    "actions": [{"id": "approve", "payload": {"review_id": "policy-original"}}]},
+        **state_overrides,
+    }
+    pm = SimpleNamespace(
+        load_run_history=AsyncMock(return_value=list(history)),
+        get_workflow_tool_call_states=AsyncMock(return_value=[state]),
+        get_pending_input_request=AsyncMock(return_value=None),
+    )
+    replayer = WorkflowRunReplayer()
+    monkeypatch.setattr(replayer, "_fetch_chat_doc", AsyncMock(return_value={
+        "status": status, "workflow_name": "DesignDocs", "user_id": "owner",
+    }))
+    monkeypatch.setattr(replayer, "_load_resume_state", AsyncMock(return_value=None))
+    monkeypatch.setattr(replayer, "_get_persistence_manager", lambda: pm)
+    return replayer, pm, state
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["connect", "fresh", "consumed", "hidden"])
+async def test_pending_review_replays_without_new_visible_history(monkeypatch, mode):
+    history = [{"role": "assistant", "content": "earlier", "metadata": {"ui_visibility": "hidden"}}]
+    replayer, pm, state = _pending_review_replayer(
+        monkeypatch, history=history if mode in {"consumed", "hidden"} else (),
+        **({"message_index": 0} if mode == "hidden" else {}),
+    )
+    before = deepcopy(state)
+    send = AsyncMock()
+    if mode == "connect":
+        await replayer.replay_on_connect_if_needed(chat_id="chat", app_id="app", send_event=send)
+    else:
+        await replayer.handle_resume_request(
+            chat_id="chat", app_id="app", send_event=send, last_client_index=0 if mode == "consumed" else -1,
+        )
+    calls = [call.args[0] for call in send.await_args_list if call.args[0].get("kind") == "tool_call"]
+    assert len(calls) == 1
+    assert calls[0]["tool_call_id"] == calls[0]["corr"] == "review-original"
+    assert calls[0]["component_type"] == "ApprovalCard"
+    assert calls[0]["workflow_name"] == "DesignDocs"
+    assert calls[0]["payload"] == before["payload"]
+    assert calls[0]["awaiting_response"] is True
+    assert calls[0]["replay"] is True
+    assert all(call.args[1] == "chat" for call in send.await_args_list)
+    assert state == before
+    assert all(call.kwargs == {"chat_id": "chat", "app_id": "app"}
+               for call in pm.get_workflow_tool_call_states.await_args_list)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,state", [
+    (1, {}), (2, {}), (0, {"tool_call_completed": True}),
+    (0, {"tool_call_status": "responded"}), (0, {"tool_call_status": "cancelled"}),
+    (0, {"tool_call_status": "completed"}), (0, {"awaiting_response": False}),
+])
+async def test_resolved_or_terminal_review_is_not_replayed_as_pending(monkeypatch, status, state):
+    replayer, _, _ = _pending_review_replayer(monkeypatch, status=status, **state)
+    send = AsyncMock()
+    await replayer.handle_resume_request(chat_id="chat", app_id="app", send_event=send, last_client_index=-1)
+    assert not any(call.args[0].get("kind") == "tool_call" for call in send.await_args_list)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,response_status,completed", [(0, "pending", False), (0, "responded", True), (2, "pending", True)])
+async def test_history_review_is_not_duplicated_or_restored_actionable_after_resolution(
+    monkeypatch, status, response_status, completed,
+):
+    replayer, _, _ = _pending_review_replayer(
+        monkeypatch, history=[{"role": "assistant", "content": "review"}], status=status,
+        message_index=0, tool_call_status=response_status,
+    )
+    send = AsyncMock()
+    await replayer.handle_resume_request(chat_id="chat", app_id="app", send_event=send, last_client_index=-1)
+    events = [call.args[0] for call in send.await_args_list]
+    assert not any(event.get("kind") == "tool_call" for event in events)
+    review = next(event for event in events if event.get("kind") == "text")
+    assert review["toolCall"]["tool_call_id"] == "review-original"
+    assert review["tool_call_completed"] is completed
 
 
 @pytest.mark.asyncio

@@ -30,6 +30,7 @@ from mozaiksai.core.artifacts.store import ArtifactStore, get_artifact_store
 _PHASE_7A_MODULE_ALLOWLIST: frozenset[str] = frozenset({
     "module.yaml",
     "contracts/events.yaml",
+    "contracts/fixtures.yaml",
     "contracts/reactions.yaml",
     "contracts/notifications.yaml",
     "contracts/policy_hooks.yaml",
