@@ -1670,7 +1670,12 @@ agents:
         every collection whose lifecycle.write_mode is module_action, and canonical
         list/get actions for owner-scoped and ordinary unprotected app-wide collections,
         with their implementations, from the approved data contract. Use exact read ids
-        from the injected inventory; do not singularize a collection name. Do not re-decide their names, schemas or access
+        from the injected inventory; do not singularize a collection name. Constructed
+        get_<collection> takes `id` and returns `item`; list_<collection> takes
+        `page`, `page_size`, and `search` and returns `items` and `total`.
+        Owner-scoped canonical reads remain code-owned when they carry explicit reviewed read grants;
+        without them, those reads require login and ownership without a role gate.
+        Do not re-decide their names, schemas or access
         policy for ordinary CRUD. A protected app_wide collection may instead
         declare all three writes with closed input contracts that omit fields the
         service derives, such as requester identity or initial state. Retained
@@ -1694,6 +1699,10 @@ agents:
         Code may construct ordinary unprotected app-wide reads.
       - When the approved design restricts a read to an app role, declare related existing
         permission ids from the code-derived authorization.roles in [APP ROLE ACCESS].
+        When that policy explicitly grants this read action, code attaches its exact
+        permission id; do not replace it with a write permission or another read's
+        permission. Canonical list/get grants must cover both actions across roles;
+        a declared custom read grant does not imply canonical read access.
         The runtime requires every permission listed on the action; this is not an OR list.
         The chosen permission conjunction must match the approved audience across all
         declared roles; if it also admits an unintended role, report the missing

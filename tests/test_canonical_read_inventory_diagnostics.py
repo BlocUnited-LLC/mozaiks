@@ -109,6 +109,10 @@ def test_actual_prompt_hook_projects_exact_ids_and_preserves_access_decision(age
     assert "  - get_tasks\n" in text and "  - list_tasks\n" in text
     assert "  - get_task\n" not in text
     assert "code does not infer read access" in text
+    assert "get_<collection> takes id and returns item" in text
+    assert "list_<collection> takes page/page_size/search and returns items/total" in text
+    assert "Explicit reviewed read grants supply their exact code-derived permissions" in text
+    assert "without a role gate; never infer read grants from writes" in text
     assert "this inventory overrides contradictory task prose" in text
     assert context == before
 

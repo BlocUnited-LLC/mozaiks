@@ -81,7 +81,7 @@ async def _review_access_policy(policy: dict[str, Any], *, binding: Any, context
         "save_design_docs_bundle",
         {
             "title": "Review app role permissions",
-            "summary": "Approve who may change these records. People without a granted role cannot perform these actions. Record ownership still applies.",
+            "summary": "Approve who may perform the listed read and write actions. People without a granted role cannot perform these actions. Record ownership still applies.",
             "review_id": review_id, "checkpoints": checkpoints,
             "actions": [
                 {"id": action, "label": label, "variant": variant, "approved": action == "approve",

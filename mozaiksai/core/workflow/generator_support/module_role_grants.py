@@ -11,6 +11,7 @@ from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     CANONICAL_WRITE_OPERATIONS,
+    canonical_read_action_id,
     canonical_write_action_id,
     collection_has_canonical_writes,
 )
@@ -42,11 +43,13 @@ class DesignAccessPolicy(BaseModel):
 def validate_access_policy(
     raw: Any, *, data_contract: Any, design_surface_map: Any,
 ) -> dict[str, Any]:
-    """Close role, collection and mutation references before design approval.
+    """Close role, collection and action references before design approval.
 
     The policy cannot grant platform/facade actions or create identity membership.
     A role-managed collection covers every canonical write explicitly, so an
     omitted update/delete grant can never silently become an open action.
+    Selecting either canonical read requires both; custom reads do not select
+    canonical reads, and write grants never imply read grants.
     """
     policy = DesignAccessPolicy.model_validate(
         {"roles": [], "grants": []} if raw is None else detach(raw)
@@ -71,6 +74,13 @@ def validate_access_policy(
         if name in collections:
             raise ValueError(f"access_policy collection {name!r} is ambiguous")
         collections[name] = (owner, collection)
+    canonical_owners: dict[tuple[str, str], str] = {}
+    for name, (owner, collection) in collections.items():
+        actions = {canonical_read_action_id(name, operation) for operation in ("get", "list")}
+        if collection_has_canonical_writes(collection):
+            actions.update(canonical_write_action_id(collection["entity"], operation)
+                           for operation in CANONICAL_WRITE_OPERATIONS)
+        canonical_owners.update({(owner, action): name for action in actions})
     selected: dict[str, set[str]] = defaultdict(set)
     seen: set[tuple[str, str, str]] = set()
     action_collections: dict[tuple[str, str], set[str]] = defaultdict(set)
@@ -85,10 +95,19 @@ def validate_access_policy(
             canonical_write_action_id(collection["entity"], operation)
             for operation in CANONICAL_WRITE_OPERATIONS
         } if collection_has_canonical_writes(collection) else set()
-        allowed = canonical | set(surfaces[owner].get("owned_mutations") or [])
+        reads = {canonical_read_action_id(name, operation) for operation in ("get", "list")}
+        allowed = canonical | reads | set(surfaces[owner].get("owned_mutations") or []) | set(
+            surfaces[owner].get("custom_reads") or []
+        )
         for action in grant["actions"]:
             if action not in allowed:
-                raise ValueError(f"access_policy action {action!r} is not an approved mutation of {name!r}")
+                raise ValueError(f"access_policy action {action!r} is not an approved action of {name!r}")
+            canonical_owner = canonical_owners.get((owner, action))
+            if canonical_owner is not None and canonical_owner != name:
+                raise ValueError(
+                    f"access_policy action {owner}.{action} belongs to collection {canonical_owner!r}, "
+                    f"not {name!r}; custom action declarations cannot change canonical ownership"
+                )
             key = (role, name, action)
             if key in seen:
                 raise ValueError(f"access_policy repeats grant {key!r}")
@@ -110,6 +129,9 @@ def validate_access_policy(
         } if collection_has_canonical_writes(collection) else set()
         if missing := required - actions:
             errors.append(f"access_policy for {name!r} omits canonical write grants {sorted(missing)}")
+        reads = {canonical_read_action_id(name, operation) for operation in ("get", "list")}
+        if actions & reads and (missing_reads := reads - actions):
+            errors.append(f"access_policy for {name!r} omits canonical read grants {sorted(missing_reads)}")
     if errors:
         raise ValueError("; ".join(errors))
     return policy
@@ -124,6 +146,21 @@ def compiled_role_grants(policy: dict[str, Any]) -> list[dict[str, Any]]:
         )
     return [{"id": role["role_id"], "permissions": sorted(permissions[role["role_id"]])}
             for role in policy["roles"]]
+
+
+def apply_module_role_permissions(manifest: dict[str, Any], permissions: dict[str, str]) -> None:
+    """Attach only the exact action permissions resolved from an approved policy."""
+    if not permissions:
+        return
+    declarations = manifest.setdefault("permissions", [])
+    known = {entry["id"] for entry in declarations}
+    for action_id, permission in sorted(permissions.items()):
+        if permission not in known:
+            declarations.append({"id": permission, "description": f"Approved role access to {action_id}."})
+            known.add(permission)
+    for action in manifest.get("actions") or []:
+        if action.get("id") in permissions:
+            action["permissions"] = [permissions[action["id"]]]
 
 
 def approved_module_role_permissions(

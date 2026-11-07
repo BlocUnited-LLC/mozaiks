@@ -32,6 +32,10 @@ from mozaiksai.core.workflow.generator_support.module_authored_code import (
     syntax_error_diagnostic,
 )
 from mozaiksai.core.workflow.generator_support.module_policy import render_module_policy
+from mozaiksai.core.workflow.generator_support.module_role_grants import (
+    apply_module_role_permissions,
+    approved_module_role_permissions,
+)
 
 # Every canonical type except the logical date types is also a JSON Schema type.
 _JSON_RECORD_TYPES = frozenset(CANONICAL_FIELD_TYPES) - DATE_FIELD_TYPES
@@ -201,7 +205,7 @@ def module_read_implementation_ownership(
 
 def _close_manifest(
     module_id: str, manifest: dict[str, Any], plan: dict[str, Any], contract: Any, subscription_contract: Any,
-    design_surface_map: Any,
+    design_surface_map: Any, role_permissions: dict[str, str],
 ) -> None:
     collections = _owned_collections(module_id, plan, contract)
     if not collections:
@@ -217,7 +221,9 @@ def _close_manifest(
     )
     diagnostics = []
     for collection in sorted(collections, key=lambda item: item["name"]):
-        if collection["tenancy"] != "app_wide" or not protected:
+        reviewed_reads = any(canonical_read_action_id(collection["name"], operation) in role_permissions
+                             for operation in ("get", "list"))
+        if collection["tenancy"] != "app_wide" or not (protected or reviewed_reads):
             continue
         for operation in ("get", "list"):
             action_id = canonical_read_action_id(collection["name"], operation)
@@ -226,7 +232,8 @@ def _close_manifest(
                 "handler_method", "input_schema", "output_schema", "permissions", "api_surface",
             }.issubset(prior):
                 diagnostics.append(
-                    f"{module_id}: app_wide collection {collection['name']!r} has protected writes; "
+                    f"{module_id}: app_wide collection {collection['name']!r} has "
+                    f"{'protected writes' if protected else 'approved read grants'}; "
                     f"explicitly declare {action_id!r} in module.yaml.actions with handler_method, "
                     "input_schema, output_schema, permissions (use [] only for deliberate unrestricted "
                     "role access), and api_surface (null, public, public_readonly, internal, or admin_internal)."
@@ -240,7 +247,7 @@ def _close_manifest(
         })
         if unapproved := unapproved_module_actions_error(module_id, existing, approved):
             diagnostics.append(unapproved)
-        diagnostics.append("Canonical reads remain ungated; declare paid behavior as a separate custom read.")
+        diagnostics.append("Canonical reads remain free of paid gates; declare paid behavior as a separate custom read.")
         raise ValueError(" ".join(diagnostics))
     for collection in collections:
         for operation in ("get", "list"):
@@ -261,7 +268,7 @@ def _close_manifest(
 
 def close_module_read_actions(
     payload: Any, *, app_build_plan: Any, data_contract: Any = None, design_surface_map: Any = None,
-    subscription_contract: Any = None,
+    subscription_contract: Any = None, access_policy: Any = None,
 ) -> Any:
     """Return detached output with every owned entity's canonical list/get declared."""
     output = _unwrap_output_envelope(detach(payload))
@@ -277,6 +284,7 @@ def close_module_read_actions(
         changes = materialize_module_read_actions(
             files, app_build_plan=plan, data_contract=contract, design_surface_map=design_surface_map,
             subscription_contract=subscription_contract,
+            access_policy=access_policy,
         )
         if changes:
             files.update(changes)
@@ -288,7 +296,14 @@ def close_module_read_actions(
     module_id = str(bundle.get("module_id") or "")
     if manifest.get("module", {}).get("id") != module_id:
         raise ValueError("Read action closure requires matching module_contract and module.yaml identities")
-    _close_manifest(module_id, manifest, plan, contract, subscription_contract, design_surface_map)
+    role_permissions = approved_module_role_permissions(
+        access_policy, data_contract=contract, design_surface_map=design_surface_map,
+    ).get(module_id, {})
+    apply_module_role_permissions(manifest, role_permissions)
+    _close_manifest(module_id, manifest, plan, contract, subscription_contract, design_surface_map, role_permissions)
+    # Canonical owner reads replace authored declarations. Restore only their
+    # explicitly reviewed grants; sibling write grants never authorize reads.
+    apply_module_role_permissions(manifest, role_permissions)
     # Approved custom actions are checked once both canonical families are closed
     # (module_write_actions.close_module_actions), so DesignDocs may omit code-owned writes.
     return output
@@ -297,7 +312,7 @@ def close_module_read_actions(
 def materialize_module_read_actions(
     files_map: Mapping[str, str], *, app_build_plan: Any, data_contract: Any = None,
     design_surface_map: Any = None,
-    subscription_contract: Any = None,
+    subscription_contract: Any = None, access_policy: Any = None,
 ) -> dict[str, str]:
     """Render closed module manifests when assembling an admitted app bundle."""
     changed: dict[str, str] = {}
@@ -315,6 +330,7 @@ def materialize_module_read_actions(
             payload, app_build_plan=app_build_plan, data_contract=data_contract,
             design_surface_map=design_surface_map,
             subscription_contract=subscription_contract,
+            access_policy=access_policy,
         )
         expanded = closed["module_contract"]["module_yaml"]
         for action in expanded.get("actions") or []:

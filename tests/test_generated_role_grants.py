@@ -8,11 +8,14 @@ import pytest
 import yaml
 
 from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
+from factory_app.workflows.AppGenerator.tools.code_file_utils import save_generated_code
 from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import materialize_auth_scaffold
 from mozaiksai.core.adapters.ag2_task_batch_runner import AG2TaskBatchRunnerResult
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.runtime.app.auth_contract import AppAuthContractError
 from mozaiksai.core.workflow import task_batches
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
 from mozaiksai.core.workflow.generator_support.code_files import extract_code_file_map_from_payload
 from mozaiksai.core.workflow.generator_support.design_access_policy import access_policy_sha256
 from mozaiksai.core.workflow.generator_support.module_role_grants import (
@@ -45,7 +48,8 @@ def _policy():
 
 
 def _surface():
-    return {"surfaces": [{"surface_id": MODULE, "surface_kind": "module", "owner": "app", "owned_mutations": []}]}
+    return {"surfaces": [{"surface_id": MODULE, "surface_kind": "module", "owner": "app",
+                          "primary_entities": ["Task"], "owned_mutations": []}]}
 
 
 def _arguments():
@@ -60,11 +64,132 @@ def _closed():
     return close_module_actions(_output(reads), **_arguments())
 
 
+@pytest.mark.parametrize("tenancy", ["per_user", "per_workspace"])
+def test_explicit_read_grants_survive_canonical_closure_and_file_roundtrip(tenancy):
+    policy = _policy()
+    policy["grants"][0]["actions"].extend(["get_tasks", "list_tasks"])
+    args = {**_arguments(), "data_contract": _contract(tenancy), "access_policy": policy}
+    closed = close_module_actions(_output(), **args)
+    actions = {action["id"]: action for action in closed["module_contract"]["module_yaml"]["actions"]}
+    for action in (*WRITES, "get_tasks", "list_tasks"):
+        assert actions[action]["permissions"] == [f"tasks.{action}"]
+    assert actions["get_tasks"]["handler_method"] == "get_tasks"
+    assert actions["get_tasks"]["api_surface"] is None
+    assert close_module_actions(closed, **args) == closed
+    files = extract_code_file_map_from_payload(closed)
+    assert materialize_module_actions(files, **args) == {}
+    auth = materialize_auth_scaffold(
+        {**files, "app.json": '{"authRequired": true}'},
+        **{key: value for key, value in args.items() if key != "app_build_plan"},
+    )
+    assert yaml.safe_load(auth["config/auth.yaml"])["authorization"]["roles"] == compiled_role_grants(policy)
+    assert auth_contract_scopes(auth, include_role_grants=False) == frozenset({"openid", "profile", "email"})
+
+
+@pytest.mark.parametrize("read", ["get_tasks", "list_tasks"])
+def test_selecting_one_canonical_read_requires_the_other_without_inventing_grants(read):
+    policy = _policy()
+    policy["grants"][0]["actions"].append(read)
+    before = deepcopy(policy)
+    missing = "list_tasks" if read == "get_tasks" else "get_tasks"
+    with pytest.raises(ValueError, match=f"omits canonical read grants.*{missing}"):
+        validate_access_policy(policy, data_contract=_contract(), design_surface_map=_surface())
+    assert policy == before
+
+
+def test_read_pair_coverage_is_across_roles_without_giving_each_role_both():
+    policy = _policy()
+    policy["grants"][0]["actions"].append("list_tasks")
+    policy["roles"].append({"role_id": "reader", "label": "Reader", "description": "Reads one task."})
+    policy["grants"].append({"role_id": "reader", "collection": "tasks", "actions": ["get_tasks"]})
+    validated = validate_access_policy(policy, data_contract=_contract(), design_surface_map=_surface())
+    assert validated == policy
+    roles = {entry["id"]: entry["permissions"] for entry in compiled_role_grants(validated)}
+    assert roles["reader"] == ["tasks.get_tasks"]
+    assert "tasks.get_tasks" not in roles["coordinator"]
+
+
+@pytest.mark.parametrize("reads", [["get_tasks", "list_tasks"], ["task_summary"]])
+def test_explicit_reads_do_not_bypass_existing_mutable_collection_write_coverage(reads):
+    policy = _policy()
+    policy["grants"][0]["actions"] = reads
+    surface = _surface()
+    surface["surfaces"][0]["custom_reads"] = ["task_summary"]
+    with pytest.raises(ValueError, match="omits canonical write grants"):
+        validate_access_policy(policy, data_contract=_contract(), design_surface_map=surface)
+
+
+@pytest.mark.parametrize("write_mode", ["workflow_write", "platform_sync"])
+def test_read_only_collections_can_grant_reads_without_inventing_writes(write_mode):
+    policy = _policy()
+    policy["grants"][0]["actions"] = ["get_tasks", "list_tasks"]
+    args = {**_arguments(), "data_contract": _contract("per_user", write_mode=write_mode), "access_policy": policy}
+    closed = close_module_actions(_output(), **args)
+    actions = closed["module_contract"]["module_yaml"]["actions"]
+    assert {action["id"] for action in actions} == {"get_tasks", "list_tasks"}
+    assert all(action["permissions"] == [f"tasks.{action['id']}"] for action in actions)
+
+
+@pytest.mark.parametrize("canonical_reads", [False, True])
+def test_custom_read_grant_is_exact_and_never_inherits_into_raw_reads(canonical_reads):
+    policy = _policy()
+    policy["grants"][0]["actions"].append("task_summary")
+    if canonical_reads:
+        policy["grants"][0]["actions"].extend(["get_tasks", "list_tasks"])
+    surface = _surface()
+    surface["surfaces"][0]["custom_reads"] = ["task_summary"]
+    args = {**_arguments(), "data_contract": _contract(), "access_policy": policy, "design_surface_map": surface}
+    custom = {"id": "task_summary", "handler_method": "summarize", "permissions": ["invented"],
+              "input_schema": {"type": "object", "properties": {}, "additionalProperties": False}}
+    closed = close_module_actions(_output([custom]), **args)
+    actions = {action["id"]: action for action in closed["module_contract"]["module_yaml"]["actions"]}
+    assert actions["task_summary"] == {**custom, "permissions": ["tasks.task_summary"]}
+    for read in ("get_tasks", "list_tasks"):
+        assert actions[read]["permissions"] == ([f"tasks.{read}"] if canonical_reads else [])
+    assert close_module_actions(closed, **args) == closed
+
+
+def test_custom_read_cannot_claim_multiple_collections_or_a_foreign_modules_read():
+    contract = _contract()
+    notes = deepcopy(contract["surfaces"][0]["collections"][0])
+    notes.update(name="notes", entity="Note", lifecycle={"write_mode": "platform_sync"})
+    contract["surfaces"][0]["collections"].append(notes)
+    surface = _surface()
+    surface["surfaces"][0]["custom_reads"] = ["task_summary"]
+    policy = _policy()
+    policy["grants"][0]["actions"].append("task_summary")
+    policy["grants"].append({"role_id": "coordinator", "collection": "notes", "actions": ["task_summary"]})
+    with pytest.raises(ValueError, match="task_summary names multiple collections"):
+        validate_access_policy(policy, data_contract=contract, design_surface_map=surface)
+    policy["grants"].pop()
+    surface["surfaces"][0]["custom_reads"] = []
+    surface["surfaces"].append({"surface_id": "other", "surface_kind": "module", "owner": "app",
+                                "custom_reads": ["task_summary"]})
+    with pytest.raises(ValueError, match="not an approved action"):
+        validate_access_policy(policy, data_contract=contract, design_surface_map=surface)
+
+
+@pytest.mark.parametrize("action", ["get_notes", "list_notes", "create_note"])
+def test_custom_inventory_cannot_reanchor_another_collections_canonical_action(action):
+    contract = _contract()
+    notes = deepcopy(contract["surfaces"][0]["collections"][0])
+    notes.update(name="notes", entity="Note")
+    contract["surfaces"][0]["collections"].append(notes)
+    surface = _surface()
+    surface["surfaces"][0]["primary_entities"].append("Note")
+    surface["surfaces"][0]["custom_reads"] = ["get_notes", "list_notes"]
+    surface["surfaces"][0]["owned_mutations"] = ["create_note"]
+    policy = _policy()
+    policy["grants"][0]["actions"].append(action)
+    with pytest.raises(ValueError, match=f"{action}.*collection 'notes'.*not 'tasks'"):
+        validate_access_policy(policy, data_contract=contract, design_surface_map=surface)
+
+
 @pytest.mark.parametrize("mutation, error", [
     (lambda p: p["roles"].append(deepcopy(p["roles"][0])), "repeats a role"),
     (lambda p: p["grants"][0].update(role_id="stranger"), "unknown role"),
     (lambda p: p["grants"][0].update(collection="other"), "unknown app-owned collection"),
-    (lambda p: p["grants"][0]["actions"].append("unknown_action"), "not an approved mutation"),
+    (lambda p: p["grants"][0]["actions"].append("unknown_action"), "not an approved action"),
     (lambda p: p["grants"][0]["actions"].pop(), "omits canonical write"),
     (lambda p: p["grants"].append(deepcopy(p["grants"][0])), "repeats grant"),
 ])
@@ -203,21 +328,82 @@ def test_candidate_cannot_self_grant_even_alongside_an_approved_policy():
         close_module_actions(candidate, **_arguments())
 
 
-def _reviewed_context(policy, *, files=None):
+def _reviewed_context(policy, *, files=None, contract=None):
+    contract = contract or _contract("app_wide")
     binding = {"build_registry_id": "appreg-test", "target_app_id": "test-app", "build_id": "build-test", "phase": "genesis"}
     return {
-        "run_build_binding": binding, "data_contract": _contract("app_wide"), "design_surface_map": _surface(),
+        "run_build_binding": binding, "data_contract": contract, "design_surface_map": _surface(),
         "generated_files": files or {},
         "design_docs_artifact": {
             "app_id": "test-app", "build_family": "design_docs", "build_key": "design_docs",
             "source_workflow": "DesignDocs", "lifecycle_status": "current",
             "commit_metadata": {"author_user_id": "owner", "metadata": {"summary_payload": {
-                "data_contract": _contract("app_wide"), "surface_map": _surface(), "access_policy": policy,
+                "data_contract": contract, "surface_map": _surface(), "access_policy": policy,
                 "access_policy_review": {"policy_sha256": access_policy_sha256(policy), "target_app_id": "test-app",
                                          "build_id": "build-test", "status": "approved", "review_id": "review-test", "reviewed_by": "owner"},
             }}},
         },
     }
+
+
+@pytest.mark.parametrize("raw_output", [False, True])
+def test_repair_save_and_final_assembly_keep_reviewed_read_permissions(raw_output):
+    policy = _policy()
+    policy["grants"][0]["actions"].extend(["get_tasks", "list_tasks"])
+    contract = _contract()
+    context = _reviewed_context(policy, contract=contract)
+    context.update(app_build_plan=_plan(), current_build_task={"owned_paths": [MANIFEST]})
+    candidate = _output()
+    if raw_output:
+        candidate = {"code_files": [{"filename": path, "content": content}
+                                    for path, content in extract_code_file_map_from_payload(candidate).items()]}
+    bridge = ContextVariablesBridge(context)
+    saved = save_generated_code(StructuredOutputOverlay(bridge, candidate))
+    assert MANIFEST in saved["saved_files"]
+    files = extract_code_file_map_from_payload({"code_files": bridge.snapshot()["code_files"]})
+    for stage in (files, {entry["filename"]: entry["content"] for entry in _merge_code_files(
+        [{"code_files": [{"filename": path, "content": content} for path, content in files.items()],
+          "app_json": {"authRequired": True}}],
+        app_build_plan=_plan(), data_contract=contract, design_surface_map=_surface(), context_variables=context,
+    )}):
+        actions = {action["id"]: action for action in yaml.safe_load(stage[MANIFEST])["actions"]}
+        assert actions["get_tasks"]["permissions"] == ["tasks.get_tasks"]
+        assert actions["list_tasks"]["permissions"] == ["tasks.list_tasks"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw_output", [False, True])
+async def test_task_admission_preserves_approved_read_grants_from_current_artifact(monkeypatch, raw_output):
+    policy = _policy()
+    policy["grants"][0]["actions"].extend(["get_tasks", "list_tasks"])
+    context = _reviewed_context(policy, contract=_contract())
+    context["app_build_plan"] = _plan()
+    task = {"task_id": "contract", "task_type": "module_contract", "capability_pack_id": MODULE,
+            "initial_agent": "ConfigMiddlewareAgent", "initial_message": "Declare the module.",
+            "owned_paths": [MANIFEST], "depends_on": [], "context_variables": {}}
+    context["app_build_plan"]["build_tasks"] = [task]
+
+    async def run(_runner, _request):
+        output = _output()
+        if raw_output:
+            output = {"code_files": [{"filename": path, "content": content}
+                                     for path, content in extract_code_file_map_from_payload(output).items()]}
+        return AG2TaskBatchRunnerResult(status=RunStatus.COMPLETED, output=output)
+
+    monkeypatch.setattr(task_batches.AG2TaskBatchRunner, "run", run)
+    config = task_batches.load_task_batches_config(
+        "AppGenerator", workflows_root=Path(__file__).resolve().parents[1] / "factory_app/workflows",
+    )
+    accepted = await task_batches._run_one_task(
+        workflow_name="AppGenerator", batch=next(b for b in config.batches if b.id == "app_build_tasks"),
+        task=task, all_task_items=[task], base_context=context, completed_task_outputs={}, current_batch_outputs={},
+        agents={"ConfigMiddlewareAgent": object()}, chat_id="reads", app_id="test-app", user_id="owner",
+        semaphore=asyncio.Semaphore(1), fresh_agents_per_task=False, agents_factory=None, context_authority_policy=None,
+    )
+    files = extract_code_file_map_from_payload(accepted)
+    actions = {action["id"]: action for action in yaml.safe_load(files[MANIFEST])["actions"]}
+    assert actions["get_tasks"]["permissions"] == ["tasks.get_tasks"]
+    assert actions["list_tasks"]["permissions"] == ["tasks.list_tasks"]
 
 
 def test_final_assembly_compiles_approved_grants_and_rejects_unreviewed_role_edits():

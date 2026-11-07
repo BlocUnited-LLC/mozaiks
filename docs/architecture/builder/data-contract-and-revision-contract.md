@@ -332,7 +332,11 @@ closed create/update request schemas carry only writable scalar fields: ids,
 owner fields, timestamps and scope metadata are never client input, and
 structured (array/object) fields reach records only through defaults, hooks or
 custom mutations. Per-user and per-workspace canonical actions require login and
-owner filtering, without a role permission. A permission on a canonical action
+owner filtering. Canonical reads receive a role permission only from an explicit
+reviewed `access_policy` grant. Selecting either canonical list/get requires
+both reads to be covered across the declared roles; write grants and custom-read
+grants do not imply canonical read grants. Without an explicit read grant,
+canonical owner-scoped reads have no role permission. A permission on a canonical write
 survives only when `config/auth.yaml` `frontend.default_scopes` or an approved
 `authorization.roles` grant declares it;
 other permissions are removed with a logged normalization on owner-scoped

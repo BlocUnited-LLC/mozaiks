@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Reviewed design role grants can protect canonical list/get and declared custom
+  reads. Selecting one canonical read requires both read grants explicitly;
+  generated permissions survive materialization while ownership remains enforced.
 - Generated module contracts can declare bounded object members and typed
   array rows, including nullable custom/joined response fields. Missing row
   fields fail producer admission before page bindings are generated; runtime

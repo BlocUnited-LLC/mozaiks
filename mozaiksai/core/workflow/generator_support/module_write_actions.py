@@ -820,6 +820,7 @@ def close_module_actions(
         raise ValueError("Write action closure requires a structured data_contract")
     companion_files = dict(companion_files or {})
     from mozaiksai.core.workflow.generator_support.module_role_grants import (
+        apply_module_role_permissions,
         approved_module_role_permissions,
     )
 
@@ -870,16 +871,7 @@ def close_module_actions(
         key: bundle[key] for key in _COMPANION_PATHS if isinstance(bundle.get(key), dict)
     } or _companions_from_files(module_id, companion_files)
     role_permissions = role_grants.get(module_id, {})
-    if role_permissions:
-        declarations = manifest.setdefault("permissions", [])
-        known = {entry["id"] for entry in declarations}
-        for action_id, permission in sorted(role_permissions.items()):
-            if permission not in known:
-                declarations.append({"id": permission, "description": f"Approved role access to {action_id}."})
-                known.add(permission)
-    for action in manifest.get("actions") or []:
-        if action.get("id") in role_permissions:
-            action["permissions"] = [role_permissions[action["id"]]]
+    apply_module_role_permissions(manifest, role_permissions)
     _close_manifest_writes(
         module_id, manifest, plan, contract, subscription_contract=subscription_contract, granted=granted,
         companions=companions, role_permissions=role_permissions,
@@ -887,6 +879,7 @@ def close_module_actions(
     output = close_module_read_actions(
         output, app_build_plan=plan, data_contract=contract, design_surface_map=design_surface_map,
         subscription_contract=subscription_contract,
+        access_policy=access_policy,
     )
     closed = output["module_contract"]
     from .module_smoke_fixtures import validate_module_fixture_record_identities

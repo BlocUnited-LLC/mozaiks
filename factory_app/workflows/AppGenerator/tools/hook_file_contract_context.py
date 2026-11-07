@@ -176,6 +176,9 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
                 "For app_wide collections with protected writes, declare every canonical read with its intended "
                 "permissions, api_surface, handler_method and input/output schemas; code does not infer read access. "
                 "Code constructs owner-scoped reads and ordinary unprotected app-wide reads. "
+                "Constructed get_<collection> takes id and returns item; list_<collection> takes page/page_size/search and returns items/total. "
+                "Explicit reviewed read grants supply their exact code-derived permissions without changing ownership. "
+                "Absent those grants, owner-scoped reads require login and ownership without a role gate; never infer read grants from writes. "
                 "These ids establish identity, not a permission or public-access grant."
             )
 

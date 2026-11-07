@@ -41,13 +41,23 @@ persistence identity.
 
 For generated apps, DesignDocs owns `access_policy`: roles have `role_id`,
 `label`, and `description`; grants name a role, an app-owned collection and
-approved mutation ids. Nonempty grants require the existing UI approval tool
+approved action ids: canonical create/update/delete, exact collection list/get,
+and declared custom mutations or reads. Nonempty grants require the existing UI approval tool
 to return approval for that policy. AppGenerator resolves the persisted,
 bound review receipt, then code derives `{collection}.{action_id}` permissions
 on module actions and auth role entries. A role-managed collection must cover
 all canonical writes explicitly. Validation reports missing grants for every
 incomplete role-managed collection together, so a single repair can address
 the complete omission without changing the policy automatically.
+Selecting either canonical read also requires explicit coverage of both
+`get_{collection}` and `list_{collection}` across the declared roles. A custom
+read grant does not infer canonical read access. Without explicit read grants,
+owner-scoped reads remain authenticated and owner-filtered; write permissions
+never imply read permissions. The compiler derives each selected read's exact
+permission from the reviewed policy, and runtime dispatch enforces it even for
+an existing record whose owner no longer holds the role.
+Canonical action grants must name the action's owning collection, including
+when a custom-action inventory repeats that canonical id.
 Candidate tasks cannot edit auth or use
 their own role declarations as authorization.
 

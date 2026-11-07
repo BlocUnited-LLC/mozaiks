@@ -38,14 +38,15 @@ def _bundle():
     return bundle
 
 
-def _approve(monkeypatch, persistence, *, action="approve", overrides=None):
+def _approve(monkeypatch, persistence, *, action="approve", overrides=None, actions=None):
     async def respond(_tool_id, payload, **kwargs):
         # Saving, downstream state, and artifact authority must all wait for review.
         persistence[1].assert_not_called()
         persistence[2].assert_not_awaited()
         assert kwargs["chat_id"] == "pricing_chat"
         assert kwargs["workflow_name"] == "DesignDocs"
-        assert "Coordinator may create_report, update_report, delete_report on reports." in payload["checkpoints"]
+        expected_actions = actions or ["create_report", "update_report", "delete_report"]
+        assert f"Coordinator may {', '.join(expected_actions)} on reports." in payload["checkpoints"]
         assert all(item["payload"]["review_id"] == payload["review_id"] for item in payload["actions"])
         return {
             "action": action, "approved": action == "approve", "review_id": payload["review_id"],
@@ -84,6 +85,21 @@ def test_design_model_preserves_typed_access_policy():
         models["DesignDocsBundle"].model_validate(bundle)
 
 
+def test_design_read_guidance_keeps_explicit_policy_and_canonical_wire_contract():
+    path = inventory.ROOT / "factory_app/workflows/DesignDocs/agents.yaml"
+    agent = yaml.safe_load(path.read_text(encoding="utf-8"))["agents"][0]
+    sections = {section["id"]: " ".join(section["content"].split()) for section in agent["prompt_sections"]}
+    policy = sections["access_policy"]
+    assert "cover both list_<collection> and get_<collection>" in policy
+    assert "A custom read grant does not grant either canonical read" in policy
+    assert "cover all three canonical writes" in policy
+    assert "never inherit read authority from write grants" in policy
+    assert "Without explicit canonical read grants" in policy
+    all_guidance = " ".join(sections.values())
+    assert "Constructed get takes the required string input `id` and returns `item`" in all_guidance
+    assert "Do not promise a service-only role check on a code-constructed read" in all_guidance
+
+
 def test_owner_approval_persists_exact_policy_and_projects_from_summary(monkeypatch, persistence):
     context, summary = _approved_context(monkeypatch, persistence)
     policy = _bundle()["access_policy"]
@@ -100,6 +116,79 @@ def test_owner_approval_persists_exact_policy_and_projects_from_summary(monkeypa
     assert backend["extra_fields"]["access_policy_review"] == review
     assert "## App role permissions" in backend["content"]
     assert "role_id: coordinator" in backend["content"]
+
+
+def _read_bundle(read_actions):
+    bundle = _bundle()
+    bundle["surface_map"]["surfaces"][0]["custom_reads"] = ["summarize_reports"]
+    collection = bundle["data_contract"]["surfaces"][0]["collections"][0]
+    collection.update(tenancy="per_user", owner_field="user_id")
+    collection["fields"].append({
+        "name": "user_id", "type": "string", "required": True,
+        "default": None, "enum": None, "nullable": False,
+    })
+    bundle["access_policy"]["grants"][0]["actions"].extend(read_actions)
+    return bundle
+
+
+@pytest.mark.parametrize("reads", [
+    ["get_reports", "list_reports"],
+    ["summarize_reports"],
+    ["get_reports", "list_reports", "summarize_reports"],
+])
+def test_explicit_reads_are_reviewed_and_persisted_without_inferred_grants(monkeypatch, persistence, reads):
+    from mozaiksai.core.workflow.generator_support.module_role_grants import compiled_role_grants
+
+    bundle = _read_bundle(reads)
+    policy = bundle["access_policy"]
+    actions = policy["grants"][0]["actions"]
+    models, _ = load_workflow_structured_outputs("DesignDocs")
+    assert models["DesignDocsBundle"].model_validate(bundle).access_policy.model_dump(mode="json") == policy
+    ui = _approve(monkeypatch, persistence, actions=actions)
+    context = ownership._context(managed=False)
+    result = inventory._save(context, bundle)
+    assert result["outcome"] == "saved", result
+    payload = ui.await_args.args[1]
+    assert "listed read and write actions" in payload["summary"]
+    summary = persistence[2].await_args.kwargs["summary_payload"]
+    assert summary["access_policy"] == policy
+    assert summary["access_policy_review"]["policy_sha256"] == access_policy_sha256(policy)
+    assert summary["access_policy_review"]["review_id"] == payload["review_id"]
+    context.set("design_docs_artifact", _record(summary))
+    assert resolve_design_access_policy(context) == policy
+    assert compiled_role_grants(policy)[0]["permissions"] == sorted(f"reports.{action}" for action in actions)
+
+
+def test_adding_read_grants_requires_a_new_exact_policy_review(monkeypatch, persistence):
+    context, original = _approved_context(monkeypatch, persistence)
+    changed = deepcopy(original)
+    changed["access_policy"]["grants"][0]["actions"].extend(["get_reports", "list_reports"])
+    context.set("design_docs_artifact", _record(changed))
+    with pytest.raises(ValueError, match="review does not match"):
+        resolve_design_access_policy(context)
+
+    for mock in persistence:
+        mock.reset_mock()
+    bundle = _read_bundle(["get_reports", "list_reports"])
+    ui = _approve(monkeypatch, persistence, actions=bundle["access_policy"]["grants"][0]["actions"])
+    assert inventory._save(ownership._context(managed=False), bundle)["outcome"] == "saved"
+    reviewed = persistence[2].await_args.kwargs["summary_payload"]["access_policy_review"]
+    assert reviewed["review_id"] == ui.await_args.args[1]["review_id"]
+    assert reviewed["review_id"] != original["access_policy_review"]["review_id"]
+    assert reviewed["policy_sha256"] != original["access_policy_review"]["policy_sha256"]
+    assert reviewed["policy_sha256"] == access_policy_sha256(bundle["access_policy"])
+    assert original["access_policy"] == _bundle()["access_policy"]
+
+
+@pytest.mark.parametrize("reads", [["get_reports"], ["list_reports"], ["get_report", "list_reports"], ["search_reports"]])
+def test_incomplete_or_undeclared_read_grants_fail_before_review(monkeypatch, persistence, reads):
+    ui = AsyncMock()
+    monkeypatch.setattr(save_design_doc, "use_ui_tool", ui)
+    result = inventory._save(ownership._context(managed=False), _read_bundle(reads))
+    assert result["outcome"] == "revise", result
+    ui.assert_not_awaited()
+    persistence[1].assert_not_called()
+    persistence[2].assert_not_awaited()
 
 
 @pytest.mark.parametrize("action,outcome", [("request_changes", "review_changes")])
@@ -214,7 +303,7 @@ def test_empty_policy_needs_no_review(monkeypatch, persistence):
     ("role_id", "unknown", "unknown role"),
     ("collection", "missing", "unknown app-owned collection"),
     ("actions", ["create_report"], "omits canonical write"),
-    ("actions", ["grant_admin"], "not an approved mutation"),
+    ("actions", ["grant_admin"], "not an approved action"),
 ])
 def test_invalid_policy_is_repaired_before_review(monkeypatch, persistence, field, value, error):
     ui = AsyncMock()

@@ -48,7 +48,7 @@ models:
       custom_reads:
         type: optional_list
         items: str
-        description: Explicit snake_case read action ids beyond canonical entity list/get, such as summarize_tasks for dashboard KPIs. These are approved design decisions implemented by ServiceAgent; canonical list/get actions are constructed from collection entity and tenancy.
+        description: Explicit snake_case read action ids beyond canonical list_<collection>/get_<collection>, such as summarize_tasks for dashboard KPIs. These are approved design decisions with authored implementations. Canonical read ids preserve the exact collection name; constructed get takes id and returns item, while list takes page/page_size/search and returns items/total. Role restrictions require explicit access_policy grants.
       events_emitted:
         type: optional_list
         items: str
@@ -426,7 +426,7 @@ models:
         description: Exact app-owned module collection name in data_contract used as the action's permission anchor. Each module action must use the same single collection across all roles, even when its implementation changes several collections. Platform and hosted collections cannot receive app grants.
       actions:
         type: list[str]
-        description: Non-empty explicit canonical create/update/delete action ids or surface_map owned_mutations for this collection. No permission strings or wildcards.
+        description: Non-empty exact canonical create/update/delete or list_<collection>/get_<collection> action ids, or surface_map owned_mutations/custom_reads for this collection. Granting either canonical read requires both across roles; custom read grants imply no canonical read grants. Any granted collection with module_action writes still requires all three canonical write grants across roles. No permission strings or wildcards.
   DesignAccessPolicy:
     type: model
     fields:
@@ -464,5 +464,5 @@ models:
         type: union
         variants: [DesignAccessPolicy, 'null']
         default: null
-        description: Proposed app roles and collection mutation grants. Non-empty grants require an explicit owner review before downstream compilation; empty lists grant no role authority.
+        description: Proposed app roles and explicit collection action grants, including reads. Non-empty grants require an explicit owner review before downstream compilation; empty lists grant no role authority. Read grants never follow implicitly from write grants and never bypass record ownership.
 

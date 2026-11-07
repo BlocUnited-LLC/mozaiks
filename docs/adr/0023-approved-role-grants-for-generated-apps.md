@@ -64,8 +64,8 @@ task.
    design the user approves:
    - `roles[]`: `{role_id, label, description}`
    - `grants[]`: `{role_id, collection, actions[]}`, where `actions` lists
-     only canonical write ids and approved `owned_mutations` for that
-     collection.
+     canonical write ids, exact `get_{collection}` / `list_{collection}` ids,
+     and approved `owned_mutations` / `custom_reads` for that collection.
 
    `save_design_docs_bundle` validates every reference deterministically. A
    nonempty grant policy is reviewed through the shipped ApprovalCard and UI
@@ -120,6 +120,35 @@ task.
    derives the member identity from the authenticated context and clamps input
    fields and initial state. A shared projection cannot authorize updates to a
    different user's per-user source record.
+
+### Explicit read grants (2026-11-07 implementation extension)
+
+A live baseline exposed a gap in the original mutation-only policy: its design
+promised member-only reads, but owner-scoped read construction removed read
+permissions. Authentication and ownership cannot enforce role removal for a
+person's existing records.
+
+The same reviewed grant shape now admits read action ids. Selecting either
+canonical read requires explicit coverage of both `get_{collection}` and
+`list_{collection}` across the declared roles; an omitted raw read must not
+remain an alternate way to retrieve the records. Existing canonical-write
+completeness still applies to role-managed mutable collections. A custom read
+grant alone does not grant or restrict canonical reads. Without explicit read
+grants, owner-scoped reads retain their authenticated, owner-filtered behavior;
+write roles never imply read roles.
+
+Canonical action ids remain anchored to their declared collection. Repeating
+another collection's canonical action in a custom-action inventory cannot
+reassign its grant or evade canonical action coverage.
+
+The read compiler derives permissions from the reviewed policy at typed-output,
+file-materialization and repeated-closure boundaries. It keeps owner-scoped read
+implementations code-owned, and preserves explicitly authored app-wide read
+schemas and API exposure. `ModuleExecutor` already enforces the resulting
+permissions; there is no new role source, global host gate, ownership bypass,
+auth schema version or subscription entitlement behavior. Changed read grants
+require a fresh policy review. This extension does not claim completed live
+generated-app acceptance.
 
 ## Reason
 
