@@ -342,6 +342,10 @@ Current canonical asset kinds:
 - `catalog`: prompt catalog or taxonomy YAML.
 - `contract`: typed agent-facing rule contract.
 - `templates`: directory of deterministic generated app files.
+- `workflows`: directory that mirrors a workspace workflow root (workflow
+  folders, `_shared/` helpers and keyed workflow registry entries). Only
+  `mozaiks pack install` places it; AppGenerator refuses to select a pack that
+  ships one, because a generated app bundle cannot hold workflows.
 
 Unknown asset kinds fail pack validation before prompt projection or
 materialization.
@@ -654,6 +658,101 @@ pinned old source. A reassembly whose pack descriptor names the new version's
 `pack_source_path` directly renders the new templates but does not touch
 `installed_components.json` or its source sidecar, so the next upgrade plan
 still compares against the old version's output and blocks again.
+
+That block applies to packs AppGenerator materialized. A pack installed with
+`mozaiks pack install` records its route manifest pages as keyed entries and
+upgrades them in place; see the next section.
+
+### Installing into an existing app
+
+`mozaiks pack` installs a pack into an app that already exists, upgrades it,
+and verifies it. It extends the lifecycle above; the operations live in
+`factory_app/workflows/AppGenerator/tools/community_component_workspace.py`.
+
+```text
+mozaiks pack install <pack-dir> [--adopt] [--dry-run] [--json]
+mozaiks pack install --git <repo> --rev <full-commit> --path <pack-folder> [...]
+mozaiks pack upgrade <pack-dir> | --git <repo> --rev <commit> --path <folder> [--dry-run] [--json]
+mozaiks pack verify [--json]
+mozaiks pack status [--json]
+```
+
+Every operation takes `--workspace` (default `.`), which holds `app/`,
+`workflows/` and `build_context/`. Exit code `0` means applied, unchanged or
+verified clean. `1` means the plan is blocked or verification found drift,
+and nothing was written. `2` means the input was invalid.
+
+What an install writes:
+
+| Output | Ownership | On upgrade |
+| --- | --- | --- |
+| Template files (modules, adapters, schema pages, module UI barrels) | Pack-owned, recorded with a content hash | Replaced or removed only when unmodified |
+| Outputs a contract declares `owner: workspace` | Seeded once, then app-owned | Never written again; a changed seed is reported |
+| `workflows` asset files | Pack-owned, recorded with a content hash | As template files |
+| Keyed entries in shared files | Pack-owned entries, recorded with a hash | Replaced or removed only when unmodified |
+
+Keyed shared files are `data/contract.json` (`surfaces` by `surface_id`),
+`ui/route_manifest.json` (`pages` by `id`), `admin/admin_registry.yaml`
+(`pages` by `id`) and the workflow root's
+`extended_orchestration/extension_registry.json` (`workflows`, `entrypoints`,
+`transitions` and `workflow_sequences` by `id`). Only the pack's own entries
+are spliced into these files. Every other byte, including the app's comments,
+formatting and entries, stays as it was, and the result is parsed again
+before anything is written. An app without a workflow registry launches every
+loaded workflow, so registry entries are skipped there with a warning.
+
+A pack may not write `ui/index.js`: hand-written registration code cannot be
+merged safely. A module registers its own React components from
+`modules/<module_id>/ui/index.js`, which the web shell discovers by folder
+scan. Each export registers as `<module_id>:<Export>` and as `<Export>`, after
+the app's own barrel, so an app component of the same name always wins.
+
+Editing a pack-owned file or entry fails `mozaiks pack verify` and blocks
+upgrades. Customize instead through seeded files, the app's own entries and
+components, and host interfaces the pack declares. Line-ending conversion is
+not an edit: hashes normalize CRLF.
+
+`--adopt` takes ownership of app files and entries that already hold exactly
+the pack's content, without rewriting them. Anything that differs blocks the
+install. Reconcile the difference in a normal reviewed change first.
+
+Before writing, an install checks the pack's closure. Pack dependencies are
+checked as before, and an upgrade also refuses to move a version another
+installed pack pins (`required_by`). The pack's contract may declare host
+requirements under `requires`:
+
+| Key | Checked |
+| --- | --- |
+| `modules: [{module_id, actions}]` | The app, or the pack, has the module and those actions. |
+| `imports: [dotted.module]` | Each module exists in the app (`app.x`, a bundle-root package such as `services.x`, or `_shared.x`). |
+| `secrets: [{env, purpose}]` | A warning when `security/secrets.yaml` does not declare the env name. |
+
+Every absolute import in the pack's Python that reaches app code must resolve
+to a file the pack ships or be declared in `requires.imports`; an undeclared
+host import blocks the install.
+
+The plan lists `permissions_introduced`. Granting those permissions to roles
+stays the app's decision. Composing host policy files (subscriptions,
+production operations, flags, shell, dashboard, secrets entries) is out of
+scope.
+
+Lifecycle provenance marks each pack entry `"ownership": "content_hash"` and
+records `sha256` per owned file, `materialized_workflow_files`, and an
+`entries` list per composed root (`composed_workflow_outputs` for the workflow
+registry). Upgrade and verify compare against these hashes, so they never
+re-read an old source. Provenance that AppGenerator wrote has no such marker
+and keeps the upgrade path described above, from a directory source.
+
+The workspace pin, its source sidecar, the provenance and the app's files are
+written as one transaction. Each file is replaced atomically, a failure
+restores every file and removes any directory the transaction created, and a
+lock file at `build_context/.mozaiks/lifecycle.lock` refuses concurrent
+operations.
+
+A `--git` source must name a full commit id. Its pack folder is exported blob
+by blob exactly as the repository stores it, so the digest is the same on
+every OS and checkout. The pin records `git+<origin>@<commit>#<folder>`, with
+any credentials in the origin URL removed.
 
 Mozaiks does not perform remote downloads, registry lookup, marketplace ranking,
 trust scoring, cryptographic signing, or automatic semver range upgrades for
