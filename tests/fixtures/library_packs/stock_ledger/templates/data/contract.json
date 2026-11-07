@@ -1,0 +1,27 @@
+{
+  "version": "1",
+  "surfaces": [
+    {
+      "surface_id": "stock_ledger",
+      "surface_kind": "module",
+      "primary_entities": ["stock_item"],
+      "collections": [
+        {
+          "name": "stock_item",
+          "entity": "stock_item",
+          "mongo_collection": "stock_items",
+          "data_alias": "stock.items",
+          "scope": "app",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "owner_module": "stock_ledger",
+          "ownership": {"surface_id": "stock_ledger", "surface_kind": "module"},
+          "fields": [
+            {"name": "sku", "type": "string", "required": true},
+            {"name": "quantity", "type": "integer", "required": true}
+          ]
+        }
+      ]
+    }
+  ]
+}
