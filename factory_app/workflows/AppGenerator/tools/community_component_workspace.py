@@ -377,7 +377,8 @@ def _render(pack_dir: Path, pack_id: str, locator: str | None) -> _RenderedPack:
     if locator:
         entry = {**entry, "source": locator}
     context = _read_pack_context(pack_dir, pack_id)
-    pack_block = context.get("pack") if isinstance(context.get("pack"), dict) else {}
+    raw_pack = context.get("pack")
+    pack_block: dict[str, Any] = raw_pack if isinstance(raw_pack, dict) else {}
     status = str(pack_block.get("status") or "active").strip()
     if status != "active":
         raise CommunityComponentLifecycleError(f"Pack '{pack_id}' is {status}; only an active pack can be installed")
@@ -924,11 +925,12 @@ def _updated_provenance(manifest: Mapping[str, Any], outcome: _Outcome, rendered
         "source": rendered.entry["source"],
         "digest": rendered.entry["digest"],
     }
-    updated = {
+    packs: list[dict[str, Any]] = [entry for entry in _pack_entries(manifest) if entry.get("pack_id") != pack_id]
+    updated: dict[str, Any] = {
         "schema_version": _PROVENANCE_SCHEMA_VERSION,
         "framework_version": manifest.get("framework_version") or _framework_version(),
         "generated_at": manifest.get("generated_at") or resolve_build_timestamp(None),
-        "packs": [entry for entry in _pack_entries(manifest) if entry.get("pack_id") != pack_id],
+        "packs": packs,
     }
     pack_entry: dict[str, Any] = {
         **identity,
@@ -937,8 +939,8 @@ def _updated_provenance(manifest: Mapping[str, Any], outcome: _Outcome, rendered
     }
     if outcome.workflow_rows:
         pack_entry["materialized_workflow_files"] = sorted(outcome.workflow_rows, key=lambda row: row["path"])
-    updated["packs"].append(pack_entry)
-    updated["packs"].sort(key=lambda entry: str(entry.get("pack_id") or ""))
+    packs.append(pack_entry)
+    packs.sort(key=lambda entry: str(entry.get("pack_id") or ""))
     for field_name, base in (("composed_outputs", "app"), ("composed_workflow_outputs", "workflows")):
         existing = manifest.get(field_name)
         composed: dict[str, list[dict[str, Any]]] = {
@@ -1189,8 +1191,8 @@ def apply_component_install(*, source: PackSource, roots: WorkspaceRoots, adopt:
 def plan_workspace_upgrade(*, source: PackSource, roots: WorkspaceRoots) -> LifecyclePlan:
     """Dry-run upgrading an installed pack to the version ``source`` names; nothing is written."""
     with _candidate(source) as candidate:
-        if _is_legacy(roots, candidate.pack_id):
-            return _legacy_plan(candidate, roots, apply=False)
+        if _is_generator_materialized(roots, candidate.pack_id):
+            return _generator_upgrade_plan(candidate, roots, apply=False)
         outcome, _rendered, _manifest = _plan_workspace_change("upgrade", candidate, roots, adopt=False)
     return outcome.plan
 
@@ -1198,8 +1200,8 @@ def plan_workspace_upgrade(*, source: PackSource, roots: WorkspaceRoots) -> Life
 def apply_workspace_upgrade(*, source: PackSource, roots: WorkspaceRoots) -> LifecyclePlan:
     """Upgrade an installed pack, preserving the app's own files and entries, or raise writing nothing."""
     with _lifecycle_lock(roots.build_context_root), _candidate(source) as candidate:
-        if _is_legacy(roots, candidate.pack_id):
-            return _legacy_plan(candidate, roots, apply=True)
+        if _is_generator_materialized(roots, candidate.pack_id):
+            return _generator_upgrade_plan(candidate, roots, apply=True)
         outcome, rendered, manifest = _plan_workspace_change("upgrade", candidate, roots, adopt=False)
         plan = outcome.plan
         if plan.status == "unchanged":
@@ -1220,12 +1222,12 @@ def _blocked(plan: LifecyclePlan) -> CommunityComponentConflictError:
     return error
 
 
-def _is_legacy(roots: WorkspaceRoots, pack_id: str) -> bool:
+def _is_generator_materialized(roots: WorkspaceRoots, pack_id: str) -> bool:
     entry = _lifecycle_entry(_provenance(roots.app_root), pack_id)
     return entry is not None and entry.get("ownership") != OWNERSHIP_CONTENT_HASH
 
 
-def _legacy_plan(candidate: _Candidate, roots: WorkspaceRoots, *, apply: bool) -> LifecyclePlan:
+def _generator_upgrade_plan(candidate: _Candidate, roots: WorkspaceRoots, *, apply: bool) -> LifecyclePlan:
     """Upgrade a pack AppGenerator materialized, through the base lifecycle's unchanged path."""
     try:
         metadata = verify_pack_integrity(candidate.pack_dir, candidate.pack_id)
@@ -1253,10 +1255,10 @@ def _legacy_plan(candidate: _Candidate, roots: WorkspaceRoots, *, apply: bool) -
             )
     except ManagedCapabilityTemplateError as exc:
         raise CommunityComponentLifecycleError(str(exc)) from exc
-    return _plan_from_legacy(result, metadata, candidate, applied=apply)
+    return _plan_from_base_upgrade(result, metadata, candidate, applied=apply)
 
 
-def _plan_from_legacy(result: UpgradePlan, metadata: dict[str, Any], candidate: _Candidate, *, applied: bool) -> LifecyclePlan:
+def _plan_from_base_upgrade(result: UpgradePlan, metadata: dict[str, Any], candidate: _Candidate, *, applied: bool) -> LifecyclePlan:
     plan = LifecyclePlan(
         operation="upgrade",
         status="applied" if applied else result.status,
@@ -1273,7 +1275,7 @@ def _plan_from_legacy(result: UpgradePlan, metadata: dict[str, Any], candidate: 
     plan.dependencies = dict(result.dependency_changes)
     plan.conflicts = [dict(conflict) for conflict in result.potential_conflicts]
     plan.warnings.append({
-        "kind": "legacy_provenance",
+        "kind": "generator_provenance",
         "detail": "this pack was materialized by AppGenerator; its upgrade uses the base lifecycle and is not hash-verified",
     })
     return plan
@@ -1352,7 +1354,7 @@ def installed_component_status(*, roots: WorkspaceRoots) -> dict[str, Any]:
             "source": pin.get("source") or entry.get("source"),
             "ownership": (
                 "content_hash" if entry.get("ownership") == OWNERSHIP_CONTENT_HASH
-                else "legacy" if entry else "pinned_only"
+                else "generator" if entry else "pinned_only"
             ),
             "owned_files": len(recorded.owned),
             "seeded_files": len(recorded.seeds),
