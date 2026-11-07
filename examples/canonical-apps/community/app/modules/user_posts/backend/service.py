@@ -164,13 +164,12 @@ class UserPostsService:
     async def get_reaction_summary(self, ctx, *, post_id: str) -> dict:
         user_id = actor_id(ctx)
         post = await self._posts.get(ctx, post_id=post_id)
-        if not can_read_post(post, user_id):
-            return {"total": 0, "by_type": {}, "viewer_reaction": None}
-        by_type = await self._reactions.count_by_type(ctx, post_id=post_id)
-        total = sum(by_type.values())
-        viewer = await self._reactions.get(ctx, post_id=post_id, user_id=user_id)
+        readable = can_read_post(post, user_id)
+        # An unreadable post summarizes no reactions; its reaction rows are never read.
+        by_type = await self._reactions.count_by_type(ctx, post_id=post_id) if readable else {}
+        viewer = await self._reactions.get(ctx, post_id=post_id, user_id=user_id) if readable else None
         return {
-            "total": total,
+            "total": sum(by_type.values()),
             "by_type": by_type,
             "viewer_reaction": viewer.get("reaction_type") if viewer else None,
         }

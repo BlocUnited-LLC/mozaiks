@@ -27,6 +27,8 @@ recommended_domains:
   - attachments
 
 required_outputs:
+  - path: data/contract.json
+    owner: templates
   - path: data/migrations/001_files_collections.json
     owner: templates
   - path: modules/files/module.yaml

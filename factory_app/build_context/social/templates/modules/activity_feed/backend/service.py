@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from .policy import actor_id, app_scope, feed_query, profile_activity_query
+from .policy import actor_id, feed_query, profile_activity_query
 from .repo import ActivityEventRepo
 from .schemas import (
     ACTIVITY_FRIENDSHIP_CREATED,
@@ -71,7 +71,6 @@ class ActivityFeedService:
             "feed_user_ids": payload.get("feed_user_ids") or [],
             "metadata": payload.get("metadata") or {},
             "created_at": now,
-            **app_scope(ctx),
         }
         await self._repo.insert(ctx, doc)
         await ctx.emit("domain.social.activity.recorded", {

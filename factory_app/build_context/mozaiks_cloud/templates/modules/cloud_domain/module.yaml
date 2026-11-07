@@ -1,25 +1,23 @@
 schema_version: mozaiks.module.v1
 module:
   id: cloud_domain
-  label: Cloud Domain Management
+  display_name: Cloud Domain Management
   description: >
     Facade module for Mozaiks Cloud domain operations. Connects, verifies,
     activates, and disconnects custom domains with normalized DNS and TLS
     status display. All operations are app-owned; provider DNS/TLS internals
     (Cloudflare zone IDs, certificate material, registrar configuration) are
     never exposed to the generated app.
-  capability_source: managed_capability
-  provider: mozaiks_cloud
+  handler: backend.handler:CloudDomainHandler
 
 permissions:
   - id: cloud_domain.read
-    label: View domain status and DNS instructions
+    description: View domain status and DNS instructions
   - id: cloud_domain.manage
-    label: Connect, activate, and disconnect domains
+    description: Connect, activate, and disconnect domains
 
 actions:
   - id: connect_domain
-    label: Connect Domain
     handler_method: connect_domain
     api_surface: internal
     permissions:
@@ -29,9 +27,22 @@ actions:
       Requires cloud_domain.manage permission.
 
   - id: get_domain_verification
-    label: Get Domain Verification
     handler_method: get_domain_verification
     api_surface: public_readonly
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        binding_id:
+          type: string
+          minLength: 1
+        tenant_id:
+          type: string
+          minLength: 1
+        app_id:
+          type: string
+          minLength: 1
+      required: [binding_id]
     permissions:
       - cloud_domain.read
     description: >
@@ -39,9 +50,22 @@ actions:
       Each record has type, name, value, and optional ttl.
 
   - id: get_dns_instructions
-    label: Get DNS Instructions
     handler_method: get_dns_instructions
     api_surface: public_readonly
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        binding_id:
+          type: string
+          minLength: 1
+        tenant_id:
+          type: string
+          minLength: 1
+        app_id:
+          type: string
+          minLength: 1
+      required: [binding_id]
     permissions:
       - cloud_domain.read
     description: >
@@ -49,7 +73,6 @@ actions:
       Records are for display only; the Mozaiks Cloud provider applies DNS changes.
 
   - id: request_domain_activation
-    label: Activate Domain
     handler_method: request_domain_activation
     api_surface: internal
     permissions:
@@ -59,9 +82,22 @@ actions:
       Requires cloud_domain.manage permission.
 
   - id: get_domain_status
-    label: Get Domain Status
     handler_method: get_domain_status
     api_surface: public_readonly
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        binding_id:
+          type: string
+          minLength: 1
+        tenant_id:
+          type: string
+          minLength: 1
+        app_id:
+          type: string
+          minLength: 1
+      required: [binding_id]
     permissions:
       - cloud_domain.read
     description: >
@@ -70,7 +106,6 @@ actions:
       TLS status: pending | provisioning | active | failed
 
   - id: disconnect_domain
-    label: Disconnect Domain
     handler_method: disconnect_domain
     api_surface: internal
     permissions:
