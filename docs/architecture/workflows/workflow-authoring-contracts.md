@@ -606,16 +606,33 @@ prompt_middleware:
   - agent: JokeWriterAgent
     filename: hook_inject_preferences.py
     function: inject_preferences
+statusbar_middleware:
+  - agent: JokeWriterAgent
+    variables: [draft_status]
 ```
 
 Rules:
-- Prompt middleware declarations are compiled to AG2 1.0 middleware.
+- Prompt middleware declarations are compiled to AG2 middleware.
 - The runner calls each function positionally as `fn(agent, messages)` and
   ignores the return value; the hook changes the prompt only through
   `agent.update_system_message(...)`. Name the first two parameters `agent` and
   `messages`. See [Call Shape Contract](../mozaiksai/hook-system-deep-dive.md#call-shape-contract).
 - Use lifecycle tools for side effects and structured outputs/runtime
   validators for output validation.
+- `statusbar_middleware` is optional (default `[]`). Each entry names one local
+  agent and a nonempty, unique list of context variables. There may be only one
+  entry per agent; `all` and remote A2A agents are unsupported. Every variable
+  must exist in `context_variables.yaml`, appear in that agent's `variables`
+  view, and be model-visible under the existing context authority policy.
+- Statusbar variables move from the ordinary system-prompt projection into
+  AG2 1.3's transient model input. Static instructions and other declared prompt
+  variables remain unchanged. Prompt callbacks retain access to the context
+  bridge; they should not duplicate selected variables in their prompt text.
+- The callback reads the live bridge before each provider call, including a
+  retry or a call after tool execution. It creates no state, routes, permissions,
+  plan authority, conversation history, or UI event. This is agent context,
+  separate from the chat status strip. Persistence, custom callback paths, and
+  templates are not configurable on this surface.
 
 ## Guardrails
 
