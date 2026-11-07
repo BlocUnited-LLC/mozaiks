@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -290,3 +292,68 @@ def test_only_runtime_can_load_review_artifacts_and_lifecycle_can_project_grants
     assert policy.can_write("access_policy", writer_id="lifecycle_tool")
     assert not policy.can_write("access_policy", writer_id="context_bridge")
     assert not policy.can_write("access_policy", writer_id="persisted_replay")
+
+
+def test_shared_role_projection_exposes_only_resolved_code_derived_permissions(monkeypatch, persistence):
+    from factory_app.workflows._shared.design_access_policy import inject_design_access_policy
+    from mozaiksai.core.workflow.generator_support.module_role_grants import compiled_role_grants
+
+    context, summary = _approved_context(monkeypatch, persistence)
+    before = detach(context.get("design_docs_artifact"))
+    agent = SimpleNamespace(name="ConfigMiddlewareAgent", context_variables=context, _system_message="Original")
+    inject_design_access_policy(agent, [])
+    marker = "Code-derived authorization.roles (reference only; do not edit grants):\n"
+    assert json.loads(agent._system_message.split(marker, 1)[1]) == compiled_role_grants(summary["access_policy"])
+    assert "reports.update_report" in agent._system_message
+    assert detach(context.get("design_docs_artifact")) == before
+    original = agent._system_message
+    inject_design_access_policy(agent, [])
+    assert agent._system_message == original
+    context.set("design_docs_artifact", None)
+    with pytest.raises(ValueError, match="no reviewed DesignDocs artifact"):
+        inject_design_access_policy(agent, [])
+    assert agent._system_message == original
+
+
+@pytest.mark.parametrize("operation", ["get", "list"])
+def test_native_protected_read_closure_and_fixture_reuse_existing_approved_role(operation):
+    from mozaiksai.core.workflow.generator_support.code_files import (
+        extract_code_file_map_from_payload,
+    )
+    from mozaiksai.core.workflow.generator_support.module_smoke_fixtures import (
+        load_module_smoke_fixtures,
+    )
+    from mozaiksai.core.workflow.generator_support.module_write_actions import close_module_actions
+    from tests.test_app_runtime_role_smoke import _role_bundle
+    from tests.test_generated_role_grants import _arguments, _closed
+
+    payload = _closed()
+    action_id = f"{operation}_tasks"
+    action = next(item for item in payload["module_contract"]["module_yaml"]["actions"] if item["id"] == action_id)
+    assert action["permissions"] == []
+    permission = "tasks.update_task"
+    action["permissions"] = [permission]
+    if operation == "get":
+        action["input_schema"] = {"type": "object", "properties": {"lookup": {"type": "string"}},
+                                  "required": ["lookup"], "additionalProperties": False}
+    params = [{"field": "lookup", "source": "record", "record_field": "task_id"}] if operation == "get" else []
+    fixture = {"action": action_id, "roles": ["coordinator"], "setup": [], "params": params}
+    payload["module_contract"]["fixtures_yaml"] = {"schema_version": "mozaiks.module_smoke_fixtures.v1", "fixtures": [fixture]}
+    before = deepcopy(payload)
+    closed = close_module_actions(payload, **_arguments())
+    assert payload == before
+    actual = next(item for item in closed["module_contract"]["module_yaml"]["actions"] if item["id"] == action_id)
+    assert actual["permissions"] == [permission] and actual["input_schema"] == action["input_schema"]
+    files = _role_bundle("app_wide")
+    auth_before = files["config/auth.yaml"]
+    files.update(extract_code_file_map_from_payload(closed))
+    files["data/contract.json"] = json.dumps(_arguments()["data_contract"])
+    admitted = load_module_smoke_fixtures(files)
+    assert admitted["task_management", action_id].roles == ["coordinator"]
+    assert files["config/auth.yaml"] == auth_before
+    manifest_path = "modules/task_management/module.yaml"
+    manifest = yaml.safe_load(files[manifest_path])
+    next(item for item in manifest["actions"] if item["id"] == action_id)["permissions"] = []
+    files[manifest_path] = yaml.safe_dump(manifest)
+    with pytest.raises(ValueError, match="unrelated or redundant"):
+        load_module_smoke_fixtures(files)

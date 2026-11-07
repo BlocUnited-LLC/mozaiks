@@ -1253,7 +1253,12 @@ def _repair_contract_task_operations(plan: dict[str, Any], context: Any) -> list
             "Declare approved writes and custom reads; code constructs owner-scoped reads and ordinary unprotected app-wide reads. "
             "For app_wide collections with protected writes, explicitly declare the canonical "
             "reads and their permissions, API exposure, and handler policy. "
-            "The prose above describes the module; this list defines it."
+            "The prose above describes the module; this list defines it. "
+            "The module's optional typed fixtures_yaml companion remains permitted even when omitted "
+            "from the initial owned_paths list. Supply exact input/setup bindings when admitted reads "
+            "cannot use the observer defaults or approved business operations need existing records, "
+            "lifecycle state or dates that schema-only inputs cannot supply. Cross-module setup requires "
+            "the actual dependency module contract; never guess IDs or weaken business rules."
         )
         contract["initial_message"] = "\n\n".join(part for part in (message, note) if part)
         repairs.append(f"{module_id}: contract task {str(contract.get('task_id'))!r} "

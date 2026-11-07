@@ -244,6 +244,14 @@ existing bounded GET decoder retain GET. The method is selected before
 dispatch, with no fallback after a failed response. This
 proves the selected module action transport, not GET query coercion for every
 JSON type.
+
+Module contract admission requires an exact read fixture when the ordinary CRUD
+observer's defaults (`{id: string}` for get, `{}` for list) cannot be proven to
+fit the declared input contract. Descriptions do not change compatibility, and
+the check does not rewrite native schemas. Internal reads and collections with
+no observed create action do not acquire a fixture requirement. The module
+contract task already owns the optional companion even if its initial file
+manifest omits it; another task's explicit ownership still takes precedence.
 Update fixtures must make an observable declared-field change when the action
 has such a field. Internal canonical reads remain explicitly
 `not_run` on the user HTTP surface; this does not prove their business behavior.
@@ -254,6 +262,14 @@ The independent role checks still require actual target 2xx and a roleless 403
 `PERMISSION_DENIED` with unchanged declared app storage. A missing fixture does
 not excuse a failed synthetic probe. A bad fixture receives its own diagnostic;
 it is not a reason to remove valid business safeguards from generated code.
+
+A positive probe returning 400, 403 or 404 without a declared target fixture
+routes repair to that module's fixture companion. Its inputs, prerequisites or
+actor have not yet established an implementation defect. The failed check stays
+failed; repair must supply valid inputs while preserving the admitted schema,
+permissions and business rules. Fixture-backed failures, exceptions, timeouts,
+500 responses, incorrect successful results, and negative authorization,
+isolation, storage and event checks retain their implementation owners.
 
 These inputs extend the existing external observer and its source/image-bound
 receipt; they do not change the acceptance scope or the event-observation limit

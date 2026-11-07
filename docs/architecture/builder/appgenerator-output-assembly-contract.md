@@ -9,6 +9,12 @@ schema-driven CRUD does not require it. The file catalog, layout registry,
 carry-forward readers and preservation inventory use the same path. Raw
 companion files cannot substitute for typed output.
 
+The manifest guard derives companion names from the same typed output registry
+as materialization. An omitted optional fixture path stays available to its
+contract task unless another task explicitly owns it. Read admission requires
+exact bindings when the ordinary observer defaults cannot fit the action's
+declared inputs; it does not infer business prerequisites from action names.
+
 Fixtures name exact actions and roles and supply bounded prerequisite calls
 and parameter bindings. They do not grant permissions, change approved domain
 requirements, define success criteria or introduce runtime services. Accepted
@@ -408,8 +414,12 @@ path; they do not introduce a new runtime dispatcher or authorization policy.
 
 ### Server Table Query Acceptance
 
-Opt-in server-paged DataTable sections must close against the actual generated
-module action contract during the existing `validate_wiring` acceptance gate.
+Table queries close against the actual generated module action contract during
+producer admission, pack-template validation, and the existing `validate_wiring`
+acceptance gate. An action that declares integer `page`/`page_size`, a selected
+row array, and a required integer `total` envelope cannot bind a client-paged
+table or ResourceTable: those controls can only operate on fully loaded rows.
+This check reads typed contracts, not action names or descriptions.
 Action names in a plan alone are insufficient. The action declares integer
 `page` and `page_size`, string `search`, and accepts the table's initial and
 next-page query, including empty search and a representative nonempty query when
@@ -420,10 +430,26 @@ by this fixed query contract. Internal-only actions are not browser endpoints.
 an array of explicitly typed objects and an integer respectively. Schema references are not supported in this
 bounded binding contract and are never fetched. Missing or incompatible bindings
 fail the existing wiring check; they do not create another routing or retry
-system. Client-paged tables retain their current input contract and also check
-declared output fields. At runtime,
+system. Client-paged tables bound to fully loaded responses retain their input
+contract and also check declared output fields. All query errors are reported
+before dependent page artifacts are accepted. At runtime,
 the data-fetch owner separately validates actual rows and counts; declaration
 closure does not prove that generated backend behavior implements the query.
+
+A `ui.datatable.refresh` action names a bound same-page table in
+`payload.component_id`. It reloads the existing query; other payload fields do
+not configure filters or sorting and fail generated-page admission. The same
+checks run for nested sections and final wiring.
+
+The fixed declarative server query sends `page`, `page_size`, and `search`.
+Arbitrary category/status controls and differently named query fields require
+an approved `custom_react_page` when shipped declarative controls cannot express
+them. The existing `custom_route_bundle` keeps the exact route/component binding;
+its React component owns local query state and calls declared actions through
+`moduleAction`. It must preserve paging, totals, errors, and backend authority.
+An approved declarative surface is revised through the existing design/plan
+review path before changing realization. No filter aliases, hidden refresh
+query interpretation, or new routing subsystem is introduced.
 
 **Status:** Canonical contract
 **Purpose:** Define exactly how AppGenerator turns persistent UI intent into bundle artifacts.
@@ -1494,6 +1520,24 @@ imports it in the same module namespace as the action handler and fails the
 module when the contract cannot be registered. Account-data load failures and
 repository API quality failures join the existing bounded `ServiceAgent`
 repair path; they do not become successful loads with warnings.
+
+Service workers receive the reviewed role-to-operation policy through the existing
+`[APP ROLE ACCESS]` prompt projection and permission IDs through admitted module
+actions. `ModuleContext.permissions` carries resolved permission IDs. The context
+does not expose `role`, `roles`, or `principal`; persistence principal metadata
+provides ownership identity, not role grants. The runtime quality gate rejects
+direct and literal `getattr`/`hasattr` probes of those nonexistent attributes on
+`ctx` or `context`, routing them through the existing bounded service repair.
+This check does not infer business policy or prove every authorization branch;
+authenticated role and ownership acceptance remains required.
+
+The same policy hook projects the compiler's exact role-to-permission mapping
+for contract and service workers. Protected reads can reference existing
+approved permissions without generating new grants or changing `auth.yaml`.
+An action requires every listed permission. Its declared permissions must
+express the approved audience; an unexpressible policy requires contract repair.
+Fixture actors must hold the action's exact declared permissions, rather than
+relying on a hidden service-only role check or a previous setup caller.
 
 File-contract prompt hooks preserve all hard constraints. Service workers see
 the callable signatures from the runtime's `PersistenceCollection` protocol,

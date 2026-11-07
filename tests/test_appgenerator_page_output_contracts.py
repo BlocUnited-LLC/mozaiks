@@ -38,6 +38,13 @@ def _files():
     })}
 
 
+def _declare_server_contract(action):
+    action["input_schema"] = {"type": "object", "properties": {
+        "page": {"type": "integer"}, "page_size": {"type": "integer"}, "search": {"type": "string"},
+    }}
+    action["output_schema"]["required"] = ["items", "total"]
+
+
 def _dashboard():
     return {"name": "dashboard", "sections": [
         {"id": "summary", "primitive": "SummaryStrip", "config": {
@@ -70,6 +77,8 @@ def test_compiler_fills_declared_canonical_list_envelope_in_every_table_mode(pri
     if mode == "server":
         table["config"].update(pagination=True, page_size=20, total_key="task_count")
     index = module_action_index(_files())
+    if mode == "server":
+        _declare_server_contract(index["tasks"]["list_tasks"])
     compile_page_data_sources(page, index, reject_api_endpoints=True)
     assert table["config"]["data_key"] == "items"
     assert table["config"].get("total_key") == ("total" if mode == "server" else None)
@@ -95,13 +104,17 @@ def test_compiler_does_not_guess_between_multiple_returned_arrays():
 
 def test_compiler_preserves_explicit_nested_table_response_paths():
     index = module_action_index(_files())
+    _declare_server_contract(index["tasks"]["list_tasks"])
     output = index["tasks"]["list_tasks"]["output_schema"]
-    output["properties"]["archive"] = {"type": "object", "properties": {
+    output["required"] = ["archive"]
+    output["properties"]["archive"] = {"type": "object", "required": ["items", "total"], "properties": {
         "items": deepcopy(output["properties"]["items"]), "total": {"type": "integer"},
     }}
     page = _dashboard()
+    page["sections"][1]["primitive"] = "DataTable"
     config = page["sections"][1]["config"]
-    config.update(data_key="archive.items", total_key="archive.total", pagination_mode="server")
+    config.update(data_key="archive.items", total_key="archive.total", pagination_mode="server",
+                  pagination=True, page_size=20)
     compile_page_data_sources(page, index)
     assert config["data_key"] == "archive.items"
     assert config["total_key"] == "archive.total"
@@ -150,6 +163,10 @@ def test_canonical_read_schema_exposes_actual_service_projection_fields_to_pages
     assert index["tasks"]["get_tasks"]["output_schema"]["properties"]["item"] == rows
     page = _dashboard()
     page["sections"] = [page["sections"][1]]
+    page["sections"][0]["primitive"] = "DataTable"
+    page["sections"][0]["config"].update(
+        pagination_mode="server", pagination=True, page_size=20, total_key="total",
+    )
     compile_page_data_sources(page, index, reject_api_endpoints=True)
     assert page["sections"][0]["config"]["data_key"] == "items"
 

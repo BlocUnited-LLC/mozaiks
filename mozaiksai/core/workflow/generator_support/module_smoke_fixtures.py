@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from mozaiksai.core.runtime.app.auth_contract import AppAuthContract
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
+from mozaiksai.core.semantics.closed_contracts import ObjectContract, ScalarContract
 
 from .data_contract_fields import read_lookup_field, record_id_field
 from .module_action_inventory import canonical_read_action_id, canonical_write_action_id
@@ -293,22 +294,83 @@ def _record_targets(
     return result
 
 
+def _default_read_inputs_compatible(schema: dict[str, Any], operation: str) -> bool:
+    """Prove finite defaults without treating descriptive annotations as assertions."""
+    projection = deepcopy(schema)
+    stack = [projection]
+    visited: set[int] = set()
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, dict) or id(node) in visited:
+            continue
+        visited.add(id(node))
+        node.pop("description", None)
+        properties = node.get("properties")
+        if isinstance(properties, dict):
+            stack.extend(properties.values())
+        if "items" in node:
+            stack.append(node["items"])
+    try:
+        contract = import_closed_contract_schema(projection)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(contract, ObjectContract):
+        return False
+    required = {prop.name for prop in contract.properties if prop.required}
+    if operation == "list":
+        return not required
+    identifier = next((prop.contract for prop in contract.properties if prop.name == "id"), None)
+    return (isinstance(identifier, ScalarContract) and identifier.kind == "string"
+            and identifier.enum is None and not identifier.nullable and required <= {"id"})
+
+
 def validate_module_fixture_record_identities(
-    module_id: str, payload: Any, *, data_contract: Any,
+    module_id: str, payload: Any, *, data_contract: Any, manifest: Mapping[str, Any] | None = None,
 ) -> None:
-    """Reject substituted CRUD targets during module closure, before service work."""
-    if payload is None:
-        return
-    document = parse_module_smoke_fixtures(payload)
+    """Close observed-row identity and finite read inputs before service work."""
+    fixtures = parse_module_smoke_fixtures(payload).fixtures if payload is not None else []
     records = _record_targets(data_contract)
     failures = []
-    for fixture in document.fixtures:
+    for fixture in fixtures:
         target = records.get((module_id, fixture.action))
         if target is not None:
             try:
                 fixture_record_identity(fixture, collection=target[1], operation=target[2])
             except ValueError as error:
                 failures.append(f"{module_id}: {error}")
+    if manifest is not None:
+        from .code_files import _materialize_schema_contract
+
+        actions = {action["id"]: action for action in manifest.get("actions") or []}
+        supplied = {fixture.action for fixture in fixtures}
+        for (owner, _), (_, collection, operation) in records.items():
+            if owner != module_id or operation != "get" or not collection.get("entity"):
+                continue
+            # The ordinary CRUD observer only owns records whose create action exists.
+            create = canonical_write_action_id(collection["entity"], "create")
+            if create not in actions:
+                continue
+            for read in ("get", "list"):
+                action_id = canonical_read_action_id(collection["name"], read)
+                action = actions.get(action_id)
+                if action is None or action.get("api_surface") in {"internal", "admin_internal"}:
+                    continue
+                if action_id in supplied:
+                    continue
+                schema = _materialize_schema_contract(action["input_schema"], closed_request=True)
+                if _default_read_inputs_compatible(schema, read):
+                    continue
+                binding = (
+                    "Bind exactly one actual declared input with source=record and "
+                    f"record_field={read_lookup_field(collection)!r}. " if read == "get" else ""
+                )
+                default = "{id: string}" if read == "get" else "{}"
+                failures.append(
+                    f"{module_id}: read {action_id!r} does not admit the observer default {default}; "
+                    "declare its exact input bindings in module_contract.fixtures_yaml. "
+                    f"{binding}Keep the admitted input schema, permissions and API surface; "
+                    "do not rename inputs or invent prerequisite records to satisfy the observer."
+                )
     if failures:
         raise ValueError("\n".join(failures))
 

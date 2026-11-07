@@ -616,3 +616,114 @@ def test_generated_mongo_id_is_not_added_when_canonical_helpers_select_declared_
     files[path] = yaml.safe_dump(module)
     with pytest.raises(ValueError, match="record source requires a declared field"):
         load_module_smoke_fixtures(files)
+
+
+@pytest.mark.parametrize("kind", ["renamed", "integer", "number", "boolean", "enum", "extra_required", "list_required"])
+def test_module_closure_requires_fixture_for_incompatible_default_read(kind):
+    from mozaiksai.core.workflow.generator_support.module_write_actions import close_module_actions
+    from tests.test_generated_role_grants import _arguments, _closed
+
+    payload = _closed()
+    action_id = "list_tasks" if kind == "list_required" else "get_tasks"
+    action = next(item for item in payload["module_contract"]["module_yaml"]["actions"] if item["id"] == action_id)
+    field = "lookup" if kind == "renamed" else "page" if kind == "list_required" else "id"
+    action["input_schema"] = _schema(**{field: kind if kind in {"integer", "number", "boolean"} else "string"})
+    if kind == "enum":
+        action["input_schema"]["properties"]["id"]["enum"] = ["one"]
+    if kind == "extra_required":
+        action["input_schema"] = _schema(id="string", filter="string")
+    before = deepcopy(payload)
+    with pytest.raises(ValueError, match=f"{action_id}.*observer default.*fixtures_yaml"):
+        close_module_actions(payload, **_arguments())
+    assert payload == before
+
+
+@pytest.mark.parametrize("surface", [None, "internal", "admin_internal"])
+def test_module_closure_keeps_compatible_or_non_http_reads_fixture_free(surface):
+    from mozaiksai.core.workflow.generator_support.module_write_actions import close_module_actions
+    from tests.test_generated_role_grants import _arguments, _closed
+
+    payload = _closed()
+    action = next(item for item in payload["module_contract"]["module_yaml"]["actions"] if item["id"] == "get_tasks")
+    action["api_surface"] = surface
+    action["input_schema"] = _schema(**({"id": "string"} if surface is None else {"lookup": "boolean"}))
+    if surface is None:
+        action["input_schema"]["properties"]["optional_filter"] = {"type": "boolean"}
+    result = close_module_actions(payload, **_arguments())
+    assert result["module_contract"].get("fixtures_yaml") is None
+    assert next(item for item in result["module_contract"]["module_yaml"]["actions"] if item["id"] == "get_tasks")["input_schema"] == action["input_schema"]
+
+
+def test_missing_fixture_diagnostics_aggregate_get_and_list():
+    from mozaiksai.core.workflow.generator_support.module_write_actions import close_module_actions
+    from tests.test_generated_role_grants import _arguments, _closed
+
+    payload = _closed()
+    for action in payload["module_contract"]["module_yaml"]["actions"]:
+        if action["id"] in {"get_tasks", "list_tasks"}:
+            action["input_schema"] = _schema(lookup="string")
+    with pytest.raises(ValueError) as error:
+        close_module_actions(payload, **_arguments())
+    assert "get_tasks" in str(error.value) and "list_tasks" in str(error.value)
+
+
+def test_no_create_collection_keeps_nondefault_read_fixture_optional():
+    from mozaiksai.core.workflow.generator_support.module_smoke_fixtures import (
+        validate_module_fixture_record_identities,
+    )
+    from tests.test_generated_role_grants import _arguments, _closed
+
+    manifest = _closed()["module_contract"]["module_yaml"]
+    manifest["actions"] = [action for action in manifest["actions"] if action["id"] != "create_task"]
+    for action in manifest["actions"]:
+        if action["id"] in {"get_tasks", "list_tasks"}:
+            action["input_schema"] = _schema(lookup="boolean")
+    before = deepcopy(manifest)
+    validate_module_fixture_record_identities(
+        "task_management", None, data_contract=_arguments()["data_contract"], manifest=manifest,
+    )
+    assert manifest == before
+
+
+@pytest.mark.parametrize("typed", [False, True])
+def test_descriptive_get_input_keeps_compatible_default_fixture_free(typed):
+    from mozaiksai.core.workflow.generator_support.module_write_actions import close_module_actions
+    from tests.test_generated_role_grants import _arguments, _closed
+
+    payload = _closed()
+    action = next(item for item in payload["module_contract"]["module_yaml"]["actions"] if item["id"] == "get_tasks")
+    if typed:
+        schema = {"type": "object", "description": "Read an existing record.", "properties": [
+            {"name": "id", "type": "string", "required": True, "description": "Record identifier."}]}
+    else:
+        schema = _schema(id="string")
+        schema["description"] = "Read an existing record."
+        schema["properties"]["id"]["description"] = "Record identifier."
+    action["input_schema"] = deepcopy(schema)
+    result = close_module_actions(payload, **_arguments())
+    actual = next(item for item in result["module_contract"]["module_yaml"]["actions"] if item["id"] == "get_tasks")
+    assert actual["input_schema"] == schema
+    assert result["module_contract"].get("fixtures_yaml") is None
+
+
+@pytest.mark.parametrize("assertion", [{"pattern": "^approved-"}, {"format": "uuid"}, {"minLength": 100}])
+def test_native_read_assertion_requires_fixture_without_rewriting_schema(assertion):
+    from mozaiksai.core.workflow.generator_support.module_write_actions import close_module_actions
+    from tests.test_generated_role_grants import _arguments, _closed
+
+    payload = _closed()
+    action = next(item for item in payload["module_contract"]["module_yaml"]["actions"] if item["id"] == "get_tasks")
+    action["input_schema"] = _schema(id="string")
+    action["input_schema"]["properties"]["id"].update(assertion)
+    before = deepcopy(payload)
+    with pytest.raises(ValueError, match="get_tasks.*observer default.*fixtures_yaml"):
+        close_module_actions(payload, **_arguments())
+    assert payload == before
+    fixture = {"action": "get_tasks", "roles": [], "setup": [], "params": [
+        {"field": "id", "source": "record", "record_field": "task_id"}]}
+    payload["module_contract"]["fixtures_yaml"] = {"schema_version": SCHEMA_VERSION, "fixtures": [fixture]}
+    result = close_module_actions(payload, **_arguments())
+    actual = next(item for item in result["module_contract"]["module_yaml"]["actions"] if item["id"] == "get_tasks")
+    assert actual["input_schema"] == action["input_schema"]
+    # This early default check adds no new restriction or schema support. The
+    # existing full fixture schema/role/reference validator remains authoritative.

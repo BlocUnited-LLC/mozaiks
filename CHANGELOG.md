@@ -356,6 +356,19 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Generated pages reject client pagination over declared bounded responses and
+  unsupported table-refresh filter payloads before materialization. The same
+  query contract is checked at final wiring; custom query interactions retain
+  the existing approved React route path.
+- Generated service guidance uses the actual `ModuleContext.permissions` API
+  and the reviewed role policy. Contract and service prompts receive exact
+  compiler-derived permission IDs; runtime quality checks reject nonexistent
+  context role/principal fields without changing app grants.
+- Module contract admission requires fixtures for incompatible default read
+  inputs and preserves their existing optional file ownership. Positive smoke
+  rejections without declared inputs route to fixture repair; authorization,
+  storage and implementation failures retain their independent checks.
+
 - Generated module contracts receive exact canonical read ids and report missing
   protected reads together with unapproved action names in one rejection,
   preserving explicit access decisions during repair.

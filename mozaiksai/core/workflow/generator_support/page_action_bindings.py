@@ -9,6 +9,8 @@ import yaml
 
 from mozaiksai.core.workflow.context.frozen import detach
 
+from .page_data_bindings import iter_data_bound_sections
+
 PAGE_ACTION_FIELDS = ("action", "submit_action", "cancel_action", "plan_action", "add_on_action")
 
 
@@ -133,3 +135,37 @@ def reachable_page_action_keys(pages: list[Any]) -> set[str]:
             if not changed:
                 break
     return keys
+
+
+def page_refresh_binding_errors(document: Any) -> list[str]:
+    """A table refresh names a real fetch target; its payload is not a query API."""
+    if not isinstance(document, dict):
+        return []
+    candidates: dict[str, int] = {}
+    for section, contract_key, _ in iter_data_bound_sections(document):
+        if (section.get("primitive") in {"DataTable", "ResourceTable"}
+                and (contract_key or section["config"].get("api_endpoint"))):
+            name = section.get("id")
+            if isinstance(name, str):
+                candidates[name] = candidates.get(name, 0) + 1
+    targets = sorted(name for name, count in candidates.items() if count == 1)
+    errors: list[str] = []
+    for section, _ in _sections(document.get("sections")):
+        for field, action in _actions(section["config"]):
+            if action.get("action_type") != "event" or action.get("event_type") != "ui.datatable.refresh":
+                continue
+            payload = action.get("payload") or {}
+            if isinstance(payload, list):
+                payload = {entry.get("key"): entry.get("value") for entry in payload if isinstance(entry, dict)}
+            extra = sorted(str(key) for key in payload if key != "component_id") if isinstance(payload, dict) else []
+            target = payload.get("component_id") if isinstance(payload, dict) else None
+            if not isinstance(target, str) or target not in targets or extra or not isinstance(payload, dict):
+                unsupported = f" Unsupported fields: {', '.join(extra)}." if extra else ""
+                errors.append(
+                    f"{document.get('name') or 'page'}/{section.get('id') or '<no-id>'}.{field}: "
+                    "ui.datatable.refresh requires only payload.component_id naming a bound table on this page. "
+                    f"Valid targets: {', '.join(targets) or '(none)'}.{unsupported} "
+                    "Refresh reloads the existing query; form fields and filters are not query bindings. "
+                    "Use supported table controls or the approved custom_react_page contract for custom query state."
+                )
+    return errors

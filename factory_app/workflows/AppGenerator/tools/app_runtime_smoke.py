@@ -1056,6 +1056,27 @@ class _SmokeRun:
         self.emit("outcome", **outcome.to_dict())
         return passed
 
+    def record_positive_failure(
+        self, check: str, message: str, *, module: str, action: str, status: int | None, path: str,
+    ) -> None:
+        """Resolve unproven inputs before asking implementation repair to alter behavior."""
+        declared = (module, action) in self.fixtures
+        needs_inputs = not declared and status in {400, 403, 404}
+        fixture_path = f"modules/{module}/contracts/fixtures.yaml"
+        if needs_inputs:
+            message += (
+                f" No declared fixture supplied this positive probe's inputs or actor for {module}.{action}. "
+                f"Add that action's valid inputs, exact roles and any prerequisite calls in {fixture_path}; "
+                "preserve the admitted action schema, authorization and business rules. "
+                "This rejection does not establish an implementation defect."
+            )
+        self.record(
+            check, False, message, path=fixture_path if needs_inputs else path,
+            input_provenance={"source": "declared_fixture" if declared else "observer_default",
+                              "module": module, "action": action, "http_status": status,
+                              "fixture_input_required": needs_inputs},
+        )
+
     def not_run(self, check: str, reason: str) -> None:
         outcome = _Outcome(check, None, f"Not run: {reason}")
         self.outcomes.append(outcome)
@@ -2138,9 +2159,9 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
     stored = await _stored(run, entity, record_id) if record_id is not None else None
     no_record = f"user A's {create} produced no stored record to act on"
     if not 200 <= status < 300:
-        run.record(f"{tag}.a_create", False,
+        run.record_positive_failure(f"{tag}.a_create",
                    f"{describe(create, 'A', payload)}: expected 2xx with the created record, got {summary}.",
-                   path=failure_path())
+                   module=entity.module, action=create, status=status, path=failure_path())
     elif record_id is None:
         keys = sorted(body) if isinstance(body, Mapping) else type(body).__name__
         run.record(f"{tag}.a_create", False,
@@ -2178,9 +2199,9 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
         )
         listed = listed_ids(body)
         if not 200 <= status < 300 or listed is None:
-            run.record(f"{tag}.a_list", False,
+            run.record_positive_failure(f"{tag}.a_list",
                        f"{describe(actions['list'], 'A')}: expected 2xx with the declared record array, got {summary}.",
-                       path=failure_path())
+                       module=entity.module, action=actions["list"], status=status, path=failure_path())
         elif has_record and record_id not in listed:
             run.record(f"{tag}.a_list", False,
                        f"{describe(actions['list'], 'A')} did not list A's own record {record_id!r} "
@@ -2227,9 +2248,9 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
                            f"{describe(actions['get'], 'A')}(id={lookup_value!r}) returned {status}, but "
                            f"{undeclared_get}, so A's record cannot be read from it.", path=path_manifest)
             elif not 200 <= status < 300 or not isinstance(record, Mapping) or record.get(entity.id_field) != record_id:
-                run.record(f"{tag}.a_get", False,
+                run.record_positive_failure(f"{tag}.a_get",
                            f"{describe(actions['get'], 'A')}(id={lookup_value!r}): expected 2xx with A's record, got {summary}.",
-                           path=failure_path())
+                           module=entity.module, action=actions["get"], status=status, path=failure_path())
             else:
                 run.record(f"{tag}.a_get", True, "A reads its own record by id.")
     if owned and "list" in actions:
@@ -2241,9 +2262,9 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
             )
             listed = listed_ids(body)
             if not 200 <= status < 300 or listed is None:
-                run.record(f"{tag}.b_list_isolated", False,
+                run.record_positive_failure(f"{tag}.b_list_isolated",
                            f"{describe(actions['list'], 'B')}: expected 2xx with B's declared record array, got {summary}.",
-                           path=failure_path())
+                           module=entity.module, action=actions["list"], status=status, path=failure_path())
             elif record_id in listed:
                 run.record(f"{tag}.b_list_isolated", False,
                            f"{describe(actions['list'], 'B')} returned user A's record {record_id!r}; "
@@ -2341,9 +2362,9 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
             status, _body, summary = await run.call("POST", entity.module, actions["update"], actor, params)
             after = await _stored(run, entity, record_id) or {}
             if not 200 <= status < 300:
-                run.record(f"{tag}.a_update", False,
+                run.record_positive_failure(f"{tag}.a_update",
                            f"{describe(actions['update'], 'A', params)} on its own record: expected 2xx, got {summary}.",
-                           path=failure_path())
+                           module=entity.module, action=actions["update"], status=status, path=failure_path())
             elif changed_fields and any(after.get(name) != params[name] for name in changed_fields):
                 run.record(f"{tag}.a_update", False,
                            f"{describe(actions['update'], 'A', params)} returned {status} but the stored "
@@ -2366,9 +2387,9 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
                 "POST", entity.module, actions["delete"], actor, params,
             )
             if not 200 <= status < 300:
-                run.record(f"{tag}.a_delete", False,
+                run.record_positive_failure(f"{tag}.a_delete",
                            f"{describe(actions['delete'], 'A')} on its own record: expected 2xx, got {summary}.",
-                           path=failure_path())
+                           module=entity.module, action=actions["delete"], status=status, path=failure_path())
             elif await _stored(run, entity, record_id) is not None:
                 run.record(f"{tag}.a_delete", False,
                            f"{describe(actions['delete'], 'A')} returned {status} but record {record_id!r} is still stored.",
@@ -2508,6 +2529,7 @@ async def _remaining_role_checks(run: _SmokeRun, entities: list[_Entity]) -> Non
             if module.action_api_surface_map.get(action) in _UNREACHABLE_SURFACES:
                 run.not_run(tag, "This role action is not on a user-callable HTTP surface.")
                 continue
+            status = None
             if key not in run.role_denials_checked or key not in run.role_successes:
                 principal = run.principal(f"role check {module.name}.{action}")
                 gate = module.action_entitlement_map.get(action)
@@ -2518,14 +2540,15 @@ async def _remaining_role_checks(run: _SmokeRun, entities: list[_Entity]) -> Non
                 prepared = await _gated_params(run, module, action, principal, entities)
                 if prepared is not None:
                     method, params, actor = prepared
-                    await run.call(method, module.name, action, actor, params)
+                    status, _body, _summary = await run.call(method, module.name, action, actor, params)
             if key not in run.role_successes:
-                run.record(
-                    f"{tag}.holder_allowed", False,
+                run.record_positive_failure(
+                    f"{tag}.holder_allowed",
                     f"No successful role-bearing execution was observed for {module.name}.{action}; "
                     f"last response: {run.role_responses.get(key, 'not run')}. "
                     "A denied non-holder alone does not prove that the authorized action works.",
-                    path=f"modules/{module.name}/backend/service.py",
+                    module=module.name, action=action, status=status,
+                    path=run.last_exception_path or f"modules/{module.name}/backend/service.py",
                 )
 
 
@@ -2572,6 +2595,8 @@ def _summary(outcomes: list[dict[str, Any]], meta: Mapping[str, Any], *, started
                 **({"path": outcome["path"]} if outcome.get("path") else {}),
                 "error": outcome.get("message"),
                 "fix_suggestion": _FIX_SUGGESTION,
+                **({"input_provenance": outcome["details"]["input_provenance"]}
+                   if "input_provenance" in outcome.get("details", {}) else {}),
             }
             for outcome in failures
         ],

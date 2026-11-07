@@ -891,7 +891,9 @@ def close_module_actions(
     closed = output["module_contract"]
     from .module_smoke_fixtures import validate_module_fixture_record_identities
 
-    validate_module_fixture_record_identities(module_id, closed.get("fixtures_yaml"), data_contract=contract)
+    validate_module_fixture_record_identities(
+        module_id, closed.get("fixtures_yaml"), data_contract=contract, manifest=closed["module_yaml"],
+    )
     _require_declared_design_actions(module_id, closed["module_yaml"], design_surface_map)
     _close_user_data_scope(module_id, closed["module_yaml"], plan, contract)
     if validate_generated_permissions:

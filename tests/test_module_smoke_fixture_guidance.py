@@ -67,3 +67,24 @@ def test_optional_fixture_does_not_transfer_ownership_between_modules_or_task_ty
     assert FIXTURE_PATH not in task_allowed_paths(service, [service])
     other_owner = {**task, "task_id": "explicit_owner", "owned_paths": [FIXTURE_PATH]}
     assert FIXTURE_PATH not in task_allowed_paths(task, [task, other_owner])
+
+
+@pytest.mark.parametrize("explicit_foreign_owner", [False, True])
+def test_actual_manifest_guard_respects_existing_optional_fixture_owner(explicit_foreign_owner):
+    from factory_app.workflows.AppGenerator.tools.hook_domain_catalog_context import (
+        inject_module_file_manifest_guard,
+    )
+    from tests.test_hook_domain_catalog_context import _FakeAgent
+
+    task = {"task_id": "reports_contract", "task_type": "module_contract", "capability_pack_id": "reports",
+            "owned_paths": ["modules/reports/module.yaml", "modules/reports/contracts/events.yaml"]}
+    tasks = [task]
+    if explicit_foreign_owner:
+        tasks.append({"task_id": "foreign", "owned_paths": [FIXTURE_PATH]})
+    agent = _FakeAgent(name="ConfigMiddlewareAgent", context_variables={
+        "current_build_task": task, "app_build_plan": {"build_tasks": tasks}})
+    inject_module_file_manifest_guard(agent, [])
+    line = next(line for line in agent.system_message.splitlines() if FIXTURE_PATH in line)
+    assert ("omit; leave" in line) is explicit_foreign_owner
+    assert "module_contract.fixtures_yaml" in line
+    assert "observer defaults" in agent.system_message
