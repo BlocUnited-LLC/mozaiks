@@ -17,10 +17,25 @@ from mozaiksai.core.runtime.composition.module_executor import ModuleInputValida
 
 CONNECTION_ID = "google_calendar"
 _PRIMARY_EVENTS = "/calendar/v3/calendars/primary/events"
+MAX_RESULTS = 50
+MAX_DAYS_AHEAD = 90
+_TEXT_LIMITS = {"summary": 200, "start": 64, "end": 64, "time_zone": 64, "description": 4000, "location": 300}
 
 
 class GoogleCalendarError(RuntimeError):
     """Google Calendar refused or failed the request."""
+
+
+def _bounded(value: int, field: str, upper: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= upper:
+        raise ModuleInputValidationError(f"{field} must be a whole number from 1 to {upper}")
+    return value
+
+
+def _check_lengths(**values: str | None) -> None:
+    for field, value in values.items():
+        if value is not None and len(str(value)) > _TEXT_LIMITS[field]:
+            raise ModuleInputValidationError(f"{field} is longer than {_TEXT_LIMITS[field]} characters")
 
 
 def _parse_time(value: str, field: str, time_zone: str | None) -> datetime:
@@ -70,6 +85,8 @@ class GoogleCalendarService:
         return data
 
     async def list_upcoming_events(self, ctx, *, max_results: int = 10, days_ahead: int = 7) -> dict[str, Any]:
+        max_results = _bounded(max_results, "max_results", MAX_RESULTS)
+        days_ahead = _bounded(days_ahead, "days_ahead", MAX_DAYS_AHEAD)
         now = datetime.now(UTC)
         data = await self._call(ctx, "GET", _PRIMARY_EVENTS, params={
             "timeMin": now.isoformat(),
@@ -92,6 +109,9 @@ class GoogleCalendarService:
         description: str | None = None,
         location: str | None = None,
     ) -> dict[str, Any]:
+        _check_lengths(
+            summary=summary, start=start, end=end, time_zone=time_zone, description=description, location=location,
+        )
         summary = str(summary or "").strip()
         if not summary:
             raise ModuleInputValidationError("summary is required")

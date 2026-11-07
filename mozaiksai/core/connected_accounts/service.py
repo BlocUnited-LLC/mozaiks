@@ -22,6 +22,7 @@ import hmac
 import json
 import secrets
 import time
+import weakref
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -68,6 +69,8 @@ _VAULT_RENEW_WITHIN = timedelta(days=30)
 OFFERING_CACHE_SECONDS = 15.0
 CLIENT_CREDENTIALS_CACHE_SECONDS = 600.0
 _ACCESS_TOKEN_EXPIRY_MARGIN_SECONDS = 60
+# Past this many cached access tokens, expired ones are dropped on the next refresh.
+_TOKEN_CACHE_SOFT_LIMIT = 1024
 
 BINDING_REFUSED_MESSAGE = (
     "This connection was started from a different browser or a different address. Start it again "
@@ -123,7 +126,8 @@ class ConnectedAccountsService:
         self._vault = vault
         # Keyed by (user_id, provider_id, connection_id): each connection gets a token for its own scopes.
         self._tokens: dict[tuple[str, str, str], _CachedToken] = {}
-        self._locks: dict[tuple[str, str, str], asyncio.Lock] = {}
+        # Held only while a refresh runs, so the table never outgrows concurrent refreshes.
+        self._locks: weakref.WeakValueDictionary[tuple[str, str, str], asyncio.Lock] = weakref.WeakValueDictionary()
         self._withheld: frozenset[str] = frozenset()
         self._withheld_read_at: float | None = None
         self._credentials: dict[str, tuple[float, tuple[str, str]]] = {}
@@ -513,6 +517,9 @@ class ConnectedAccountsService:
             raise required("reconnect_required")
         needed = set(connection.scopes)
         missing = tuple(sorted(needed - set(record.get("granted_scopes") or [])))
+        if len(missing) == len(needed):
+            # The user connected this provider for another plugin, never for this one.
+            raise required("not_connected")
         if missing:
             raise required("missing_scopes", missing)
         key = (user_id, provider.id, connection.id)
@@ -527,7 +534,11 @@ class ConnectedAccountsService:
         cached = self._tokens.get(key)
         if usable(cached):
             return cached.access_token  # type: ignore[union-attr]
-        async with self._locks.setdefault(key, asyncio.Lock()):
+        lock = self._locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[key] = lock
+        async with lock:
             # Another caller may have refreshed while this one waited.
             cached = self._tokens.get(key)
             if usable(cached):
@@ -583,6 +594,10 @@ class ConnectedAccountsService:
         self._tokens[(user_id, provider.id, connection.id)] = _CachedToken(
             tokens.access_token, tokens.expires_at, tokens.scopes,
         )
+        if len(self._tokens) > _TOKEN_CACHE_SOFT_LIMIT:
+            now = time.time()
+            for stale in [key for key, cached in self._tokens.items() if cached.expires_at <= now]:
+                del self._tokens[stale]
         return tokens.access_token
 
     # -- the app's admins --------------------------------------------------------------

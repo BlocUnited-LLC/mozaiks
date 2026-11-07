@@ -194,6 +194,8 @@ async def test_calendar_reads_and_writes_the_users_own_calendar(host: SimpleName
         {"summary": "x", "start": "2026-11-20T15:00:00", "end": "2026-11-20T16:00:00"},
         {"summary": "x", "start": "2026-11-20T15:00:00", "end": "2026-11-20T16:00:00", "time_zone": "Mars/Base"},
         {"summary": "   ", "start": "2026-11-20T15:00:00+00:00", "end": "2026-11-20T16:00:00+00:00"},
+        {"summary": "x" * 201, "start": "2026-11-20T15:00:00+00:00", "end": "2026-11-20T16:00:00+00:00"},
+        {"summary": "x", "start": "2026-11-20T15:00:00+00:00", "end": "2026-11-20T16:00:00+00:00", "location": "x" * 301},
     ],
 )
 async def test_calendar_refuses_invalid_events_before_calling_google(host: SimpleNamespace, event: dict[str, str]) -> None:
@@ -202,6 +204,14 @@ async def test_calendar_refuses_invalid_events_before_calling_google(host: Simpl
     response = _client(host, "alice").post("/api/modules/google_calendar/create_event", json=event)
     assert response.status_code == 400, response.text
     assert len(host.google.api_requests) == before
+
+
+@pytest.mark.parametrize("params", [{"max_results": 0}, {"max_results": 51}, {"days_ahead": 91}, {"days_ahead": 0}])
+async def test_calendar_listing_is_bounded(host: SimpleNamespace, params: dict[str, int]) -> None:
+    await _connect(host, "alice", "google_calendar")
+    response = _client(host, "alice").get("/api/modules/google_calendar/list_upcoming_events", params=params)
+    assert response.status_code == 400, response.text
+    assert host.google.api_requests == []
 
 
 async def test_a_refused_access_token_is_refreshed_once(host: SimpleNamespace) -> None:
@@ -239,6 +249,11 @@ async def test_gmail_sends_from_the_users_own_address(host: SimpleNamespace) -> 
         {"to": ["a@example.test, b@example.test"], "subject": "Hi", "body": "x"},
         {"to": ["a@example.test"], "subject": "Hi\nBcc: everyone@example.test", "body": "x"},
         {"to": [f"user{index}@example.test" for index in range(15)], "cc": [f"cc{index}@example.test" for index in range(6)], "subject": "Hi", "body": "x"},
+        {"to": [f"user{index}@example.test" for index in range(21)], "subject": "Hi", "body": "x"},
+        {"to": ["a@example.test"], "subject": "x" * 251, "body": "x"},
+        {"to": ["a@example.test"], "subject": "Hi", "body": "x" * 50001},
+        {"to": ["a@example.test"], "subject": "Hi", "body": "   "},
+        {"to": [], "subject": "Hi", "body": "x"},
     ],
 )
 async def test_gmail_refuses_header_injection_and_bulk_mail(host: SimpleNamespace, payload: dict[str, Any]) -> None:

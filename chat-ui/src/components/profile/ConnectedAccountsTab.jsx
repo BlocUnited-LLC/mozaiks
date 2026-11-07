@@ -21,6 +21,8 @@ import { authFetch } from '../../adapters/api.js'
 
 const POPUP_FEATURES = 'width=520,height=680,scrollbars=yes,resizable=yes'
 const POLL_INTERVAL_MS = 1000
+// The server ends a started flow within ten minutes; stop waiting a little after that.
+const FLOW_WAIT_MS = 11 * 60 * 1000
 const PROVIDER_URL_RE = /^https?:\/\//i
 
 const STATUS_TEXT = {
@@ -62,6 +64,12 @@ function useConnectPopup(onConnected) {
     return () => { mountedRef.current = false; stopPolling() }
   }, [stopPolling])
 
+  const cancel = useCallback(() => {
+    stopPolling()
+    closePopup()
+    setPendingId(null)
+  }, [stopPolling, closePopup])
+
   const connect = useCallback(async (connection) => {
     // Open the popup inside the click so it is not blocked, then send it to the
     // provider once the server has started a flow bound to this user and browser.
@@ -101,13 +109,15 @@ function useConnectPopup(onConnected) {
     }
     popup.location.href = authorizeUrl
 
-    let pollsAfterClose = 0
+    // Wait for the server's answer, not for the popup: a provider page can cut the
+    // popup off from this page (Cross-Origin-Opener-Policy), and then it looks
+    // closed while the user is still choosing. Cancel stops waiting.
+    const startedAt = Date.now()
     pollRef.current = setInterval(async () => {
-      const popupClosed = !popupRef.current || popupRef.current.closed
       try {
         const response = await authFetch(`/api/me/connected-accounts/flows/${encodeURIComponent(flowId)}`)
         const body = response.ok ? await readJson(response) : null
-        if (body?.status === 'connected' || body?.status === 'failed') {
+        if (body?.status === 'connected' || body?.status === 'failed' || body?.status === 'unknown') {
           stopPolling()
           closePopup()
           if (!mountedRef.current) return
@@ -116,21 +126,22 @@ function useConnectPopup(onConnected) {
             setMessage({ kind: 'success', text: body.message || `${connection.label} connected.` })
             onConnected()
           } else {
-            setMessage({ kind: 'error', text: body.message || `${connection.label} was not connected.` })
+            setMessage({ kind: 'error', text: body.message || `Connecting ${connection.label} did not finish. Try again.` })
           }
           return
         }
       } catch (_) { /* network blip: keep polling */ }
-      // The user closed the popup: the flow can still finish on the server for a moment.
-      if (popupClosed && ++pollsAfterClose > 2) {
+      if (Date.now() - startedAt > FLOW_WAIT_MS) {
         stopPolling()
-        popupRef.current = null
-        if (mountedRef.current) setPendingId(null)
+        closePopup()
+        if (!mountedRef.current) return
+        setPendingId(null)
+        setMessage({ kind: 'error', text: `Connecting ${connection.label} did not finish. Try again.` })
       }
     }, POLL_INTERVAL_MS)
   }, [stopPolling, closePopup, onConnected])
 
-  return { connect, pendingId, message, setMessage }
+  return { connect, cancel, pendingId, message, setMessage }
 }
 
 function StatusBadge({ status }) {
@@ -141,7 +152,7 @@ function StatusBadge({ status }) {
   )
 }
 
-function ConnectionRow({ connection, highlighted, pending, onConnect }) {
+function ConnectionRow({ connection, highlighted, pending, onConnect, onCancel }) {
   const rowRef = useRef(null)
   useEffect(() => {
     if (highlighted && rowRef.current?.scrollIntoView) rowRef.current.scrollIntoView({ block: 'center' })
@@ -164,14 +175,25 @@ function ConnectionRow({ connection, highlighted, pending, onConnect }) {
         )}
       </div>
       {canConnect && (
-        <button
-          type="button"
-          onClick={() => onConnect(connection)}
-          disabled={pending}
-          className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-        >
-          {pending ? 'Connecting…' : connection.status === 'reconnect_required' ? 'Reconnect' : 'Connect'}
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          {pending && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted"
+            >
+              Cancel
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onConnect(connection)}
+            disabled={pending}
+            className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+          >
+            {pending ? 'Connecting…' : connection.status === 'reconnect_required' ? 'Reconnect' : 'Connect'}
+          </button>
+        </div>
       )}
     </li>
   )
@@ -224,7 +246,7 @@ export default function ConnectedAccountsTab() {
 
   useEffect(() => { load() }, [load])
 
-  const { connect, pendingId, message, setMessage } = useConnectPopup(load)
+  const { connect, cancel, pendingId, message, setMessage } = useConnectPopup(load)
 
   const disconnect = useCallback(async (account) => {
     const confirmed = typeof window === 'undefined' || window.confirm(
@@ -288,6 +310,7 @@ export default function ConnectedAccountsTab() {
                 highlighted={connection.id === highlightId}
                 pending={pendingId === connection.id}
                 onConnect={connect}
+                onCancel={cancel}
               />
             ))}
           </ul>

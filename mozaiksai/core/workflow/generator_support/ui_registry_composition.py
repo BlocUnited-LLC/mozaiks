@@ -298,6 +298,7 @@ SHELL_CORE_COMPONENTS = frozenset({
     "ProfilePage",
     "WorkflowCompletion",
     "TokenStatusTab",
+    "ConnectedAccountsTab",
     "AdminMyUsagePanel",
     "AdminAppUsagePanel",
 })

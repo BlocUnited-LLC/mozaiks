@@ -48,6 +48,11 @@ async function harness(t) {
     };
     window.open = (url, name, features) => {
       const popup = {closed: false, location: {href: url}, close() { this.closed = true; }};
+      if (window.fixture.severOpener) {
+        // A provider page with Cross-Origin-Opener-Policy cuts the popup off: it reads as closed.
+        let href = url;
+        popup.location = {get href() { return href; }, set href(next) { href = next; popup.closed = true; }};
+      }
       window.fixture.opened.push({name, features, popup});
       return popup;
     };
@@ -169,6 +174,42 @@ test('a refused start and a failed flow show the server reason', async t => {
   await page.getByRole('button', { name: 'Reconnect' }).click();
   await page.getByRole('status').filter({ hasText: 'needs every permission' }).waitFor();
   assert.equal(await page.evaluate(() => window.fixture.opened.every(({ popup }) => popup.closed)), true);
+});
+
+test('a popup the provider cut off from the page still completes the connection', async t => {
+  const page = await harness(t);
+  await script(page, {
+    'GET /api/me/connected-accounts': [
+      { body: { connections: [{ ...CALENDAR, status: 'not_connected' }], providers: [] } },
+      { body: { connections: [{ ...CALENDAR, status: 'connected' }], providers: [] } },
+    ],
+    'POST /api/me/connected-accounts/google_calendar/connect': [{ body: { authorize_url: 'https://accounts.google.test/auth', flow_id: 'flow-3' } }],
+    'GET /api/me/connected-accounts/flows/flow-3': [
+      { body: { status: 'pending' } }, { body: { status: 'pending' } }, { body: { status: 'pending' } },
+      { body: { status: 'connected', message: 'Google Calendar connected.' } },
+    ],
+  });
+  await page.evaluate(() => { window.fixture.severOpener = true; window.render('tab'); });
+  await page.getByRole('button', { name: 'Connect' }).click();
+  await page.getByRole('status').filter({ hasText: 'Google Calendar connected.' }).waitFor({ timeout: 9000 });
+});
+
+test('cancel stops waiting for a flow the user abandoned', async t => {
+  const page = await harness(t);
+  await script(page, {
+    'GET /api/me/connected-accounts': [{ body: { connections: [{ ...CALENDAR, status: 'not_connected' }], providers: [] } }],
+    'POST /api/me/connected-accounts/google_calendar/connect': [{ body: { authorize_url: 'https://accounts.google.test/auth', flow_id: 'flow-4' } }],
+    'GET /api/me/connected-accounts/flows/flow-4': [{ body: { status: 'pending' } }],
+  });
+  await page.evaluate(() => window.render('tab'));
+  await page.getByRole('button', { name: 'Connect' }).click();
+  await page.waitForFunction(() => window.fixture.requests.some(request => request.key.includes('/flows/flow-4')));
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await page.getByRole('button', { name: 'Connect' }).waitFor();
+  const polls = await page.evaluate(() => window.fixture.requests.filter(request => request.key.includes('/flows/')).length);
+  await page.waitForTimeout(2500);
+  assert.equal(await page.evaluate(() => window.fixture.requests.filter(request => request.key.includes('/flows/')).length), polls);
+  assert.equal(await page.evaluate(() => window.fixture.opened[0].popup.closed), true);
 });
 
 test('disconnecting asks first and then revokes the account', async t => {

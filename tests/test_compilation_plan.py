@@ -171,11 +171,12 @@ def test_cross_process_canonical_equality() -> None:
 
 
 def test_service_package_markers_preserve_existing_units_and_gaps() -> None:
-    from mozaiksai.core.semantics.compilation_plan import snapshot_layout_registry
     from tests.service_package_marker_migration_helpers import (
         POST_BASELINE_FAMILY_PATHS,
         SERVICE_PACKAGE_MARKER_PATHS,
         corpus_plan_before_service_package_markers,
+        historical_units,
+        post_baseline_row_digests,
         registry_before_service_package_markers,
     )
 
@@ -183,20 +184,12 @@ def test_service_package_markers_preserve_existing_units_and_gaps() -> None:
     current = _plan()
     assert previous.plan_digest == "9fe1d96e4c38fb8c6b061333deae1a9095626e4305b3ac8377b10ef0ae2b3737"
     # A module-scope family added after the baseline can only contribute an
-    # inapplicable scope-inactive unit to this app-scope corpus: no outputs,
-    # placeholders or sources. Every other unit is one of the historical 61.
-    post_baseline_rows = {
-        row.row_digest for row in snapshot_layout_registry(_registry()).rows
-        if row.path_template in POST_BASELINE_FAMILY_PATHS
-    }
-    added_units = [unit for unit in current.units if unit.family_identity_digest in post_baseline_rows]
-    for unit in added_units:
-        assert unit.unit_id == f"{unit.family_kind}/scope_inactive/{unit.family_identity_digest[:12]}"
-        assert unit.disposition is PlanDisposition.INAPPLICABLE
-        assert unit.outputs == unit.placeholder_values == unit.sources == unit.edge_sources == ()
-    historical_units = [unit for unit in current.units if unit not in added_units]
-    assert len(previous.units) == len(historical_units) == 61
-    assert [unit.model_dump(mode="json") for unit in historical_units] == [
+    # inapplicable scope-inactive unit to this app-scope corpus (asserted by
+    # historical_units). Every other unit is one of the historical 61.
+    post_baseline_rows = post_baseline_row_digests()
+    kept = historical_units(current)
+    assert len(previous.units) == len(kept) == 61
+    assert [unit.model_dump(mode="json") for unit in kept] == [
         unit.model_dump(mode="json") for unit in previous.units
     ]
     restored = current.canonical_payload(include_digest=False)

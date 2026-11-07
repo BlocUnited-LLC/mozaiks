@@ -17,27 +17,20 @@ actions:
       additionalProperties: false
       required: [to, subject, body]
       properties:
+        # to / cc: email addresses, at most 20 recipients in all.
         to:
           type: array
-          minItems: 1
-          maxItems: 20
           items:
             type: string
-            maxLength: 254
         cc:
           type: array
-          maxItems: 20
           items:
             type: string
-            maxLength: 254
+        # subject: one line, at most 250 characters. body: plain text, at most 50000.
         subject:
           type: string
-          minLength: 1
-          maxLength: 250
         body:
           type: string
-          minLength: 1
-          maxLength: 50000
     output_schema:
       type: object
       required: [success, message_id]

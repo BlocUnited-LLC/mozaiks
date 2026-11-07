@@ -69,6 +69,7 @@ def test_current_documents_require_explicit_versions_and_parse_repeatably(before
 def test_current_corpus_has_no_changed_units_plans_graph_or_payloads():
     from tests.service_package_marker_migration_helpers import (
         corpus_plan_before_service_package_markers,
+        historical_units,
     )
 
     before = BASELINE["corpus"]
@@ -82,14 +83,14 @@ def test_current_corpus_has_no_changed_units_plans_graph_or_payloads():
             "serialized_json": unit.model_dump_json(),
             "unit_digest": unit.unit_digest,
         }
-        for unit in plan.units
+        for unit in historical_units(plan)
     ]
     assert len(records) == before["unit_count"] == 61
     assert canonical_digest(records) == before["unit_records_fingerprint"]
     # The later package-marker registry addition changes aggregate identity,
     # independently of document metadata. Keep this historical proof pinned.
     historical_plan = corpus_plan_before_service_package_markers()
-    assert historical_plan.units == plan.units
+    assert list(historical_plan.units) == historical_units(plan)
     assert historical_plan.plan_digest == before["plan_digest"]
     assert (
         hashlib.sha256(historical_plan.model_dump_json().encode()).hexdigest()

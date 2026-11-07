@@ -19,6 +19,9 @@ from mozaiksai.core.runtime.composition.module_executor import ModuleInputValida
 
 CONNECTION_ID = "gmail_send"
 MAX_RECIPIENTS = 20
+MAX_ADDRESS_LENGTH = 254
+MAX_SUBJECT_LENGTH = 250
+MAX_BODY_LENGTH = 50000
 _SEND_PATH = "/gmail/v1/users/me/messages/send"
 _ADDRESS_RE = re.compile(r"^[^@\s<>()\[\],;:\"\\]+@[^@\s<>()\[\],;:\"\\]+\.[^@\s<>()\[\],;:\"\\]+$")
 # The user's own request in the app. Workflow dispatch (an AI agent acting in the
@@ -32,9 +35,11 @@ class GmailError(RuntimeError):
 
 def _addresses(values: list[str] | None, field: str) -> list[str]:
     addresses: list[str] = []
+    if len(values or []) > MAX_RECIPIENTS:
+        raise ModuleInputValidationError(f"at most {MAX_RECIPIENTS} recipients per message")
     for value in values or []:
         address = str(value or "").strip()
-        if not _ADDRESS_RE.fullmatch(address):
+        if len(address) > MAX_ADDRESS_LENGTH or not _ADDRESS_RE.fullmatch(address):
             raise ModuleInputValidationError(f"{field} must contain email addresses only")
         if address.lower() not in {existing.lower() for existing in addresses}:
             addresses.append(address)
@@ -61,14 +66,17 @@ class GmailService:
         if len(recipients) + len(copies) > MAX_RECIPIENTS:
             raise ModuleInputValidationError(f"at most {MAX_RECIPIENTS} recipients per message")
         subject = str(subject or "").strip()
-        if not subject or "\r" in subject or "\n" in subject:
-            raise ModuleInputValidationError("subject must be one line of text")
+        if not subject or "\r" in subject or "\n" in subject or len(subject) > MAX_SUBJECT_LENGTH:
+            raise ModuleInputValidationError(f"subject must be one line of at most {MAX_SUBJECT_LENGTH} characters")
+        body = str(body or "")
+        if not body.strip() or len(body) > MAX_BODY_LENGTH:
+            raise ModuleInputValidationError(f"body must be text of at most {MAX_BODY_LENGTH} characters")
         message = EmailMessage()
         message["To"] = ", ".join(recipients)
         if copies:
             message["Cc"] = ", ".join(copies)
         message["Subject"] = subject
-        message.set_content(str(body or ""))
+        message.set_content(body)
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
         response = await account_request(
             ctx, CONNECTION_ID, "POST", f"{google_api_base_url()}{_SEND_PATH}", json={"raw": raw},

@@ -352,6 +352,25 @@ async def test_plugin_tokens_are_per_user_and_limited_to_the_connections_scopes(
     assert raised.value.to_error_metadata()["connect_route"] == "/me?tab=connected-accounts&connect=google_calendar"
 
 
+async def test_connecting_one_plugin_does_not_count_as_connecting_another(make_service, google: FakeGoogle, db: FakeDatabase) -> None:
+    service = make_service()
+    await _connect(service, google, connection_id="google_calendar")
+    with pytest.raises(AccountConnectionRequired) as raised:
+        await service.access_token(user_id="alice", connection_id="gmail_send")
+    assert raised.value.reason == "not_connected"
+    assert str(raised.value) == "Connect your Gmail account to use this."
+    # A connection whose declaration grew since the user connected asks for the rest.
+    record = db["ConnectedAccounts"].documents[0]
+    record["granted_scopes"] = [scope for scope in record["granted_scopes"] if scope != CALENDAR_SCOPE] + ["partial"]
+    service._declared = tuple(
+        type(c)(**{**c.__dict__, "scopes": (CALENDAR_SCOPE, "partial")}) if c.id == "google_calendar" else c
+        for c in service._declared
+    )
+    with pytest.raises(AccountConnectionRequired) as partial:
+        await service.access_token(user_id="alice", connection_id="google_calendar")
+    assert (partial.value.reason, partial.value.missing_scopes) == ("missing_scopes", (CALENDAR_SCOPE,))
+
+
 async def test_a_grant_revoked_at_google_asks_the_user_to_reconnect(make_service, google: FakeGoogle, db: FakeDatabase) -> None:
     service = make_service()
     await _connect(service, google)

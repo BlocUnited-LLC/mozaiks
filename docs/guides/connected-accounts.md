@@ -25,7 +25,7 @@ connections the app offers, with the user's status for each:
 
 **Connect** opens the provider's consent screen in a popup. The user signs in
 there, never in your app, and the app never sees their password.
-**Disconnect** revokes the grant at the provider and removes it from the app.
+**Disconnect** revokes the grant at the provider and deletes it from the app.
 Deleting the user's account does the same for every grant they gave.
 
 When a plugin action needs a connection the user has not made, it fails with
@@ -85,7 +85,8 @@ For each declared connection, admins see:
 - the redirect URI to register with the provider.
 
 Admins never see who connected, which account they used, or any token.
-Stopping a connection blocks new connections and plugin access at once.
+Stopping a connection blocks new connections and plugin access within
+seconds on every instance of the app.
 Existing grants stay with their users, who can still see and disconnect them.
 Every change is audited as `admin.write`.
 
@@ -199,7 +200,7 @@ the app the host loaded. Platform operators have no route to a user's grant.
 - `ConnectedAccounts` records which user connected which provider, the email
   the provider verified, and the scopes granted.
 - `ConnectedAccountFlows` holds a flow in progress for at most ten minutes. The
-  PKCE verifier is removed when the flow ends.
+  PKCE verifier is deleted when the flow ends.
 - `ConnectedAccountSettings` records which connections the app's admins
   withheld.
 - Access tokens live only in process memory.

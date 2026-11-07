@@ -186,11 +186,13 @@ def _id_token(claims: dict[str, Any]) -> str:
     return f"{encode({'alg': 'none'})}.{encode(claims)}.signature"
 
 
-@dataclass
+@dataclass(eq=False)
 class _Grant:
+    """One user's grant to the app's client. Like Google's, it is shared by every
+    refresh token issued for it, and revoking any of its tokens ends all of it."""
+
     user: str
     scopes: set[str]
-    refresh_token: str
     revoked: bool = False
 
 
@@ -200,11 +202,13 @@ class FakeGoogle:
 
     A test approves a consent with :meth:`approve`, which returns the code the
     provider would put on the redirect. Tokens are opaque strings that name the
-    grant and the scopes they carry, so API handlers can check them.
+    grant and the scopes they carry, so API handlers can check them. As with
+    Google, a user has one grant per client: a later consent extends it
+    (incremental authorization) and issues another refresh token for it.
     """
 
     codes: dict[str, dict[str, Any]] = field(default_factory=dict)
-    grants: dict[str, _Grant] = field(default_factory=dict)  # refresh token -> grant
+    grants: dict[str, _Grant] = field(default_factory=dict)  # refresh token -> grant (several tokens, one grant)
     access_tokens: dict[str, tuple[_Grant, frozenset[str]]] = field(default_factory=dict)
     token_requests: list[dict[str, str]] = field(default_factory=list)
     revoked: list[str] = field(default_factory=list)
@@ -218,16 +222,21 @@ class FakeGoogle:
         self._counter += 1
         return f"{prefix}-{self._counter}"
 
+    def active_grant(self, user: str) -> _Grant | None:
+        return next((grant for grant in self.grants.values() if grant.user == user and not grant.revoked), None)
+
+    def unique_grants(self) -> list[_Grant]:
+        return list({id(grant): grant for grant in self.grants.values()}.values())
+
     def approve(self, authorize_url: str, *, user: str = "person", granted: set[str] | None = None) -> tuple[str, str]:
         """Consent on *authorize_url*; returns (code, state). *granted* defaults to every requested scope."""
         query = urllib.parse.parse_qs(urllib.parse.urlparse(authorize_url).query)
         requested = set(query["scope"][0].split())
         scopes = requested if granted is None else set(granted)
-        if query.get("include_granted_scopes") == ["true"]:
-            # Incremental authorization: the new grant also covers what this user granted before.
-            for grant in self.grants.values():
-                if grant.user == user and not grant.revoked:
-                    scopes |= grant.scopes
+        existing = self.active_grant(user)
+        if existing is not None and query.get("include_granted_scopes") == ["true"]:
+            # Incremental authorization: the new tokens also cover what this user granted before.
+            scopes |= existing.scopes
         code = self._next("code")
         self.codes[code] = {
             "user": user,
@@ -238,12 +247,12 @@ class FakeGoogle:
         }
         return code, query["state"][0]
 
-    def _issue(self, grant: _Grant, scopes: frozenset[str], *, with_refresh: bool) -> dict[str, Any]:
+    def _issue(self, grant: _Grant, scopes: frozenset[str], *, refresh_token: str | None = None) -> dict[str, Any]:
         access_token = self._next(f"access-{grant.user}")
         self.access_tokens[access_token] = (grant, scopes)
         body: dict[str, Any] = {"access_token": access_token, "expires_in": 3600, "scope": " ".join(sorted(scopes))}
-        if with_refresh:
-            body["refresh_token"] = grant.refresh_token
+        if refresh_token:
+            body["refresh_token"] = refresh_token
         return body
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -261,9 +270,15 @@ class FakeGoogle:
                 ).decode().rstrip("=")
                 if challenge != entry["challenge"]:
                     return httpx.Response(400, json={"error": "invalid_grant"})
-                grant = _Grant(entry["user"], set(entry["scopes"]), self._next(f"refresh-{entry['user']}"))
-                self.grants[grant.refresh_token] = grant
-                body = self._issue(grant, frozenset(grant.scopes), with_refresh=self.issue_refresh_token)
+                grant = self.active_grant(entry["user"])
+                if grant is None:
+                    grant = _Grant(entry["user"], set())
+                grant.scopes |= set(entry["scopes"])
+                refresh_token = self._next(f"refresh-{entry['user']}")
+                self.grants[refresh_token] = grant
+                body = self._issue(
+                    grant, frozenset(entry["scopes"]), refresh_token=refresh_token if self.issue_refresh_token else None,
+                )
                 body["id_token"] = _id_token({"sub": f"sub-{grant.user}", "email": f"{grant.user}@gmail.test", "email_verified": True})
                 return httpx.Response(200, json=body)
             if form["grant_type"] == "refresh_token":
@@ -273,7 +288,7 @@ class FakeGoogle:
                 requested = set(form["scope"].split()) if form.get("scope") else set(grant.scopes)
                 if not requested <= grant.scopes:
                     return httpx.Response(400, json={"error": "invalid_scope"})
-                return httpx.Response(200, json=self._issue(grant, frozenset(requested), with_refresh=False))
+                return httpx.Response(200, json=self._issue(grant, frozenset(requested)))
             return httpx.Response(400, json={"error": "unsupported_grant_type"})
         if path == "/revoke":
             token = urllib.parse.parse_qs(request.content.decode())["token"][0]

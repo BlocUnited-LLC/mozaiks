@@ -16,14 +16,11 @@ actions:
       type: object
       additionalProperties: false
       properties:
+        # max_results: 1 to 50 (default 10). days_ahead: 1 to 90 (default 7).
         max_results:
           type: integer
-          minimum: 1
-          maximum: 50
         days_ahead:
           type: integer
-          minimum: 1
-          maximum: 90
     output_schema:
       type: object
       required: [events, total]
@@ -41,27 +38,22 @@ actions:
       additionalProperties: false
       required: [summary, start, end]
       properties:
+        # summary: 1 to 200 characters.
         summary:
           type: string
-          minLength: 1
-          maxLength: 200
         # start / end: ISO 8601 date-times with a UTC offset, or without one
         # when time_zone is given (an IANA name such as Europe/Paris).
         start:
           type: string
-          maxLength: 64
         end:
           type: string
-          maxLength: 64
         time_zone:
           type: string
-          maxLength: 64
+        # description: at most 4000 characters. location: at most 300.
         description:
           type: string
-          maxLength: 4000
         location:
           type: string
-          maxLength: 300
     output_schema:
       type: object
       required: [success, event]
