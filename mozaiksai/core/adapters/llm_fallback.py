@@ -129,6 +129,8 @@ def build_fallback_config_list(
 
     # ---- Primary ----
     resolved_api_type = (primary_api_type or _env("LLM_PRIMARY_API_TYPE", "openai")).lower()
+    if resolved_api_type not in MODEL_API_KEY_ENV_NAMES:
+        raise ValueError("Unsupported LLM provider api_type")
     resolved_primary = primary_model or _env("LLM_PRIMARY_MODEL", "gpt-4o")
     resolved_api_key = resolve_model_api_key(resolved_api_type, primary_api_key or None)
     resolved_base_url = primary_base_url or _env("LLM_PRIMARY_BASE_URL") or None
@@ -146,6 +148,8 @@ def build_fallback_config_list(
 
     # ---- Fallbacks ----
     resolved_fallback_models = fallback_models if fallback_models is not None else _env_list("LLM_FALLBACK_MODELS")
+    if not resolved_fallback_models:
+        return config_list
     resolved_fallback_keys = (
         fallback_api_keys if fallback_api_keys is not None
         else [key.strip() for key in _optional_secret("LLM_FALLBACK_API_KEYS").split(",") if key.strip()]
@@ -153,7 +157,7 @@ def build_fallback_config_list(
     resolved_fallback_urls = fallback_base_urls if fallback_base_urls is not None else _env_list("LLM_FALLBACK_BASE_URLS")
 
     for idx, model in enumerate(resolved_fallback_models):
-        entry: dict[str, Any] = {"model": model}
+        entry: dict[str, Any] = {"model": model, "api_type": resolved_api_type}
         if idx < len(resolved_fallback_keys) and resolved_fallback_keys[idx]:
             entry["api_key"] = resolved_fallback_keys[idx]
         elif resolved_api_key:
@@ -300,6 +304,7 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
         kwargs = {
             "model": model,
             "api_key": api_key,
+            "base_url": base_url,
             "streaming": streaming,
             **_model_call_limits(llm_config, entry, ("max_tokens", "max_retries")),
         }

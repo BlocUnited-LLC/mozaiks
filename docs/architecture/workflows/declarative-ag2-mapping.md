@@ -65,6 +65,24 @@ Anthropic configs omit the shared `temperature` setting: Anthropic SDK 2.x
 rejects that sampling parameter. OpenAI and Gemini retain their supported
 temperature settings.
 
+The canonical Factory loader uses the existing provider config builder for
+`LLM_PRIMARY_API_TYPE` and `LLM_PRIMARY_MODEL`, with the matching secret handle.
+OpenAI's `DEFAULT_LLM_MODEL` and `OPENAI_MODEL_FALLBACK` order remain available
+when no explicit primary model is selected. Stored provider entries retain
+`api_type`, `base_url`, and native output/retry limits; an untyped stored entry
+keeps the historical OpenAI default. Provider order, type, URL, key, and limits
+participate in cache invalidation, and raw TTL refresh precedes derived-cache
+lookup. Config logs never include credential values.
+The Factory typed-config path selects the first configured entry; additional
+entries do not provide automatic provider failover in this path.
+
+`LLM_MAX_TOKENS` is an optional positive integer for the existing native
+`max_tokens` field. Explicit per-call limits override this environment default;
+stored provider-entry limits retain the adapter's precedence. AG2 validates
+provider support, so Gemini's distinct `max_output_tokens` field must be supplied
+through explicit config or a stored provider entry. No provider default changes
+when the environment setting is absent.
+
 ### `transition_graph.yaml`
 
 Maps to AG2 1.0 Network transition conditions and targets. Mozaiks compiles

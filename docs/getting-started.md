@@ -57,9 +57,12 @@ state. The easiest way to start one is via Docker:
     ```
 
 !!! note "LLM provider"
-    Builds call OpenAI today: the runtime builds OpenAI clients only. The
-    default model is `gpt-5-nano`; set `DEFAULT_LLM_MODEL` to use another
-    OpenAI model. Gemini and Anthropic keys are not used for builds yet.
+    Builds default to OpenAI with `gpt-5-nano`; `DEFAULT_LLM_MODEL` retains
+    that setup's model override. To choose another provider, install its
+    optional package (`mozaiks[anthropic]` or `mozaiks[gemini]`), set
+    `LLM_PRIMARY_API_TYPE=anthropic` or `google`, set `LLM_PRIMARY_MODEL` to
+    your intended model, and supply `ANTHROPIC_API_KEY` or `GEMINI_API_KEY`.
+    `LLM_FALLBACK_ENABLED=false` keeps the configuration to that one model.
 
     Using Atlas? Replace `MONGO_URI` with your Atlas connection string.
 

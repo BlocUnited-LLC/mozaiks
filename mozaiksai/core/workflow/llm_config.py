@@ -3,7 +3,7 @@ Centralized LLM configuration & caching utilities.
 
 Goals
 -----
-1. Single place for building the config_list used by AG2 OpenAI configuration.
+1. Single place for building the config_list used by AG2 provider configuration.
 2. Lightweight async cache (raw provider list + final llm_config variants) with TTL.
 3. Support structured outputs (response_format) without rebuilding base pieces.
 4. Gentle fallback when Mongo unavailable (env-only bootstrap) WITH price mapping.
@@ -13,7 +13,10 @@ Environment (optional)
 ----------------------
 LLM_CONFIG_CACHE_TTL   Seconds to keep raw provider list (default 300)
 DEFAULT_LLM_MODEL      Override fallback model name (default gpt-5-nano)
-OPENAI_MODEL_FALLBACK  Comma-separated list of fallback model names
+OPENAI_MODEL_FALLBACK  Legacy OpenAI model order when LLM_PRIMARY_MODEL is absent
+LLM_PRIMARY_API_TYPE  Selected provider: openai (default), anthropic, google, ollama
+LLM_PRIMARY_MODEL     Explicit model for the selected provider
+LLM_MAX_TOKENS        Optional positive provider-native max_tokens limit
 
 Public API
 ----------
@@ -31,7 +34,10 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from mozaiksai.core.adapters.llm_fallback import resolve_model_api_key
+from mozaiksai.core.adapters.llm_fallback import (
+    MODEL_API_KEY_ENV_NAMES,
+    build_fallback_config_list,
+)
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, BuilderCollections
 
@@ -113,80 +119,57 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
                 db = get_mongo_client()[SYSTEM_DATABASE]
                 db_doc = await db[BuilderCollections.LLM_CONFIG].find_one()
             except Exception as e:  # pragma: no cover
-                logger.debug("[LLM_CONFIG] Mongo fetch failed, will fallback: %s", e)
+                logger.debug("[LLM_CONFIG] Mongo fetch failed, will fallback: %s", type(e).__name__)
 
         if db_doc and isinstance(db_doc, dict):
-            # Avoid dumping raw secrets from the DB document
-            def _redact_val(v: Any) -> Any:
-                if not isinstance(v, str):
-                    return v
-                if len(v) <= 8:
-                    return "***"
-                return v[:4] + "***REDACTED***" + v[-4:]
-
-            def _redact_mapping(d: dict[str, Any]) -> dict[str, Any]:
-                sens_keys = {"api_key", "apikey", "authorization", "secret", "password", "token", "clientsecret", "accountkey"}
-                out: dict[str, Any] = {}
-                for k, v in d.items():
-                    if isinstance(v, dict):
-                        out[k] = _redact_mapping(v)
-                    elif any(s in k.lower() for s in sens_keys):
-                        out[k] = _redact_val(v)
-                    else:
-                        out[k] = v
-                return out
-
-            try:
-                logger.debug("[LLM_CONFIG] DB document found: %s", _redact_mapping(db_doc))
-            except Exception:
-                logger.debug("[LLM_CONFIG] DB document found (redaction failed to serialize)")
-            # Expect a shape like: { model: 'gpt-5-nano', price: {...}, ... }
-            # Support single or list of providers.
             providers = db_doc.get("providers") or db_doc.get("models") or [db_doc]
             if not isinstance(providers, list):
                 providers = [providers]
-            logger.debug("[LLM_CONFIG] Processing %s providers from DB", len(providers))
-            for i, p in enumerate(providers):
-                try:
-                    logger.debug("[LLM_CONFIG] Processing provider %s: %s", i, _redact_mapping(p))
-                except Exception:
-                    logger.debug("[LLM_CONFIG] Processing provider %s: <redaction error>", i)
-                # Extract model name with logging for debugging
-                model_lowercase = p.get("model")
-                model_capitalized = p.get("Model")
-                model_name_field = p.get("name")
-                env_default = os.getenv("DEFAULT_LLM_MODEL", "gpt-5-nano")
-                model_name = model_lowercase or model_capitalized or model_name_field or env_default
-                logger.debug(
-                    "[LLM_CONFIG] Model extraction for provider %s: ", i)
-                # First check if API key is in the DB document
-                api_key = p.get("api_key") or p.get("ApiKey") or p.get("OPENAI_API_KEY")
-                api_key = resolve_model_api_key("openai", api_key)
-                entry = {"model": model_name, "api_key": api_key}
-                if "price" in p:
-                    entry["price"] = p["price"]
-                else:
-                    if model_name in PRICE_MAP:
-                        entry["price"] = PRICE_MAP[model_name]
-                safe_entry = {**entry, "api_key": "***REDACTED***" if entry.get("api_key") else entry.get("api_key")}
-                logger.debug("[LLM_CONFIG] Created entry %s: %s", i, safe_entry)
+            for provider in providers:
+                if not isinstance(provider, dict):
+                    raise ValueError("Stored LLM provider must be an object")
+                api_type = str(provider.get("api_type") or "openai").strip().lower()
+                model = provider.get("model") or provider.get("Model") or provider.get("name")
+                model = model or os.getenv("DEFAULT_LLM_MODEL") or ("gpt-5-nano" if api_type == "openai" else None)
+                if not model:
+                    raise ValueError("Stored LLM provider requires an explicit model")
+                key = provider.get("api_key") or provider.get("ApiKey") or next(
+                    (provider[name] for name in MODEL_API_KEY_ENV_NAMES.get(api_type, ()) if provider.get(name)),
+                    None,
+                )
+                entry = build_fallback_config_list(
+                    primary_model=model, primary_api_type=api_type, primary_api_key=key,
+                    primary_base_url=provider.get("base_url"), fallback_models=[],
+                )[0]
+                if not provider.get("base_url"):
+                    entry.pop("base_url", None)
+                if "price" in provider:
+                    entry["price"] = provider["price"]
+                for name in ("max_tokens", "max_completion_tokens", "max_output_tokens", "max_retries"):
+                    if name in provider:
+                        entry[name] = provider[name]
                 config_list.append(entry)
 
-        # Fallback if empty
         if not config_list:
-            api_key = resolve_model_api_key("openai")
-            fallback_models: list[str] = []
-            if os.getenv("OPENAI_MODEL_FALLBACK"):
-                fallback_models = [m.strip() for m in os.getenv("OPENAI_MODEL_FALLBACK", "").split(",") if m.strip()]
-            if not fallback_models:
-                fallback_models = [os.getenv("DEFAULT_LLM_MODEL", "gpt-5-nano")]
-            for m in fallback_models:
-                entry = {"model": m, "api_key": api_key}
-                if m in PRICE_MAP:
-                    # cast list to tuple for immutability (optional)
-                    mapped = PRICE_MAP[m]
-                    entry["price"] = mapped  # type: ignore[assignment]
-                config_list.append(entry)
+            api_type = os.getenv("LLM_PRIMARY_API_TYPE", "openai").strip().lower()
+            legacy_models = [model.strip() for model in os.getenv("OPENAI_MODEL_FALLBACK", "").split(",") if model.strip()] if api_type == "openai" else []
+            primary_model = os.getenv("LLM_PRIMARY_MODEL", "").strip()
+            if not primary_model:
+                primary_model = (legacy_models[0] if legacy_models else os.getenv("DEFAULT_LLM_MODEL", "").strip())
+            if not primary_model and api_type == "openai":
+                primary_model = "gpt-5-nano"
+            if not primary_model:
+                raise ValueError("LLM_PRIMARY_MODEL is required for the selected provider")
+            fallback_models = None
+            if legacy_models and not os.getenv("LLM_FALLBACK_MODELS"):
+                fallback_models = [model for model in legacy_models if model != primary_model]
+            config_list = build_fallback_config_list(
+                primary_model=primary_model, primary_api_type=api_type,
+                fallback_models=fallback_models,
+            )
+        for entry in config_list:
+            if "price" not in entry and entry["model"] in PRICE_MAP:
+                entry["price"] = PRICE_MAP[entry["model"]]
 
     _RAW_CONFIG_CACHE["config_list"] = config_list
     _RAW_CONFIG_CACHE["loaded_at"] = time.time()
@@ -206,9 +189,8 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
             # Avoid logging raw key; hash it
             api_key_hash = hashlib.sha256(api_key_val.encode()).hexdigest() if api_key_val else ""
             api_keys_now.add(api_key_hash)
-            price = e.get("price")
-            sig_parts.append(json.dumps({"model": model, "k": api_key_hash, "price": price}, sort_keys=True))
-        signature = hashlib.sha256("|".join(sorted(sig_parts)).encode()).hexdigest()
+            sig_parts.append(json.dumps({**e, "api_key": api_key_hash}, sort_keys=True))
+        signature = hashlib.sha256("|".join(sig_parts).encode()).hexdigest()
 
         provider_changed = _LAST_PROVIDER_SIGNATURE is not None and signature != _LAST_PROVIDER_SIGNATURE
         keys_changed = bool(_LAST_API_KEYS) and api_keys_now != _LAST_API_KEYS
@@ -222,10 +204,6 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
         _LAST_API_KEYS = api_keys_now
     except Exception as sig_err:  # pragma: no cover
         logger.debug("[LLM_CONFIG] Provider signature generation failed (non-fatal): %s", sig_err)
-    # Debug: log each config entry
-    for i, entry in enumerate(config_list):
-        safe_entry = {**entry, "api_key": "***REDACTED***" if entry.get("api_key") else entry.get("api_key")}
-        logger.debug("[LLM_CONFIG] config_list[%s]: %s", i, safe_entry)
     return config_list
 
 
@@ -243,14 +221,8 @@ def _build_llm_cache_key(*, response_format: type[BaseModel] | None, extra_confi
             schema_hash = "unknown"
         parts.append(f"rf:{response_format.__name__}:{schema_hash}")
     if extra_config:
-        # Deterministic ordering (avoid giant keys; only include primitive scalars)
-        norm_items = []
-        for k in sorted(extra_config.keys()):
-            v = extra_config[k]
-            if isinstance(v, (str, int, float, bool)):
-                norm_items.append(f"{k}={v}")
-        if norm_items:
-            parts.append("x:" + ",".join(norm_items))
+        encoded = json.dumps(extra_config, sort_keys=True, default=str)
+        parts.append("x:" + hashlib.sha256(encoded.encode()).hexdigest())
     return "|".join(parts)
 
 
@@ -267,18 +239,29 @@ async def get_llm_config(
 
     Returns a tuple (wrapper_placeholder, llm_config). The first element is
     reserved and currently always None; the second is the dict converted into
-    an AG2 OpenAICompletionsConfig.
+    the selected AG2 provider configuration.
     """
+    extra_config = dict(extra_config or {})
+    raw_limit = os.getenv("LLM_MAX_TOKENS", "").strip()
+    if raw_limit:
+        try:
+            limit = int(raw_limit)
+        except ValueError:
+            raise ValueError("LLM_MAX_TOKENS must be a positive integer") from None
+        if limit < 1:
+            raise ValueError("LLM_MAX_TOKENS must be a positive integer")
+        if not {"max_tokens", "max_output_tokens", "max_completion_tokens"}.intersection(extra_config):
+            extra_config["max_tokens"] = limit
     cache_key = _build_llm_cache_key(
         response_format=response_format, extra_config=extra_config
     )
+    # Refresh raw providers before consulting derived variants so TTL and
+    # explicit invalidation can replace a previously cached provider.
+    config_list = await _load_raw_config_list()
     if cache and cache_key in _LLM_CONFIG_CACHE:
         import copy
         cfg = copy.deepcopy(_LLM_CONFIG_CACHE[cache_key])
         return None, cfg
-
-    # Ensure base provider list loaded
-    config_list = await _load_raw_config_list()
 
     # Determine seed origin BEFORE constructing final config for clearer logging
     seed_from_extra = None
@@ -292,12 +275,12 @@ async def get_llm_config(
     if seed_origin == "process-default":
         logger.debug(
             "[LLM_CONFIG] Using process-level default cache seed",
-            extra={"seed": selected_seed, "reason": "no per-chat override", "cache_key_fragment": cache_key[:60]},
+            extra={"seed": selected_seed, "reason": "no per-chat override"},
         )
     else:
         logger.debug(
             "[LLM_CONFIG] Using per-chat cache seed override",
-            extra={"seed": selected_seed, "cache_key_fragment": cache_key[:60]},
+            extra={"seed": selected_seed},
         )
 
     # NOTE: response_format is accepted as a parameter for cache-key differentiation
@@ -323,21 +306,17 @@ async def get_llm_config(
             _LLM_CONFIG_CACHE[cache_key] = copy.deepcopy(llm_config)
 
     logger.debug(
-        "[LLM_CONFIG] Built config (rf=%s, extras=%s, cache_key=%s)", 'yes' if response_format else 'no', bool(extra_config), cache_key)
-    logger.debug("[LLM_CONFIG] Final llm_config before return: %s", llm_config)
+        "[LLM_CONFIG] Built config (rf=%s, extras=%s)", 'yes' if response_format else 'no', bool(extra_config))
     
     # Additional safety check - validate the config_list entries before return
     config_list = llm_config.get('config_list', [])
     logger.debug("[LLM_CONFIG] Validating config_list with %s entries", len(config_list))
     
     for i, entry in enumerate(config_list):
-        logger.debug("[LLM_CONFIG] Checking entry [%s]: %s", i, entry)
         if not isinstance(entry, dict):
-            logger.error("[LLM_CONFIG] VALIDATION ERROR: Entry [%d] is not a dict: %s %s", i, type(entry), entry)
             raise ValueError(f"Config entry [{i}] is not a dict: {type(entry)}")
         elif not entry.get('model'):
-            logger.error("[LLM_CONFIG] VALIDATION ERROR: Entry [%d] missing model field: %s", i, entry)
-            raise ValueError(f"Config entry [{i}] missing required model field: {entry}")
+            raise ValueError(f"Config entry [{i}] missing required model field")
         else:
             logger.debug("[LLM_CONFIG] Entry [%s] validation OK: model=%s", i, entry.get('model'))
     
@@ -360,9 +339,9 @@ def clear_llm_caches(raw: bool = True, built: bool = True) -> None:
     if raw:
         _RAW_CONFIG_CACHE["config_list"] = None
         _RAW_CONFIG_CACHE["loaded_at"] = 0
+    if built:
         _LAST_PROVIDER_SIGNATURE = None
         _LAST_API_KEYS = set()
-    if built:
         _LLM_CONFIG_CACHE.clear()
     logger.debug("[LLM_CONFIG] Caches cleared raw=%s built=%s", raw, built)
 

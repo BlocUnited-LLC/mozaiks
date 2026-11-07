@@ -330,6 +330,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Factory builds now preserve the explicitly selected provider, model, and
+  credential through the existing AG2 configuration path. Stored provider
+  changes invalidate cached configs, optional `LLM_MAX_TOKENS` reaches native
+  output limits, and config diagnostics omit credential values.
+
 - Design review reports missing canonical write grants across all affected
   collections together. Owner-requested permission changes no longer consume
   structural repair attempts; a rejected final counted attempt fails immediately

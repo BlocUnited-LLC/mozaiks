@@ -80,8 +80,11 @@ mozaiks quickstart [-h] [--dir DIRECTORY] [--preset {engine,chat,integrated,full
 | `--no-browser` | Start the services without opening a browser |
 
 The provider and model are shown by [`studio`](#studio), but builds do not
-read them yet: the runtime builds OpenAI clients only, with `OPENAI_API_KEY`
-and the model in `DEFAULT_LLM_MODEL` (default `gpt-5-nano`).
+read those workspace display values. Runtime builds use `LLM_PRIMARY_API_TYPE`
+and `LLM_PRIMARY_MODEL` with the selected provider's credential. Without an
+explicit provider, OpenAI and `DEFAULT_LLM_MODEL` (default `gpt-5-nano`) remain
+the defaults. Install the selected provider's optional SDK package; see
+[getting started](getting-started.md#3-set-environment-variables).
 
 === "Windows"
 
