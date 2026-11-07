@@ -423,7 +423,7 @@ models:
         description: Exact role_id declared in access_policy.roles.
       collection:
         type: str
-        description: Exact app-owned module collection name in data_contract. Platform and hosted collections cannot receive app grants.
+        description: Exact app-owned module collection name in data_contract used as the action's permission anchor. Each module action must use the same single collection across all roles, even when its implementation changes several collections. Platform and hosted collections cannot receive app grants.
       actions:
         type: list[str]
         description: Non-empty explicit canonical create/update/delete action ids or surface_map owned_mutations for this collection. No permission strings or wildcards.

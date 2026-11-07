@@ -15,7 +15,11 @@ from mozaiksai.core.runtime.app.auth_contract import AppAuthContractError
 from mozaiksai.core.workflow import task_batches
 from mozaiksai.core.workflow.generator_support.code_files import extract_code_file_map_from_payload
 from mozaiksai.core.workflow.generator_support.design_access_policy import access_policy_sha256
-from mozaiksai.core.workflow.generator_support.module_role_grants import validate_access_policy
+from mozaiksai.core.workflow.generator_support.module_role_grants import (
+    approved_module_role_permissions,
+    compiled_role_grants,
+    validate_access_policy,
+)
 from mozaiksai.core.workflow.generator_support.module_write_actions import (
     auth_contract_scopes,
     close_module_actions,
@@ -104,6 +108,44 @@ def test_incomplete_policy_reports_every_collection_for_one_repair():
         entity = grant["actions"][0].removeprefix("create_")
         grant["actions"].extend([f"update_{entity}", f"delete_{entity}"])
     assert validate_access_policy(policy, data_contract=contract, design_surface_map=_surface()) == policy
+
+
+def test_cross_role_action_bindings_report_all_conflicts_without_selecting_authority():
+    contract = _contract("app_wide")
+    notes = deepcopy(contract["surfaces"][0]["collections"][0])
+    notes.update(name="notes", entity="Note")
+    contract["surfaces"][0]["collections"].append(notes)
+    surface = _surface()
+    mutations = ["archive_records", "restore_records"]
+    surface["surfaces"][0]["owned_mutations"] = mutations
+    policy = _policy()
+    policy["roles"].append({"role_id": "reviewer", "label": "Reviewer", "description": "Reviews tasks."})
+    policy["grants"][0]["actions"].extend(mutations)
+    policy["grants"].append({"role_id": "reviewer", "collection": "notes", "actions": mutations.copy()})
+    before = deepcopy(policy)
+    expected = "; ".join([
+        f"access_policy action {MODULE}.{action} names multiple collections ['notes', 'tasks']; "
+        "bind this module action to exactly one collection in every role's grants, "
+        "even when its implementation changes several collections"
+        for action in mutations
+    ] + ["access_policy for 'notes' omits canonical write grants ['create_note', 'delete_note', 'update_note']"])
+    for grants in (policy["grants"], list(reversed(policy["grants"]))):
+        with pytest.raises(ValueError) as error:
+            validate_access_policy({**policy, "grants": grants}, data_contract=contract, design_surface_map=surface)
+        assert str(error.value) == expected
+    assert policy == before
+
+    # The author chooses the anchor and missing permissions; validation never does.
+    policy["grants"][1]["collection"] = "tasks"
+    policy["grants"].append({"role_id": "coordinator", "collection": "notes",
+                             "actions": ["create_note", "update_note", "delete_note"]})
+    validated = validate_access_policy(policy, data_contract=contract, design_surface_map=surface)
+    assert validated == policy
+    assert compiled_role_grants(validated)[1] == {
+        "id": "reviewer", "permissions": [f"tasks.{action}" for action in mutations],
+    }
+    permissions = approved_module_role_permissions(policy, data_contract=contract, design_surface_map=surface)
+    assert all(permissions[MODULE][action] == f"tasks.{action}" for action in mutations)
 
 
 def test_approved_roles_close_shared_writes_and_compile_real_implementations():

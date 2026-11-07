@@ -38,6 +38,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Design permission repair identifies every conflicting action/collection
+  binding together. Factory guidance keeps one permission anchor per action
+  and describes cross-user review without bypassing record ownership.
 - Updated the AG2 runtime and provider extras to 1.2.2. OpenAI workflows keep
   Chat Completions through the explicit `OpenAICompletionsConfig`; Responses
   workflows keep their selected API. Anthropic no longer receives the shared

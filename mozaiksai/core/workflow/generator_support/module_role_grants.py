@@ -73,7 +73,7 @@ def validate_access_policy(
         collections[name] = (owner, collection)
     selected: dict[str, set[str]] = defaultdict(set)
     seen: set[tuple[str, str, str]] = set()
-    action_collections: dict[tuple[str, str], str] = {}
+    action_collections: dict[tuple[str, str], set[str]] = defaultdict(set)
     for grant in policy["grants"]:
         role, name = grant["role_id"], grant["collection"]
         if role not in role_ids:
@@ -93,13 +93,15 @@ def validate_access_policy(
             if key in seen:
                 raise ValueError(f"access_policy repeats grant {key!r}")
             seen.add(key)
-            binding = (owner, action)
-            previous = action_collections.setdefault(binding, name)
-            if previous != name:
-                raise ValueError(f"access_policy action {owner}.{action} names multiple collections")
+            action_collections[owner, action].add(name)
             selected[name].add(action)
         # Other roles may supply the remaining canonical grants; check after all rows.
-    missing_grants: list[str] = []
+    errors = [
+        f"access_policy action {owner}.{action} names multiple collections {sorted(names)}; "
+        "bind this module action to exactly one collection in every role's grants, "
+        "even when its implementation changes several collections"
+        for (owner, action), names in sorted(action_collections.items()) if len(names) > 1
+    ]
     for name, actions in sorted(selected.items()):
         _, collection = collections[name]
         required = {
@@ -107,9 +109,9 @@ def validate_access_policy(
             for operation in CANONICAL_WRITE_OPERATIONS
         } if collection_has_canonical_writes(collection) else set()
         if missing := required - actions:
-            missing_grants.append(f"access_policy for {name!r} omits canonical write grants {sorted(missing)}")
-    if missing_grants:
-        raise ValueError("; ".join(missing_grants))
+            errors.append(f"access_policy for {name!r} omits canonical write grants {sorted(missing)}")
+    if errors:
+        raise ValueError("; ".join(errors))
     return policy
 
 

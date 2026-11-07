@@ -77,6 +77,10 @@ task.
    action's `permissions` to `["{collection}.{action_id}"]`, the same way
    approved entitlement gates are compiled onto actions. The model authors
    neither the ids nor their assignment.
+   Each module action has one collection anchor across every role's grants,
+   even when its implementation writes several collections. Validation reports
+   every conflicting action and collection alongside missing canonical grants;
+   it never chooses an anchor or changes the proposed authority.
 3. **Compiled auth contract.** `config/auth.yaml` moves to
    `mozaiks.auth.v2`, which adds `authorization.roles[]: {id, permissions[]}`.
    The code-owned auth scaffold renders it from the approved `access_policy`,
@@ -110,6 +114,12 @@ task.
    Role permissions do not bypass per-user or per-workspace persistence
    ownership. Access to another user's records requires a compatible approved
    data contract, not merely a role.
+   For cross-user review, an app-wide authoritative collection can expose
+   explicitly protected administrative reads and writes plus separate member
+   submission and owner-filtered reads. Domain authorization in the service
+   derives the member identity from the authenticated context and clamps input
+   fields and initial state. A shared projection cannot authorize updates to a
+   different user's per-user source record.
 
 ## Reason
 

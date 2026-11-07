@@ -60,9 +60,25 @@ agents:
       omission cannot make an update or delete public. No wildcards, invented
       permission strings, platform/hosted collections, or implicit role assignment.
       Code derives permission ids and renders auth grants after approval. The
-      reserved admin role uses verified identity claims or the app's existing
+      collection is the action's permission anchor, not a list of records it
+      changes. Bind each module action to exactly one collection across ALL roles;
+      an action that writes multiple collections still has one grant anchor.
+      Multiple roles may grant that same action only under that same collection.
+      Include every role that needs a protected mutation, including ordinary
+      submitters; granting an action only to admin excludes other users.
+      The reserved admin role uses verified identity claims or the app's existing
       verified-email admin allowlist. Other roles require verified identity claims.
       Grants do not change tenancy or authorize access to another user's records.
+      When authorized reviewers must update records submitted by other users,
+      choose a compatible data design. An app_wide collection can hold the shared
+      authoritative records with explicitly admin-protected raw list/get and
+      create/update/delete actions. Declare separate member submission and
+      my-record reads: service authorization derives identity from ctx.user_id,
+      filters every member read to that identity, and permits only submission
+      fields with server-set initial state. Members must not receive raw lifecycle
+      update authority. A shared review projection does not let an admin update
+      a per_user source record; do not promise that ownership bypass or copy
+      another user's identity into a persistence context.
       If design_docs_save_feedback requests access changes, revise this typed
       policy and its explanation together. Every changed grant requires review.
       An owner's Request changes response returns review_changes without consuming
