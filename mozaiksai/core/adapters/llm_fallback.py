@@ -257,12 +257,12 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
     Routes to the correct provider config class based on the ``api_type`` field
     in the first ``config_list`` entry.  Supported api_type values:
 
-    - ``"openai"`` (default) → ``OpenAIConfig``
+    - ``"openai"`` (default) → ``OpenAICompletionsConfig``
     - ``"google"``           → ``GeminiConfig``  (Google AI Studio free tier or Vertex AI)
     - ``"anthropic"``        → ``AnthropicConfig``
     - ``"ollama"``           → ``OllamaConfig``  (local inference)
 
-    Any unrecognised api_type falls through to ``OpenAIConfig``.
+    Any unrecognised api_type falls through to ``OpenAICompletionsConfig``.
 
     Explicit output/retry limits use the provider's native AG2 field names.
     Provider-entry values override shared defaults. Unsupported, ambiguous,
@@ -300,7 +300,6 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
         kwargs = {
             "model": model,
             "api_key": api_key,
-            "temperature": temperature,
             "streaming": streaming,
             **_model_call_limits(llm_config, entry, ("max_tokens", "max_retries")),
         }
@@ -314,7 +313,8 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
             "streaming": streaming,
             **_model_call_limits(llm_config, entry, ("max_tokens",)),
         }
-        return OllamaConfig(**kwargs)
+        # AG2 1.2.2 inherits the Files API rejection stub, which mypy treats as abstract.
+        return OllamaConfig(**kwargs)  # type: ignore[abstract]
     # openai / azure / default
     if api_type == "openai" and bool(llm_config.get("use_responses_api") or llm_config.get("responses_api")):
         from ag2.config import OpenAIResponsesConfig
@@ -334,7 +334,7 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
                 response_kwargs[key] = llm_config[key]
         return OpenAIResponsesConfig(**response_kwargs)
 
-    from ag2.config import OpenAIConfig
+    from ag2.config import OpenAICompletionsConfig
     kwargs = {
         "model": model,
         "api_key": api_key,
@@ -345,7 +345,7 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
     }
     if timeout is not None:
         kwargs["timeout"] = timeout
-    return OpenAIConfig(**kwargs)
+    return OpenAICompletionsConfig(**kwargs)
 
 
 # ---------------------------------------------------------------------------

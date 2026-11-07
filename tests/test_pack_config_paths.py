@@ -48,6 +48,7 @@ def test_load_global_pack_graph_uses_canonical_file(monkeypatch) -> None:
         "SubscriptionContractDesigner",
         "AgentGenerator",
         "AppGenerator",
+        "AppMediaGenerator",
         "ExistingAppDiscovery",
         "SecurityReadiness",
         "AppReview",

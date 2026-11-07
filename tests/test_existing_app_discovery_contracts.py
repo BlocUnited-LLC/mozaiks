@@ -824,6 +824,7 @@ def test_brownfield_path_selector_routes_into_discovery_with_context() -> None:
         "SubscriptionContractDesigner",
         "AgentGenerator",
         "AppGenerator",
+        "AppMediaGenerator",
         "SecurityReadiness",
     ]
 

@@ -56,6 +56,16 @@ def _append_generated_assets_context(
     _ctx_set(context_variables, "last_generated_media_assets", entries)
 
 
+def _task_batch_identity(context_variables: Any) -> dict[str, str]:
+    """Task-batch worker identity, so a later step can match each asset to its task."""
+    identity: dict[str, str] = {}
+    for context_key, param_key in (("current_task_batch_id", "task_batch_id"), ("current_task_id", "task_id")):
+        value = str(context_get(context_variables, context_key, "") or "").strip()
+        if value:
+            identity[param_key] = value
+    return identity
+
+
 def _prompt_from_events(events: Sequence[BaseEvent]) -> str | None:
     for event in reversed(list(events or [])):
         content = getattr(event, "content", None)
@@ -107,6 +117,7 @@ async def harvest_generated_media_response(
                 generation_params={
                     "agent_name": agent_name,
                     **dict(generation_params or {}),
+                    **_task_batch_identity(context_variables),
                 },
                 promotion_targets=resolved_targets,
             )

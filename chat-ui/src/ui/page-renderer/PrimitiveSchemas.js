@@ -439,6 +439,17 @@ export const PRIMITIVE_SCHEMAS = {
     },
   },
 
+  Image: {
+    type: 'object',
+    required: ['asset_id'],
+    properties: {
+      asset_id: { type: 'string' },
+      alt:      { type: 'string' },
+      caption:  { type: 'string' },
+      variant:  { type: 'string', enum: ['inline', 'banner'], default: 'inline' },
+    },
+  },
+
   Skeleton: {
     type: 'object',
     properties: {

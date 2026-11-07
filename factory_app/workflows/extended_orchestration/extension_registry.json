@@ -153,6 +153,17 @@
       "handoff_style": "continuous_chat"
     },
     {
+      "id": "AppMediaGenerator",
+      "description": "Generates the images a built app's pages plan and publishes them into a new draft bundle version",
+      "startup_mode": "AgentDriven",
+      "interaction_mode": "agent_directed",
+      "launch_behavior": "auto_start",
+      "handoff_style": "continuous_chat",
+      "dependencies": [
+        "AppGenerator"
+      ]
+    },
+    {
       "id": "SecurityReadiness",
       "description": "Advisory generated app security readiness review",
       "startup_mode": "AgentDriven",
@@ -241,6 +252,11 @@
         {
           "workflows": [
             "AppGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
           ]
         },
         {
@@ -352,6 +368,11 @@
         },
         {
           "workflows": [
+            "AppMediaGenerator"
+          ]
+        },
+        {
+          "workflows": [
             "SecurityReadiness"
           ]
         },
@@ -400,6 +421,11 @@
         {
           "workflows": [
             "AppGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
           ]
         },
         {
@@ -456,6 +482,11 @@
         },
         {
           "workflows": [
+            "AppMediaGenerator"
+          ]
+        },
+        {
+          "workflows": [
             "SecurityReadiness"
           ]
         },
@@ -504,6 +535,11 @@
         {
           "workflows": [
             "AppGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
           ]
         },
         {
@@ -573,6 +609,11 @@
           "workflows": [
             "AppGenerator"
           ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
+          ]
         }
       ]
     },
@@ -593,6 +634,11 @@
           "workflows": [
             "AppGenerator"
           ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
+          ]
         }
       ]
     },
@@ -612,6 +658,11 @@
         {
           "workflows": [
             "AppGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
           ]
         }
       ]
@@ -638,6 +689,11 @@
         {
           "workflows": [
             "AppGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
           ]
         }
       ]
@@ -673,6 +729,11 @@
           "workflows": [
             "AppGenerator"
           ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
+          ]
         }
       ]
     },
@@ -686,6 +747,11 @@
         {
           "workflows": [
             "AppGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
           ]
         }
       ]
@@ -707,6 +773,11 @@
           "workflows": [
             "AppGenerator"
           ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
+          ]
         }
       ]
     },
@@ -721,6 +792,11 @@
         {
           "workflows": [
             "AppGenerator"
+          ]
+        },
+        {
+          "workflows": [
+            "AppMediaGenerator"
           ]
         }
       ]

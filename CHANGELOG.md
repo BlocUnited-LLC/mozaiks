@@ -12,8 +12,33 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- Chats show connection and run status beside the composer, with measured token
+  usage for the current run when available. Ask and workflow receipts stay
+  scoped to their owning chat; the wallet balance remains in the Tokens tab.
+- Generated apps get their images made during the build. AppGenerator plans
+  the images each page shows in `config/asset_manifest.json` (a `brief` and
+  `aspect`, `source: generated` for AI art, `source: uploaded` for photos the
+  owner must supply), and the new `AppMediaGenerator` step, between
+  AppGenerator and SecurityReadiness (and after scoped revisions), makes the AI images in parallel, writes
+  them and labeled upload placeholders under `ui/assets/`, and publishes them
+  as a new draft bundle version that review, preview, and download use. A
+  failed image keeps its placeholder instead of failing the build. Images
+  carry no text, so they cannot invent prices or names. The complete bundle,
+  including image bytes, must pass fresh contained acceptance and build checks
+  before publication; a parent-version comparison protects concurrent revisions.
+- The `Image` page primitive shows an asset-manifest entry by `asset_id`
+  (`banner` or `inline`), served from the app bundle at
+  `GET /api/app-assets/{asset_id}`. Manifest IDs and page references are validated;
+  remote HTTP(S) entries redirect through the configured backend origin.
+
 ### Changed
 
+- Updated the AG2 runtime and provider extras to 1.2.2. OpenAI workflows keep
+  Chat Completions through the explicit `OpenAICompletionsConfig`; Responses
+  workflows keep their selected API. Anthropic no longer receives the shared
+  temperature setting, which Anthropic SDK 2.x rejects.
 - Generated UI acceptance can verify a candidate against the existing local
   driver's owned backend and built frontend, with authenticated browser evidence
   preserved per run. External-host probes still cannot accept a candidate.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -234,3 +235,103 @@ async def test_ag2_usage_middleware_receipt_for_ag2_anthropic_usage_shape(monkey
     assert emitted["total_tokens"] == 17
     assert emitted["cached"] is False
     assert emitted["cached_tokens"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["openai-chat", "openai-responses", "gemini"])
+@pytest.mark.parametrize("cache_read", [0, 2])
+async def test_native_provider_usage_keeps_thinking_and_cache_writes_distinct(monkeypatch, provider, cache_read):
+    """AG2-normalized usage reaches the receipt without double counting or a cache-write discount."""
+    from ag2.events import ModelResponse
+
+    if provider == "openai-chat":
+        from ag2.config.openai.mappers import normalize_usage
+        from openai.types.completion_usage import CompletionUsage
+
+        usage = normalize_usage(CompletionUsage(
+            prompt_tokens=12, completion_tokens=8, total_tokens=20,
+            prompt_tokens_details={"cached_tokens": cache_read, "cache_write_tokens": 4},
+            completion_tokens_details={"reasoning_tokens": 3},
+        ))
+    elif provider == "openai-responses":
+        from ag2.config.openai.mappers import normalize_responses_usage
+        from openai.types.responses.response_usage import ResponseUsage
+
+        usage = normalize_responses_usage(ResponseUsage(
+            input_tokens=12, output_tokens=8, total_tokens=20,
+            input_tokens_details={"cached_tokens": cache_read, "cache_write_tokens": 4},
+            output_tokens_details={"reasoning_tokens": 3},
+        ))
+    else:
+        pytest.importorskip("google.genai", reason="ag2[gemini] extra not installed")
+        from ag2.config.gemini.mappers import normalize_usage
+        from google.genai.types import GenerateContentResponseUsageMetadata
+
+        usage = normalize_usage(GenerateContentResponseUsageMetadata(
+            prompt_token_count=12, candidates_token_count=5, thoughts_token_count=3,
+            total_token_count=20, cached_content_token_count=cache_read,
+        ))
+
+    if provider.startswith("openai"):
+        assert usage.cache_creation_input_tokens == 4
+    assert usage.thinking_tokens == 3
+    emit = AsyncMock()
+    monkeypatch.setattr(usage_mod.TokenManager, "emit_usage_delta", emit)
+    monkeypatch.setattr(usage_mod.TokenUsageGuard, "check_or_raise", AsyncMock())
+    middleware = usage_mod.MozaiksUsageMiddleware(
+        event=SimpleNamespace(), context=SimpleNamespace(), agent_name="PlannerAgent",
+        workflow_name="AppGenerator", context_variables=dict(_ContextBridge.data),
+    )
+    response = ModelResponse(usage=usage, model=provider)
+    assert await middleware.on_llm_call(AsyncMock(return_value=response), [], SimpleNamespace()) is response
+
+    emit.assert_awaited_once()
+    receipt = emit.await_args.kwargs
+    assert (receipt["prompt_tokens"], receipt["completion_tokens"], receipt["total_tokens"]) == (12, 8, 20)
+    assert receipt["cached_tokens"] == cache_read
+    assert receipt["cached"] is bool(cache_read)
+
+
+@pytest.mark.asyncio
+async def test_native_anthropic_continuation_emits_one_aggregated_receipt(monkeypatch):
+    pytest.importorskip("anthropic", reason="ag2[anthropic] extra not installed")
+    import httpx2
+    from ag2 import Agent
+    from ag2.config import AnthropicConfig
+
+    requests = []
+
+    def respond(request):
+        assert request.url.host == "provider.invalid"
+        requests.append(request)
+        first = len(requests) == 1
+        return httpx2.Response(200, json={
+            "id": f"message-{len(requests)}", "type": "message", "role": "assistant",
+            "model": "claude-test", "content": [{"type": "text", "text": "Working" if first else "Done"}],
+            "stop_reason": "pause_turn" if first else "end_turn", "stop_sequence": None,
+            "usage": {"input_tokens": 10 if first else 13, "output_tokens": 2 if first else 5},
+        })
+
+    emit = AsyncMock()
+    monkeypatch.setattr(usage_mod.TokenManager, "emit_usage_delta", emit)
+    monkeypatch.setattr(usage_mod.TokenUsageGuard, "check_or_raise", AsyncMock())
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as http:
+        agent = Agent(
+            "PlannerAgent",
+            config=AnthropicConfig(
+                model="claude-test", api_key="test", base_url="https://provider.invalid",
+                http_client=http, streaming=False, max_retries=0,
+            ),
+            middleware=[usage_mod.build_ag2_usage_middleware(
+                agent_name="PlannerAgent", workflow_name="AppGenerator",
+                context_variables=dict(_ContextBridge.data),
+            )],
+        )
+        reply = await agent.ask("Complete the task.")
+
+    assert reply.body == "Done"
+    assert len(requests) == 2
+    emit.assert_awaited_once()
+    receipt = emit.await_args.kwargs
+    assert (receipt["prompt_tokens"], receipt["completion_tokens"], receipt["total_tokens"]) == (23, 7, 30)
+    assert receipt["cached_tokens"] == 0

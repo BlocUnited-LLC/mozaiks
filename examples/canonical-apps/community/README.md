@@ -112,7 +112,7 @@ has two synthetic fixture accounts and is unsuitable for deployment.
 Install Python dependencies with `python -m pip install -e ".[dev]"` and run
 `npm ci` in both `chat-ui/` and `web_shell/`. Install Chromium from `web_shell/`
 with `npx playwright install chromium`. The launcher records the installed AG2
-version; acceptance must use the exact pin in `pyproject.toml` (currently 1.1.2).
+version; acceptance must use the exact pin in `pyproject.toml` (currently 1.2.2).
 It uses normal workspace workflow discovery, with no synthetic workflow root.
 
 From the checkout root, keep this command running in a terminal:

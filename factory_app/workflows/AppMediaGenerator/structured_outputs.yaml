@@ -1,0 +1,42 @@
+schema_version: mozaiks.structured_outputs.v1
+registry:
+  MediaPlanAgent: MediaPlanOutput
+  SquareImageMakerAgent: null
+  LandscapeImageMakerAgent: null
+  PortraitImageMakerAgent: null
+  MediaPublishAgent: null
+
+models:
+  MediaImagePrompt:
+    type: model
+    fields:
+      asset_id:
+        type: str
+        description: Exact asset_id of one requested image from media_requests.
+      prompt:
+        type: str
+        description: >
+          Concrete visual description for the illustrator: subject, composition,
+          setting, and mood. Do not repeat the shared art direction here.
+
+  MediaArtDirection:
+    type: model
+    fields:
+      style_guide:
+        type: str
+        description: >
+          One shared art direction for every image in this app (medium, palette
+          drawn from the brand colors, lighting, framing) so the set reads as one family.
+      images:
+        type: list
+        items: MediaImagePrompt
+        description: Exactly one entry per requested asset_id; empty when nothing was requested.
+
+  MediaPlanOutput:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: One short sentence telling the user which images are being made.
+      MediaArtDirection:
+        type: MediaArtDirection

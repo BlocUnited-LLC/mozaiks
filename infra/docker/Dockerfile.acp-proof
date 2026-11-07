@@ -5,7 +5,7 @@ FROM ${BASE_IMAGE}
 
 USER root
 RUN python -m pip install --no-cache-dir --break-system-packages \
-    "ag2[acp]==1.1.2" "agent-client-protocol==0.12.1"
+    "ag2[acp]==1.2.2" "agent-client-protocol==0.12.1"
 COPY mozaiksai/ /opt/mozaiks/mozaiksai/
 COPY factory_app/ /opt/mozaiks/factory_app/
 COPY infra/docker/acp_proof/ /opt/mozaiks/acp_proof/

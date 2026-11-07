@@ -15,6 +15,12 @@ APP_REFINEMENT_POLICY_CONFIG_PATH = "config/refinement_policy.yaml"
 APP_METRICS_CONFIG_PATH = "config/metrics.yaml"
 APP_PROVENANCE_PATH = "provenance.yaml"
 
+# Non-source bundle files preserved by artifact readers and contained validation.
+APP_BINARY_ASSET_SUFFIXES = frozenset({
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".ico", ".svg",
+    ".woff", ".woff2", ".ttf", ".otf", ".eot", ".pdf", ".mp3", ".mp4",
+})
+
 CANONICAL_APP_CONFIG_FILES = frozenset(
     {
         "config/ai.json",

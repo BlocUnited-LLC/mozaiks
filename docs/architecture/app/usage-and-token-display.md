@@ -99,6 +99,28 @@ MozaiksPay, minted by a free plan allowance, or granted by any other means.
 | `GET /api/me/tokens` | Personal wallet balances + plan allowances | user |
 | `GET /api/me/tokens/ledger` | Personal wallet entry history | user |
 
+### Chat status and live usage
+
+The shared chat UI places a compact status strip between the message feed and
+composer. It shows connection and run activity, including when a workflow is
+waiting for the user. After a measured model call, it shows the tokens reported
+for the current run. A new user message clears that number until another usage
+receipt arrives. Replayed receipt IDs are counted once; switching chats or
+modes does not carry the previous chat's number into the new view. The strip
+does not infer tokens from streamed text or display zero when usage is unknown.
+
+`MozaiksUsageMiddleware` emits `chat.usage_delta` for workflow model calls,
+and Ask mode emits the same event for its general chat. The transport sends a
+minimal usage payload to the owning WebSocket. Ask sessions use a separate
+carrier chat ID, so routing matches the active general chat and owner before
+forwarding. Agent and model names stay out of the UI usage payload. The
+profile Tokens tab remains the place for a configured wallet's balance and
+plan allowance; the chat strip reports consumption, not credits remaining.
+
+AG2 status observations are inputs to the model before a call. They are
+separate from this user-visible strip and do not replace the usage event or
+wallet contracts.
+
 ---
 
 ## The Three Audiences

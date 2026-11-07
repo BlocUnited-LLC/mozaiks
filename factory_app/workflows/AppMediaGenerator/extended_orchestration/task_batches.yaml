@@ -1,0 +1,24 @@
+version: 1
+batches:
+  - id: app_media_jobs
+    trigger_agent: MediaPlanAgent
+    source:
+      kind: context_variable
+      path: media_job_items
+      task_model: MediaImageJob
+    worker:
+      mode: ag2_agent
+      agent_field: initial_agent
+      prompt_field: initial_message
+    execution:
+      concurrency: 4
+      # One failed image keeps its slot empty; it never fails the build.
+      failure_policy: continue_with_available
+      retry_limit: 1
+      timeout_seconds: 240
+    result:
+      context_key: app_media_jobs_results
+      status_key: app_media_jobs_status
+      merge_strategy: collect_task_outputs
+      # Image bytes are harvested media assets, not code files.
+      require_owned_paths: false
