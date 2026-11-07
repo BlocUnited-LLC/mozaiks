@@ -17,10 +17,11 @@ before(async () => {
     useTheme: `export default ()=>({theme:{}});`,
     brandAssets: `export const getBrandLogoSrc=()=>''; export const applyBrandImageFallback=()=>{};`,
     ChatInterface: `import React,{useState} from 'react';
-      export default function ChatInterface({messages,onSendMessage}) {
+      export default function ChatInterface({messages,onSendMessage,chatStatus}) {
         const [text,setText]=useState('');
         return <><div role="log">{messages.filter(m=>!m.isThinking).map(m=><p key={m.id} data-id={m.id}>{m.content}</p>)}</div>
           {messages.some(m=>m.isThinking)&&<span data-testid="pending-response">Waiting for a response</span>}
+          {chatStatus?.totalTokens != null && <output data-testid="run-tokens">{chatStatus.totalTokens}</output>}
           <form onSubmit={e=>{e.preventDefault();onSendMessage(text);setText('');}}>
             <input aria-label="Ask input" value={text} onChange={e=>setText(e.target.value)}/>
             <button>Send</button>
@@ -120,6 +121,34 @@ async function send(page, text) {
   await page.getByRole('button', { name: 'Send', exact: true }).click();
 }
 const submissions = page => page.evaluate(() => window.sent.filter(event => event.type === 'user.input.submit'));
+
+test('usage deltas count only for the acknowledged Ask conversation', async t => {
+  const page = await fixture(t);
+  const usage = (chatId, eventId, totalTokens) => page.evaluate(({ chatId, eventId, totalTokens }) => {
+    window.connections[0].callbacks.onMessage({
+      type: 'chat.usage_delta',
+      data: { chat_id: chatId, event_id: eventId, total_tokens: totalTokens },
+    });
+  }, { chatId, eventId, totalTokens });
+
+  await usage('saved', 'before-ack', 11);
+  await ack(page);
+  await resolve(page);
+  await send(page, 'How is this going?');
+  await usage('another-chat', 'other', 20);
+  await expect(page.getByTestId('run-tokens')).toHaveCount(0);
+  await usage('saved', 'first', 12);
+  await expect(page.getByTestId('run-tokens')).toHaveText('12');
+  await usage('saved', 'first', 12);
+  await usage('saved', 'second', 7);
+  await expect(page.getByTestId('run-tokens')).toHaveText('19');
+  await send(page, 'One more thing');
+  await expect(page.getByTestId('run-tokens')).toHaveCount(0);
+  await usage('saved', 'first', 12);
+  await expect(page.getByTestId('run-tokens')).toHaveCount(0);
+  await usage('saved', 'third', 4);
+  await expect(page.getByTestId('run-tokens')).toHaveText('4');
+});
 
 for (const width of [390, 1280]) {
   test(`restores acknowledged persisted transcript without sending a prompt (${width}px)`, async t => {

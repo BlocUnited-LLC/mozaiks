@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Chats show connection and run status beside the composer, with measured token
+  usage for the current run when available. Ask and workflow receipts stay
+  scoped to their owning chat; the wallet balance remains in the Tokens tab.
 - Generated apps get their images made during the build. AppGenerator plans
   the images each page shows in `config/asset_manifest.json` (a `brief` and
   `aspect`, `source: generated` for AI art, `source: uploaded` for photos the
