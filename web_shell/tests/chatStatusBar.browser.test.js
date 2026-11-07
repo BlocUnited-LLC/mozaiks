@@ -157,6 +157,13 @@ test('chat status stays between the feed and composer on desktop and mobile', as
     });
     await expect(bar).toContainText('Continuing validation');
     await expect(bar).toContainText('2 of 3');
+    await page.evaluate(() => window.progressEvent({
+      type: 'chat.tool_progress', chat_id: 'chat-1', workflow_name: 'AppGenerator', sequence: 6,
+      stage_id: 'validate', stage_label: 'W'.repeat(120), completed: 12, total: 40, unit: 'W'.repeat(40),
+    }));
+    await expect(bar).toContainText('W'.repeat(40));
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false,
+      'valid maximum-length labels and units must wrap within the chat');
     await page.evaluate(() => window.setChatStatus({ phase: 'idle', detail: '', totalTokens: null }));
     await expect(bar).toContainText('Ready');
     await expect(bar).not.toContainText('Run tokens');

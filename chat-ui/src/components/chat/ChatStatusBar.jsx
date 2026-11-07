@@ -33,7 +33,7 @@ export default function ChatStatusBar({ chatStatus, connectionStatus }) {
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span className="font-medium text-[var(--color-text-primary)]">{phase.label}</span>
           {detail && <span className="max-w-full break-words text-[var(--color-text-secondary)]">{detail}</span>}
-          {showCount && <span className="tabular-nums text-[var(--color-text-secondary)]">
+          {showCount && <span className="max-w-full break-words tabular-nums text-[var(--color-text-secondary)]">
             {progress.completed.toLocaleString()} of {progress.total.toLocaleString()}{progress.unit ? ` ${progress.unit}` : ''}
           </span>}
         </div>
