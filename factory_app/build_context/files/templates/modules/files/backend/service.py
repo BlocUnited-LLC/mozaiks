@@ -69,6 +69,7 @@ class FilesService:
             storage_url=record["storage_url"],
             is_public=record["is_public"],
             created_by=record["created_by"],
+            created_at=record["created_at"],
             metadata=record.get("metadata"),
         )
 

@@ -11,14 +11,12 @@ def timestamp_now() -> str:
 def notification_preferences_doc(
     *,
     user_id: str,
-    app_id: str | None,
     email_enabled: bool = True,
     push_enabled: bool = True,
     sms_enabled: bool = False,
 ) -> dict[str, Any]:
     return {
         "user_id": user_id,
-        "app_id": app_id,
         "email_enabled": email_enabled,
         "push_enabled": push_enabled,
         "sms_enabled": sms_enabled,

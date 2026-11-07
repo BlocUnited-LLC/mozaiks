@@ -34,6 +34,8 @@ recommended_domains:
   - collaboration
 
 required_outputs:
+  - path: data/contract.json
+    owner: templates
   - path: data/migrations/001_social_collections.json
     owner: templates
   # friends module
@@ -79,6 +81,8 @@ required_outputs:
   - path: modules/activity_feed/backend/policy.py
     owner: templates
   - path: modules/activity_feed/backend/schemas.py
+    owner: templates
+  - path: modules/activity_feed/backend/account_data_handler.py
     owner: templates
   - path: modules/activity_feed/contracts/events.yaml
     owner: templates

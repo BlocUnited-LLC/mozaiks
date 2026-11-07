@@ -58,12 +58,6 @@ recommended_domains:
   - saas
   - creator
 
-avoid_when:
-  - App is a single-page tool with one primary action.
-  - App surface is operator-only or admin-only.
-  - App navigation has fewer than three distinct sections.
-  - App is a CLI, API, or developer-facing tool with no meaningful UI.
-
 required_outputs:
   - path: config/onboarding.yaml
     owner: generator

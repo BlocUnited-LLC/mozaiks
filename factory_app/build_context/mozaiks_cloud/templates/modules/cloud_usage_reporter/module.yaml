@@ -1,7 +1,7 @@
 schema_version: mozaiks.module.v1
 module:
   id: cloud_usage_reporter
-  label: Cloud Usage Reporter
+  display_name: Cloud Usage Reporter
   description: >
     Periodically rolls up the app's own AppMetrics usage instrumentation
     (page views, sessions, action invocations) into daily aggregate counts
@@ -11,16 +11,14 @@ module:
     default. Aggregate counts only; no per-user or per-session data leaves
     the app. Reporting requires MOZAIKS_CLOUD_APP_ID or MOZAIKS_APP_ID; when
     both are set they must match.
-  capability_source: managed_capability
-  provider: mozaiks_cloud
+  handler: backend.handler:CloudUsageReporterHandler
 
 permissions:
   - id: cloud_usage_reporter.read
-    label: View usage reporting status
+    description: View usage reporting status
 
 actions:
   - id: get_reporter_status
-    label: Get Usage Reporter Status
     handler_method: get_reporter_status
     api_surface: public_readonly
     permissions:

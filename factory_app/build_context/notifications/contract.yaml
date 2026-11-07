@@ -45,15 +45,18 @@ recommended_domains:
   - social
   - ecommerce
 
-avoid_when:
-  - App only needs in-app alerts and notification center — declare contracts/notifications.yaml on the event-producing module instead.
-  - App uses a managed notification platform that handles external delivery — use that platform's client as a managed_capability or service integration.
-
 # All required outputs are owner: generator because external delivery adapters
 # are provider-specific and must be customized per deployment target.
 # AppGenerator produces provider-neutral stubs. Operators select their
 # provider and fill in credentials + API calls in the adapter.
 required_outputs:
+  - path: data/contract.json
+    owner: templates
+    notes: >
+      Declares the notification_settings module's preferences collection
+      (app_wide tenancy; the module scopes every read and write to the acting
+      user itself) with its fields and the unique per-user index.
+
   - path: modules/notification_settings/module.yaml
     owner: templates
     notes: >
@@ -79,7 +82,9 @@ required_outputs:
 
   - path: modules/notification_settings/backend/repo.py
     owner: templates
-    notes: Persists preference records to notifications.preferences data alias via ctx.persistence.
+    notes: >
+      Persists preference records to the notification_settings preferences
+      collection via ctx.persistence.collection("notification_settings", "preferences").
 
   - path: modules/notification_settings/backend/schemas.py
     owner: templates
@@ -114,9 +119,10 @@ required_outputs:
   - path: data/migrations/001_notification_preferences_collection.json
     owner: templates
     notes: >
-      Declares notifications.preferences data alias for the notification_settings
-      module. Does NOT create notification delivery log collections — those belong
-      in the external provider.
+      Additive operations only: ensures the notification_settings preferences
+      collection and its unique per-user index. The collection itself is declared
+      in data/contract.json. Does NOT create notification delivery log
+      collections — those belong in the external provider.
 
 forbidden_outputs:
   - path_prefix: modules/notifications/

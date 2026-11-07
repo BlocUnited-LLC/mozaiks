@@ -10,10 +10,7 @@ async def get_notification_preferences(ctx, *, user_id: str) -> dict[str, Any]:
     doc = await repo.get_preferences(ctx, user_id=user_id)
     if doc is None:
         # Return defaults if the user has never saved preferences
-        doc = notification_preferences_doc(
-            user_id=user_id,
-            app_id=getattr(ctx, "app_id", None),
-        )
+        doc = notification_preferences_doc(user_id=user_id)
     return {"preferences": preferences_response(doc)}
 
 

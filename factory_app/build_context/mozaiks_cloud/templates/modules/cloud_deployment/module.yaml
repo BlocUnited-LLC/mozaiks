@@ -1,25 +1,23 @@
 schema_version: mozaiks.module.v1
 module:
   id: cloud_deployment
-  label: Cloud Deployment
+  display_name: Cloud Deployment
   description: >
     Facade module for Mozaiks Cloud deployment and environment operations.
     Submits, monitors, and manages app deployment lifecycle through the Mozaiks
     Cloud managed platform. All operations are app-owned; provider internals
     (Azure resource IDs, pipeline configuration, credential material) are never
     exposed to the generated app.
-  capability_source: managed_capability
-  provider: mozaiks_cloud
+  handler: backend.handler:CloudDeploymentHandler
 
 permissions:
   - id: cloud_deployment.read
-    label: View deployment status and environment endpoints
+    description: View deployment status and environment endpoints
   - id: cloud_deployment.write
-    label: Submit deployments and request rollbacks
+    description: Submit deployments and request rollbacks
 
 actions:
   - id: submit_deployment
-    label: Submit Deployment
     handler_method: submit_deployment
     api_surface: internal
     permissions:
@@ -29,9 +27,16 @@ actions:
       Requires cloud_deployment.write permission.
 
   - id: get_deployment_status
-    label: Get Deployment Status
     handler_method: get_deployment_status
     api_surface: public_readonly
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        operation_id:
+          type: string
+          minLength: 1
+      required: [operation_id]
     permissions:
       - cloud_deployment.read
     description: >
@@ -39,9 +44,16 @@ actions:
       Status values: pending, running, succeeded, failed, cancelled, rolling_back.
 
   - id: get_environment_endpoints
-    label: Get Environment Endpoints
     handler_method: get_environment_endpoints
     api_surface: public_readonly
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        app_id:
+          type: string
+          minLength: 1
+      required: [app_id]
     permissions:
       - cloud_deployment.read
     description: >
@@ -50,9 +62,16 @@ actions:
       Provider-internal resource IDs are never returned.
 
   - id: get_deployment_health
-    label: Get Deployment Health
     handler_method: get_deployment_health
     api_surface: public_readonly
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        deployment_id:
+          type: string
+          minLength: 1
+      required: [deployment_id]
     permissions:
       - cloud_deployment.read
     description: >
@@ -60,7 +79,6 @@ actions:
       Provider-internal resource IDs and raw build logs are never returned.
 
   - id: request_rollback
-    label: Request Rollback
     handler_method: request_rollback
     api_surface: internal
     permissions:
