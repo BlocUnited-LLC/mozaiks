@@ -20,6 +20,10 @@ from mozaiksai.core.workflow.generator_support.design_access_policy import (
     resolve_design_access_policy,
 )
 from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    all_module_actions,
+    canonical_read_actions_for_surface,
+)
 from mozaiksai.core.workflow.generator_support.module_write_actions import (
     module_write_implementation_ownership,
 )
@@ -142,6 +146,35 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
         "Runtime truth remains build_tasks, owned_paths, structured outputs, and runtime loaders.",
         "The approved app_build_plan incorporates the latest interview decisions. Preserve its entity fields, optionality, ownership, actions, page routes, and exclusions. Older design documents and category defaults must not override it. Dependency outputs implement that plan, not a new product scope; report contradictions instead of silently copying them.",
     ]
+
+    if agent_name in {"AppPlanAgent", "ConfigMiddlewareAgent"}:
+        context = getattr(agent, "context_variables", None)
+        task = _context_get(context, "current_build_task", {}) or {}
+        module_id = str(task.get("capability_pack_id") or "")
+        inventory = all_module_actions(context)
+        surfaces = (_context_get(context, "design_surface_map", {}) or {}).get("surfaces") or []
+        for surface in surfaces:
+            surface_id = surface.get("surface_id")
+            if surface_id not in inventory or (agent_name == "ConfigMiddlewareAgent" and module_id and surface_id != module_id):
+                continue
+            lines.extend(_format_list_block(
+                f"Approved action ids for {surface_id}; this inventory overrides contradictory task prose:",
+                inventory[surface_id],
+            ))
+            reads = [action for action in canonical_read_actions_for_surface(surface, _context_get(context, "data_contract"))
+                     if action in inventory[surface_id]]
+            lines.extend(_format_list_block(
+                f"Exact canonical read ids for {surface_id}; preserve the collection name, including its plural spelling:",
+                reads,
+            ))
+        if inventory:
+            lines.append(
+                "Use only the listed action ids; do not infer alternate names from an entity or page, or keep obsolete spellings after a repair. "
+                "For app_wide collections with protected writes, declare every canonical read with its intended "
+                "permissions, api_surface, handler_method and input/output schemas; code does not infer read access. "
+                "Code constructs owner-scoped reads and ordinary unprotected app-wide reads. "
+                "These ids establish identity, not a permission or public-access grant."
+            )
 
     if agent_name == "AppPlanAgent":
         context = getattr(agent, "context_variables", None)

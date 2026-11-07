@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Module `contracts/fixtures.yaml` can declare bounded runtime-smoke inputs and
+  prerequisite action calls. The contained observer resolves real response IDs,
+  caller identity and relative dates while independently requiring successful
+  role-bearing execution and roleless denial with unchanged app storage.
 - Factory and auxiliary structured calls can explicitly select AG2 prompted
   output with `LLM_STRUCTURED_OUTPUT_MODE=prompted` when a provider cannot
   compile the native schema. Native remains the default; the same typed
@@ -333,6 +337,10 @@ This project follows a practical pre-1.0 changelog format:
   a candidate. The generated-UI Playwright configuration retries no test.
 
 ### Fixed
+
+- Generated module contracts receive exact canonical read ids and report missing
+  protected reads together with unapproved action names in one rejection,
+  preserving explicit access decisions during repair.
 
 - ServiceAgent emits Python source once through its typed output; code builds the
   assembly representation without asking the model to duplicate every file.

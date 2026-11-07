@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 _MODULE_CONTRACT_FILENAMES = {
     "admin.yaml",
     "events.yaml",
+    "fixtures.yaml",
     "notifications.yaml",
     "policy_hooks.yaml",
     "profile.yaml",
@@ -46,6 +47,7 @@ _MODULE_CONTRACT_FILENAMES = {
 _MODULE_CONTRACT_OUTPUT_PATHS = {
     "module_yaml": "module.yaml",
     "events_yaml": "contracts/events.yaml",
+    "fixtures_yaml": "contracts/fixtures.yaml",
     "reactions_yaml": "contracts/reactions.yaml",
     "notifications_yaml": "contracts/notifications.yaml",
     "policy_hooks_yaml": "contracts/policy_hooks.yaml",
@@ -511,6 +513,10 @@ def _materialize_module_contract_file_map(payload: dict[str, Any]) -> dict[str, 
                 for event in value.get("events") or []:
                     if isinstance(event.get("payload_schema"), dict):
                         event["payload_schema"] = _materialize_schema_contract(event["payload_schema"])
+            elif key == "fixtures_yaml":
+                from .module_smoke_fixtures import parse_module_smoke_fixtures
+
+                value = parse_module_smoke_fixtures(value).model_dump(exclude_none=True)
             elif key == "policy_hooks_yaml" and isinstance(value, dict):
                 for hook in value.get("hooks") or []:
                     for schema_key in ("input_schema", "output_schema"):

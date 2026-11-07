@@ -1,4 +1,4 @@
-"""Plan construction preserves approved actions without guessing read semantics."""
+"""Plan instructions project approved collection reads without inventing actions."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def _approved_plan(operations: list[str]) -> tuple[dict[str, Any], ContextVariab
     ["enumerate_visible_records", "publish_report"],
     [],
 ])
-def test_public_review_does_not_invent_read_semantics(operations):
+def test_public_review_projects_declared_collection_reads_without_promoting_plan_only_actions(operations):
     plan, context = _approved_plan(operations)
 
     result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
@@ -41,9 +41,10 @@ def test_public_review_does_not_invent_read_semantics(operations):
     cached = detach(context.get("app_build_plan"))
     assert cached["capability_packs"][0]["operations"] == operations
     contract = next(task for task in cached["build_tasks"] if task["task_type"] == "module_contract")
-    assert "list_reports" not in contract["initial_message"]
+    assert "`get_reports`, `list_reports`" in contract["initial_message"]
+    assert "Approved module action inventory (DesignDocs and data_contract):" in contract["initial_message"]
     for operation in operations:
-        assert f"`{operation}`" in contract["initial_message"]
+        assert f"`{operation}`" not in contract["initial_message"]
 
 
 @pytest.mark.parametrize("omit_capability", [False, True])
@@ -68,7 +69,8 @@ def test_approved_actions_reach_existing_or_constructed_capability(omit_capabili
     cached = detach(context.get("app_build_plan"))
     assert cached["capability_packs"][0]["operations"] == approved_operations
     contract = next(task for task in cached["build_tasks"] if task["task_type"] == "module_contract")
-    assert "list_reports" not in contract["initial_message"]
+    assert "`get_reports`" in contract["initial_message"]
+    assert "`list_reports`" in contract["initial_message"]
     assert all(f"`{operation}`" in contract["initial_message"] for operation in approved_operations)
     queued = detach(context.get("app_task_batch_items"))
     queued_contract = next(task for task in queued if task["task_type"] == "module_contract")

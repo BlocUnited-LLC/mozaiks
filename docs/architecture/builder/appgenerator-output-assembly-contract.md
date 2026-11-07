@@ -1,5 +1,25 @@
 # AppGenerator Output Assembly Contract
 
+## Runtime Smoke Fixture Ownership
+
+`ModuleContractBundle.fixtures_yaml` is the optional typed source for
+`modules/{module}/contracts/fixtures.yaml`. The module contract task reserves
+that companion path when domain prerequisites need explicit inputs; ordinary
+schema-driven CRUD does not require it. The file catalog, layout registry,
+carry-forward readers and preservation inventory use the same path. Raw
+companion files cannot substitute for typed output.
+
+Fixtures name exact actions and roles and supply bounded prerequisite calls
+and parameter bindings. They do not grant permissions, change approved domain
+requirements, define success criteria or introduce runtime services. Accepted
+module request/response schemas and compiled auth grants remain authoritative.
+Cross-module setup requires the relevant contract dependencies; full reference
+closure occurs against the assembled bundle before any observer action runs.
+The existing contained runtime observer consumes the file as declarative input
+and retains independent CRUD, role and storage checks. See
+[stateful action inputs](../app/generated-app-functional-acceptance.md#runtime-smoke-gate)
+for the supported bindings and evidence limits.
+
 ## Service Source Ownership
 
 ServiceAgent emits each Python file once in `ServiceOutput.python_files`.

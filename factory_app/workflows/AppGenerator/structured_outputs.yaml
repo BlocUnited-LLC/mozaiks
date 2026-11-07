@@ -3142,6 +3142,81 @@ models:
           questions to app-owned module actions; they do not define hosted
           governance, wallet, payout, billing, campaign, or revenue behavior.
 
+  SmokeFixtureParam:
+    type: model
+    fields:
+      field:
+        type: str
+        description: Exact top-level input field of the declared action. Each field appears once.
+      source:
+        type: literal
+        values: [literal, response, actor_subject, relative_date, relative_datetime, record]
+        description: Finite input source. Set only the matching source fields; all others are null.
+      value_json:
+        type: optional_str
+        description: For literal only, JSON-encoded input value, at most 4096 characters, 8 levels and 256 nodes. No code, nonfinite numbers or duplicate object keys.
+      step_id:
+        type: optional_str
+        description: For response only, exact id of an earlier setup call in this fixture. Forward references and cycles are forbidden.
+      response_path:
+        type: optional_list
+        items: str
+        description: For response only, 1 to 8 exact declared object property names from the setup action output, without a transport envelope, wildcards or expressions.
+      offset_days:
+        type: union
+        variants: [int, 'null']
+        description: For relative_date or relative_datetime only, explicit whole-day offset from the observer's fixed UTC clock, between -3650 and 3650.
+      record_field:
+        type: optional_str
+        description: For record only, a declared field from the observer's currently tested collection row. Target canonical get/update/delete only; never setup or arbitrary database access.
+  SmokeFixtureSetup:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Unique identifier for this setup response within the fixture.
+      module:
+        type: str
+        description: Exact declared module id; foreign-module prerequisites require explicit declared action references.
+      action:
+        type: str
+        description: Exact user-callable action id. Internal and admin_internal actions are forbidden.
+      roles:
+        type: list
+        items: str
+        description: Exact role ids from approved auth grants sufficient for this action. Each role must contribute a required permission; no unrelated or redundant roles. Empty for default-scope-only actions.
+      params:
+        type: list
+        items: SmokeFixtureParam
+        description: Complete required inputs and only declared input fields. At most 64 bindings. No record source in setup.
+  ModuleSmokeFixture:
+    type: model
+    fields:
+      action:
+        type: str
+        description: Exact target action id in this companion's owning module. One fixture per action.
+      roles:
+        type: list
+        items: str
+        description: Exact approved role subset for the target, without automatic role addition. Every role must uniquely contribute a required permission after default scopes.
+      setup:
+        type: list
+        items: SmokeFixtureSetup
+        description: At most 24 ordered public action calls creating valid prerequisites. Every setup call must succeed; it never satisfies independent target-action coverage.
+      params:
+        type: list
+        items: SmokeFixtureParam
+        description: Complete target inputs, at most 64. record references preserve the canonical CRUD row being independently checked.
+  ModuleSmokeFixtures:
+    type: model
+    fields:
+      schema_version:
+        type: literal
+        values: [mozaiks.module_smoke_fixtures.v1]
+      fixtures:
+        type: list
+        items: ModuleSmokeFixture
+        description: 1 to 64 bounded fixtures, at most 128 total setup calls and 128 KiB per module. Test inputs only; no expected status, skip, coverage, permission or acceptance-policy fields.
   ModuleContractBundle:
     type: model
     fields:
@@ -3151,6 +3226,12 @@ models:
       module_yaml:
         type: ModuleManifest
         description: module.yaml contract object.
+      fixtures_yaml:
+        type: union
+        variants:
+          - ModuleSmokeFixtures
+          - 'null'
+        description: Optional contracts/fixtures.yaml, only when this module's declared actions need valid prerequisites or specific input values for contained smoke. The observer owns coverage and outcomes. Use null when unneeded or unowned.
       events_yaml:
         type: union
         variants:

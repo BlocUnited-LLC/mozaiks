@@ -55,6 +55,22 @@ Generation admission can inspect the union of declared grants. Runtime smoke
 keeps that union out of ordinary users' token scopes and checks role-holder
 success and role-less denial through authenticated dispatch.
 
+### Canonical read declarations
+
+Canonical read ids use the exact collection name: `get_{collection_name}` and
+`list_{collection_name}`. The Factory projects these ids and the complete
+approved action inventory into planner and module-contract prompts. An
+authoritative task suffix overrides contradictory naming or construction
+advice in model-authored prose.
+
+App-wide collections with protected writes require explicit read declarations,
+including permissions, API surface, handler and request/response contracts.
+Code does not infer their access policy. A rejection lists all missing read
+declarations together with any unapproved action ids, so a repair can address
+both omissions and alternate spellings. Validation does not rename actions,
+delete extra declarations, or select permissions automatically. Owner-scoped
+reads and ordinary unprotected app-wide reads retain their existing construction.
+
 ## Collection reach
 
 Runtime persistence does not bind an app module to its own collections, so an
