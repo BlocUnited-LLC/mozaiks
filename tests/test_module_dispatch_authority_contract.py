@@ -262,3 +262,39 @@ async def test_supplied_context_receives_dispatch_authority() -> None:
     assert supplied_ctx.dispatch_authority.kind == "public_http"
     assert supplied_ctx.dispatch_provenance is not None
     assert supplied_ctx.dispatch_audit is not None
+
+
+class _TrustedLookAlike:
+    """Duck-typed authority a handler could fabricate; it must never count as trusted."""
+
+    kind = "framework_internal"
+    permission_mode = "trusted_bypass"
+
+
+@pytest.mark.asyncio
+async def test_trusted_dispatch_context_is_only_what_the_executor_supplied() -> None:
+    from types import SimpleNamespace
+
+    from mozaiksai.core.runtime.composition import is_trusted_dispatch_context
+    from mozaiksai.core.runtime.composition.module_context import ModuleContext
+
+    executor = _executor()
+    trusted_ctx = ModuleContext(app_id="app-1", module_id="orders", action_id="run")
+    enforced_ctx = ModuleContext(app_id="app-1", module_id="orders", action_id="public_ping")
+    await executor.execute(
+        ModuleRequest(module="orders", action="run", app_id="app-1", authority=trusted_framework_authority()),
+        context=trusted_ctx,
+    )
+    await executor.execute(
+        ModuleRequest(
+            module="orders", action="public_ping", app_id="app-1",
+            authority=enforce_authority(kind="public_http"),
+        ),
+        context=enforced_ctx,
+    )
+
+    assert is_trusted_dispatch_context(trusted_ctx) is True
+    assert is_trusted_dispatch_context(enforced_ctx) is False
+    assert is_trusted_dispatch_context(ModuleContext(app_id="app-1", module_id="orders", action_id="run")) is False
+    assert is_trusted_dispatch_context(SimpleNamespace(dispatch_authority=_TrustedLookAlike())) is False
+    assert is_trusted_dispatch_context(object()) is False
