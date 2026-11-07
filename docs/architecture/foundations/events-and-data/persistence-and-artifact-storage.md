@@ -63,6 +63,16 @@ Current implemented workflow-run persistence contract:
   - `last_artifact`
   - `pending_input_request`
   - `tool_calls`
+- The transport persists response-bearing UI calls in `workflow_ui_state.tool_calls`
+  before delivery, even before an assistant message exists. Their optional `message_index` links a
+  committed transcript turn; it is not a prerequisite for storing the pending
+  card. Reconnect replays pending calls independently of the transcript cursor,
+  preserving the original event ID and payload, including review IDs.
+- Pending-call and transcript replay suppress actionable cards for responded or
+  completed calls and terminal chats. This restores inline UI access to a response
+  waiter that remains live in the backend process; it does not recreate that
+  waiter after a backend restart. The separate `last_artifact` cache restoration
+  is not completion-aware and is outside this inline replay guarantee.
 - On startup, the runtime backfills pre-migration top-level workflow UI fields such as `last_artifact` and `pending_input_request` into `workflow_ui_state` and removes the old top-level fields. Runtime readers should not depend on those pre-migration top-level fields.
 - The current source of truth for this runtime contract is `mozaiksai/core/data/persistence/persistence_manager.py`, `mozaiksai/core/workflow/execution/run_bootstrap.py`, `mozaiksai/core/transport/run_replay.py`, `mozaiksai/hosts/runtime.py`, `mozaiksai/hosts/platform.py`, and the focused tests `tests/test_persistence_initial_messages.py`, `tests/test_orchestration_seed_persistence.py`, `tests/test_run_replay.py`, `tests/test_runtime_websocket_contract.py`, and `tests/test_platform_chat_meta_contract.py`.
 
