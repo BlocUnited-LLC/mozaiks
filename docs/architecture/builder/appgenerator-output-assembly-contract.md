@@ -784,9 +784,41 @@ omits it when no properties are required. The retired typed required-name list
 is rejected, including when it agrees with the flags; there is no precedence
 rule or compatibility normalization. Runtime JSON Schema maps retain their
 standard `required` lists, including schemas shipped in pack templates.
-Action/capability requests use the existing closed-contract importer: unknown
-keys are rejected, and
-unrepresentable nested/open request objects fail instead of being weakened.
+An object property declares a nonempty `properties` list; an object-array
+property declares a nonempty `items_properties` list. Each list contains
+`JsonSchemaLeafProperty` members: scalars or arrays of scalars, with no further
+object nesting. The root contract's array form uses the same terminal member
+list, while collection actions keep an object envelope. Member names are exact
+response keys, including fields produced by custom joins. Descriptions cannot
+substitute for declarations. Empty object rows, duplicate names, wrong-kind
+member lists and unsupported nesting fail module contract admission before
+pages or services consume the contract. Action schema diagnostics name all
+invalid actions in that module's candidate; the input candidate remains unchanged.
+
+`nullable: true` on an output property or terminal member admits JSON null;
+`required` independently controls whether the key must be present. String
+enums retain their declared values and admit null only when explicitly nullable.
+Action/capability requests retain the existing exact-type closed-contract
+profile: nullable unions are rejected, every object level has
+`additionalProperties: false`, and unknown keys fail validation. Event and
+policy-hook schemas use the same finite renderer with their existing validation
+boundaries. Native runtime JSON Schema and page binding validation are unchanged.
+
+Custom/joined service responses must return those declared fields and wire
+types. Their source remains `ServiceOutput.python_files`; optional local typing
+does not become another response authority. The code-owned `schemas.py` remains
+derived from storage records and write inputs, so custom responses must not
+invent imports from it. Page columns and fixture response paths resolve against
+the admitted native schema, never service source or descriptive text.
+
+The canonical read compiler also projects ServiceAgent's read implementation
+ownership from the admitted module contract and approved data contract. Service
+prompts list exact code-owned and authored read actions; canonical list/get names
+and empty permissions do not imply a generated implementation. Shared app-wide
+collections with protected actions retain their explicitly declared read
+implementation, while ordinary scoped reads remain rendered. The static file
+contract defers read/write implementation ownership to these projections; final
+module implementation validation still rejects missing authored handlers.
 
 Workflow/module/page contracts use `.yaml`. Browser manifests, app identity,
 data contracts, migrations, and tooling manifests retain their canonical `.json`

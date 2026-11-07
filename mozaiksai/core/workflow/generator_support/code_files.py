@@ -431,6 +431,78 @@ def materialize_collection_auth(
     return {**files, "app.json": json.dumps(manifest, indent=2, ensure_ascii=False)}
 
 
+def _schema_members(properties: Any, *, closed_request: bool, leaf: bool) -> dict[str, Any]:
+    if not isinstance(properties, list):
+        raise ValueError("Schema contract properties must be a finite typed list")
+    rendered: dict[str, Any] = {"type": "object", "properties": {}}
+    if closed_request:
+        rendered["additionalProperties"] = False
+    required: list[str] = []
+    for prop in properties:
+        if not isinstance(prop, dict):
+            raise ValueError("Schema contract properties must be typed objects")
+        name = prop.get("name")
+        if not isinstance(name, str) or not name or name in rendered["properties"]:
+            raise ValueError("Schema contract property names must be nonempty and unique")
+        rendered["properties"][name] = _schema_property(prop, closed_request=closed_request, leaf=leaf)
+        if prop.get("required") is True:
+            required.append(name)
+    if required:
+        rendered["required"] = required
+    return rendered
+
+
+def _schema_property(prop: dict[str, Any], *, closed_request: bool, leaf: bool) -> dict[str, Any]:
+    allowed = {"name", "type", "description", "required", "enum_values", "items_type", "nullable"}
+    if not leaf:
+        allowed.update({"properties", "items_properties"})
+    unexpected = set(prop) - allowed
+    if unexpected:
+        raise ValueError(f"Unsupported {'terminal ' if leaf else ''}schema property fields: {sorted(unexpected)!r}")
+    kind = prop.get("type")
+    scalar_types = {"string", "integer", "number", "boolean", "null"}
+    if not isinstance(kind, str) or kind not in scalar_types | {"array", "object"} or (leaf and kind == "object"):
+        raise ValueError("Schema property requires a supported finite type; terminal members cannot contain objects")
+    nullable = prop.get("nullable", False)
+    if type(nullable) is not bool or (nullable and (closed_request or kind == "null")):
+        raise ValueError("Nullable schema properties are supported only for non-null output types; closed requests require false")
+    if "required" in prop and type(prop["required"]) is not bool:
+        raise ValueError("Schema property required must be a boolean")
+    properties = prop.get("properties")
+    items_properties = prop.get("items_properties")
+    items_type = prop.get("items_type")
+    if kind != "object" and properties is not None:
+        raise ValueError("Only object properties may declare properties")
+    if kind != "array" and (items_type is not None or items_properties is not None):
+        raise ValueError("Only array properties may declare items_type or items_properties")
+    rendered: dict[str, Any] = {"type": kind}
+    if kind == "object":
+        if not properties:
+            raise ValueError("Object properties require nonempty declared terminal properties; descriptions do not declare fields")
+        rendered = _schema_members(properties, closed_request=closed_request, leaf=True)
+    elif kind == "array":
+        if items_type == "object" and not leaf:
+            if not items_properties:
+                raise ValueError("Object-array items require nonempty items_properties; declare exact row fields before page generation")
+            rendered["items"] = _schema_members(items_properties, closed_request=closed_request, leaf=True)
+        elif isinstance(items_type, str) and items_type in scalar_types:
+            if items_properties is not None:
+                raise ValueError("Only object-array items may declare items_properties")
+            rendered["items"] = {"type": items_type}
+        else:
+            raise ValueError("Array items require a supported scalar type or declared terminal object members")
+    if nullable:
+        rendered["type"] = [kind, "null"]
+    enum_values = prop.get("enum_values")
+    if enum_values:
+        if kind != "string" or not isinstance(enum_values, list) or any(type(value) is not str for value in enum_values):
+            raise ValueError("enum_values must be a finite list of strings on a string property")
+        rendered["enum"] = [*enum_values, *([None] if nullable else [])]
+    if not closed_request and prop.get("description") is not None:
+        rendered["description"] = prop["description"]
+    return rendered
+
+
 def _materialize_schema_contract(schema: dict[str, Any], *, closed_request: bool = False) -> dict[str, Any]:
     """Compile the finite generator schema into the runtime's JSON Schema shape."""
     if "items_type" not in schema and not isinstance(schema.get("properties"), list):
@@ -440,35 +512,24 @@ def _materialize_schema_contract(schema: dict[str, Any], *, closed_request: bool
             "Typed schema contracts must not declare a top-level required list; "
             "set each property's required flag instead"
         )
+    unexpected = set(schema) - {"type", "description", "properties", "items_type", "items_properties"}
+    if unexpected:
+        raise ValueError(f"Unsupported typed schema contract fields: {sorted(unexpected)!r}")
     result: dict[str, Any] = {"type": schema["type"]}
     if not closed_request and schema.get("description") is not None:
         result["description"] = schema["description"]
-    if schema["type"] == "array" and schema.get("items_type") is not None:
-        result["items"] = {"type": schema["items_type"]}
     properties = schema.get("properties") or []
     if schema["type"] != "object" and properties:
         raise ValueError("Only object schema contracts may declare properties")
+    if schema["type"] == "array":
+        result = _schema_property({
+            "name": "items", "type": "array", "description": schema.get("description"),
+            "items_type": schema.get("items_type"), "items_properties": schema.get("items_properties"),
+        }, closed_request=closed_request, leaf=False)
+    elif schema.get("items_type") is not None or schema.get("items_properties") is not None:
+        raise ValueError("Only array schema contracts may declare items_type or items_properties")
     if schema["type"] == "object":
-        result["properties"] = {}
-        if closed_request:
-            result["additionalProperties"] = False
-        required_names: list[str] = []
-        for prop in properties:
-            name = prop["name"]
-            if not name or name in result["properties"]:
-                raise ValueError("Schema contract property names must be nonempty and unique")
-            rendered = {"type": prop["type"]}
-            if not closed_request and prop.get("description") is not None:
-                rendered["description"] = prop["description"]
-            if prop.get("enum_values"):
-                rendered["enum"] = prop["enum_values"]
-            if prop["type"] == "array" and prop.get("items_type") is not None:
-                rendered["items"] = {"type": prop["items_type"]}
-            result["properties"][name] = rendered
-            if prop.get("required") is True:
-                required_names.append(name)
-        if required_names:
-            result["required"] = required_names
+        result.update(_schema_members(properties, closed_request=closed_request, leaf=False))
     try:
         Draft7Validator.check_schema(result)
     except SchemaError as exc:
@@ -496,14 +557,20 @@ def _materialize_module_contract_file_map(payload: dict[str, Any]) -> dict[str, 
         if isinstance(value, (dict, list)):
             value = deepcopy(value)
             if key == "module_yaml" and isinstance(value, dict):
+                schema_errors: list[str] = []
                 for action in value.get("actions") or []:
                     if "timeout_seconds" in action:
                         validate_action_timeout(action["timeout_seconds"])
                     for schema_key in ("input_schema", "output_schema"):
                         if isinstance(action.get(schema_key), dict):
-                            action[schema_key] = _materialize_schema_contract(
-                                action[schema_key], closed_request=schema_key == "input_schema",
-                            )
+                            try:
+                                action[schema_key] = _materialize_schema_contract(
+                                    action[schema_key], closed_request=schema_key == "input_schema",
+                                )
+                            except ValueError as exc:
+                                schema_errors.append(f"{module_id}/{action.get('id', '<unnamed>')}.{schema_key}: {exc}")
+                if schema_errors:
+                    raise ValueError("Invalid module action schemas: " + "; ".join(schema_errors))
                 for capability in value.get("capabilities") or []:
                     if isinstance(capability.get("input_schema"), dict):
                         capability["input_schema"] = _materialize_schema_contract(

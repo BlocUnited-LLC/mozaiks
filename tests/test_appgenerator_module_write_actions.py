@@ -866,7 +866,9 @@ async def test_task_batch_builds_writes_from_empty_model_output_and_keeps_shared
               "input_schema": {"type": "object", "properties": [
                   {"name": "task_id", "type": "string", "required": True, "description": None, "enum_values": None, "items_type": None}]},
               "output_schema": {"type": "object", "properties": [
-                  {"name": "item", "type": "object", "required": True, "description": None, "enum_values": None, "items_type": None}]}}
+                  {"name": "item", "type": "object", "required": True, "description": None, "enum_values": None, "items_type": None,
+                   "properties": [{"name": "task_id", "type": "string", "required": True,
+                                   "description": None, "enum_values": None, "items_type": None}]}]}}
     authored = {
         f"{BACKEND}/handler.py": (
             "class TaskManagementHandler:\n"

@@ -223,9 +223,29 @@ There is no expression evaluator, arbitrary code, wildcard lookup, inferred
 foreign key, or fixture-side database seeding. Setup uses the real HTTP action
 boundary and must return 2xx. Resolved target inputs are validated again before
 dispatch; unavailable or wrong-type response fields fail the fixture rather
-than becoming synthetic IDs. CRUD fixtures cannot substitute a different
-target record, and update fixtures must make an observable declared-field change
-when the action has such a field. Internal canonical reads remain explicitly
+than becoming synthetic IDs. Canonical get/update/delete fixtures must bind
+their target to the observer's actual `record`. Update and delete use the
+collection's canonical record ID field. Get binds its authored request key to
+the collection's canonical read lookup field (`search_by`, otherwise a declared
+`id` field, otherwise `_id`). Setup-response IDs, literals and caller identity
+cannot replace these record bindings. This identity check runs during module
+contract admission, before service generation; full cross-module and role
+closure still runs against the assembled bundle.
+
+The observer honors authored get request keys and list parameters without
+changing the app's API. Fixture reads preserve the stored lookup's declared
+type, including numeric and boolean keys. A missing-row probe must fit the
+request schema and be absent from the actual canonical collection. If no such
+probe can be established, its check fails explicitly. These inputs never
+replace the checks that A reads the created row and B cannot read or list it.
+Read fixtures with declared number, boolean or structured parameters use the
+existing JSON POST action route; strings and integers supported by the
+existing bounded GET decoder retain GET. The method is selected before
+dispatch, with no fallback after a failed response. This
+proves the selected module action transport, not GET query coercion for every
+JSON type.
+Update fixtures must make an observable declared-field change when the action
+has such a field. Internal canonical reads remain explicitly
 `not_run` on the user HTTP surface; this does not prove their business behavior.
 
 The source-free observer receives only the allowlisted declarative fixture and

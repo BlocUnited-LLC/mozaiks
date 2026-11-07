@@ -18,6 +18,7 @@ from mozaiksai.core.runtime.app.layout_registry import (
 from mozaiksai.core.workflow.generator_support.code_files import extract_code_file_map_from_payload
 from mozaiksai.core.workflow.generator_support.module_smoke_fixtures import (
     SCHEMA_VERSION,
+    fixture_record_identity,
     load_module_smoke_fixtures,
     parse_module_smoke_fixtures,
     resolve_fixture_params,
@@ -487,3 +488,131 @@ def test_deep_json_literal_has_a_validation_failure_not_parser_recursion():
     fixture["setup"][0]["params"][0]["value_json"] = "[" * 1500 + "0" + "]" * 1500
     with pytest.raises(ValueError, match="literal exceeds (depth or node bounds|the JSON nesting bound)"):
         parse_module_smoke_fixtures({"schema_version": SCHEMA_VERSION, "fixtures": [fixture]})
+
+
+@pytest.mark.parametrize("source", ["literal", "response", "actor_subject"])
+def test_canonical_update_rejects_substitute_record_identity(source):
+    fixture = _fixture()
+    fixture.update(action="update_borrow_request", roles=["member"])
+    identity = (_literal("borrow_request_id", "another-row") if source == "literal" else
+                _response("borrow_request_id", "request", ["borrow_request_id"]) if source == "response" else
+                {"field": "borrow_request_id", "source": "actor_subject"})
+    fixture["params"] = [identity, _literal("reason", "Changed reason")]
+    with pytest.raises(ValueError, match="update_borrow_request.*borrow_request_id.*source=record"):
+        load_module_smoke_fixtures(_files(fixture))
+
+
+def test_authored_get_identity_uses_declared_input_and_natural_lookup_field():
+    collection = {"name": "borrow_requests", "entity": "BorrowRequest", "search_by": "reason",
+                  "fields": [{"name": "borrow_request_id", "type": "string"},
+                             {"name": "reason", "type": "string"}]}
+    assert fixture_record_identity(None, collection=collection, operation="get") == ("id", "reason")
+    assert fixture_record_identity(None, collection=collection, operation="delete") == (
+        "borrow_request_id", "borrow_request_id")
+    fixture = _fixture()
+    fixture.update(action="get_borrow_requests", roles=["reader"], setup=[], params=[
+        {"field": "lookup", "source": "record", "record_field": "reason"}])
+    files = _files(fixture)
+    data = json.loads(files["data/contract.json"])
+    data["surfaces"][0]["collections"][0] = collection
+    files["data/contract.json"] = json.dumps(data)
+    path = "modules/borrowing/module.yaml"
+    module = yaml.safe_load(files[path])
+    module["actions"].append(_action("get_borrow_requests", "requests.read", _schema(lookup="string"),
+                                     _schema(borrow_request_id="string")))
+    files[path] = yaml.safe_dump(module)
+    bound = load_module_smoke_fixtures(files)["borrowing", "get_borrow_requests"]
+    assert fixture_record_identity(bound, collection=collection, operation="get") == ("lookup", "reason")
+    for params in ([_literal("lookup", "substitute")], [
+        {"field": "lookup", "source": "record", "record_field": "borrow_request_id"}]):
+        document = bound.model_dump(exclude_none=True)
+        document["params"] = params
+        parsed = parse_module_smoke_fixtures({"schema_version": SCHEMA_VERSION, "fixtures": [document]})
+        with pytest.raises(ValueError, match="get_borrow_requests.*source=record.*reason"):
+            fixture_record_identity(parsed.fixtures[0], collection=collection, operation="get")
+
+
+@pytest.mark.parametrize("operation", ["update", "delete"])
+def test_module_action_closure_rejects_substitute_fixture_target(operation):
+    from mozaiksai.core.workflow.generator_support.module_write_actions import close_module_actions
+    from tests.test_generated_role_grants import _arguments, _closed
+
+    payload = _closed()
+    fixture = {"action": f"{operation}_task", "roles": ["coordinator"],
+               "setup": [{"id": "created", "module": "task_management", "action": "create_task",
+                          "roles": ["coordinator"], "params": [_literal("title", "Another task")]}],
+               "params": [_response("task_id", "created", ["item", "task_id"])]}
+    payload["module_contract"]["fixtures_yaml"] = {"schema_version": SCHEMA_VERSION, "fixtures": [fixture]}
+    before = deepcopy(payload)
+    with pytest.raises(ValueError, match=f"task_management.*{operation}_task.*task_id.*source=record"):
+        close_module_actions(payload, **_arguments())
+    assert payload == before
+
+
+def test_module_action_closure_preserves_authored_get_input_with_record_lookup():
+    from mozaiksai.core.workflow.generator_support.module_write_actions import close_module_actions
+    from tests.test_generated_role_grants import _arguments, _closed
+
+    payload = _closed()
+    action = next(action for action in payload["module_contract"]["module_yaml"]["actions"]
+                  if action["id"] == "get_tasks")
+    action["input_schema"] = _schema(lookup="string")
+    fixture = {"action": "get_tasks", "roles": [], "setup": [], "params": [
+        {"field": "lookup", "source": "record", "record_field": "task_id"}]}
+    payload["module_contract"]["fixtures_yaml"] = {"schema_version": SCHEMA_VERSION, "fixtures": [fixture]}
+    result = close_module_actions(payload, **_arguments())
+    actual = next(action for action in result["module_contract"]["module_yaml"]["actions"]
+                  if action["id"] == "get_tasks")
+    assert actual["input_schema"] == _schema(lookup="string")
+    assert result["module_contract"]["fixtures_yaml"]["fixtures"] == [fixture]
+
+
+@pytest.mark.parametrize("operation", ["get", "update", "delete"])
+@pytest.mark.parametrize("declared_id_type", [None, "integer"])
+def test_generated_mongo_id_fallback_is_an_allowed_observed_record_field(operation, declared_id_type):
+    action = "get_borrow_requests" if operation == "get" else f"{operation}_borrow_request"
+    input_field = "lookup" if operation == "get" else "_id"
+    fixture = {"action": action, "roles": ["reader" if operation == "get" else "member"],
+               "setup": [], "params": [{"field": input_field, "source": "record", "record_field": "_id"}]}
+    inputs = {input_field: "string"}
+    if operation == "update":
+        inputs["reason"] = "string"
+        fixture["params"].append(_literal("reason", "Changed reason"))
+    files = _files(fixture)
+    data = json.loads(files["data/contract.json"])
+    collection = data["surfaces"][0]["collections"][0]
+    collection["fields"] = [{"name": "reason", "type": "string"}]
+    if declared_id_type is not None:
+        collection["fields"].append({"name": "_id", "type": declared_id_type})
+    files["data/contract.json"] = json.dumps(data)
+    path = "modules/borrowing/module.yaml"
+    module = yaml.safe_load(files[path])
+    module["actions"] = [item for item in module["actions"] if item["id"] != action]
+    module["actions"].append(_action(action, "requests.read" if operation == "get" else "requests.update",
+                                     _schema(**inputs), _schema(_id="string")))
+    files[path] = yaml.safe_dump(module)
+    bound = load_module_smoke_fixtures(files)["borrowing", action]
+    assert fixture_record_identity(bound, collection=collection, operation=operation) == (input_field, "_id")
+    assert fixture_record_identity(None, collection=collection, operation=operation) == (
+        "id" if operation == "get" else "_id", "_id")
+    params = resolve_fixture_params(bound.params, responses={}, actor_subject="subject-a",
+                                    record={"_id": "observed-row", "reason": "Before"},
+                                    now=datetime(2026, 11, 7, tzinfo=UTC))
+    assert params[input_field] == "observed-row"
+
+
+def test_generated_mongo_id_is_not_added_when_canonical_helpers_select_declared_fields():
+    fixture = {"action": "get_borrow_requests", "roles": ["reader"], "setup": [], "params": [
+        {"field": "lookup", "source": "record", "record_field": "reason"},
+        {"field": "extra", "source": "record", "record_field": "_id"}]}
+    files = _files(fixture)
+    data = json.loads(files["data/contract.json"])
+    data["surfaces"][0]["collections"][0]["search_by"] = "reason"
+    files["data/contract.json"] = json.dumps(data)
+    path = "modules/borrowing/module.yaml"
+    module = yaml.safe_load(files[path])
+    module["actions"].append(_action("get_borrow_requests", "requests.read", _schema(lookup="string", extra="string"),
+                                     _schema(borrow_request_id="string")))
+    files[path] = yaml.safe_dump(module)
+    with pytest.raises(ValueError, match="record source requires a declared field"):
+        load_module_smoke_fixtures(files)

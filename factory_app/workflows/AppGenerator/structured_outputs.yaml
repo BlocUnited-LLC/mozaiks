@@ -2222,6 +2222,65 @@ models:
         type: str
         description: Human-readable permission purpose.
 
+  JsonSchemaScalarType:
+    type: literal
+    values:
+    - string
+    - integer
+    - number
+    - boolean
+    - 'null'
+
+  JsonSchemaArrayItemType:
+    type: literal
+    values:
+    - string
+    - integer
+    - number
+    - boolean
+    - object
+    - 'null'
+
+  JsonSchemaLeafProperty:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Exact terminal object member name returned by the action.
+      type:
+        type: literal
+        values:
+        - string
+        - integer
+        - number
+        - boolean
+        - array
+        - 'null'
+        description: Terminal scalar or scalar-array type; nested object members are not supported.
+      description:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional member description; descriptions never declare fields.
+      required:
+        type: bool
+        description: Whether this member must be present; independent of nullability.
+      enum_values:
+        type: optional_list
+        items: str
+        description: Optional finite string values for a string member.
+      items_type:
+        type: union
+        variants:
+        - JsonSchemaScalarType
+        - 'null'
+        description: Exact scalar item type for an array member; null otherwise.
+      nullable:
+        type: bool
+        default: false
+        description: Permit JSON null in an output member. Closed action/capability requests require false.
+
   JsonSchemaProperty:
     type: model
     fields:
@@ -2255,9 +2314,21 @@ models:
       items_type:
         type: union
         variants:
-        - str
+        - JsonSchemaArrayItemType
         - 'null'
-        description: Array item type when type=array.
+        description: Exact array item type when type=array; null otherwise. Object items require items_properties.
+      properties:
+        type: optional_list
+        items: JsonSchemaLeafProperty
+        description: Exact terminal members for type=object; required and nonempty for an object property, null otherwise.
+      items_properties:
+        type: optional_list
+        items: JsonSchemaLeafProperty
+        description: Exact terminal row members for type=array with items_type=object; required and nonempty for object rows, null otherwise.
+      nullable:
+        type: bool
+        default: false
+        description: Permit JSON null in an output property. Closed action/capability requests require false.
 
   JsonSchemaContract:
     type: model
@@ -2286,9 +2357,13 @@ models:
       items_type:
         type: union
         variants:
-        - str
+        - JsonSchemaArrayItemType
         - 'null'
-        description: Array item type when type=array.
+        description: Exact array item type when type=array; null otherwise.
+      items_properties:
+        type: optional_list
+        items: JsonSchemaLeafProperty
+        description: Exact terminal members for top-level object-array items. Collection actions still return an object envelope with a named array property.
 
   ModuleApiSurface:
     type: literal

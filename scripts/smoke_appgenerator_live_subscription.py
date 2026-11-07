@@ -209,8 +209,8 @@ def _module_contract_task() -> dict[str, Any]:
             Module id: reports.
             Module handler: backend.handler:ReportsModule.
             Actions:
-            - list_reports: handler_method list_reports, explicit permissions [], api_surface null. Declare output_schema properties named items (array, items_type object) and total (integer); mark both required. Do not declare nested item properties.
-            - get_reports: handler_method get_reports, explicit permissions [], api_surface null, input id, output item.
+            - list_reports: handler_method list_reports, explicit permissions [], api_surface null. Declare output_schema properties named items (array, items_type object) and total (integer); mark both required. Declare items_properties with required string fields report_id, topic, status.
+            - get_reports: handler_method get_reports, explicit permissions [], api_surface null, input id, output item with required string properties report_id, topic, status.
             - generate_report: handler_method generate_report, input_schema property topic (required string), output_schema properties report_id and topic (strings).
             Capabilities:
             - reports.view grants list_reports.
@@ -567,6 +567,11 @@ def deterministic_module_contract_output() -> dict[str, Any]:
                   type: array
                   items:
                     type: object
+                    properties:
+                      report_id: {type: string}
+                      topic: {type: string}
+                      status: {type: string}
+                    required: [report_id, topic, status]
                 total:
                   type: integer
           - id: generate_report
@@ -610,6 +615,9 @@ def deterministic_module_contract_output() -> dict[str, Any]:
         "output_schema": {"type": "object", "properties": [{
             "name": "item", "type": "object", "required": True,
             "description": None, "enum_values": None, "items_type": None,
+            "properties": [{"name": name, "type": "string", "required": True,
+                            "description": None, "enum_values": None, "items_type": None}
+                           for name in ("report_id", "topic", "status")],
         }], "description": None, "items_type": None},
     })
     module_yaml = _yaml_text(module)

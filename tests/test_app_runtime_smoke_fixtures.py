@@ -86,6 +86,146 @@ async def approve_task(ctx, task_id, expected_owner, review_date):
     return files
 
 
+def authored_read_fixture_bundle(lookup_field="task_id"):
+    files = fixture_bundle()
+    contract = json.loads(files["data/contract.json"])
+    surface = next(item for item in contract["surfaces"] if item["surface_id"] == "task_management")
+    surface["collections"][0]["search_by"] = lookup_field
+    files["data/contract.json"] = json.dumps(contract)
+    module = yaml.safe_load(files[MODULE_YAML])
+    for action in module["actions"]:
+        if action["id"] == "get_tasks":
+            action["input_schema"] = {
+                "type": "object", "additionalProperties": False,
+                "properties": {"lookup": {"type": "string"}}, "required": ["lookup"],
+            }
+        elif action["id"] == "list_tasks":
+            action["input_schema"]["properties"]["proof_filter"] = {"type": "string", "enum": ["all"]}
+            action["input_schema"].setdefault("required", []).append("proof_filter")
+    files[MODULE_YAML] = yaml.safe_dump(module)
+    handler = "modules/task_management/backend/handler.py"
+    files[handler] = files[handler].replace("get_tasks(self, ctx, *, id)", "get_tasks(self, ctx, *, lookup)")
+    files[handler] = files[handler].replace("service.get_tasks(ctx, id=id)", "service.get_tasks(ctx, id=lookup)")
+    for filename in (handler, "modules/task_management/backend/service.py"):
+        files[filename] = files[filename].replace(
+            "list_tasks(self, ctx, *, page=", "list_tasks(self, ctx, *, proof_filter, page=",
+        ).replace("list_tasks(ctx, *, page=", "list_tasks(ctx, *, proof_filter, page=")
+    files[handler] = files[handler].replace(
+        "service.list_tasks(ctx, page=", "service.list_tasks(ctx, proof_filter=proof_filter, page=",
+    )
+    repo = "modules/task_management/backend/repo.py"
+    files[repo] = files[repo].replace("filters = {'task_id': id}", f"filters = {{{lookup_field!r}: id}}", 1)
+    document = yaml.safe_load(files[FIXTURE_PATH])
+    document["fixtures"].extend([
+        {"action": "get_tasks", "roles": [], "setup": [],
+         "params": [{"field": "lookup", "source": "record", "record_field": lookup_field}]},
+        {"action": "list_tasks", "roles": [], "setup": [], "params": [literal("proof_filter", "all")]},
+    ])
+    files[FIXTURE_PATH] = yaml.safe_dump(document)
+    return files
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lookup_field", ["task_id", "title"])
+async def test_read_fixtures_preserve_authored_inputs_actual_row_and_isolation(mongo, lookup_field):
+    result = await _smoke(authored_read_fixture_bundle(lookup_field), mongo.uri)
+    assert result["passed"] is True, result["failed_tests"]
+    checks = _by_check(result)
+    for name in ("a_get", "get_missing", "b_get_isolated", "a_list", "b_list_isolated"):
+        assert checks[f"crud.task_management.tasks.{name}"]["status"] == "passed"
+
+
+def typed_authored_read_fixture_bundle(kind, initial, changed, *, enum=None):
+    files = authored_read_fixture_bundle("title")
+    contract = json.loads(files["data/contract.json"])
+    collection = next(surface for surface in contract["surfaces"]
+                      if surface["surface_id"] == "task_management")["collections"][0]
+    title = next(field for field in collection["fields"] if field["name"] == "title")
+    title.update(type=kind, enum=enum)
+    files["data/contract.json"] = json.dumps(contract)
+    module = yaml.safe_load(files[MODULE_YAML])
+
+    def replace_title_schema(value):
+        if isinstance(value, dict):
+            properties = value.get("properties", {})
+            if "title" in properties:
+                properties["title"] = {"type": kind, **({"enum": enum} if enum else {})}
+            for child in value.values():
+                replace_title_schema(child)
+        elif isinstance(value, list):
+            for child in value:
+                replace_title_schema(child)
+
+    replace_title_schema(module)
+    get = next(action for action in module["actions"] if action["id"] == "get_tasks")
+    get["input_schema"]["properties"]["lookup"] = {"type": kind, **({"enum": enum} if enum else {})}
+    permission = "tasks.typed_read"
+    get["permissions"] = [permission]
+    module["permissions"].append({"id": permission, "description": "Read one task by its typed lookup."})
+    files[MODULE_YAML] = yaml.safe_dump(module)
+    auth = yaml.safe_load(files["config/auth.yaml"])
+    auth["authorization"]["roles"].append({"id": "lookup_reader", "permissions": [permission]})
+    files["config/auth.yaml"] = yaml.safe_dump(auth)
+    events_path = "modules/task_management/contracts/events.yaml"
+    events = yaml.safe_load(files[events_path])
+    replace_title_schema(events)
+    files[events_path] = yaml.safe_dump(events)
+    fixtures = yaml.safe_load(files[FIXTURE_PATH])
+    for fixture in fixtures["fixtures"]:
+        if fixture["action"] == "get_tasks":
+            fixture["roles"] = ["lookup_reader"]
+        for params in [fixture["params"], *[step["params"] for step in fixture["setup"]]]:
+            for binding in params:
+                if binding["field"] == "title":
+                    binding["value_json"] = json.dumps(changed if fixture["action"] == "update_task" else initial)
+        if fixture["action"] == "update_task" and enum:
+            fixture["params"] = [record("task_id"), literal("status", "completed")]
+    files[FIXTURE_PATH] = yaml.safe_dump(fixtures)
+    return files
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind,initial,changed", [("integer", 0, 3), ("number", 0.0, 3.5),
+                                                  ("boolean", False, True)])
+async def test_authored_get_keeps_typed_zero_and_false_lookup_values(mongo, kind, initial, changed):
+    result = await _smoke(typed_authored_read_fixture_bundle(kind, initial, changed), mongo.uri)
+    assert result["passed"] is True, result["failed_tests"]
+    checks = _by_check(result)
+    for name in ("a_get", "get_missing", "b_get_isolated"):
+        assert checks[f"crud.task_management.tasks.{name}"]["status"] == "passed"
+    expected_method = "GET" if kind == "integer" else "POST"
+    for check in ("holder_allowed", "non_holder_denied"):
+        proof = checks[f"role.task_management.get_tasks.{check}"]
+        assert proof["status"] == "passed" and proof["details"]["method"] == expected_method
+    assert checks["role.task_management.get_tasks.non_holder_denied"]["details"]["records_unchanged"] is True
+
+
+@pytest.mark.asyncio
+async def test_missing_lookup_proof_fails_when_all_schema_valid_values_exist(mongo):
+    files = typed_authored_read_fixture_bundle("boolean", False, False, enum=[False])
+    result = await _smoke(files, mongo.uri)
+    assert result["passed"] is False
+    checks = _by_check(result)
+    missing = checks["crud.task_management.tasks.get_missing"]
+    assert missing["status"] == "failed"
+    assert "missing-record proof is incomplete: no schema-valid absent lookup value" in missing["message"]
+    assert checks["crud.task_management.tasks.a_get"]["status"] == "passed"
+
+
+@pytest.mark.asyncio
+async def test_authored_get_fixture_does_not_hide_leaked_record(mongo):
+    files = authored_read_fixture_bundle()
+    repo = "modules/task_management/backend/repo.py"
+    files[repo] = files[repo].replace(
+        "record = await collection.find_one(filters)",
+        "record = await collection._collection.find_one(filters)",
+    )
+    result = await _smoke(files, mongo.uri)
+    assert result["passed"] is False
+    check = _by_check(result)["crud.task_management.tasks.b_get_isolated"]
+    assert check["status"] == "failed" and "returned user A's record" in check["message"]
+
+
 def test_observer_copies_only_declarative_fixture_input_and_loads_actual_bytes(tmp_path):
     root, probe = tmp_path / "app", tmp_path / "probe"
     _write_files_to_dir(root, fixture_bundle())

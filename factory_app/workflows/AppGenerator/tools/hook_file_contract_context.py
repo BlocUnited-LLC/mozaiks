@@ -24,6 +24,9 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     all_module_actions,
     canonical_read_actions_for_surface,
 )
+from mozaiksai.core.workflow.generator_support.module_read_actions import (
+    module_read_implementation_ownership,
+)
 from mozaiksai.core.workflow.generator_support.module_write_actions import (
     module_write_implementation_ownership,
 )
@@ -261,6 +264,21 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
             if module and (module.get("module") or {}).get("id") != module_id:
                 raise ValueError(f"Write ownership context does not belong to module {module_id!r}")
         if module_id and module:
+            read_ownership = module_read_implementation_ownership(
+                module_id, module, app_build_plan=_context_get(context, "app_build_plan"),
+                data_contract=_context_get(context, "data_contract"),
+                subscription_contract=_context_get(context, "subscription_contract"),
+            )
+            lines.extend(_format_list_block(
+                "Code-owned read methods; omit their handler/service/repo bodies:",
+                read_ownership["code_owned"],
+            ))
+            lines.extend(_format_list_block(
+                "Authored read actions; implement each accepted handler_method, service and repo body in "
+                "owned_paths, preserving its input/output schema and access policy. These reads are not "
+                "rendered, even when permissions is empty and api_surface is null:",
+                read_ownership["authored"],
+            ))
             ownership = module_write_implementation_ownership(
                 module_id, module, app_build_plan=_context_get(context, "app_build_plan"),
                 data_contract=_context_get(context, "data_contract"),

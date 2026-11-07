@@ -18,6 +18,7 @@ from mozaiksai.core.runtime.app.auth_contract import AppAuthContract
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
 
+from .data_contract_fields import read_lookup_field, record_id_field
 from .module_action_inventory import canonical_read_action_id, canonical_write_action_id
 
 SCHEMA_VERSION = "mozaiks.module_smoke_fixtures.v1"
@@ -231,8 +232,40 @@ def _action(modules: Mapping[str, Mapping[str, Any]], module: str, action: str) 
     return result
 
 
-def _record_fields(data_contract: Any) -> dict[tuple[str, str], dict[str, dict[str, Any]]]:
-    result = {}
+def fixture_record_identity(
+    fixture: ModuleSmokeFixture | None, *, collection: Mapping[str, Any],
+    operation: Literal["get", "update", "delete"],
+) -> tuple[str, str]:
+    """Return the declared input and stored field that identify the observed row."""
+    if operation not in {"get", "update", "delete"}:
+        raise ValueError("smoke fixture record identity requires get, update, or delete")
+    stored_field = (read_lookup_field(collection) if operation == "get" else
+                    record_id_field(collection, [field["name"] for field in collection.get("fields") or []]))
+    input_field = "id" if operation == "get" else stored_field
+    if fixture is None:
+        return input_field, stored_field
+    if operation == "get":
+        matches = [binding for binding in fixture.params
+                   if binding.source == "record" and binding.record_field == stored_field]
+        if len(matches) != 1:
+            raise ValueError(
+                f"smoke fixture {fixture.action!r} requires exactly one declared input bound with "
+                f"source=record and record_field={stored_field!r}; setup results cannot replace the tested row"
+            )
+        return matches[0].field, stored_field
+    binding = next((binding for binding in fixture.params if binding.field == input_field), None)
+    if binding is None or binding.source != "record" or binding.record_field != stored_field:
+        raise ValueError(
+            f"smoke fixture {fixture.action!r} input {input_field!r} requires source=record and "
+            f"record_field={stored_field!r}; setup results cannot replace the tested row"
+        )
+    return input_field, stored_field
+
+
+def _record_targets(
+    data_contract: Any,
+) -> dict[tuple[str, str], tuple[dict[str, dict[str, Any]], Mapping[str, Any], Literal["get", "update", "delete"]]]:
+    result: dict[tuple[str, str], tuple[dict[str, dict[str, Any]], Mapping[str, Any], Literal["get", "update", "delete"]]] = {}
     for module, kind, collection in iter_data_contract_collections(data_contract, require_complete_ownership=False):
         if kind != "module":
             continue
@@ -242,15 +275,42 @@ def _record_fields(data_contract: Any) -> dict[tuple[str, str], dict[str, dict[s
             if field.get("enum"):
                 schema["enum"] = field["enum"]
             fields[field["name"]] = schema
-        actions = [canonical_read_action_id(collection["name"], "get")]
+        if "_id" in {record_id_field(collection, list(fields)), read_lookup_field(collection)}:
+            fields["_id"] = {"type": "string"}
+        actions: list[tuple[str, Literal["get", "update", "delete"]]] = [
+            (canonical_read_action_id(collection["name"], "get"), "get"),
+        ]
         if collection.get("entity"):
-            actions.extend(canonical_write_action_id(collection["entity"], op) for op in ("update", "delete"))
-        for action in actions:
+            actions.extend([
+                (canonical_write_action_id(collection["entity"], "update"), "update"),
+                (canonical_write_action_id(collection["entity"], "delete"), "delete"),
+            ])
+        for action, operation in actions:
             key = module, action
             if key in result:
                 raise ValueError("smoke fixture canonical record action has ambiguous collection ownership")
-            result[key] = fields
+            result[key] = fields, collection, operation
     return result
+
+
+def validate_module_fixture_record_identities(
+    module_id: str, payload: Any, *, data_contract: Any,
+) -> None:
+    """Reject substituted CRUD targets during module closure, before service work."""
+    if payload is None:
+        return
+    document = parse_module_smoke_fixtures(payload)
+    records = _record_targets(data_contract)
+    failures = []
+    for fixture in document.fixtures:
+        target = records.get((module_id, fixture.action))
+        if target is not None:
+            try:
+                fixture_record_identity(fixture, collection=target[1], operation=target[2])
+            except ValueError as error:
+                failures.append(f"{module_id}: {error}")
+    if failures:
+        raise ValueError("\n".join(failures))
 
 
 def load_module_smoke_fixtures(files: Mapping[str, str | bytes]) -> dict[tuple[str, str], ModuleSmokeFixture]:
@@ -274,7 +334,7 @@ def load_module_smoke_fixtures(files: Mapping[str, str | bytes]) -> dict[tuple[s
         auth = AppAuthContract.model_validate(yaml.safe_load(files["config/auth.yaml"]))
         grants = {role.id: set(role.permissions) for role in auth.authorization.roles}
         scopes = set(auth.frontend.default_scopes)
-    records = _record_fields(json.loads(files["data/contract.json"])) if "data/contract.json" in files else {}
+    records = _record_targets(json.loads(files["data/contract.json"])) if "data/contract.json" in files else {}
     result = {}
     for path in sorted(paths):
         content = files[path]
@@ -295,7 +355,11 @@ def load_module_smoke_fixtures(files: Mapping[str, str | bytes]) -> dict[tuple[s
                 output = action.get("output_schema", {})
                 Draft7Validator.check_schema(output)
                 responses[step.id] = output
-            _validate_params(fixture.params, target.get("input_schema", {}), responses, records.get((module, fixture.action), {}))
+            record_target = records.get((module, fixture.action))
+            _validate_params(fixture.params, target.get("input_schema", {}), responses,
+                             record_target[0] if record_target else {})
+            if record_target is not None:
+                fixture_record_identity(fixture, collection=record_target[1], operation=record_target[2])
             result[module, fixture.action] = fixture
     if len(result) > 256 or sum(len(fixture.setup) for fixture in result.values()) > 512:
         raise ValueError("app smoke fixtures exceed the total execution bound")

@@ -1165,7 +1165,7 @@ class _SmokeRun:
             f"Same user and workspace without roles: {summary}; declared app records "
             f"{'unchanged' if unchanged else 'CHANGED'}.",
             path=None if denied and unchanged else f"modules/{module}/module.yaml",
-            user_id=ordinary.user_id, roles=[], records_unchanged=unchanged,
+            user_id=ordinary.user_id, roles=[], records_unchanged=unchanged, method=method,
         )
 
     async def call(
@@ -1197,7 +1197,7 @@ class _SmokeRun:
                 self.role_successes.add((module, action))
                 self.record(f"role.{module}.{action}.holder_allowed", True,
                             f"Role-bearing principal executed {module}.{action}: {summary}.",
-                            user_id=principal.user_id, roles=list(principal.roles))
+                            user_id=principal.user_id, roles=list(principal.roles), method=method)
         if missing and not principal.exact_roles and status == 403 and (module, action) not in self.permission_denials:
             self.permission_denials.add((module, action))
             self.record(
@@ -1244,7 +1244,7 @@ class _SmokeRun:
     ) -> tuple[int, Any, str]:
         since = len(self.capture.records)
         rejected_since = len(self.rejected_events)
-        self.emit("calling", module=module, action=action, principal=principal.label)
+        self.emit("calling", module=module, action=action, principal=principal.label, method=method)
         url = f"/api/modules/{module}/{action}"
         headers = {"Authorization": f"Bearer {principal.token}"}
         if self.external_probe:
@@ -1974,10 +1974,90 @@ def _get_record(entity: _Entity, body: Any, output_schema: Mapping[str, Any]) ->
     return True, body.get(name) if isinstance(body, Mapping) else None
 
 
-def _lookup_value(entity: _Entity, stored: Mapping[str, Any] | None) -> str | None:
+def _lookup_value(entity: _Entity, stored: Mapping[str, Any] | None, *, fixture: Any = None) -> Any:
     """Use the stored canonical get key; it need not be the generated write id."""
     value = stored.get(entity.lookup_field) if stored is not None else None
-    return str(value) if value is not None else None
+    if value is None:
+        return None
+    return value if fixture is not None and entity.lookup_field != "_id" else str(value)
+
+
+async def _prepare_get_inputs(
+    run: _SmokeRun, module: Any, entity: _Entity, principal: _Principal,
+    stored: Mapping[str, Any] | None, lookup_value: Any,
+) -> tuple[_Principal, dict[str, Any]] | None:
+    from mozaiksai.core.workflow.generator_support.module_smoke_fixtures import (
+        fixture_record_identity,
+    )
+
+    action = entity.actions["get"]
+    fixture = getattr(run, "fixtures", {}).get((module.name, action))
+    input_field, record_field = fixture_record_identity(fixture, collection=entity.collection, operation="get")
+    params = {input_field: lookup_value}
+    # The observer owns the lookup for the real row and the missing-row probe.
+    record = {**(stored or {}), record_field: lookup_value}
+    return await _prepare_action_inputs(run, module, action, principal, params, record=record, identity=params)
+
+
+def _read_request_method(module: Any, action: str, params: Mapping[str, Any]) -> str:
+    """Use existing JSON POST for values the canonical GET route cannot decode."""
+    # GET admits strings and bounded declared integers. bool is deliberately
+    # excluded from int; JSON POST retains boolean/number/null values exactly.
+    properties = _properties(_input_schema(module, action))
+    query_scalars = all(
+        type(value) is str or (type(value) is int and len(str(value)) <= 16
+                               and properties.get(key, {}).get("type") == "integer")
+        for key, value in params.items()
+    )
+    return "GET" if query_scalars else "POST"
+
+
+async def _call_get(
+    run: _SmokeRun, module: Any, entity: _Entity, principal: _Principal,
+    stored: Mapping[str, Any] | None, lookup_value: Any,
+) -> tuple[int, Any, str] | None:
+    prepared = await _prepare_get_inputs(run, module, entity, principal, stored, lookup_value)
+    if prepared is None:
+        return None
+    actor, params = prepared
+    return await run.call(_read_request_method(module, entity.actions["get"], params), module.name, entity.actions["get"], actor, params)
+
+
+async def _missing_get_lookup(run: _SmokeRun, module: Any, entity: _Entity) -> Any:
+    """Find a bounded schema-valid absent key, without changing app data."""
+    from jsonschema import Draft7Validator
+
+    from mozaiksai.core.runtime.persistence import MongoPersistenceContext
+    from mozaiksai.core.workflow.generator_support.module_smoke_fixtures import (
+        fixture_record_identity,
+    )
+
+    action = entity.actions["get"]
+    fixture = getattr(run, "fixtures", {}).get((module.name, action))
+    if fixture is None:
+        return f"smoke-missing-{uuid4().hex[:8]}"
+    input_field, record_field = fixture_record_identity(fixture, collection=entity.collection, operation="get")
+    schema = _properties(_input_schema(module, action))[input_field]
+    if schema.get("enum"):
+        candidates = schema["enum"][:32]
+    else:
+        candidates = {
+            "string": [f"smoke-missing-{uuid4().hex}"],
+            "integer": list(range(32)), "number": list(range(32)), "boolean": [False, True],
+        }.get(_schema_type(schema) or "", [])
+    names = MongoPersistenceContext(app_id=run.app_id, database_name=run.database_name,
+                                    client=run.client, data_contract=run.load.data_contract)
+    collection = run.database[names.collection_name(entity.module, str(entity.collection["name"]))]
+    validator = Draft7Validator(schema)
+    for candidate in candidates:
+        if not validator.is_valid(candidate):
+            continue
+        if await collection.find_one({record_field: candidate}, {"_id": 1}) is None:
+            return candidate
+    raise ValueError(
+        f"{module.name}.{action} missing-record proof is incomplete: no schema-valid absent "
+        f"lookup value found within the bounded probe for {input_field!r}"
+    )
 
 
 async def _stored(run: _SmokeRun, entity: _Entity, record_id: Any) -> dict[str, Any] | None:
@@ -2084,15 +2164,18 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
     else:
         run.record(f"{tag}.a_create", True, f"A created {entity.entity} {entity.id_field}={record_id!r}.")
     has_record = stored is not None
-    lookup_value = _lookup_value(entity, stored)
+    get_fixture = getattr(run, "fixtures", {}).get((module.name, actions.get("get")))
+    lookup_value = _lookup_value(entity, stored, fixture=get_fixture)
     no_lookup = f"the stored record has no value for canonical get lookup {entity.lookup_field!r}"
 
     def listed_ids(body: Any) -> list[Any] | None:
         items = _items(body, _output_schema(module, actions["list"]))
         return None if items is None else [item.get(entity.id_field) for item in items if isinstance(item, Mapping)]
 
-    if "list" in actions:
-        status, body, summary = await run.call("GET", entity.module, actions["list"], a, {})
+    if "list" in actions and (prepared := await _prepare_action_inputs(run, module, actions["list"], a, {})) is not None:
+        status, body, summary = await run.call(
+            _read_request_method(module, actions["list"], prepared[1]), entity.module, actions["list"], prepared[0], prepared[1],
+        )
         listed = listed_ids(body)
         if not 200 <= status < 300 or listed is None:
             run.record(f"{tag}.a_list", False,
@@ -2112,25 +2195,32 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
         f"id field {entity.id_field!r} nor one object member such as 'item'"
     )
     if "get" in actions:
-        missing_id = f"smoke-missing-{uuid4().hex[:8]}"
-        status, body, summary = await run.call("GET", entity.module, actions["get"], a, {"id": missing_id})
-        declared, record = _get_record(entity, body, get_schema)
-        if 200 <= status < 300 and not declared:
-            run.record(f"{tag}.get_missing", False,
-                       f"{describe(actions['get'], 'A')} for an id that does not exist returned {status}, but "
-                       f"{undeclared_get}, so the response cannot be read as not found.", path=path_manifest)
+        try:
+            missing_id = await _missing_get_lookup(run, module, entity)
+        except ValueError as error:
+            run.record(f"{tag}.get_missing", False, str(error), path=path_manifest)
+            response = None
         else:
-            found_nothing = status == 404 or (200 <= status < 300 and not record)
-            run.record(f"{tag}.get_missing", found_nothing,
-                       f"{describe(actions['get'], 'A')} for an id that does not exist: "
-                       + ("not found." if found_nothing else f"expected 404, got {summary}."),
-                       path=None if found_nothing else failure_path())
+            response = await _call_get(run, module, entity, a, stored, missing_id)
+        if response is not None:
+            status, body, summary = response
+            declared, record = _get_record(entity, body, get_schema)
+            if 200 <= status < 300 and not declared:
+                run.record(f"{tag}.get_missing", False,
+                           f"{describe(actions['get'], 'A')} for an id that does not exist returned {status}, but "
+                           f"{undeclared_get}, so the response cannot be read as not found.", path=path_manifest)
+            else:
+                found_nothing = status == 404 or (200 <= status < 300 and not record)
+                run.record(f"{tag}.get_missing", found_nothing,
+                           f"{describe(actions['get'], 'A')} for an id that does not exist: "
+                           + ("not found." if found_nothing else f"expected 404, got {summary}."),
+                           path=None if found_nothing else failure_path())
         if not has_record:
             run.not_run(f"{tag}.a_get", no_record)
         elif lookup_value is None:
             run.record(f"{tag}.a_get", False, no_lookup, path=path_repo)
-        else:
-            status, body, summary = await run.call("GET", entity.module, actions["get"], a, {"id": lookup_value})
+        elif (response := await _call_get(run, module, entity, a, stored, lookup_value)) is not None:
+            status, body, summary = response
             declared, record = _get_record(entity, body, get_schema)
             if 200 <= status < 300 and not declared:
                 run.record(f"{tag}.a_get", False,
@@ -2145,8 +2235,10 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
     if owned and "list" in actions:
         if not has_record:
             run.not_run(f"{tag}.b_list_isolated", no_record)
-        else:
-            status, body, summary = await run.call("GET", entity.module, actions["list"], b, {})
+        elif (prepared := await _prepare_action_inputs(run, module, actions["list"], b, {})) is not None:
+            status, body, summary = await run.call(
+                _read_request_method(module, actions["list"], prepared[1]), entity.module, actions["list"], prepared[0], prepared[1],
+            )
             listed = listed_ids(body)
             if not 200 <= status < 300 or listed is None:
                 run.record(f"{tag}.b_list_isolated", False,
@@ -2163,8 +2255,8 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
             run.not_run(f"{tag}.b_get_isolated", no_record)
         elif lookup_value is None:
             run.not_run(f"{tag}.b_get_isolated", no_lookup)
-        else:
-            status, body, summary = await run.call("GET", entity.module, actions["get"], b, {"id": lookup_value})
+        elif (response := await _call_get(run, module, entity, b, stored, lookup_value)) is not None:
+            status, body, summary = response
             declared, record = _get_record(entity, body, get_schema)
             if 200 <= status < 300 and not declared:
                 run.record(f"{tag}.b_get_isolated", False,
@@ -2299,7 +2391,7 @@ async def _gated_params(
         fields = _fields(entity)
         if operation == "list":
             prepared = await _prepare_action_inputs(run, module, action, principal, {})
-            return ("GET", prepared[1], prepared[0]) if prepared is not None else None
+            return (_read_request_method(module, action, prepared[1]), prepared[1], prepared[0]) if prepared is not None else None
         if operation == "create":
             prepared = await _prepare_action_inputs(
                 run, module, action, principal, _required_params(_input_schema(module, action), fields),
@@ -2318,11 +2410,20 @@ async def _gated_params(
         record_id = record_id if record_id is not None else "smoke-missing-record"
         stored = await _stored(run, entity, record_id)
         if operation == "get":
-            params = {"id": _lookup_value(entity, stored) or "smoke-missing-record"}
-        else:
-            params = {entity.id_field: record_id}
+            fixture = getattr(run, "fixtures", {}).get((module.name, action))
+            lookup = _lookup_value(entity, stored, fixture=fixture)
+            if lookup is None:
+                try:
+                    lookup = await _missing_get_lookup(run, module, entity)
+                except ValueError as error:
+                    run.record(f"fixture.{module.name}.{action}", False, str(error),
+                               path=f"modules/{module.name}/contracts/fixtures.yaml")
+                    return None
+            prepared = await _prepare_get_inputs(run, module, entity, principal, stored, lookup)
+            return (_read_request_method(module, action, prepared[1]), prepared[1], prepared[0]) if prepared is not None else None
+        params = {entity.id_field: record_id}
         prepared = await _prepare_action_inputs(run, module, action, principal, params, record=stored, identity=params)
-        return ("GET" if operation == "get" else "POST", prepared[1], prepared[0]) if prepared is not None else None
+        return ("POST", prepared[1], prepared[0]) if prepared is not None else None
     prepared = await _prepare_action_inputs(
         run, module, action, principal, _required_params(_input_schema(module, action), {}),
     )

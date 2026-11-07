@@ -14,6 +14,17 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Generated module contracts can declare bounded object members and typed
+  array rows, including nullable custom/joined response fields. Missing row
+  fields fail producer admission before page bindings are generated; runtime
+  page validation and closed request enforcement remain strict.
+- Runtime-smoke fixtures target the observer's actual record for canonical
+  get/update/delete, reject substitute IDs during module contract admission,
+  and honor authored get/list input schemas while retaining missing-row and
+  cross-user isolation checks.
+- Service generation receives exact read implementation ownership from the
+  admitted module and data contracts. Protected shared reads stay authored;
+  ordinary scoped reads remain rendered, and missing handlers still fail validation.
 - Module `contracts/fixtures.yaml` can declare bounded runtime-smoke inputs and
   prerequisite action calls. The contained observer resolves real response IDs,
   caller identity and relative dates while independently requiring successful
