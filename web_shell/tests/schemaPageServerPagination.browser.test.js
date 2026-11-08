@@ -251,12 +251,12 @@ for (const primitive of ['DataTable', 'ResourceTable']) {
       assert.equal(await page.getByRole('button', { name: 'Delete', exact: true }).isDisabled(), true);
     });
   }
-  test(`${primitive} explicit rows win over other arrays and an omitted selector keeps legacy rows`, async t => {
+  test(`${primitive} explicit rows win over other arrays and an omitted selector keeps the response rows`, async t => {
     const selected = await fixture(t, { primitive, serverMode: false, dataKey: 'recent',
       responseExtra: { recent: [{ id: 'selected', title: 'Selected row', author: 'Selected author' }] } });
     await selected.page.getByRole('cell', { name: 'Selected row', exact: true }).waitFor();
     assert.equal(await selected.page.getByRole('cell', { name: 'Book 001', exact: true }).count(), 0);
-    const legacy = await fixture(t, { primitive, serverMode: false, dataKey: null });
-    await legacy.page.getByRole('cell', { name: 'Book 001', exact: true }).waitFor();
+    const unselectedResponse = await fixture(t, { primitive, serverMode: false, dataKey: null });
+    await unselectedResponse.page.getByRole('cell', { name: 'Book 001', exact: true }).waitFor();
   });
 }
