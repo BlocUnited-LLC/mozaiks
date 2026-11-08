@@ -36,7 +36,10 @@ from factory_app.workflows._shared.platform.genesis_import import (
     read_imported_genesis_review_bundle,
     require_accepted_genesis_baseline,
 )
-from factory_app.workflows._shared.platform.review_continuation import continue_inline_app_review
+from factory_app.workflows._shared.platform.review_continuation import (
+    continue_inline_app_review,
+    recover_saved_app_review,
+)
 from logs.logging_config import get_workflow_logger
 from mozaiksai.control_plane import (
     AcceptedStagedAppBundleBuildRecordError,
@@ -4334,6 +4337,34 @@ async def trigger_workflow(
             )
         except Exception as persist_err:
             logger.warning("Failed to update ChangeRequest routing decision: %s", persist_err)
+
+    if body.trigger_source == "manual" and launch.workflow_id == "AppReview" and build_registry_id:
+        from mozaiksai.core.session.launcher import _PERSISTENCE_MANAGER
+
+        try:
+            recovered_review = await recover_saved_app_review(
+                app_id=app_id, user_id=user_id,
+                binding=RunBuildBinding.model_validate(launch.session_fields.get("run_build_binding")),
+                registry=_get_app_registry_service(), artifact_store=get_artifact_store(),
+                persistence=_PERSISTENCE_MANAGER, session_router=session_router,
+                has_launch_overrides=bool(
+                    body.context_variables or body.trigger_payload or body.source_chat_id or body.journey_id
+                    or body.action_id or body.artifact_key or body.retry_failed
+                ),
+            )
+        except ValueError as recovery_error:
+            raise HTTPException(status_code=400, detail=str(recovery_error)) from recovery_error
+        except Exception as recovery_error:
+            logger.exception("Saved app review recovery failed build=%s", build_registry_id)
+            raise HTTPException(status_code=500, detail="The saved review could not resume. Retry Continue in chat.") from recovery_error
+        if recovered_review is not None:
+            return {
+                "execution_mode": "workflow", "chat_id": recovered_review["chat_id"],
+                "workflow_id": "AppReview", "requested_workflow_id": launch.requested_workflow_id,
+                "journey_id": launch.journey_id, "websocket_url": recovered_review["websocket_url"],
+                "trigger_source": body.trigger_source, "routing_explanation": "Resume the saved app review",
+                "rerouted_by_dependency": False, "harness_decision": None,
+            }
 
     workflow_launch = await launch_prepared_workflow(launch)
     if invalidation_pending:

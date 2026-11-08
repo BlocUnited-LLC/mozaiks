@@ -72,6 +72,14 @@ test('saved build review continues only its current build through the authentica
   });
   const data=()=>({buildRegistryId:'registry-a',summary:{app:{lifecycle_state:'review',current_build_run:{artifact_version_id:'current'}}},
     buildHistory:{artifact_versions:[{id:'current',version_number:2,created_at:'today'},{id:'older',version_number:1,created_at:'yesterday'}]}});
+  const interrupted=()=>{
+    const value=data();
+    Object.assign(value.summary.app,{lifecycle_state:'building',active_workflow_id:'AppGenerator'});
+    Object.assign(value.summary.app.current_build_run,{phase:'refinement',build_id:'refined'});
+    Object.assign(value.buildHistory.artifact_versions[0],{parent_build_record_id:'older',lifecycle_status:'current',
+      validation_status:'passed',commit_metadata:{metadata:{build_id:'refined'}}});
+    return value;
+  };
   let fixture={data:data(),loading:false,error:null,dataMode:'live'};
   let reject=false;
   const requests=[];
@@ -124,6 +132,51 @@ test('saved build review continues only its current build through the authentica
       assert.equal(requests.length,1);
     }finally{reject=false;await page.close();}
   });
+  for(const denied of [false,true]){
+    await t.test(`current accepted refinement in building can request review; server denial=${denied}`,async()=>{
+      fixture={data:interrupted(),loading:false,error:null,dataMode:'live'};
+      reject=denied;requests.length=0;
+      const page=await browser.newPage();
+      try{
+        await page.goto(origin+'/apps/target-app/activity');
+        const button=page.getByRole('button',{name:'Continue in chat',exact:true});
+        await expect(button).toBeEnabled({timeout:1500});
+        await button.click();
+        await expect.poll(()=>requests.length).toBe(1);
+        assert.equal(requests[0].headers.authorization,'Bearer fixture-token');
+        assert.deepEqual(requests[0].body,{trigger_source:'manual',context_variables:{},app_id:'studio-host',user_id:'owner',
+          build_registry_id:'registry-a',workflow_id:'AppReview'});
+        if(denied){
+          await expect(page.getByRole('alert')).toContainText('The current build changed. Refresh its review.');
+          await expect(button).toBeEnabled();
+          assert.equal(new URL(page.url()).pathname,'/apps/target-app/activity');
+        }else{
+          await expect(page.getByRole('heading',{name:'Review conversation'})).toBeVisible();
+          assert.equal(new URL(page.url()).searchParams.get('chat_id'),'new-review');
+        }
+      }finally{reject=false;await page.close();}
+    });
+  }
+  for(const damage of ['genesis','draft','failed','foreign-build','missing-parent','other-workflow']){
+    await t.test(`building review remains unavailable for ${damage}`,async()=>{
+      fixture={data:interrupted(),loading:false,error:null,dataMode:'live'};
+      const app=fixture.data.summary.app;
+      const artifact=fixture.data.buildHistory.artifact_versions[0];
+      if(damage==='genesis')app.current_build_run.phase='genesis';
+      if(damage==='draft')artifact.lifecycle_status='draft';
+      if(damage==='failed')artifact.validation_status='failed';
+      if(damage==='foreign-build')artifact.commit_metadata.metadata.build_id='other';
+      if(damage==='missing-parent')delete artifact.parent_build_record_id;
+      if(damage==='other-workflow')app.active_workflow_id='Other';
+      requests.length=0;
+      const page=await browser.newPage();
+      try{
+        await page.goto(origin+'/apps/target-app/activity');
+        await expect(page.getByRole('button',{name:'Continue in chat',exact:true})).toBeDisabled();
+        assert.equal(requests.length,0);
+      }finally{await page.close();}
+    });
+  }
   for(const mode of ['demo','missing-current','building']){
     await t.test(`recovery stays unavailable for ${mode}`,async()=>{
       fixture={data:data(),loading:false,error:null,dataMode:mode==='demo'?'demo':'live'};
@@ -155,11 +208,14 @@ test('review workspace previews owned snapshots and keeps revision evidence sepa
       }
       createRoot(document.getElementById('root')).render(<Fixture />);
     `},
-    bundle:true, write:false, jsx:'automatic', loader:{'.js':'jsx'}, nodePaths:[path.join(shell,'node_modules')],
+    bundle:true, write:false, jsx:'automatic', loader:{'.js':'jsx','.png':'dataurl'}, nodePaths:[path.join(shell,'node_modules')],
+    alias:{'@mozaiks/chat-ui/core/ui/DownloadCenter.js':path.join(root,'chat-ui/src/core/ui/DownloadCenter.js'),
+      react:path.join(shell,'node_modules/react'),'react-dom':path.join(shell,'node_modules/react-dom')},
     plugins:[{name:'review-transport', setup(builder) {
-      builder.onResolve({filter:/@mozaiks\/chat-ui\/ui|studioApi\.js$|websocketAuth\.js$/}, args => ({path:args.path,namespace:'fixture'}));
+      builder.onResolve({filter:/@mozaiks\/chat-ui\/ui|studioApi\.js$|websocketAuth\.js$|adapters\/api\.js$/}, args => ({path:args.path,namespace:'fixture'}));
       builder.onLoad({filter:/.*/,namespace:'fixture'}, ({path: name}) => ({loader:'jsx',resolveDir:shell,contents:
         name.endsWith('studioApi.js') ? 'export const getStudioAccessToken = () => null; export const studioFetch = (...args) => fetch(...args);'
+          : name.endsWith('api.js') ? 'export const authFetch = (...args) => fetch(...args);'
           : name.endsWith('websocketAuth.js') ? 'export const openAuthenticatedWebSocket = () => ({close(){}});'
             : 'export const Panel=({children})=><section>{children}</section>; export const StatusPill=({children})=><span>{children}</span>; export const Button=({children,...props})=><button {...props}>{children}</button>;',
       }));
@@ -175,11 +231,11 @@ test('review workspace previews owned snapshots and keeps revision evidence sepa
   let origin;
   const saved = (id, status='passed') => ({
     app_id:'app-a', artifact_version_id:id, build_family:'app_bundle', generated_files:{'app.json':JSON.stringify({name:id})},
-    workbench:{target_app_id:'app-a', build_registry_id:'registry-a', artifact_version_id:id, build_family:'app_bundle',
+    workbench:{app_id:'studio-host',target_app_id:'app-a', build_registry_id:'registry-a', artifact_version_id:id, build_family:'app_bundle',
       generated_files:{'app.json':JSON.stringify({name:id})}, app_validation_status:status, app_validation_strategy_used:'e2b',
       integration_test_result:{passed:status==='passed'}},
     review:{app_id:'app-a', artifact_version_id:id, artifact_kind:'app_bundle', validation_status:status,
-      parent_version_id:id==='parent' ? null : 'parent',
+      parent_version_id:id==='parent' ? null : 'parent', lifecycle_status:id==='parent'?'current':'draft',
       validation_result:{validation_status:status, app_validation_result:{validation_status:status}, app_bundle_acceptance_result:{passed:status==='passed'}},
       can_accept:id!=='parent' && status==='passed', can_promote:id==='parent' && status==='passed'},
   });
@@ -204,8 +260,10 @@ test('review workspace previews owned snapshots and keeps revision evidence sepa
       if (delayed.has(id)) delayed.set(id,finish); else finish();
     } else if (url.pathname.endsWith('/accept')) {
       const next = bodies.get(id);
-      next.review = {...next.review,can_accept:false,can_promote:true};
+      next.review = {...next.review,can_accept:false,can_promote:true,lifecycle_status:'current'};
       res.end(JSON.stringify({review:next.review}));
+    } else if (url.pathname.endsWith('/download')) {
+      res.setHeader('Content-Type','application/zip');res.end(`verified archive ${id}`);
     } else if (url.pathname.endsWith('/promote')) {res.end('{"promoted":true}');}
     else if (url.pathname.startsWith('/api/artifacts/')) {
       const artifactId=url.pathname.split('/')[3];
@@ -245,6 +303,7 @@ test('review workspace previews owned snapshots and keeps revision evidence sepa
   const frameNode=await page.locator('iframe').elementHandle();
   await patch({refinement_pending:true});
   await expect(page.getByText('Making your changes. You can keep trying this preview.')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Download accepted app',exact:true})).toHaveCount(0);
   await expect(page.getByRole('heading',{name:'Updating your draft',exact:true})).toBeVisible();
   await expect(page.getByText('Required checks are incomplete or failed.',{exact:false})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeDisabled();
@@ -256,11 +315,19 @@ test('review workspace previews owned snapshots and keeps revision evidence sepa
   await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeDisabled();
   await expect(page.getByRole('heading',{name:'Checks passed · Ready for your review',exact:true})).toBeVisible();
   await expect(page.getByText('Accept this draft before activation, or request a change.',{exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Download accepted app',exact:true})).toHaveCount(0);
   await expect(page.getByText('Required checks are incomplete or failed.',{exact:false})).toHaveCount(0);
   await page.getByRole('button',{name:'Accept this draft',exact:true}).click();
   await expect(page.getByRole('button',{name:'Activate this version',exact:true})).toBeEnabled();
   await expect(page.getByRole('heading',{name:'Ready for your decision',exact:true})).toBeVisible();
   assert.ok(requests.some(r=>r.method==='POST' && r.url==='/api/studio/build/artifacts/child/accept?build_registry_id=registry-a'));
+  const downloadEvent=page.waitForEvent('download');
+  await page.getByRole('button',{name:'Download accepted app',exact:true}).click();
+  const download=await downloadEvent;
+  assert.equal(download.suggestedFilename(),'app-a-child.zip');
+  assert.equal(await fs.readFile(await download.path(),'utf8'),'verified archive child');
+  assert.ok(requests.some(r=>r.method==='GET' && r.url==='/api/studio/build/artifacts/child/download?build_registry_id=registry-a&app_id=studio-host'));
+  assert.equal(requests.filter(r=>r.method==='POST' && /tool.*response/.test(r.url)).length,0);
   await page.getByRole('button',{name:'Update preview',exact:true}).click();
   await expect(page.getByText('Preview based on version child')).toBeVisible();
   assert.equal(maxActive,1);

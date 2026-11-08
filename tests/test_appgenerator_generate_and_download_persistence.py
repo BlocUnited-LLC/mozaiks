@@ -462,6 +462,7 @@ def test_generate_and_download_uses_canonical_build_root_and_propagates_registra
 @pytest.mark.parametrize("export_result", [{"success": True}, {"success": False}, None, "exception"])
 def test_requested_github_export_failure_does_not_report_ready(monkeypatch, tmp_path, export_result):
     module = generate_and_download_module
+    monkeypatch.setattr(module, "resolve_current_build_artifact", AsyncMock(return_value=(None, {}, type("Artifact", (), {"id": None})())))
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
     for name in ("_inject_agent_context_env", "_register_app_bundle_artifact_version"):
         monkeypatch.setattr(module, name, AsyncMock(return_value=None))
@@ -493,7 +494,7 @@ def test_requested_github_export_failure_does_not_report_ready(monkeypatch, tmp_
         side_effect=TimeoutError("export timed out") if export_result == "exception" else None,
     ))
     context = _Context({
-        "chat_id": "chat", "app_id": "app", "build_id": "build",
+        "chat_id": "chat", "app_id": "app", "build_id": "build", "user_id": "owner",
         "generated_files": {"app.json": '{"app_id":"app"}'},
     })
     result = asyncio.run(module.generate_and_download({}, "Bundle ready.", context_variables=context))
@@ -565,6 +566,7 @@ async def test_packaging_publishes_registered_review_path_under_real_context_aut
     from factory_app.app.modules.app_registry.backend.service import AppRegistryService
 
     module = generate_and_download_module
+    monkeypatch.setattr(module, "resolve_current_build_artifact", AsyncMock(return_value=(None, {}, type("Artifact", (), {"id": None})())))
     monkeypatch.setattr(module, "resolve_export_gate", lambda *args, **kwargs: {"allow_export": True})
     root = Path(__file__).resolve().parents[1]
     definitions = yaml.safe_load((root / "factory_app/workflows/AppGenerator/context_variables.yaml").read_text(encoding="utf-8"))["definitions"]

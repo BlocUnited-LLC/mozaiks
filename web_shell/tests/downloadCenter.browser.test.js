@@ -54,6 +54,7 @@ test('artifact download authenticates and only completes after a successful down
   await page.getByRole('button', { name: 'Download Bundle', exact: true }).click();
   assert.equal((await downloaded).suggestedFilename(), 'bundle.zip');
   await page.waitForFunction(() => window.responses.length === 1);
+  assert.equal(await page.evaluate(() => window.responses[0].artifact_version_id), 'av_1');
   assert.equal(requests.length, 2);
   assert.ok(requests.every(request => request.authorization === 'Bearer test-session'));
   assert.ok(requests.every(request => request.url === '/api/studio/build/artifacts/av_1/download?build_registry_id=reg_1&app_id=factory'));
