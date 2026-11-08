@@ -393,6 +393,10 @@ This project follows a practical pre-1.0 changelog format:
   `.local`, `build`, or another excluded directory name. Exclusions still apply
   to those directories inside the repository.
 
+- Generated record lists and dashboards reject unconditional empty, loading,
+  and error sections beside live tables, including task-batch bundle validation.
+  Factory guidance uses table-owned states and keeps create actions available.
+
 - Workflow data references retain MongoDB `_id` when explicitly requested, so
   generated bundle exports can verify their bound DesignDocs compilation inputs.
   Unrequested identities remain omitted.

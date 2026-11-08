@@ -344,9 +344,22 @@ Persistent AppGenerator pages have a deterministic gate before assembly:
 - `app_ui_quality_status == "passed"` is required before `AssemblyAgent`
 - `needs_revision` routes back to `AppSchemaAgent`; `blocked` routes to user/operator review
 
-This is the production bar for schema-driven UI. The gate is runtime state, not
-prompt prose, so live AG2 runs cannot assemble generated app UI until the
-quality status passes.
+The schema-driven lane uses this review before assembly. Task-batch page files
+also pass the final generated-bundle scanner, which reuses the shared state
+composition check and attributes errors to the owned page path for the existing
+bounded bundle repair.
+
+On `record_list` and `analytics_dashboard` pages with a top-level live
+`DataTable` or `ResourceTable`, top-level `InlineEmptyState`, `LoadingState`, and
+`ErrorState` companions are rejected. Those static sections remain visible even
+when rows load successfully; they do not observe another section's requests.
+The table owns loading, error, empty, and populated states. Use `config.empty`
+for empty copy and its `error_title`, `error_message`, and `retry_label` fields
+for recoverable errors. Keep create actions in `config.actions` with
+`requires_selection: false` when they must remain available after rows load.
+Dedicated status-only pages and intentional Modal children remain supported.
+This check uses page taxonomy, primitive identity, and compiled API bindings,
+never status-message text. It adds no conditional page field or repair loop.
 
 After the gate passes, assembly must collect files from the persisted
 `generated_app_dir` app workspace. The schema-driven path does not rely on the

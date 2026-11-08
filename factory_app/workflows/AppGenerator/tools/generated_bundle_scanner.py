@@ -29,7 +29,10 @@ from typing import Any
 import yaml
 from pydantic import ValidationError as PydanticValidationError
 
-from factory_app.workflows._shared.generated_ui_contract import resolve_registered_component_files
+from factory_app.workflows._shared.generated_ui_contract import (
+    audit_page_data_states,
+    resolve_registered_component_files,
+)
 from factory_app.workflows._shared.hook_utils import workflow_context_path
 from factory_app.workflows.AppGenerator.tools.module_persistence_guard import (
     scan_module_persistence,
@@ -1764,6 +1767,7 @@ def _scan_page_schema_structure(files_map: dict[str, str]) -> list[str]:
                 f"{path}: {diagnostic.location}: {diagnostic.code}"
                 for diagnostic in exc.diagnostics
             )
+        errors.extend(audit_page_data_states(schema, page_path=f"{path}:"))
 
     return errors
 

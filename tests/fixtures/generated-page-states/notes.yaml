@@ -1,0 +1,228 @@
+schema_version: mozaiks.app_page.v1
+name: notes
+route: /notes
+title: Notes
+page_type: record_list
+layout: full-width
+shell_mode: standard
+roles:
+- member
+navigation:
+  id: notes
+  label: Notes
+  scope: global
+  order: 2
+  visible: true
+sections:
+- id: note-table
+  primitive: DataTable
+  title: My Notes
+  config:
+    columns:
+    - key: title
+      label: Title
+      sortable: false
+      type: text
+    - key: content
+      label: Content
+      sortable: false
+      type: text
+    - key: created_at
+      label: Created
+      sortable: false
+      type: text
+    - key: updated_at
+      label: Updated
+      sortable: false
+      type: text
+    data_key: items
+    selection: single
+    pagination: true
+    pagination_mode: server
+    total_key: total
+    page_size: 20
+    search: true
+    search_keys:
+    - title
+    actions:
+    - id: edit-note
+      label: Edit
+      variant: secondary
+      requires_selection: true
+      closes_modal: false
+      action_type: event
+      event_type: ui.modal.open
+      payload:
+        modal_id: note-edit-modal
+    - id: delete-note
+      label: Delete
+      variant: destructive
+      requires_selection: true
+      closes_modal: false
+      action_type: event
+      event_type: ui.modal.open
+      payload:
+        modal_id: note-delete-alert
+    empty:
+      title: No notes yet.
+      message: Click ‘New Note’ to create your first.
+      action:
+        id: open-create-modal
+        label: New Note
+        variant: primary
+        requires_selection: false
+        closes_modal: false
+        action_type: event
+        event_type: ui.modal.open
+        payload:
+          modal_id: note-create-modal
+    api_endpoint: /api/modules/notes/list_notes
+  event_triggers:
+  - ui.datatable.refresh
+- id: note-create-modal
+  primitive: Modal
+  config:
+    title: New Note
+    size: medium
+    children:
+    - id: note-create-form
+      primitive: Form
+      config:
+        fields:
+        - name: title
+          label: Title
+          type: text
+          required: true
+          placeholder: Note title
+        - name: content
+          label: Content
+          type: textarea
+          required: false
+          placeholder: Your notes...
+        layout: vertical
+        columns: 1
+        submit_label: Create
+        submit_action:
+          id: create-note
+          label: Create
+          variant: primary
+          requires_selection: false
+          closes_modal: true
+          action_type: submit
+          payload:
+            title: '{form.title}'
+            content: '{form.content}'
+          href: /api/modules/notes/create_note
+        cancel_label: Cancel
+        cancel_action:
+          id: cancel-create
+          label: Cancel
+          variant: secondary
+          requires_selection: false
+          closes_modal: true
+          action_type: event
+          event_type: ui.modal.close
+          payload:
+            modal_id: note-create-modal
+        disabled: false
+- id: note-edit-modal
+  primitive: Modal
+  config:
+    title: Edit Note
+    size: medium
+    children:
+    - id: note-edit-form
+      primitive: Form
+      config:
+        initial_values_key: selected_row
+        fields:
+        - name: title
+          label: Title
+          type: text
+          required: true
+          placeholder: Note title
+        - name: content
+          label: Content
+          type: textarea
+          required: false
+          placeholder: Your notes...
+        layout: vertical
+        columns: 1
+        submit_label: Save
+        submit_action:
+          id: update-note
+          label: Save
+          variant: primary
+          requires_selection: false
+          closes_modal: true
+          action_type: submit
+          payload:
+            note_id: '{selected_row.note_id}'
+            title: '{form.title}'
+            content: '{form.content}'
+          href: /api/modules/notes/update_note
+        cancel_label: Cancel
+        cancel_action:
+          id: cancel-edit
+          label: Cancel
+          variant: secondary
+          requires_selection: false
+          closes_modal: true
+          action_type: event
+          event_type: ui.modal.close
+          payload:
+            modal_id: note-edit-modal
+        disabled: false
+- id: note-delete-alert
+  primitive: Modal
+  config:
+    size: medium
+    children:
+    - id: delete-confirm-alert
+      primitive: AlertBanner
+      config:
+        message: Are you sure you want to delete this note? This cannot be undone.
+        variant: warning
+        dismissible: false
+        actions:
+        - id: do-delete
+          label: Delete
+          variant: destructive
+          requires_selection: false
+          closes_modal: true
+          action_type: delete
+          payload:
+            note_id: '{selected_row.note_id}'
+          href: /api/modules/notes/delete_note
+        - id: cancel-delete
+          label: Cancel
+          variant: secondary
+          requires_selection: false
+          closes_modal: true
+          action_type: event
+          event_type: ui.modal.close
+          payload:
+            modal_id: note-delete-alert
+- id: notes-empty
+  primitive: InlineEmptyState
+  config:
+    title: No notes yet.
+    description: Click ‘New Note’ to create your first.
+    action:
+      id: open-create-modal
+      label: New Note
+      variant: primary
+      requires_selection: false
+      closes_modal: false
+      action_type: event
+      event_type: ui.modal.open
+      payload:
+        modal_id: note-create-modal
+- id: notes-loading
+  primitive: LoadingState
+  config:
+    label: Loading notes...
+- id: notes-error
+  primitive: ErrorState
+  config:
+    message: Could not load your notes. Please try again later.
