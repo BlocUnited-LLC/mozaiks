@@ -149,8 +149,8 @@ visibility and promotion-history keys while retaining ordinary provider details.
 An authorized `MediaAssetStore.mark_asset_promoted` call atomically sets public
 visibility and records its promotion history. Changing visibility back to
 `private` or `investor_preview` closes the public endpoint even if that history
-remains. Legacy records marked promoted only in metadata must be explicitly
-republished or assigned public visibility by an authorized caller.
+remains. Records marked promoted only in metadata require explicit publication
+or public visibility assigned by an authorized caller.
 
 The generic `media.promote` WebSocket action passes the authenticated connection's
 chat ID as `expected_source_chat_id`. The store compares it with persisted asset

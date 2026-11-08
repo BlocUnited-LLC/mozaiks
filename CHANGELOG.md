@@ -673,7 +673,7 @@ This project follows a practical pre-1.0 changelog format:
 - Generated media ignores provider-supplied publication authority. Public reads
   require server-owned public visibility, and explicit promotion records that
   visibility. Private/backer-only visibility overrides old promotion metadata;
-  metadata-only legacy publications require authorized republication. Chat
+  metadata-only publication records require authorized republication. Chat
   promotion actions now atomically require the asset's persisted source chat to
   match the authenticated connection.
 - The model-invoked brand promotion tool uses immutable active workflow scope,
