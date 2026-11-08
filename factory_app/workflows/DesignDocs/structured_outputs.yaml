@@ -435,7 +435,19 @@ models:
         description: Exact app-owned module collection name in data_contract used as the action's permission anchor. Each module action must use the same single collection across all roles, even when its implementation changes several collections. Platform and hosted collections cannot receive app grants.
       actions:
         type: list[str]
-        description: Non-empty exact canonical create/update/delete or list_<collection>/get_<collection> action ids, or surface_map owned_mutations/custom_reads for this collection. Granting either canonical read requires both across roles; custom read grants imply no canonical read grants. Any granted collection with module_action writes still requires all three canonical write grants across roles. No permission strings or wildcards.
+        description: >-
+          Non-empty exact canonical list_<collection>/get_<collection> or
+          create_<entity>/update_<entity>/delete_<entity> action ids, or surface_map
+          owned_mutations/custom_reads for this collection. Reads retain the exact
+          collection name; writes convert the declared entity to snake_case.
+          For collection project_updates and entity ProjectUpdate, use
+          list_project_updates/get_project_updates and
+          create_project_update/update_project_update/delete_project_update.
+          Do not singularize collection reads or invent a custom alias for them.
+          Granting either canonical read requires both across roles; custom read
+          grants imply no canonical read grants. Any granted collection with
+          module_action writes still requires all three canonical write grants
+          across roles. No permission strings or wildcards.
   DesignAccessPolicy:
     type: model
     fields:

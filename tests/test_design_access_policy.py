@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from copy import deepcopy
 from types import SimpleNamespace
@@ -98,6 +99,70 @@ def test_design_read_guidance_keeps_explicit_policy_and_canonical_wire_contract(
     all_guidance = " ".join(sections.values())
     assert "Constructed get takes the required string input `id` and returns `item`" in all_guidance
     assert "Do not promise a service-only role check on a code-constructed read" in all_guidance
+
+
+def test_design_action_guidance_distinguishes_collection_reads_from_entity_writes():
+    path = inventory.ROOT / "factory_app/workflows/DesignDocs/agents.yaml"
+    agent = yaml.safe_load(path.read_text(encoding="utf-8"))["agents"][0]
+    policy = next(section["content"] for section in agent["prompt_sections"] if section["id"] == "access_policy")
+    models, _ = load_workflow_structured_outputs("DesignDocs")
+    description = models["DesignAccessGrant"].model_fields["actions"].description
+    for guidance in (policy, description):
+        assert "project_updates" in guidance and "ProjectUpdate" in guidance
+        for action in ("get_project_updates", "list_project_updates", "create_project_update",
+                       "update_project_update", "delete_project_update"):
+            assert action in guidance
+
+
+def test_unknown_read_feedback_reaches_next_declared_prompt_without_authorizing(monkeypatch, persistence):
+    from mozaiksai.core.workflow.agents.factory import _compose_prompt_sections
+    from mozaiksai.core.workflow.execution.middleware import (
+        MozaiksPromptMiddleware,
+        _resolve_import,
+        load_prompt_middleware_entries,
+    )
+
+    # Same naming error as the live get_note grant: reads retain the collection.
+    bundle = _read_bundle(["list_reports", "get_report"])
+    original = deepcopy(bundle)
+    context = ownership._context(managed=False)
+    ui = AsyncMock()
+    monkeypatch.setattr(save_design_doc, "use_ui_tool", ui)
+    result = inventory._save(context, bundle)
+    assert result["outcome"] == "revise"
+    feedback = context.get("design_docs_save_feedback")
+    assert result["error"] == feedback
+    assert "action 'get_report' is not an approved action of 'reports'" in feedback
+    assert bundle == original
+    assert context.get("design_docs_save_attempts") == 1
+    assert context.get("access_policy") is None
+    ui.assert_not_awaited()
+    persistence[1].assert_not_called()
+    persistence[2].assert_not_awaited()
+
+    workflow_dir = inventory.ROOT / "factory_app/workflows/DesignDocs"
+    agent = yaml.safe_load((workflow_dir / "agents.yaml").read_text(encoding="utf-8"))["agents"][0]
+    config = yaml.safe_load((workflow_dir / "context_variables.yaml").read_text(encoding="utf-8"))
+    variables = config["agents"]["DesignDocsAgent"]["variables"]
+    assert "design_docs_save_feedback" in variables
+    hooks = []
+    for entry in load_prompt_middleware_entries("DesignDocs", base_path=str(workflow_dir.parent)):
+        if entry.get("agent") not in ("DesignDocsAgent", "all"):
+            continue
+        hook, _ = _resolve_import("DesignDocs", entry.get("filename"), entry["function"], workflow_dir)
+        assert hook is not None
+        hooks.append(hook)
+    runner = object.__new__(MozaiksPromptMiddleware)
+    runner._middleware_functions = hooks
+    runner._agent_name = "DesignDocsAgent"
+    runner._base_system_message = _compose_prompt_sections(agent["prompt_sections"])
+    runner._context_bridge = context
+    runner._context_exposures = []
+    runner._context_variables = variables
+    prompt = asyncio.run(runner._run_prompt_middleware(SimpleNamespace(variables={})))
+    assert prompt.count(feedback) == 1
+    assert "Approved actions: ['create_report', 'delete_report', 'get_reports', 'list_reports', " \
+           "'summarize_reports', 'update_report']" in feedback
 
 
 def test_owner_approval_persists_exact_policy_and_projects_from_summary(monkeypatch, persistence):

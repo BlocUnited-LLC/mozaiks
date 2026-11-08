@@ -58,6 +58,13 @@ permission from the reviewed policy, and runtime dispatch enforces it even for
 an existing record whose owner no longer holds the role.
 Canonical action grants must name the action's owning collection, including
 when a custom-action inventory repeats that canonical id.
+Unknown-action rejection feedback lists the exact approved ids for the grant's
+collection, excluding canonical actions owned by another collection. DesignDocs
+receives that feedback through its declared context on the next prompt; the
+validator does not rename or grant an action. Reads retain the collection name,
+while writes use the snake_case entity: `project_updates` / `ProjectUpdate`
+produces `get_project_updates`, `list_project_updates`, `create_project_update`,
+`update_project_update`, and `delete_project_update`.
 Candidate tasks cannot edit auth or use
 their own role declarations as authorization.
 

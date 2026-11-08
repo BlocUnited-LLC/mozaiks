@@ -74,6 +74,12 @@ agents:
       explicit surface_map owned_mutations or custom_reads. If either canonical
       read is role-granted, cover both list_<collection> and get_<collection>
       across the declared roles; the collection name keeps its exact spelling.
+      Canonical writes use create_<entity>, update_<entity>, and delete_<entity>,
+      converting the declared entity to snake_case. For collection project_updates
+      with entity ProjectUpdate, the reads are list_project_updates and
+      get_project_updates; the writes are create_project_update,
+      update_project_update, and delete_project_update. Do not singularize a
+      collection read or use the collection name in place of the write entity.
       A custom read grant does not grant either canonical read. If a collection uses module_action writes and
       any role grant, cover all three canonical writes across the declared roles;
       omission cannot make an update or delete public. No wildcards, invented
@@ -104,6 +110,9 @@ agents:
       another user's identity into a persistence context.
       If design_docs_save_feedback requests access changes, revise this typed
       policy and its explanation together. Every changed grant requires review.
+      An unknown-action rejection lists the approved action ids for that
+      collection. Use those exact ids to repair the rejected grant; do not add
+      an alternate spelling to custom_reads or owned_mutations to evade it.
       An owner's Request changes response returns review_changes without consuming
       a structural repair attempt. Structural validation failures still consume
       the fixed repair budget; never reset or edit its protected counter.

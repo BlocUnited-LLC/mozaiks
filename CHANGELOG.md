@@ -379,6 +379,10 @@ This project follows a practical pre-1.0 changelog format:
   existing selected-file context, including canonical role permission fields.
   Edit scope, authorization and validation remain enforced.
 
+- DesignDocs rejection feedback now lists exact approved action ids for the
+  selected collection. Prompt and schema guidance distinguish collection-based
+  read names from entity-based writes without renaming or authorizing invalid grants.
+
 - Workflow data references retain MongoDB `_id` when explicitly requested, so
   generated bundle exports can verify their bound DesignDocs compilation inputs.
   Unrequested identities remain omitted.
