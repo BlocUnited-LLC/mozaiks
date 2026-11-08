@@ -115,8 +115,8 @@ NOT_MATERIALIZABLE_ALONE = {
 # must fail with exactly that message, and fails once it passes, so the entry is removed.
 BLOCKED_PACKS: dict[str, tuple[str, str]] = {
     "notifications": ("contains placeholder/not-implemented marker 'NotImplementedError'", (
-        "The provider adapter stubs raise NotImplementedError by design "
-        "(test_adapters_have_not_implemented_stub), and the acceptance gate's "
+        "The push adapter still raises NotImplementedError "
+        "(test_email_implements_smtp_while_push_remains_an_explicit_provider_gap), and the acceptance gate's "
         "PLACEHOLDER_IMPLEMENTATION check fails every bundle that contains that marker."
     )),
 }
