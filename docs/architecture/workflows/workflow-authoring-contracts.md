@@ -355,6 +355,12 @@ string IDs do not establish chronology. Authorization data-reference lookup
 errors abort context loading instead of being treated as missing data or
 falling back to an older policy.
 
+The returned projection omits MongoDB `_id` unless `source.fields` explicitly
+includes `_id`. An explicit `_id` field is preserved, including scalar extraction
+when it is the only requested field. Artifact authority references use that
+declared identity to verify the exact saved record; they do not replace it with
+a later record lookup.
+
 ### `structured_outputs.yaml`
 
 ```yaml
