@@ -366,6 +366,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Workflow data references retain MongoDB `_id` when explicitly requested, so
+  generated bundle exports can verify their bound DesignDocs compilation inputs.
+  Unrequested identities remain omitted.
+
 - Pack integrity checks accept canonical reads and pricing gates compiled from
   approved build inputs while rejecting changes to verified implementations.
   Commerce no longer requires fixed pricing gates, uses current schema admin panels,

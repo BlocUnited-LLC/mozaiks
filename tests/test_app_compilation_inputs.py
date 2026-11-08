@@ -137,7 +137,7 @@ async def test_resolver_preserves_shared_app_bundle_archive_limit(saved, asset_c
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["owner", "registry", "app", "summary", "stale", "plan", "archive", "reference", "missing"])
+@pytest.mark.parametrize("kind", ["owner", "registry", "app", "build", "summary", "stale", "plan", "archive", "reference", "missing"])
 async def test_resolver_refuses_identity_and_authority_drift(saved, kind):
     store, _, bundle = saved
     overrides = {}
@@ -147,6 +147,8 @@ async def test_resolver_refuses_identity_and_authority_drift(saved, kind):
         overrides["build_registry_id"] = "foreign"
     elif kind == "app":
         overrides["app_id"] = "foreign"
+    elif kind == "build":
+        bundle.commit_metadata.metadata["build_id"] = "foreign"
     elif kind == "summary":
         store.records["design"].commit_metadata.metadata["summary_payload"]["data_contract"]["version"] = "tampered"
     elif kind == "stale":
@@ -214,6 +216,53 @@ async def test_factory_save_pins_used_design_instead_of_later_current(saved, mon
     )
     assert child.canonical_inputs_version == {"design_docs": "design", "workflow_bundle": "workflow"}
     assert child.commit_metadata.metadata["compilation_inputs"]["inputs"]["design_docs"]["record_id"] == "design"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reference", ["design_docs_artifact", "design_docs_build_artifact"])
+async def test_factory_save_pins_data_reference_loaded_design(saved, monkeypatch, reference):
+    from factory_app.workflows.AppGenerator.tools import generate_and_download as download
+    from mozaiksai.core.workflow.context import variables
+    from mozaiksai.core.workflow.context.schema import ContextVariableDefinition
+    from mozaiksai.core.workflow.generator_support.design_access_policy import access_policy_sha256
+    from tests.test_context_data_reference_ordering import _Collection, _install_collection
+
+    store, context, parent = saved
+    design = store.records["design"]
+    payload = design.commit_metadata.metadata["summary_payload"]
+    payload["access_policy"] = {"roles": [], "grants": []}
+    payload["access_policy_review"] = {
+        "status": "not_required", "build_id": "genesis", "target_app_id": "target",
+        "policy_sha256": access_policy_sha256(payload["access_policy"]),
+    }
+    raw = _summary_bytes(payload)
+    design.files_manifest[0].sha256 = hashlib.sha256(raw).hexdigest()
+    design.files_manifest[0].size_bytes = len(raw)
+    row = design.model_dump(mode="json", by_alias=True)
+    collection = _Collection([row])
+    _install_collection(monkeypatch, collection)
+    path = Path(__file__).resolve().parents[1] / "factory_app/workflows/AppGenerator/context_variables.yaml"
+    definition = ContextVariableDefinition.model_validate(
+        yaml.safe_load(path.read_text(encoding="utf-8"))["definitions"][reference]
+    )
+    context.pop("design_docs_artifact")
+    context[reference] = await variables._load_data_reference_value(
+        reference, definition, default_database_name=None, app_id="mozaiks-factory", context=context,
+    )
+    assert collection.query["app_id"] == "target"
+    if reference == "design_docs_build_artifact":
+        assert collection.query["commit_metadata.metadata.summary_payload.access_policy_review.build_id"] == "genesis"
+    context["app_bundle_acceptance_status"] = "passed"
+    monkeypatch.setattr(import_module("mozaiksai.core.artifacts"), "resolve_latest_artifact_version_refs",
+                        AsyncMock(return_value={"design_docs": "later-design"}))
+    child = await download._register_app_bundle_artifact_version(
+        app_id="target", user_id="owner", workflow_name="AppGenerator", chat_id="chat", bundle_name="bundle",
+        zip_path=Path(parent.commit_metadata.metadata["artifact_path"]), context_variables=context, artifact_store=store,
+    )
+    assert child.canonical_inputs_version == {"design_docs": "design"}
+    assert child.commit_metadata.metadata["compilation_inputs"]["inputs"]["design_docs"] == {
+        "record_id": "design", "sha256": hashlib.sha256(raw).hexdigest(),
+    }
 
 
 @pytest.mark.asyncio
