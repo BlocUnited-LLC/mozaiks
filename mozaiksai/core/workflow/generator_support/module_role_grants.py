@@ -101,7 +101,13 @@ def validate_access_policy(
         )
         for action in grant["actions"]:
             if action not in allowed:
-                raise ValueError(f"access_policy action {action!r} is not an approved action of {name!r}")
+                choices = sorted(candidate for candidate in allowed
+                                 if canonical_owners.get((owner, candidate), name) == name)
+                raise ValueError(
+                    f"access_policy action {action!r} is not an approved action of {name!r}. "
+                    f"Approved actions: {choices}. Canonical reads use the exact collection name; "
+                    "canonical writes use the snake_case entity name."
+                )
             canonical_owner = canonical_owners.get((owner, action))
             if canonical_owner is not None and canonical_owner != name:
                 raise ValueError(

@@ -100,6 +100,29 @@ def test_live_sections_compile_with_real_context_and_pass_unchanged_wiring_gate(
     assert "data_source" not in admitted["ui/pages/tasks.yaml"]
 
 
+@pytest.mark.parametrize("page_index", [0, 1])
+def test_save_compiles_typed_sources_before_auditing_unconditional_states(page_index, tmp_path, monkeypatch):
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
+    page = _pages()[page_index]
+    page["sections"].append({
+        "id": "empty-state", "primitive": "InlineEmptyState", "config": {"title": "No tasks yet"},
+    })
+    original = deepcopy(page)
+    context = _bridge({"generated_files": _module_files()})
+    with _workflow_tool_invocation(context):
+        save_app_schema(
+            manifest={"app_name": "Task tracker", "pages": [page["name"]], "default_route": page["route"]},
+            pages=[page], context_variables=context,
+        )
+    warnings = context.get("app_ui_quality_warnings")
+    assert len(warnings) == 1 and "unconditional InlineEmptyState" in warnings[0]
+    compiled = context.get("app_pages")[0]
+    table = next(section for section in compiled["sections"] if section["primitive"] == "DataTable")
+    assert table["config"]["api_endpoint"] == "/api/modules/task_management/list_tasks"
+    assert "data_source" not in table["config"]
+    assert page == original
+
+
 def test_original_live_url_evidence_still_fails_wiring_gate():
     pages = _pages()
     for page in pages:

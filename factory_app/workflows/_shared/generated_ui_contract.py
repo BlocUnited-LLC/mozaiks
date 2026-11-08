@@ -784,6 +784,36 @@ def _audit_runtime_page_contract(page: dict[str, Any], *, page_path: str) -> lis
     return []
 
 
+def audit_page_data_states(page: dict[str, Any], *, page_path: str) -> list[str]:
+    """Reject unconditional status companions on compiled live table pages."""
+    if page.get("page_type") not in {"record_list", "analytics_dashboard"}:
+        return []
+    sections = page.get("sections")
+    if not isinstance(sections, list):
+        return []
+    has_live_table = any(
+        isinstance(section, dict)
+        and section.get("primitive") in {"DataTable", "ResourceTable"}
+        and isinstance(config := section.get("config"), dict)
+        and isinstance(endpoint := config.get("api_endpoint"), str)
+        and _API_ENDPOINT_RE.fullmatch(endpoint)
+        for section in sections
+    )
+    if not has_live_table:
+        return []
+    # Check direct companions only. Modal children have an independent
+    # interaction gate and are deliberately left alone.
+    return [
+        f"{page_path}.sections[{index}] declares unconditional {section['primitive']} "
+        "beside a live table; it remains visible when rows load successfully. "
+        "Use the table's config.empty for empty/error copy and its built-in loading state; "
+        "keep create actions available in table config.actions with requires_selection: false."
+        for index, section in enumerate(sections)
+        if isinstance(section, dict)
+        and section.get("primitive") in {"InlineEmptyState", "LoadingState", "ErrorState"}
+    ]
+
+
 def audit_page_schemas(
     pages: Sequence[dict[str, Any]],
     *,
@@ -801,6 +831,7 @@ def audit_page_schemas(
         page_path = f"{source_label} '{page_name}'"
         primitive_counts: dict[str, int] = {}
         warnings.extend(_audit_runtime_page_contract(page, page_path=page_path))
+        warnings.extend(audit_page_data_states(page, page_path=page_path))
 
         meta = page.get("meta")
         if meta is not None and not isinstance(meta, dict):
@@ -1306,6 +1337,7 @@ __all__ = [
     "audit_app_ui_bundle_integrity",
     "audit_custom_route_bundle_integrity",
     "audit_generated_react_files",
+    "audit_page_data_states",
     "audit_page_schemas",
     "audit_route_auth_action_contracts",
     "custom_route_bundle_page_files",

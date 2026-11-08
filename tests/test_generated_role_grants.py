@@ -185,6 +185,27 @@ def test_custom_inventory_cannot_reanchor_another_collections_canonical_action(a
         validate_access_policy(policy, data_contract=contract, design_surface_map=surface)
 
 
+@pytest.mark.parametrize("invalid_action", ["get_task", "create_tasks"])
+def test_unknown_action_diagnostic_uses_exact_owned_inventory(invalid_action):
+    contract = _contract()
+    notes = deepcopy(contract["surfaces"][0]["collections"][0])
+    notes.update(name="notes", entity="Note")
+    contract["surfaces"][0]["collections"].append(notes)
+    surface = _surface()
+    surface["surfaces"][0]["custom_reads"] = ["task_summary", "get_notes", "list_notes"]
+    surface["surfaces"][0]["owned_mutations"] = ["archive_task", "create_note"]
+    policy = _policy()
+    policy["grants"][0]["actions"].append(invalid_action)
+    original = deepcopy(policy)
+    with pytest.raises(ValueError, match="not an approved action") as rejected:
+        validate_access_policy(policy, data_contract=contract, design_surface_map=surface)
+    assert "Approved actions: ['archive_task', 'create_task', 'delete_task', 'get_tasks', " \
+           "'list_tasks', 'task_summary', 'update_task']" in str(rejected.value)
+    for foreign in ("get_notes", "list_notes", "create_note"):
+        assert foreign not in str(rejected.value)
+    assert policy == original
+
+
 @pytest.mark.parametrize("mutation, error", [
     (lambda p: p["roles"].append(deepcopy(p["roles"][0])), "repeats a role"),
     (lambda p: p["grants"][0].update(role_id="stranger"), "unknown role"),

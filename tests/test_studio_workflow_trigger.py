@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import sys
 import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -695,17 +696,59 @@ def test_studio_trigger_endpoint_rejects_refinement_when_control_plane_disabled(
     assert "Control-plane harness" not in detail
 
 
-@pytest.mark.parametrize("continuation_case", [
-    "none", "ready", "unavailable", "generator_ready",
-    "generator_recover_bind", "generator_recover_settle", "generator_recover_missing", "generator_recover_misroute",
+@pytest.fixture
+def _preserve_workflow_namespaces(reload_workflow_namespace):
+    if not reload_workflow_namespace:
+        yield
+        return
+    namespaces = ("workflows", "factory_app.workflows")
+    saved_modules = {
+        name: module for name, module in sys.modules.items()
+        if any(name == prefix or name.startswith(prefix + ".") for prefix in namespaces)
+    }
+    try:
+        yield
+    finally:
+        # Preserve collection-held imports after the deliberate tool reload.
+        for name in list(sys.modules):
+            if any(name == prefix or name.startswith(prefix + ".") for prefix in namespaces):
+                sys.modules.pop(name, None)
+        sys.modules.update(saved_modules)
+        for name, module in saved_modules.items():
+            parent, _, child = name.rpartition(".")
+            if parent in sys.modules:
+                setattr(sys.modules[parent], child, module)
+
+
+@pytest.mark.parametrize("continuation_case, reload_workflow_namespace", [
+    ("none", False), ("ready", False), ("unavailable", False), ("generator_ready", False),
+    ("generator_recover_bind", False), ("generator_recover_settle", False),
+    ("generator_recover_missing", False), ("generator_recover_misroute", False),
+    pytest.param("generator_recover_missing", True, id="reloaded-missing"),
+    pytest.param("generator_recover_misroute", True, id="reloaded-misroute"),
 ])
-def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch, _owned_build_target, continuation_case):
+def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(
+    monkeypatch, _owned_build_target, _preserve_workflow_namespaces, continuation_case, reload_workflow_namespace,
+):
     from mozaiksai.core.auth import reset_auth_adapter
 
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
     from mozaiksai.hosts import studio as studio_app
+
+    if reload_workflow_namespace:
+        from importlib import import_module
+
+        from mozaiksai.core.workflow.agents.tools import _reset_workflow_package_namespace
+
+        _reset_workflow_package_namespace(
+            base_dir=Path(__file__).resolve().parents[1] / "factory_app/workflows/AppGenerator",
+            workflow_name="AppGenerator",
+        )
+        fresh = import_module("factory_app.workflows._shared.platform.review_continuation")
+        assert studio_app.continue_inline_app_review.__globals__ is not fresh.__dict__
+        assert studio_app.recover_saved_app_review.__globals__ is not fresh.__dict__
 
     continuation = None
     continuation_error = None
@@ -729,7 +772,6 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch,
         monkeypatch.setattr(studio_app, "continue_inline_app_review", reopen)
 
     if continuation_case.startswith("generator_"):
-        from factory_app.workflows._shared.platform import review_continuation as review
         from mozaiksai.core.session import launcher
         from mozaiksai.core.session import router as router_module
         from mozaiksai.core.transport.simple_transport import SimpleTransport
@@ -756,7 +798,12 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch,
         prerequisites = AsyncMock(return_value=(True, None))
         if continuation_case in {"generator_recover_missing", "generator_recover_misroute"}:
             prerequisites.side_effect = [(False, "Interrupted before successor creation"), (True, None)]
-        monkeypatch.setattr(review, "get_platform_hooks", lambda: SimpleNamespace(call_chat_prereqs=prerequisites))
+        # Studio retains these callables when the tool loader refreshes _shared.
+        for continuation_callback in (studio_app.continue_inline_app_review, studio_app.recover_saved_app_review):
+            monkeypatch.setitem(
+                continuation_callback.__globals__, "get_platform_hooks",
+                lambda: SimpleNamespace(call_chat_prereqs=prerequisites),
+            )
         record = _owned_build_target.get_app_record.return_value["app"]
         record["current_build_run"] = {**source_binding.model_dump(), "artifact_version_id": "av_456"}
         _owned_build_target.repo = SimpleNamespace(get_owned_chat_binding=AsyncMock(return_value=source_binding.model_dump()))
@@ -937,6 +984,9 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch,
     )
 
     assert response.status_code == 200
+    if continuation_case in {"generator_recover_missing", "generator_recover_misroute"}:
+        prerequisites.assert_awaited_once_with("factory", "demo-user", "AppReview", persistence)
+        persistence.create_chat_session.assert_not_awaited()
     if continuation_case == "generator_ready":
         continuation = response.json()["review_continuation"]
         assert continuation is not None, response.json()["review_continuation_error"]
@@ -1125,6 +1175,9 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch,
             "workbench", {"status": "superseded", "approved": False, "data": {"artifact_version_id": "av_456"}},
         )
         worker.execute.assert_not_awaited()
+        if continuation_case in {"generator_recover_missing", "generator_recover_misroute"}:
+            assert prerequisites.await_count == 2
+            assert prerequisites.await_args.args == ("factory", "demo-user", "AppReview", persistence)
         if continuation_case == "generator_recover_misroute":
             persistence.mark_chat_failed.assert_awaited_once_with("misrouted", app_id="factory")
             assert sessions["misrouted"]["status"] == 2

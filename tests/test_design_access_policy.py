@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from copy import deepcopy
 from types import SimpleNamespace
@@ -38,7 +39,7 @@ def _bundle():
     return bundle
 
 
-def _approve(monkeypatch, persistence, *, action="approve", overrides=None, actions=None):
+def _approve(monkeypatch, persistence, *, action="approve", overrides=None, actions=None, label="Coordinator"):
     async def respond(_tool_id, payload, **kwargs):
         # Saving, downstream state, and artifact authority must all wait for review.
         persistence[1].assert_not_called()
@@ -46,11 +47,11 @@ def _approve(monkeypatch, persistence, *, action="approve", overrides=None, acti
         assert kwargs["chat_id"] == "pricing_chat"
         assert kwargs["workflow_name"] == "DesignDocs"
         expected_actions = actions or ["create_report", "update_report", "delete_report"]
-        assert f"Coordinator may {', '.join(expected_actions)} on reports." in payload["checkpoints"]
+        assert f"{label} may {', '.join(expected_actions)} on reports." in payload["checkpoints"]
         assert all(item["payload"]["review_id"] == payload["review_id"] for item in payload["actions"])
         return {
             "action": action, "approved": action == "approve", "review_id": payload["review_id"],
-            "rationale": "Only coordinators should maintain reports.", **(overrides or {}),
+            "rationale": f"Only people holding the {label} role should have these grants.", **(overrides or {}),
         }
     ui = AsyncMock(side_effect=respond)
     monkeypatch.setattr(save_design_doc, "use_ui_tool", ui)
@@ -100,15 +101,82 @@ def test_design_read_guidance_keeps_explicit_policy_and_canonical_wire_contract(
     assert "Do not promise a service-only role check on a code-constructed read" in all_guidance
 
 
+def test_design_action_guidance_distinguishes_collection_reads_from_entity_writes():
+    path = inventory.ROOT / "factory_app/workflows/DesignDocs/agents.yaml"
+    agent = yaml.safe_load(path.read_text(encoding="utf-8"))["agents"][0]
+    policy = next(section["content"] for section in agent["prompt_sections"] if section["id"] == "access_policy")
+    models, _ = load_workflow_structured_outputs("DesignDocs")
+    description = models["DesignAccessGrant"].model_fields["actions"].description
+    for guidance in (policy, description):
+        assert "project_updates" in guidance and "ProjectUpdate" in guidance
+        for action in ("get_project_updates", "list_project_updates", "create_project_update",
+                       "update_project_update", "delete_project_update"):
+            assert action in guidance
+
+
+def test_unknown_read_feedback_reaches_next_declared_prompt_without_authorizing(monkeypatch, persistence):
+    from mozaiksai.core.workflow.agents.factory import _compose_prompt_sections
+    from mozaiksai.core.workflow.execution.middleware import (
+        MozaiksPromptMiddleware,
+        _resolve_import,
+        load_prompt_middleware_entries,
+    )
+
+    # Same naming error as the live get_note grant: reads retain the collection.
+    bundle = _read_bundle(["list_reports", "get_report"])
+    original = deepcopy(bundle)
+    context = ownership._context(managed=False)
+    ui = AsyncMock()
+    monkeypatch.setattr(save_design_doc, "use_ui_tool", ui)
+    result = inventory._save(context, bundle)
+    assert result["outcome"] == "revise"
+    feedback = context.get("design_docs_save_feedback")
+    assert result["error"] == feedback
+    assert "action 'get_report' is not an approved action of 'reports'" in feedback
+    assert bundle == original
+    assert context.get("design_docs_save_attempts") == 1
+    assert context.get("access_policy") is None
+    ui.assert_not_awaited()
+    persistence[1].assert_not_called()
+    persistence[2].assert_not_awaited()
+
+    workflow_dir = inventory.ROOT / "factory_app/workflows/DesignDocs"
+    agent = yaml.safe_load((workflow_dir / "agents.yaml").read_text(encoding="utf-8"))["agents"][0]
+    config = yaml.safe_load((workflow_dir / "context_variables.yaml").read_text(encoding="utf-8"))
+    variables = config["agents"]["DesignDocsAgent"]["variables"]
+    assert "design_docs_save_feedback" in variables
+    hooks = []
+    for entry in load_prompt_middleware_entries("DesignDocs", base_path=str(workflow_dir.parent)):
+        if entry.get("agent") not in ("DesignDocsAgent", "all"):
+            continue
+        hook, _ = _resolve_import("DesignDocs", entry.get("filename"), entry["function"], workflow_dir)
+        assert hook is not None
+        hooks.append(hook)
+    runner = object.__new__(MozaiksPromptMiddleware)
+    runner._middleware_functions = hooks
+    runner._agent_name = "DesignDocsAgent"
+    runner._base_system_message = _compose_prompt_sections(agent["prompt_sections"])
+    runner._context_bridge = context
+    runner._context_exposures = []
+    runner._context_variables = variables
+    prompt = asyncio.run(runner._run_prompt_middleware(SimpleNamespace(variables={})))
+    assert prompt.count(feedback) == 1
+    assert "Approved actions: ['create_report', 'delete_report', 'get_reports', 'list_reports', " \
+           "'summarize_reports', 'update_report']" in feedback
+
+
 def test_owner_approval_persists_exact_policy_and_projects_from_summary(monkeypatch, persistence):
     context, summary = _approved_context(monkeypatch, persistence)
     policy = _bundle()["access_policy"]
     review = summary["access_policy_review"]
     assert review["status"] == "approved"
     assert review["reviewed_by"] == "owner"
-    assert review["policy_sha256"] == access_policy_sha256(policy)
+    assert review["policy_sha256"] == access_policy_sha256(policy, summary["experience_spec"])
     assert review["build_id"] == "pricing_build"
     assert review["target_app_id"] == "reports-app"
+    assert "Page /reports: no page-role gate; authentication and record ownership still apply." in (
+        save_design_doc.use_ui_tool.await_args.args[1]["checkpoints"]
+    )
     assert detach(context.get("access_policy")) == policy
     assert resolve_design_access_policy(context) == policy
     backend = next(call.kwargs for call in persistence[0].upsert_design_doc.await_args_list if call.kwargs["kind"] == "backend")
@@ -136,15 +204,20 @@ def _read_bundle(read_actions):
     ["summarize_reports"],
     ["get_reports", "list_reports", "summarize_reports"],
 ])
-def test_explicit_reads_are_reviewed_and_persisted_without_inferred_grants(monkeypatch, persistence, reads):
+@pytest.mark.parametrize("role_id,label", [("coordinator", "Coordinator"), ("member", "Member")])
+def test_explicit_reads_are_reviewed_and_persisted_without_inferred_grants(
+    monkeypatch, persistence, reads, role_id, label,
+):
     from mozaiksai.core.workflow.generator_support.module_role_grants import compiled_role_grants
 
     bundle = _read_bundle(reads)
     policy = bundle["access_policy"]
+    policy["roles"] = [{"role_id": role_id, "label": label, "description": "Verified role holders using their own reports."}]
+    policy["grants"][0]["role_id"] = role_id
     actions = policy["grants"][0]["actions"]
     models, _ = load_workflow_structured_outputs("DesignDocs")
     assert models["DesignDocsBundle"].model_validate(bundle).access_policy.model_dump(mode="json") == policy
-    ui = _approve(monkeypatch, persistence, actions=actions)
+    ui = _approve(monkeypatch, persistence, actions=actions, label=label)
     context = ownership._context(managed=False)
     result = inventory._save(context, bundle)
     assert result["outcome"] == "saved", result
@@ -152,10 +225,11 @@ def test_explicit_reads_are_reviewed_and_persisted_without_inferred_grants(monke
     assert "listed read and write actions" in payload["summary"]
     summary = persistence[2].await_args.kwargs["summary_payload"]
     assert summary["access_policy"] == policy
-    assert summary["access_policy_review"]["policy_sha256"] == access_policy_sha256(policy)
+    assert summary["access_policy_review"]["policy_sha256"] == access_policy_sha256(policy, summary["experience_spec"])
     assert summary["access_policy_review"]["review_id"] == payload["review_id"]
     context.set("design_docs_artifact", _record(summary))
     assert resolve_design_access_policy(context) == policy
+    assert compiled_role_grants(policy)[0]["id"] == role_id
     assert compiled_role_grants(policy)[0]["permissions"] == sorted(f"reports.{action}" for action in actions)
 
 
@@ -176,7 +250,7 @@ def test_adding_read_grants_requires_a_new_exact_policy_review(monkeypatch, pers
     assert reviewed["review_id"] == ui.await_args.args[1]["review_id"]
     assert reviewed["review_id"] != original["access_policy_review"]["review_id"]
     assert reviewed["policy_sha256"] != original["access_policy_review"]["policy_sha256"]
-    assert reviewed["policy_sha256"] == access_policy_sha256(bundle["access_policy"])
+    assert reviewed["policy_sha256"] == access_policy_sha256(bundle["access_policy"], persistence[2].await_args.kwargs["summary_payload"]["experience_spec"])
     assert original["access_policy"] == _bundle()["access_policy"]
 
 
@@ -231,7 +305,7 @@ def test_owner_corrections_preserve_structural_budget_and_still_require_fresh_ap
     assert inventory._save(context, revised)["outcome"] == "saved"
     assert context.get("design_docs_save_attempts") == prior_failures + 1
     summary = persistence[2].await_args.kwargs["summary_payload"]
-    assert summary["access_policy_review"]["policy_sha256"] == access_policy_sha256(revised["access_policy"])
+    assert summary["access_policy_review"]["policy_sha256"] == access_policy_sha256(revised["access_policy"], summary["experience_spec"])
     assert summary["access_policy_review"]["status"] == "approved"
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, TypeGuard
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
@@ -84,6 +84,13 @@ def section_metrics(section: dict[str, Any]) -> list[tuple[dict[str, Any], str]]
     return []
 
 
+def schema_declares_array(schema: Any) -> TypeGuard[dict[str, Any]]:
+    """Recognize the array types emitted by the canonical output materializer."""
+    return isinstance(schema, dict) and schema.get("type") in (
+        "array", ["array", "null"], ["null", "array"],
+    )
+
+
 def page_data_binding_errors(document: Any, contracts: dict[str, dict[str, Any]]) -> list[str]:
     """Validate compiled Metric/SummaryStrip and table fields, including inherited data."""
     failures: list[str] = []
@@ -112,7 +119,7 @@ def page_data_binding_errors(document: Any, contracts: dict[str, dict[str, Any]]
         if section.get("primitive") in {"DataTable", "ResourceTable"}:
             key = config.get("data_key")
             rows = schema_at_path(outputs, key) if key else outputs
-            if not isinstance(rows, dict) or rows.get("type") != "array":
+            if not schema_declares_array(rows):
                 fail(f"{section_location}.data_key", key, contract_key, outputs, "must select a declared array")
             else:
                 item_schema = rows.get("items")
@@ -209,7 +216,7 @@ def _declares_paged_rows(config: dict[str, Any], action: dict[str, Any]) -> bool
     if not isinstance(row_path, str):
         return False
     rows = schema_at_path(outputs, row_path)
-    if not isinstance(rows, dict) or rows.get("type") != "array":
+    if not schema_declares_array(rows):
         return False
     total_path = config.get("total_key") or (
         row_path.rsplit(".", 1)[0] + ".total" if "." in row_path else "total"

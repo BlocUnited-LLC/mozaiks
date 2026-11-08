@@ -369,9 +369,41 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Factory generation preserves explicitly required roles, including a sole
+  `member` role. Typed page roles join the existing owner review and survive
+  planning, generation and artifact-bound refinement validation; changed gates
+  and unreviewed route aliases are rejected.
+
+- Saved Factory compilation inputs retain verified settled task evidence, so
+  refinement checks can validate nonempty plans without losing completed work.
+  Version 2 snapshots are size-bounded; version 1 requires a fresh build.
+  Candidate contract, file completeness and runtime checks still run afresh.
+- Scoped auth-file refinements receive the runtime auth model schema through
+  existing selected-file context, including canonical role permission fields.
+  Edit scope, authorization and validation remain enforced.
+
+- DesignDocs rejection feedback now lists exact approved action ids for the
+  selected collection. Prompt and schema guidance distinguish collection-based
+  read names from entity-based writes without renaming or authorizing invalid grants.
+- Client tables accept declared nullable arrays and preserve their explicit
+  response selector. Null or missing rows stay empty instead of displaying an
+  unrelated response array; column checks and required server-paging rows remain strict.
+
+- Scoped refinement and surface regeneration reject malformed YAML inside the
+  shared file response contract, allowing AG2's existing bounded schema
+  correction to repair syntax before candidate validation. Staged coding
+  proposals fail closed on the same check; valid files, scope enforcement,
+  and final bundle/runtime admission remain unchanged.
+- AlertBanner actions inside a modal retain the selected record for confirmation
+  requests. Nested table actions still use their own selection, including no row.
+
 - Governance scans now inspect repository files when a checkout lives beneath
   `.local`, `build`, or another excluded directory name. Exclusions still apply
   to those directories inside the repository.
+
+- Generated record lists and dashboards reject unconditional empty, loading,
+  and error sections beside live tables, including task-batch bundle validation.
+  Factory guidance uses table-owned states and keeps create actions available.
 
 - Workflow data references retain MongoDB `_id` when explicitly requested, so
   generated bundle exports can verify their bound DesignDocs compilation inputs.

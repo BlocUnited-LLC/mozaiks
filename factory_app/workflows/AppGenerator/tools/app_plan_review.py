@@ -42,6 +42,10 @@ from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.dependency_graph import deterministic_topological_order
 from mozaiksai.core.workflow.generator_support.code_files import planned_page_path
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_design_page_roles,
+    validate_page_role_preservation,
+)
 from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     PackFacadeDirectory,
@@ -458,6 +462,7 @@ def _approved_page_inventory(context: Any) -> list[dict[str, Any]]:
 
 def _validate_page_realizations(plan: dict[str, Any], context: Any) -> None:
     """A plan implements the approved rendering contract; it cannot re-decide it."""
+    validate_page_role_preservation(plan.get("pages") or [], context)
     planned = {page.get("route"): page for page in plan.get("pages") or []}
     for approved in _approved_page_inventory(context):
         surface = approved.get("ui_surface")
@@ -659,6 +664,7 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
 
     # 1. The approved page inventory is authority.
     approved_pages = _approved_page_inventory(context)
+    approved_roles = resolve_design_page_roles(context)
     expected = [
         (page["name"], page["route"])
         for page in approved_pages
@@ -672,6 +678,8 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
             approved_page = approved_by_route.get(page.get("route"))
             if approved_page is not None and not page.get("ui_surface"):
                 page["ui_surface"] = approved_page["ui_surface"]
+                if approved_roles is not None:
+                    page["roles"] = approved_roles[approved_page["route"]]
                 repairs.append(f"{page['route']}: copied approved ui_surface for constructed page")
         by_route = {page.get("route"): page for page in planned}
         by_name = {page.get("name"): page for page in planned}
@@ -687,6 +695,8 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
                 page.update(existing)
                 page["name"], page["route"] = name, route
                 page["ui_surface"] = approved_page["ui_surface"]
+                if not existing and approved_roles is not None:
+                    page["roles"] = approved_roles[route]
                 rebuilt.append(page)
             plan["pages"] = rebuilt
             repairs.append(f"pages -> approved inventory {sorted(expected)}")

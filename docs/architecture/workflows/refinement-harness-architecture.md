@@ -1130,6 +1130,29 @@ LLM coding checkpoint
     → emit tool event to Studio panel
 ```
 
+### Saved compilation task evidence
+
+Factory registration writes compilation binding version 2 with the exact approved
+plan, task execution inventory, settled task results and original `_meta` evidence.
+The existing task owner verifies completion, task/worker/path identity, inventory
+and plan digests, and every accepted output digest. Failed, pending, in-flight,
+missing or extra tasks cannot be captured. Historical failure diagnostics remain
+unchanged within the settled snapshot.
+
+The scoped artifact resolver repeats these checks and verifies the owned
+app/build/registry, design and subscription references, archive and parent lineage.
+Coding and media children retain this immutable snapshot. Fresh candidate
+acceptance checks their current files against the original plan and execution
+evidence; it does not reuse parent acceptance or require edited files to equal
+historical worker output. Missing required files and invalid current contracts
+still fail. No current-session or latest-record lookup supplies missing evidence.
+
+Capture and resolution share an 8 MiB limit over the canonical serialized compiler
+inputs. This bounds inline evidence; it is not a guarantee that the complete
+MongoDB record fits its document limit. Oversize inputs fail before capture.
+Version 1 bindings lack this immutable evidence and require a new Factory build;
+existing records are never backfilled or rewritten.
+
 ### What the coding worker does NOT do
 
 - It does not modify the live workspace. All writes go to a staging area.
@@ -1206,6 +1229,24 @@ result = await reply.content()
 - `RetryMiddleware(max_retries=2)` — transient failures retry automatically.
 - `TokenMonitor()` — token accounting without custom hooks.
 - `MemoryStream` — captures the full conversation for observability.
+
+`FileUpdate`, shared by `CodingWorkerPlan` and `SurfaceRegenerationResponse`,
+requires concrete `.yaml` and `.yml` contents to parse with the safe YAML loader
+(extensions are case-insensitive). Malformed YAML, including raw forbidden
+control characters, raises a Pydantic validation error with the relative path,
+parser error class, and location. The parser message does not echo file contents.
+AG2's existing `reply.content(retries=2)` schema correction receives the rejected
+response and validation feedback within the original scoped conversation; an
+unchanged invalid response exhausts that bound. No Mozaiks repair loop is added.
+
+The `path`/`content` wire fields and valid content bytes are unchanged. Non-YAML
+files and template suffixes such as `.yaml.j2` are unaffected. Quoted YAML escape
+sequences remain valid; raw forbidden control characters do not. Parseability
+does not admit a page schema, widen selected file scope, or grant promotion:
+the existing full candidate and runtime checks still decide acceptance. Staged
+proposals (including ACP output) use the same `FileUpdate` contract during
+finalization; invalid YAML fails there without another provider call or child
+artifact write.
 
 ### Agent Factory Injection
 

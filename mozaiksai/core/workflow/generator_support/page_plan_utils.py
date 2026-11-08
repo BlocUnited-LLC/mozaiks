@@ -36,6 +36,7 @@ from .page_data_bindings import (
     page_data_binding_errors,
     page_query_binding_errors,
     schema_at_path,
+    schema_declares_array,
     schema_field_paths,
 )
 
@@ -623,7 +624,7 @@ def _materialize_table_response_keys(document: Any, contracts: dict[str, dict[st
         properties = output.get("properties") if isinstance(output, dict) else None
         if not isinstance(properties, dict):
             continue
-        arrays = [path for path in schema_field_paths(output) if (schema_at_path(output, path) or {}).get("type") == "array"]
+        arrays = [path for path in schema_field_paths(output) if schema_declares_array(schema_at_path(output, path))]
         total = properties.get("total")
         if arrays != ["items"] or not isinstance(total, dict) or total.get("type") != "integer":
             continue
