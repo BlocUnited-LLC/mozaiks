@@ -33,9 +33,7 @@ import re
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
-from uuid import uuid4
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.audit.audit_logger import AuditLogger, get_audit_logger
@@ -55,6 +53,11 @@ from mozaiksai.core.runtime.composition.module_authority import (
     ModulePermissionCheck,
 )
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
+from mozaiksai.core.runtime.composition.module_event_contract import (
+    build_module_event_envelope,
+    module_event_id,
+    module_event_rejection,
+)
 from mozaiksai.core.runtime.composition.module_event_provenance import ModuleEventRejection
 from mozaiksai.core.runtime.composition.platform_hooks import (
     PlatformHookRegistry,
@@ -185,7 +188,6 @@ class ModuleResult:
 # ---------------------------------------------------------------------------
 
 _AUDIT_ACTION_MAX_LENGTH = 64
-_AUDIT_EVENT_TYPE_MAX_LENGTH = 128
 _AUDIT_ACTION_SAFE_RE = re.compile(r"[^A-Za-z0-9_.\-]")
 
 
@@ -1012,28 +1014,11 @@ class ModuleExecutor:
         payload: Any,
     ) -> ModuleEventRejection | None:
         """Why an emitted event breaks the action's declared event contract, if it does."""
-        declared_emits = self._action_emits.get(request.module, {}).get(request.action)
-        if declared_emits is not None and event_type not in declared_emits:
-            return ModuleEventRejection(
-                event_id=event_id,
-                event_type=_bounded_for_audit(event_type, max_length=_AUDIT_EVENT_TYPE_MAX_LENGTH),
-                category="undeclared",
-                reason=f"Action {request.module}.{request.action} does not declare this event in module.yaml emits.",
-                validator="emits",
-            )
-        payload_schema = self._event_payload_schemas.get(request.module, {}).get(event_type)
-        if payload_schema is None:
-            return None
-        diagnostic = validate_json_schema(payload, payload_schema)
-        if diagnostic is None:
-            return None
-        return ModuleEventRejection(
-            event_id=event_id,
-            event_type=event_type,
-            category=diagnostic.category,
-            reason=diagnostic.message,
-            validator=diagnostic.validator,
-            schema_path=diagnostic.schema_path,
+        return module_event_rejection(
+            module_id=request.module, action_id=request.action,
+            event_id=event_id, event_type=event_type, payload=payload,
+            declared_emits=self._action_emits.get(request.module, {}).get(request.action),
+            payload_schema=self._event_payload_schemas.get(request.module, {}).get(event_type),
         )
 
     def _record_event_rejection(self, request: ModuleRequest, rejection: ModuleEventRejection) -> None:
@@ -1065,12 +1050,7 @@ class ModuleExecutor:
         ) -> EventDispatchOutcome | ModuleEventRejection | None:
             """Return the bus receipt, or the rejection that kept the event off it."""
             event_type_text = str(event_type or "").strip()
-            if event_id is not None and (
-                not isinstance(event_id, str)
-                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", event_id) is None
-            ):
-                raise ValueError("event_id must be a nonempty, bounded event identifier")
-            event_id = event_id or f"evt_{uuid4().hex}"
+            event_id = module_event_id(event_id)
             rejection = self._event_rejection(request, event_id, event_type_text, payload)
             if rejection is not None:
                 # An event that breaks its contract is dropped and named, never
@@ -1081,46 +1061,23 @@ class ModuleExecutor:
                 rejected_events.append(rejection)
                 return rejection
 
-            tenant_scope = {
-                "app_id": request.app_id,
-                "tenant_id": request.tenant_id,
-            }
-            if request.workspace_id:
-                tenant_scope["workspace_id"] = request.workspace_id
-
-            envelope: dict[str, Any] = {
-                "id": event_id,
-                "type": event_type_text,
-                "version": 1,
-                "occurred_at": datetime.now(UTC).isoformat(),
-                "source": {
-                    "layer": "module",
-                    "app_id": request.app_id,
-                    "module_id": request.module,
-                    "action_id": request.action,
-                    "capability_id": f"{request.module}.{request.action}",
-                },
-                "tenant": tenant_scope,
-                "correlation": {
-                    "correlation_id": request.correlation_id,
-                },
-                "payload": payload,
-                "visibility": "internal",
-            }
-            envelope["authority"] = {
-                "kind": request.authority.kind,
-                "permission_mode": request.authority.permission_mode,
-                "permissions": list(request.authority.permissions),
-            }
-            if request.user_id:
-                envelope["actor"] = {"type": "user", "id": request.user_id}
             trigger_trace = (
                 request.provenance.metadata.get(WORKFLOW_TRIGGER_TRACE_KEY)
                 if request.provenance is not None
                 else None
             )
-            if isinstance(trigger_trace, dict):
-                envelope[WORKFLOW_TRIGGER_TRACE_KEY] = dict(trigger_trace)
+            envelope = build_module_event_envelope(
+                module_id=request.module, action_id=request.action,
+                app_id=request.app_id, tenant_id=request.tenant_id,
+                workspace_id=request.workspace_id,
+                actor={"type": "user", "id": request.user_id} if request.user_id else None,
+                correlation_id=request.correlation_id,
+                authority={"kind": request.authority.kind,
+                           "permission_mode": request.authority.permission_mode,
+                           "permissions": list(request.authority.permissions)},
+                event_id=event_id, event_type=event_type_text, payload=payload,
+                trigger_trace=trigger_trace if isinstance(trigger_trace, dict) else None,
+            )
 
             result = self._event_emitter(event_type_text, envelope)  # type: ignore[misc]
             if inspect.isawaitable(result):

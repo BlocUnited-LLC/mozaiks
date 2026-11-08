@@ -166,6 +166,9 @@ def test_activity_feed_module_declares_expected_actions() -> None:
         "get_feed",
         "get_profile_activity",
         "record_activity",
+        "on_friendship_created",
+        "on_post_published",
+        "on_post_commented",
     }
 
 
