@@ -36,9 +36,13 @@ def can_read_post(post: dict[str, Any] | None, user_id: str) -> bool:
     )
 
 
-def can_delete_post(post: dict[str, Any], user_id: str, roles: list[str]) -> bool:
-    return post.get("author_id") == user_id or "admin" in roles or "moderator" in roles
+def can_delete_post(post: dict[str, Any], user_id: str, permissions: list[str]) -> bool:
+    return post.get("author_id") == user_id or bool(
+        {"user_posts.admin", "user_posts.moderate"}.intersection(permissions)
+    )
 
 
-def can_delete_comment(comment: dict[str, Any], user_id: str, roles: list[str]) -> bool:
-    return comment.get("author_id") == user_id or "admin" in roles or "moderator" in roles
+def can_delete_comment(comment: dict[str, Any], user_id: str, permissions: list[str]) -> bool:
+    return comment.get("author_id") == user_id or bool(
+        {"user_posts.admin", "user_posts.moderate"}.intersection(permissions)
+    )

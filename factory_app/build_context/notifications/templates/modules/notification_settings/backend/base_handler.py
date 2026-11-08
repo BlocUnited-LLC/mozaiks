@@ -7,21 +7,31 @@ from typing import Any
 from . import service
 
 
+def _actor_id(ctx) -> str:
+    """Preferences belong to the signed-in user; a caller cannot name another user."""
+    user_id = str(getattr(ctx, "user_id", None) or "").strip()
+    if not user_id:
+        raise PermissionError("Sign in to manage notification preferences.")
+    return user_id
+
+
 class NotificationSettingsBaseHandler:
-    async def get_notification_preferences(
-        self, ctx, payload: dict[str, Any]
-    ) -> dict[str, Any]:
-        user_id = getattr(ctx, "user_id", None) or payload.get("user_id", "")
-        return await service.get_notification_preferences(ctx, user_id=user_id)
+    async def get_notification_preferences(self, ctx, **_: object) -> dict[str, Any]:
+        return await service.get_notification_preferences(ctx, user_id=_actor_id(ctx))
 
     async def update_notification_preferences(
-        self, ctx, payload: dict[str, Any]
+        self,
+        ctx,
+        *,
+        email_enabled: bool | None = None,
+        push_enabled: bool | None = None,
+        sms_enabled: bool | None = None,
+        **_: object,
     ) -> dict[str, Any]:
-        user_id = getattr(ctx, "user_id", None) or payload.get("user_id", "")
         return await service.update_notification_preferences(
             ctx,
-            user_id=user_id,
-            email_enabled=payload.get("email_enabled"),
-            push_enabled=payload.get("push_enabled"),
-            sms_enabled=payload.get("sms_enabled"),
+            user_id=_actor_id(ctx),
+            email_enabled=email_enabled,
+            push_enabled=push_enabled,
+            sms_enabled=sms_enabled,
         )

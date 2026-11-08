@@ -17,11 +17,12 @@ Verifies that:
 - service.py does not call adapter functions directly
 - email.py and push.py declare provider-neutral interfaces
 - No credentials hardcoded in adapter files
-- data migration declares notifications.preferences alias
+- data/contract.json declares the notification_settings preferences collection;
+  the data migration emits only additive ensure_collection/ensure_index operations
 - reactions.yaml has correct schema_version
 - Forbidden outputs prevent namespace collision with runtime in-app channel
 - 6 runtime boundaries
-- avoid_when is documented
+- avoid_when guidance lives in the AppGenerator routing catalog
 - Cross-pack integrations declared (messaging, social, commerce)
 - AppGenerator capability_directory has notifications_pack entry
 - capability_directory entry has an alternative for managed notification platforms
@@ -321,10 +322,13 @@ def test_adapters_have_not_implemented_stub() -> None:
 
 
 def test_notification_settings_reactions_yaml_has_correct_schema() -> None:
+    from mozaiksai.core.runtime.app.module_loader import ModuleReactionsManifest
+
     reactions = _read_yaml(MODULE / "contracts" / "reactions.yaml")
     assert reactions.get("schema_version") == "mozaiks.reactions.v1"
-    assert reactions.get("module_id") == "notification_settings"
     assert "reactions" in reactions
+    # The runtime loads this manifest strictly; the owning module is its directory.
+    ModuleReactionsManifest.model_validate(reactions)
 
 
 # ---------------------------------------------------------------------------
@@ -332,22 +336,62 @@ def test_notification_settings_reactions_yaml_has_correct_schema() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_notification_preferences_migration_declares_alias() -> None:
-    migrations_dir = TEMPLATES / "data" / "migrations"
-    migration_files = list(migrations_dir.glob("*.json"))
-    assert migration_files, "templates must include at least one data migration"
-
+def test_notification_preferences_collection_is_declared_in_the_data_contract() -> None:
     import json
+
+    outputs = {output["path"]: output for output in _read_yaml(NOTIFICATIONS / "contract.yaml")["required_outputs"]}
+    assert outputs["data/contract.json"]["owner"] == "templates"
+    contract = json.loads((TEMPLATES / "data" / "contract.json").read_text(encoding="utf-8"))
+    assert contract.get("shared_collections") == []
+    surfaces = {surface["surface_id"]: surface for surface in contract.get("surfaces") or []}
+    assert set(surfaces) == {"notification_settings"}
+    surface = surfaces["notification_settings"]
+    assert surface["surface_kind"] == "module"
+    collections = {collection["name"]: collection for collection in surface.get("collections") or []}
+    assert set(collections) == {"preferences"}, (
+        "data/contract.json must declare the notification_settings preferences collection"
+    )
+    preferences = collections["preferences"]
+    assert preferences["tenancy"] == "app_wide" and preferences["owner_field"] is None
+    assert {field["name"] for field in preferences["fields"]} >= {
+        "user_id", "email_enabled", "push_enabled", "sms_enabled",
+    }
+    assert preferences["indexes"] == [{
+        "name": "notification_settings_preferences_user_unique",
+        "keys": [{"field": "app_id", "order": 1}, {"field": "user_id", "order": 1}],
+        "unique": True,
+    }]
+
+
+def test_notification_preferences_migration_emits_additive_operations() -> None:
+    import json
+
+    migration_files = list((TEMPLATES / "data" / "migrations").glob("*.json"))
+    assert migration_files, "templates must include at least one data migration"
     for mf in migration_files:
         migration = json.loads(mf.read_text(encoding="utf-8"))
-        aliases = migration.get("aliases", [])
-        alias_names = [a.get("alias", "") for a in aliases]
-        if any("notifications.preferences" in a for a in alias_names):
-            return  # Found the expected alias
+        assert not {"aliases", "surfaces", "shared_collections", "indexes"} & set(migration), (
+            f"{mf.name}: collections and aliases belong in data/contract.json; emit additive operations"
+        )
 
-    raise AssertionError(
-        "A migration file must declare the 'notifications.preferences' data alias"
+    migration = json.loads(
+        (TEMPLATES / "data" / "migrations" / "001_notification_preferences_collection.json").read_text(encoding="utf-8")
     )
+    assert migration["schema_version"] == "mozaiks.data_migration.v1"
+    assert migration["migration_id"] == "001_notification_preferences_collection"
+    assert migration["operations"] == [
+        {"type": "ensure_collection", "module_id": "notification_settings", "entity_name": "preferences"},
+        {
+            "type": "ensure_index",
+            "module_id": "notification_settings",
+            "entity_name": "preferences",
+            "index": {
+                "name": "notification_settings_preferences_user_unique",
+                "keys": [["app_id", 1], ["user_id", 1]],
+                "unique": True,
+            },
+        },
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -423,11 +467,12 @@ def test_notifications_contract_runtime_boundary_provider_neutral_interface() ->
 # ---------------------------------------------------------------------------
 
 
-def test_notifications_contract_declares_avoid_when() -> None:
-    contract = _read_yaml(NOTIFICATIONS / "contract.yaml")
-    assert contract.get("avoid_when"), "contract.yaml must declare avoid_when"
-    avoid_text = " ".join(str(a) for a in (contract.get("avoid_when") or []))
-    assert "contracts/notifications.yaml" in avoid_text or "in-app" in avoid_text
+def test_notifications_avoid_when_guidance_lives_in_the_routing_catalog() -> None:
+    """Selection guidance is catalog routing; the pack contract schema rejects an avoid_when field."""
+    assert "avoid_when" not in _read_yaml(NOTIFICATIONS / "contract.yaml")
+    routing = _read_yaml(BUILD_CONTEXT / "AppGenerator" / "capability_routing.yaml")
+    packs = {pack["id"]: pack for pack in routing["layers"]["capability_pack"]["packs"]}
+    assert "contracts/notifications.yaml" in packs["notifications"]["avoid_when"]
 
 
 # ---------------------------------------------------------------------------

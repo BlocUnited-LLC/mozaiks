@@ -5,7 +5,7 @@ Verifies that:
 - contract.yaml required_outputs all exist under templates; forbidden paths are absent
 - The support module declares the expected actions and capabilities
 - Capabilities reference declared actions
-- Data migration declares the support.requests collection alias
+- Data contract declares the support requests collection; the migration ensures it
 - Backend Python files compile and use the canonical persistence pattern
 - Service emits domain.support.* events
 - Notification contract covers request_created and status_changed
@@ -169,31 +169,43 @@ def test_support_module_owns_conversation_actions() -> None:
 # Data migration
 # ---------------------------------------------------------------------------
 
-def test_support_data_migration_declares_requests_collection_alias() -> None:
-    migration_path = TEMPLATES / "data" / "migrations" / "001_support_collections.json"
-    assert migration_path.exists()
-    migration = json.loads(migration_path.read_text(encoding="utf-8"))
-
-    aliases = {
-        collection["data_alias"]
-        for surface in migration.get("surfaces", [])
+def _data_contract_collections() -> set[tuple[str, str]]:
+    contract = json.loads((TEMPLATES / "data" / "contract.json").read_text(encoding="utf-8"))
+    return {
+        (surface["surface_id"], collection["name"])
+        for surface in contract.get("surfaces", [])
         for collection in surface.get("collections", [])
     }
-    assert "support.requests" in aliases, f"Missing support.requests alias; found: {aliases}"
+
+
+def _migration() -> dict[str, Any]:
+    migration_path = TEMPLATES / "data" / "migrations" / "001_support_collections.json"
+    assert migration_path.exists()
+    return json.loads(migration_path.read_text(encoding="utf-8"))
+
+
+def test_support_data_contract_declares_requests_collection() -> None:
+    collections = _data_contract_collections()
+    assert ("support", "requests") in collections, f"Missing support requests collection; found: {collections}"
+
+    migration = _migration()
+    # Collections and aliases belong in data/contract.json; the migration only emits additive operations.
+    assert not {"surfaces", "aliases", "shared_collections"} & set(migration)
+    ensured = {
+        (operation["module_id"], operation["entity_name"])
+        for operation in migration["operations"]
+        if operation["type"] == "ensure_collection"
+    }
+    assert ("support", "requests") in ensured, f"Migration does not ensure support requests; found: {ensured}"
+    assert {operation["type"] for operation in migration["operations"]} <= {"ensure_collection", "ensure_index"}
 
 
 def test_support_data_migration_does_not_declare_messages_collection() -> None:
     """Support must not own message storage — that belongs to the messaging pack."""
-    migration_path = TEMPLATES / "data" / "migrations" / "001_support_collections.json"
-    migration = json.loads(migration_path.read_text(encoding="utf-8"))
-
-    aliases = {
-        collection["data_alias"]
-        for surface in migration.get("surfaces", [])
-        for collection in surface.get("collections", [])
-    }
-    assert not any(alias.startswith("messages.") or alias.startswith("messaging.") for alias in aliases), (
-        f"Support pack must not own message collections: {aliases}"
+    owners = {owner for owner, _name in _data_contract_collections()}
+    owners |= {operation["module_id"] for operation in _migration()["operations"]}
+    assert not owners & {"messages", "messaging"}, (
+        f"Support pack must not own message collections: {sorted(owners)}"
     )
 
 

@@ -1,0 +1,475 @@
+{
+  "version": "1",
+  "surfaces": [
+    {
+      "surface_id": "commerce",
+      "surface_kind": "module",
+      "collections": [
+        {
+          "name": "products",
+          "scope": "app",
+          "entity": "Product",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "fields": [
+            {
+              "name": "product_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "slug",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "description",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "category",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "sku",
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "status",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "price_amount",
+              "type": "integer",
+              "required": true
+            },
+            {
+              "name": "currency",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "inventory_quantity",
+              "type": "integer",
+              "required": false
+            },
+            {
+              "name": "track_inventory",
+              "type": "boolean",
+              "required": true
+            },
+            {
+              "name": "image_url",
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "created_by",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "created_at",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "updated_at",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "lifecycle": {
+            "write_mode": "module_action"
+          },
+          "indexes": [
+            {
+              "name": "products_by_id",
+              "keys": [
+                {
+                  "field": "product_id",
+                  "order": 1
+                }
+              ],
+              "unique": true
+            },
+            {
+              "name": "products_by_status_updated",
+              "keys": [
+                {
+                  "field": "status",
+                  "order": 1
+                },
+                {
+                  "field": "updated_at",
+                  "order": -1
+                }
+              ]
+            },
+            {
+              "name": "products_by_slug",
+              "keys": [
+                {
+                  "field": "slug",
+                  "order": 1
+                }
+              ],
+              "unique": true,
+              "sparse": true
+            },
+            {
+              "name": "products_by_category",
+              "keys": [
+                {
+                  "field": "category",
+                  "order": 1
+                },
+                {
+                  "field": "status",
+                  "order": 1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "carts",
+          "scope": "app",
+          "entity": "Cart",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "fields": [
+            {
+              "name": "cart_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "actor_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "status",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "items",
+              "type": "array",
+              "required": true
+            },
+            {
+              "name": "subtotal_amount",
+              "type": "integer",
+              "required": true
+            },
+            {
+              "name": "subtotal_display",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "currency",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "created_at",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "updated_at",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "lifecycle": {
+            "write_mode": "module_action"
+          },
+          "indexes": [
+            {
+              "name": "carts_by_id",
+              "keys": [
+                {
+                  "field": "cart_id",
+                  "order": 1
+                }
+              ],
+              "unique": true
+            },
+            {
+              "name": "carts_by_actor_status",
+              "keys": [
+                {
+                  "field": "actor_id",
+                  "order": 1
+                },
+                {
+                  "field": "status",
+                  "order": 1
+                }
+              ]
+            },
+            {
+              "name": "carts_by_updated",
+              "keys": [
+                {
+                  "field": "updated_at",
+                  "order": -1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "orders",
+          "scope": "app",
+          "entity": "Order",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "fields": [
+            {
+              "name": "order_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "actor_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "cart_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "status",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "items",
+              "type": "array",
+              "required": true
+            },
+            {
+              "name": "subtotal_amount",
+              "type": "integer",
+              "required": true
+            },
+            {
+              "name": "total_amount",
+              "type": "integer",
+              "required": true
+            },
+            {
+              "name": "total_display",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "currency",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "payment",
+              "type": "object",
+              "required": true
+            },
+            {
+              "name": "fulfillment",
+              "type": "object",
+              "required": true
+            },
+            {
+              "name": "payment_event",
+              "type": "object",
+              "required": false
+            },
+            {
+              "name": "created_at",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "updated_at",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "lifecycle": {
+            "write_mode": "module_action"
+          },
+          "indexes": [
+            {
+              "name": "orders_by_id",
+              "keys": [
+                {
+                  "field": "order_id",
+                  "order": 1
+                }
+              ],
+              "unique": true
+            },
+            {
+              "name": "orders_by_actor_created",
+              "keys": [
+                {
+                  "field": "actor_id",
+                  "order": 1
+                },
+                {
+                  "field": "created_at",
+                  "order": -1
+                }
+              ]
+            },
+            {
+              "name": "orders_by_status_created",
+              "keys": [
+                {
+                  "field": "status",
+                  "order": 1
+                },
+                {
+                  "field": "created_at",
+                  "order": -1
+                }
+              ]
+            },
+            {
+              "name": "orders_by_provider_reference",
+              "keys": [
+                {
+                  "field": "payment.provider_reference",
+                  "order": 1
+                }
+              ],
+              "sparse": true
+            }
+          ]
+        },
+        {
+          "name": "checkout_requests",
+          "scope": "app",
+          "entity": "CheckoutRequest",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "fields": [
+            {
+              "name": "checkout_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "order_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "actor_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "cart_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "status",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "payment_provider",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "amount",
+              "type": "integer",
+              "required": true
+            },
+            {
+              "name": "currency",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "success_url",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "cancel_url",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "created_at",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "updated_at",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "lifecycle": {
+            "write_mode": "module_action"
+          },
+          "indexes": [
+            {
+              "name": "checkout_requests_by_id",
+              "keys": [
+                {
+                  "field": "checkout_id",
+                  "order": 1
+                }
+              ],
+              "unique": true
+            },
+            {
+              "name": "checkout_requests_by_order",
+              "keys": [
+                {
+                  "field": "order_id",
+                  "order": 1
+                }
+              ]
+            },
+            {
+              "name": "checkout_requests_by_status_created",
+              "keys": [
+                {
+                  "field": "status",
+                  "order": 1
+                },
+                {
+                  "field": "created_at",
+                  "order": -1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "shared_collections": []
+}

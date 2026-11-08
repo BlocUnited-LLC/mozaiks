@@ -1,0 +1,140 @@
+{
+  "version": "1",
+  "surfaces": [
+    {
+      "surface_id": "support",
+      "surface_kind": "module",
+      "collections": [
+        {
+          "name": "requests",
+          "scope": "app",
+          "entity": "Request",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "fields": [
+            {
+              "name": "request_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "subject_app_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "requester_id",
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "subject",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "page_url",
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "page_title",
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "severity",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "status",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "assignee_id",
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "message_thread_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "created_at",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "updated_at",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "resolved_at",
+              "type": "string",
+              "required": false
+            }
+          ],
+          "lifecycle": {
+            "write_mode": "module_action"
+          },
+          "indexes": [
+            {
+              "name": "support_requests_by_id",
+              "keys": [
+                {
+                  "field": "request_id",
+                  "order": 1
+                }
+              ],
+              "unique": true
+            },
+            {
+              "name": "support_requests_by_subject_app_status_updated",
+              "keys": [
+                {
+                  "field": "subject_app_id",
+                  "order": 1
+                },
+                {
+                  "field": "status",
+                  "order": 1
+                },
+                {
+                  "field": "updated_at",
+                  "order": -1
+                }
+              ]
+            },
+            {
+              "name": "support_requests_by_requester_updated",
+              "keys": [
+                {
+                  "field": "requester_id",
+                  "order": 1
+                },
+                {
+                  "field": "updated_at",
+                  "order": -1
+                }
+              ]
+            },
+            {
+              "name": "support_requests_by_message_thread",
+              "keys": [
+                {
+                  "field": "message_thread_id",
+                  "order": 1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "shared_collections": []
+}
