@@ -386,21 +386,21 @@ class WorkflowRunReplayer:
                 or not isinstance(payload, dict)
             ):
                 continue
-            await send_event(
-                {
-                    "kind": "tool_call", "tool_call_id": event_id, "corr": event_id,
-                    "tool_name": state.get("tool_name"),
-                    "component_type": state.get("component_type") or state.get("tool_name"),
-                    "workflow_name": state.get("workflow_name") or payload.get("workflow_name"),
-                    "agent_name": state.get("agent_name") or payload.get("agent_name"),
-                    "display": state.get("display") or "inline",
-                    "display_type": state.get("display") or "inline",
-                    "awaiting_response": True,
-                    "interaction_type": payload.get("interaction_type") or "ui_tool",
-                    "payload": self._json_safe(payload), "replay": True,
-                },
-                chat_id,
-            )
+            tool_event = {
+                "kind": "tool_call", "tool_call_id": event_id, "corr": event_id,
+                "tool_name": state.get("tool_name"),
+                "component_type": state.get("component_type") or state.get("tool_name"),
+                "workflow_name": state.get("workflow_name") or payload.get("workflow_name"),
+                "agent_name": state.get("agent_name") or payload.get("agent_name"),
+                "display": state.get("display") or "inline",
+                "display_type": state.get("display") or "inline",
+                "awaiting_response": True,
+                "interaction_type": payload.get("interaction_type") or "ui_tool",
+                "payload": self._json_safe(payload), "replay": True,
+            }
+            if self._project_ui_tool_response_state is not None:
+                tool_event = self._project_ui_tool_response_state(tool_event, chat_id=chat_id) or tool_event
+            await send_event(tool_event, chat_id)
             emitted_ids.add(event_id)
 
     def _resolve_hidden_initial_message(

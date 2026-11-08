@@ -444,6 +444,7 @@ This project follows a practical pre-1.0 changelog format:
 
 - Saved workflow reviews restored after a server restart now show inactive
   decision controls and explain how to request a fresh review through the chat.
+  Pending reviews saved before a committed chat turn receive the same state.
   Reconnecting to a still-live review keeps its controls available. Failed
   response submissions no longer make an inline review appear completed.
 

@@ -207,6 +207,8 @@ Client behavior:
 Saved response-bearing tool calls carry a transient `response_available` boolean
 when replayed or returned as `last_artifact`. It describes whether the current
 server process still has that chat's unresolved response waiter or input request.
+This includes pending reviews saved before their chat turn was committed, as
+well as reviews attached to replayed history.
 It is presentation metadata, not authorization: the response endpoint still
 checks the authenticated owner and current event binding. Passive UI surfaces
 are unaffected.
