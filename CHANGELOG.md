@@ -370,6 +370,8 @@ This project follows a practical pre-1.0 changelog format:
   approved build inputs while rejecting changes to verified implementations.
   Commerce no longer requires fixed pricing gates, uses current schema admin panels,
   and declares the product response envelopes used by its mutation actions.
+- Failed automatic workflow steps now show a safe conversation notice without
+  enabling debug messages, exposing result details, or changing retry eligibility.
 
 - Account export and deletion in files `0.1.13`, notifications `0.1.13`,
   commerce `0.1.14`, social `0.1.14`, and support `0.1.14` use the same
@@ -481,6 +483,12 @@ This project follows a practical pre-1.0 changelog format:
   - social moderation uses admitted `user_posts.moderate` or `user_posts.admin`
     permissions instead of a nonexistent runtime roles field. Author deletion,
     the action's create permission, app scoping and post soft deletion remain enforced.
+
+- Saved workflow reviews restored after a server restart now show inactive
+  decision controls and explain how to request a fresh review through the chat.
+  Pending reviews saved before a committed chat turn receive the same state.
+  Reconnecting to a still-live review keeps its controls available. Failed
+  response submissions no longer make an inline review appear completed.
 
 - The shell no longer offers Profile, Sign in, or Sign out when nobody can sign
   in. A fresh Studio runs with authentication disabled, yet its account menu
