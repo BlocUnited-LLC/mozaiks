@@ -362,6 +362,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- App Studio cancels abandoned data loads during navigation and development
+  StrictMode replay, preventing duplicate detail requests while keeping refresh available.
+
 - Account export and deletion in files `0.1.13`, notifications `0.1.13`,
   commerce `0.1.14`, social `0.1.14`, and support `0.1.14` use the same
   authenticated persistence bindings as module actions. Multi-page records are
