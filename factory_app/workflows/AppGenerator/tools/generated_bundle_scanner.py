@@ -1702,12 +1702,15 @@ def _scan_reviewed_page_roles(files_map: dict[str, str], context: Any) -> list[s
             # Only the exact shared auth page identities may extend the reviewed
             # app inventory. An arbitrary component at /login is still an app page.
             canonical_auth = {entry["path"]: entry for entry in app_auth_route_entries(contract)}
+            registered_files, _ = resolve_registered_component_files(files_map, source_label="ui/route_manifest.json:")
+            app_auth_components = APP_AUTH_COMPONENTS.intersection(registered_files)
             app_routes = []
             for entry in routes:
                 expected = canonical_auth.get(entry.get("path"))
                 meta = entry.get("meta") or {}
                 shared_auth_page = (
                     expected is not None and entry.get("component") == expected["component"]
+                    and entry.get("component") not in app_auth_components
                     and meta.get("requiresAuth") is False
                     and not {"roles", "requiredRole", "requiresRole"} & entry.keys()
                     and not {"roles", "requiredRole"} & meta.keys()

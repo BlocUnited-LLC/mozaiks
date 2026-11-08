@@ -288,3 +288,20 @@ async def test_page_only_archive_replays_exact_review_and_rejects_removed_gate(s
     assert any("no reviewed page in ExperienceSpec" in item.message for item in result.diagnostics)
     # An authored upload has no claim to Factory approval and uses static validation.
     assert validate_generated_app_bundle(GeneratedAppValidationRequest(files=files)).passed
+    for component in ("LoginPage", "AuthCallbackPage"):
+        shadowed = {
+            **files,
+            "ui/index.js": (
+                "import Reports from './pages/custom/Reports.jsx';\n"
+                "export function register(registerComponent) {\n"
+                f"  registerComponent('{component}', Reports);\n"
+                "}\n"
+            ),
+            "ui/pages/custom/Reports.jsx": "export default function Reports() { return <div>Private reports</div>; }\n",
+        }
+        result = validate_generated_app_bundle(GeneratedAppValidationRequest(files=shadowed, approved_compilation=approval))
+        assert not result.passed
+        assert any("no reviewed page in ExperienceSpec" in item.message for item in result.diagnostics)
+        # Explicit authored auth UI overrides remain supported outside Factory approval.
+        authored = validate_generated_app_bundle(GeneratedAppValidationRequest(files=shadowed))
+        assert authored.passed, authored.diagnostics
