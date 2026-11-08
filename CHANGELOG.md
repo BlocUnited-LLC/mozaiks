@@ -367,6 +367,10 @@ This project follows a practical pre-1.0 changelog format:
   Commerce no longer requires fixed pricing gates, uses current schema admin panels,
   and declares the product response envelopes used by its mutation actions.
 
+- Module handler reactions receive contract-bounded persistence from the
+  platform host. Owned collections require the active authenticated dispatch;
+  event actors and notification recipients cannot supply storage authority.
+
 - Account export and deletion in files `0.1.13`, notifications `0.1.13`,
   commerce `0.1.14`, social `0.1.14`, and support `0.1.14` use the same
   authenticated persistence bindings as module actions. Multi-page records are

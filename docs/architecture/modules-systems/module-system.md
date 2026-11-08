@@ -486,6 +486,24 @@ reactions:
 
 Add the matching method to `handler.py` and delegate to service.
 
+Handler reactions receive `ctx.persistence` from the platform's loaded data
+contract and mounted-module collection declarations, with the reaction's module
+as the dispatch owner. `ctx.module_id` and `ctx.workspace_id` describe that
+reaction context. An unconfigured router or an event without an app identity
+has no persistence context; an explicitly empty data contract permits no
+undeclared collections.
+
+The event actor, recipient and permission metadata do not create a persistence
+principal. Synchronous reactions can reuse only the already-active authenticated
+dispatch for the same app. Nonempty event user, workspace or tenant identities
+that conflict with that principal fail closed. Collection handles resolve the
+principal again on each operation, so a detached task cannot retain it after
+the originating dispatch ends. Background reactions without that principal
+cannot access `per_user` or `per_workspace` collections; declared `app_wide`
+collections retain the adapter's existing app-scoped behavior. Modules remain
+responsible for recipient selection and business authorization. This injection
+does not change reaction permissions, event provenance or emission validation.
+
 `service_adapter` is the bounded escape hatch for provider or hosted-product
 mechanics that belong under `app/services/adapters/...`, not inside a generated
 module. It is useful when a module owns the event contract and durable state,

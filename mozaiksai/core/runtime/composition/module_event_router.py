@@ -46,6 +46,15 @@ from mozaiksai.core.runtime.composition.schema_validation import (
     SchemaValidationDiagnostic,
     validate_json_schema,
 )
+from mozaiksai.core.runtime.persistence.adapter import (
+    ModulePersistenceContext,
+    PersistencePrincipal,
+    PersistenceScopeError,
+)
+from mozaiksai.core.runtime.persistence.intent_loader import DataContract
+from mozaiksai.core.runtime.persistence.mongo import MongoPersistenceContext
+from mozaiksai.core.runtime.persistence.platform_modules import PlatformModuleDeclarations
+from mozaiksai.core.runtime.persistence.request_scope import current_persistence_principal
 
 logger = get_workflow_logger("module_event_router")
 
@@ -150,6 +159,9 @@ class _ReactionCtx:
         tenant_id: str,
         user_id: str,
         event_emitter: EventEmitter | None,
+        workspace_id: str | None = None,
+        module_id: str | None = None,
+        persistence: ModulePersistenceContext | None = None,
         event_provenance: ModuleEventProvenance | None = None,
         reaction_provenance: ModuleReactionProvenance | None = None,
         permissions: Iterable[str] | None = None,
@@ -157,6 +169,9 @@ class _ReactionCtx:
         self.app_id = app_id
         self.tenant_id = tenant_id
         self.user_id = user_id
+        self.workspace_id = workspace_id
+        self.module_id = module_id
+        self.persistence = persistence
         self.event_provenance = event_provenance
         self.reaction_provenance = reaction_provenance
         self.permissions = list(permissions or [])
@@ -242,11 +257,19 @@ class ModuleEventRouter:
         notification_store: NotificationStore | None = None,
         capability_invoker: CapabilityInvoker | None = None,
         idempotency_store: ReactionIdempotencyStore | None = None,
+        data_contract: DataContract | None = None,
+        platform_modules: PlatformModuleDeclarations | None = None,
+        persistence_database: str | None = None,
+        persistence_client: Any | None = None,
     ) -> None:
         self._event_emitter = event_emitter
         self._notification_store = notification_store
         self._capability_invoker = capability_invoker
         self._idempotency_store = idempotency_store
+        self._data_contract = data_contract
+        self._platform_modules = platform_modules
+        self._persistence_database = persistence_database
+        self._persistence_client = persistence_client
         self._reactions_by_event: dict[str, list[dict]] = defaultdict(list)
         self._notifications_by_event: dict[str, list[dict]] = defaultdict(list)
         self._notifications_by_key: dict[tuple[str, str], dict] = {}
@@ -1190,6 +1213,8 @@ class ModuleEventRouter:
             app_id=str(tenant.get("app_id") or event_provenance.app_id or ""),
             tenant_id=str(tenant.get("tenant_id") or event_provenance.tenant_id or ""),
             user_id=str(actor.get("id") or event_provenance.actor_id or ""),
+            workspace_id=event_provenance.workspace_id,
+            module_id=module_id,
             event_emitter=self._event_emitter,
             event_provenance=event_provenance,
             reaction_provenance=reaction_provenance,
@@ -1207,6 +1232,7 @@ class ModuleEventRouter:
         else:
             payload = {}
         try:
+            ctx.persistence = self._build_persistence_context(ctx)
             result = await self._maybe_await(method(ctx, **payload))
         except Exception as exc:
             logger.error(
@@ -1224,6 +1250,28 @@ class ModuleEventRouter:
                 else "handler returned false"
             ), None
         return "ok", None, result.effect_id if isinstance(result, ModuleReactionEffectAck) else None
+
+    def _build_persistence_context(self, ctx: _ReactionCtx) -> ModulePersistenceContext | None:
+        if not ctx.app_id or (self._data_contract is None and self._platform_modules is None):
+            return None
+        app_id, user_id, workspace_id, tenant_id = ctx.app_id, ctx.user_id, ctx.workspace_id, ctx.tenant_id
+
+        def principal() -> PersistencePrincipal | None:
+            # Event identity is evidence only. Reuse the active authenticated
+            # dispatch, and let the adapter refuse owned data when it ends.
+            active = current_persistence_principal(app_id)
+            if active is not None:
+                for field, claimed in (("user_id", user_id), ("workspace_id", workspace_id), ("tenant_id", tenant_id)):
+                    if claimed and claimed != getattr(active, field):
+                        raise PersistenceScopeError(f"Reaction {field} does not match the active persistence principal")
+            return active
+
+        return MongoPersistenceContext(
+            app_id=app_id, tenant_id=tenant_id, user_id=user_id, workspace_id=workspace_id,
+            database_name=self._persistence_database, client=self._persistence_client,
+            data_contract=self._data_contract, principal=principal,
+            platform_modules=self._platform_modules, module_id=ctx.module_id,
+        )
 
     async def _emit_reaction_audit(self, audit: ModuleReactionAudit) -> None:
         """Emit payload-free reaction audit metadata without affecting fan-out."""
