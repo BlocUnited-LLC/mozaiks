@@ -337,6 +337,9 @@ This project follows a practical pre-1.0 changelog format:
 - Concept planning guidance now leaves API endpoint hints empty for ordinary
   module-backed features instead of teaching invented CRUD routes. Explicit
   integration endpoints remain advisory references to supplied contracts.
+- Studio onboarding status accepts a null completion timestamp for new,
+  partially completed, and dismissed tours without an output-contract warning.
+
 - The shell no longer offers Profile, Sign in, or Sign out when nobody can sign
   in. A fresh Studio runs with authentication disabled, yet its account menu
   showed Profile, Sign Out, and Sign In, and the mobile bar showed Profile, all
