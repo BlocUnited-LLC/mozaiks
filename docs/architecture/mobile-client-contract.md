@@ -204,6 +204,23 @@ Client behavior:
 - Apply events idempotently.
 - Replace local optimistic state if boundary indicates divergence.
 
+Saved response-bearing tool calls carry a transient `response_available` boolean
+when replayed or returned as `last_artifact`. It describes whether the current
+server process still has that chat's unresolved response waiter or input request.
+This includes pending reviews saved before their chat turn was committed, as
+well as reviews attached to replayed history.
+It is presentation metadata, not authorization: the response endpoint still
+checks the authenticated owner and current event binding. Passive UI surfaces
+are unaffected.
+
+When `response_available` is false, show the saved payload without decision
+controls. Reopening a chat or sending `client.resume` does not recreate a waiter
+or execute a workflow. For an unfinished workflow, the user can send a normal
+message in the same chat to request resumption and a fresh review; existing AG2
+resume and pending-turn replay policy govern whether that is possible. Only the
+newly emitted review may be answered. A rejected response must not mark the old
+card completed. Browser-cached availability is not evidence of a live waiter.
+
 ## 6) Error Contract
 
 Errors are emitted as:

@@ -180,9 +180,14 @@ async def handle_switch_workflow(
     # UI can reliably reconstruct workflow messages after Ask-mode transitions.
     if replay_on_switch:
         try:
-            from mozaiksai.core.transport.run_replay import WorkflowRunReplayer
+            from functools import partial
 
-            replayer = WorkflowRunReplayer()
+            from mozaiksai.core.transport.run_replay import WorkflowRunReplayer
+            from mozaiksai.core.transport.ui_tools import project_ui_tool_response_state
+
+            replayer = WorkflowRunReplayer(
+                project_ui_tool_response_state=partial(project_ui_tool_response_state, transport=transport),
+            )
 
             async def send_event_wrapper(event_dict: dict[str, Any], _target_chat_id: str | None) -> None:
                 if not isinstance(event_dict, dict):
