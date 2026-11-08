@@ -334,6 +334,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Account export and deletion in files `0.1.13`, notifications `0.1.13`,
+  commerce `0.1.14`, social `0.1.14`, and support `0.1.14` use the same
+  authenticated persistence bindings as module actions. Multi-page records are
+  handled without skipping rows during metadata updates, exports encode BSON
+  safely, and each module keeps its existing deletion or anonymization policy.
 - Concept planning guidance now leaves API endpoint hints empty for ordinary
   module-backed features instead of teaching invented CRUD routes. Explicit
   integration endpoints remain advisory references to supplied contracts.
