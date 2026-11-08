@@ -27,6 +27,8 @@ recommended_domains:
   - attachments
 
 required_outputs:
+  - path: data/contract.json
+    owner: templates
   - path: data/migrations/001_files_collections.json
     owner: templates
   - path: modules/files/module.yaml
@@ -74,6 +76,14 @@ runtime_boundaries:
       File records are user-owned PII. The module declares user_data_scope: true
       and ships account_data_handler.py implementing delete_user_data and
       export_user_data.
+  - id: record_visibility
+    rule: >
+      Signed-in callers with files.read may read their own live metadata and
+      another user's live metadata only when is_public is true. Listing remains
+      current-user-only. files.write permits deletion only of the caller's own
+      live records; public visibility does not grant deletion authority. Keep
+      these predicates in the module policy/repository queries alongside the
+      runtime's app scope, with no role-name or administrator bypass.
   - id: no_direct_sdk_calls
     rule: >
       Generated repo.py must use ctx.persistence.collection("files", collection_name).

@@ -1,98 +1,255 @@
 {
+  "schema_version": "mozaiks.data_migration.v1",
   "migration_id": "commerce_001_collections",
-  "description": "Declare commerce catalog, cart, checkout, and order collections in the app data contract.",
-  "surfaces": [
+  "version": "1",
+  "description": "Ensure commerce catalog, cart, checkout, and order collections and indexes without rewriting records.",
+  "operations": [
     {
-      "surface_id": "commerce",
-      "collections": [
-        {
-          "mongo_collection": "commerce_products",
-          "data_alias": "commerce.products",
-          "indexes": [
-            {
-              "name": "products_by_id",
-              "keys": [{"field": "product_id", "order": 1}],
-              "unique": true
-            },
-            {
-              "name": "products_by_status_updated",
-              "keys": [{"field": "status", "order": 1}, {"field": "updated_at", "order": -1}]
-            },
-            {
-              "name": "products_by_slug",
-              "keys": [{"field": "slug", "order": 1}],
-              "unique": true,
-              "sparse": true
-            },
-            {
-              "name": "products_by_category",
-              "keys": [{"field": "category", "order": 1}, {"field": "status", "order": 1}]
-            }
+      "type": "ensure_collection",
+      "module_id": "commerce",
+      "entity_name": "products"
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "commerce",
+      "entity_name": "products",
+      "index": {
+        "name": "products_by_id",
+        "keys": [
+          [
+            "product_id",
+            1
           ]
-        },
-        {
-          "mongo_collection": "commerce_carts",
-          "data_alias": "commerce.carts",
-          "indexes": [
-            {
-              "name": "carts_by_id",
-              "keys": [{"field": "cart_id", "order": 1}],
-              "unique": true
-            },
-            {
-              "name": "carts_by_actor_status",
-              "keys": [{"field": "actor_id", "order": 1}, {"field": "status", "order": 1}]
-            },
-            {
-              "name": "carts_by_updated",
-              "keys": [{"field": "updated_at", "order": -1}]
-            }
+        ],
+        "unique": true
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "commerce",
+      "entity_name": "products",
+      "index": {
+        "name": "products_by_status_updated",
+        "keys": [
+          [
+            "status",
+            1
+          ],
+          [
+            "updated_at",
+            -1
           ]
-        },
-        {
-          "mongo_collection": "commerce_orders",
-          "data_alias": "commerce.orders",
-          "indexes": [
-            {
-              "name": "orders_by_id",
-              "keys": [{"field": "order_id", "order": 1}],
-              "unique": true
-            },
-            {
-              "name": "orders_by_actor_created",
-              "keys": [{"field": "actor_id", "order": 1}, {"field": "created_at", "order": -1}]
-            },
-            {
-              "name": "orders_by_status_created",
-              "keys": [{"field": "status", "order": 1}, {"field": "created_at", "order": -1}]
-            },
-            {
-              "name": "orders_by_provider_reference",
-              "keys": [{"field": "payment.provider_reference", "order": 1}],
-              "sparse": true
-            }
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "commerce",
+      "entity_name": "products",
+      "index": {
+        "name": "products_by_slug",
+        "keys": [
+          [
+            "slug",
+            1
           ]
-        },
-        {
-          "mongo_collection": "commerce_checkout_requests",
-          "data_alias": "commerce.checkout_requests",
-          "indexes": [
-            {
-              "name": "checkout_requests_by_id",
-              "keys": [{"field": "checkout_id", "order": 1}],
-              "unique": true
-            },
-            {
-              "name": "checkout_requests_by_order",
-              "keys": [{"field": "order_id", "order": 1}]
-            },
-            {
-              "name": "checkout_requests_by_status_created",
-              "keys": [{"field": "status", "order": 1}, {"field": "created_at", "order": -1}]
-            }
+        ],
+        "unique": true,
+        "sparse": true
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "commerce",
+      "entity_name": "products",
+      "index": {
+        "name": "products_by_category",
+        "keys": [
+          [
+            "category",
+            1
+          ],
+          [
+            "status",
+            1
           ]
-        }
-      ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_collection",
+      "module_id": "commerce",
+      "entity_name": "carts"
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "commerce",
+      "entity_name": "carts",
+      "index": {
+        "name": "carts_by_id",
+        "keys": [
+          [
+            "cart_id",
+            1
+          ]
+        ],
+        "unique": true
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "commerce",
+      "entity_name": "carts",
+      "index": {
+        "name": "carts_by_actor_status",
+        "keys": [
+          [
+            "actor_id",
+            1
+          ],
+          [
+            "status",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "commerce",
+      "entity_name": "carts",
+      "index": {
+        "name": "carts_by_updated",
+        "keys": [
+          [
+            "updated_at",
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_collection",
+      "module_id": "commerce",
+      "entity_name": "orders"
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "commerce",
+      "entity_name": "orders",
+      "index": {
+        "name": "orders_by_id",
+        "keys": [
+          [
+            "order_id",
+            1
+          ]
+        ],
+        "unique": true
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "commerce",
+      "entity_name": "orders",
+      "index": {
+        "name": "orders_by_actor_created",
+        "keys": [
+          [
+            "actor_id",
+            1
+          ],
+          [
+            "created_at",
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "commerce",
+      "entity_name": "orders",
+      "index": {
+        "name": "orders_by_status_created",
+        "keys": [
+          [
+            "status",
+            1
+          ],
+          [
+            "created_at",
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "commerce",
+      "entity_name": "orders",
+      "index": {
+        "name": "orders_by_provider_reference",
+        "keys": [
+          [
+            "payment.provider_reference",
+            1
+          ]
+        ],
+        "sparse": true
+      }
+    },
+    {
+      "type": "ensure_collection",
+      "module_id": "commerce",
+      "entity_name": "checkout_requests"
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "commerce",
+      "entity_name": "checkout_requests",
+      "index": {
+        "name": "checkout_requests_by_id",
+        "keys": [
+          [
+            "checkout_id",
+            1
+          ]
+        ],
+        "unique": true
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "commerce",
+      "entity_name": "checkout_requests",
+      "index": {
+        "name": "checkout_requests_by_order",
+        "keys": [
+          [
+            "order_id",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "commerce",
+      "entity_name": "checkout_requests",
+      "index": {
+        "name": "checkout_requests_by_status_created",
+        "keys": [
+          [
+            "status",
+            1
+          ],
+          [
+            "created_at",
+            -1
+          ]
+        ]
+      }
     }
   ]
 }

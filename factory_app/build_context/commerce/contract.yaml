@@ -35,6 +35,8 @@ recommended_domains:
   - checkout
 
 required_outputs:
+  - path: data/contract.json
+    owner: templates
   - path: data/migrations/001_commerce_collections.json
     owner: templates
   - path: modules/commerce/module.yaml
@@ -86,7 +88,7 @@ forbidden_outputs:
 
 runtime_boundaries:
   - id: persistence_layer
-    rule: Generated repo.py must use app_data_from_context and data aliases. No direct Motor clients and no hardcoded database names.
+    rule: Generated repo.py must use ctx.persistence.collection("commerce", collection_name) for the collections declared in data/contract.json. No direct Motor clients, no app_data_from_context aliases and no hardcoded database names.
   - id: payment_provider_boundary
     rule: Commerce owns catalog, cart, orders, checkout requests, and fulfillment state. Payment provider mechanics stay in a selected payment capability pack or app-owned services/adapters/payments when the user explicitly brings a provider.
   - id: checkout_event_boundary

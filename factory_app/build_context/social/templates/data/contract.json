@@ -1,0 +1,590 @@
+{
+  "version": "1",
+  "surfaces": [
+    {
+      "surface_id": "friends",
+      "surface_kind": "module",
+      "collections": [
+        {
+          "name": "friendships",
+          "scope": "app",
+          "entity": "Friendship",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "fields": [
+            {
+              "name": "friendship_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "user_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "friend_user_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "since",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "created_at",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "lifecycle": {
+            "write_mode": "module_action"
+          },
+          "indexes": [
+            {
+              "name": "friendships_by_id",
+              "keys": [
+                {
+                  "field": "friendship_id",
+                  "order": 1
+                }
+              ],
+              "unique": true
+            },
+            {
+              "name": "friendships_by_user",
+              "keys": [
+                {
+                  "field": "user_id",
+                  "order": 1
+                },
+                {
+                  "field": "created_at",
+                  "order": -1
+                }
+              ]
+            },
+            {
+              "name": "friendships_by_user_friend",
+              "keys": [
+                {
+                  "field": "user_id",
+                  "order": 1
+                },
+                {
+                  "field": "friend_user_id",
+                  "order": 1
+                }
+              ],
+              "unique": true
+            }
+          ]
+        },
+        {
+          "name": "requests",
+          "scope": "app",
+          "entity": "FriendRequest",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "fields": [
+            {
+              "name": "request_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "requester_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "requester_name",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "recipient_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "status",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "created_at",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "updated_at",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "lifecycle": {
+            "write_mode": "module_action"
+          },
+          "indexes": [
+            {
+              "name": "requests_by_id",
+              "keys": [
+                {
+                  "field": "request_id",
+                  "order": 1
+                }
+              ],
+              "unique": true
+            },
+            {
+              "name": "requests_by_requester",
+              "keys": [
+                {
+                  "field": "requester_id",
+                  "order": 1
+                },
+                {
+                  "field": "status",
+                  "order": 1
+                },
+                {
+                  "field": "created_at",
+                  "order": -1
+                }
+              ]
+            },
+            {
+              "name": "requests_by_recipient",
+              "keys": [
+                {
+                  "field": "recipient_id",
+                  "order": 1
+                },
+                {
+                  "field": "status",
+                  "order": 1
+                },
+                {
+                  "field": "created_at",
+                  "order": -1
+                }
+              ]
+            },
+            {
+              "name": "requests_unique_pending",
+              "keys": [
+                {
+                  "field": "requester_id",
+                  "order": 1
+                },
+                {
+                  "field": "recipient_id",
+                  "order": 1
+                },
+                {
+                  "field": "status",
+                  "order": 1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "surface_id": "activity_feed",
+      "surface_kind": "module",
+      "collections": [
+        {
+          "name": "events",
+          "scope": "app",
+          "entity": "ActivityEvent",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "fields": [
+            {
+              "name": "event_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "activity_type",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "actor_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "about_user_id",
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "subject_id",
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "subject_type",
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "subject_label",
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "feed_user_ids",
+              "type": "array",
+              "required": true
+            },
+            {
+              "name": "metadata",
+              "type": "object",
+              "required": true
+            },
+            {
+              "name": "created_at",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "lifecycle": {
+            "write_mode": "module_action"
+          },
+          "indexes": [
+            {
+              "name": "events_by_id",
+              "keys": [
+                {
+                  "field": "event_id",
+                  "order": 1
+                }
+              ],
+              "unique": true
+            },
+            {
+              "name": "events_by_actor_created",
+              "keys": [
+                {
+                  "field": "actor_id",
+                  "order": 1
+                },
+                {
+                  "field": "created_at",
+                  "order": -1
+                }
+              ]
+            },
+            {
+              "name": "events_by_feed_user_created",
+              "keys": [
+                {
+                  "field": "feed_user_ids",
+                  "order": 1
+                },
+                {
+                  "field": "created_at",
+                  "order": -1
+                }
+              ]
+            },
+            {
+              "name": "events_by_about_user",
+              "keys": [
+                {
+                  "field": "about_user_id",
+                  "order": 1
+                },
+                {
+                  "field": "created_at",
+                  "order": -1
+                }
+              ]
+            },
+            {
+              "name": "events_by_type_created",
+              "keys": [
+                {
+                  "field": "activity_type",
+                  "order": 1
+                },
+                {
+                  "field": "created_at",
+                  "order": -1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "surface_id": "user_posts",
+      "surface_kind": "module",
+      "collections": [
+        {
+          "name": "posts",
+          "scope": "app",
+          "entity": "Post",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "fields": [
+            {
+              "name": "post_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "author_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "body",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "body_preview",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "media_urls",
+              "type": "array",
+              "required": true
+            },
+            {
+              "name": "visibility",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "status",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "reaction_count",
+              "type": "integer",
+              "required": true
+            },
+            {
+              "name": "comment_count",
+              "type": "integer",
+              "required": true
+            },
+            {
+              "name": "created_at",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "updated_at",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "lifecycle": {
+            "write_mode": "module_action"
+          },
+          "indexes": [
+            {
+              "name": "posts_by_id",
+              "keys": [
+                {
+                  "field": "post_id",
+                  "order": 1
+                }
+              ],
+              "unique": true
+            },
+            {
+              "name": "posts_by_author_created",
+              "keys": [
+                {
+                  "field": "author_id",
+                  "order": 1
+                },
+                {
+                  "field": "created_at",
+                  "order": -1
+                }
+              ]
+            },
+            {
+              "name": "posts_by_status_created",
+              "keys": [
+                {
+                  "field": "status",
+                  "order": 1
+                },
+                {
+                  "field": "created_at",
+                  "order": -1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "reactions",
+          "scope": "app",
+          "entity": "PostReaction",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "fields": [
+            {
+              "name": "post_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "user_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "reaction_type",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "created_at",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "lifecycle": {
+            "write_mode": "module_action"
+          },
+          "indexes": [
+            {
+              "name": "reactions_by_post_user",
+              "keys": [
+                {
+                  "field": "post_id",
+                  "order": 1
+                },
+                {
+                  "field": "user_id",
+                  "order": 1
+                }
+              ],
+              "unique": true
+            },
+            {
+              "name": "reactions_by_user",
+              "keys": [
+                {
+                  "field": "user_id",
+                  "order": 1
+                },
+                {
+                  "field": "created_at",
+                  "order": -1
+                }
+              ]
+            },
+            {
+              "name": "reactions_by_post_type",
+              "keys": [
+                {
+                  "field": "post_id",
+                  "order": 1
+                },
+                {
+                  "field": "reaction_type",
+                  "order": 1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "comments",
+          "scope": "app",
+          "entity": "Comment",
+          "tenancy": "app_wide",
+          "owner_field": null,
+          "fields": [
+            {
+              "name": "comment_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "post_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "author_id",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "body",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "created_at",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "lifecycle": {
+            "write_mode": "module_action"
+          },
+          "indexes": [
+            {
+              "name": "comments_by_id",
+              "keys": [
+                {
+                  "field": "comment_id",
+                  "order": 1
+                }
+              ],
+              "unique": true
+            },
+            {
+              "name": "comments_by_post_created",
+              "keys": [
+                {
+                  "field": "post_id",
+                  "order": 1
+                },
+                {
+                  "field": "created_at",
+                  "order": 1
+                }
+              ]
+            },
+            {
+              "name": "comments_by_author",
+              "keys": [
+                {
+                  "field": "author_id",
+                  "order": 1
+                },
+                {
+                  "field": "created_at",
+                  "order": -1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "shared_collections": []
+}
