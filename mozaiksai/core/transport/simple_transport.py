@@ -1310,7 +1310,10 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     asset_id=asset_id,
                     promotion_target=promotion_target,
                     promoted_by=str(user_id),
+                    expected_source_chat_id=chat_id,
                 )
+                if updated is None:
+                    raise ValueError("Media asset is not available for promotion in this chat")
                 await send_event_envelope(websocket, {
                     "schema_version": "mozaiks.ui.event.v1",
                     "type": "artifact.action.completed",

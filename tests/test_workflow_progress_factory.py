@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
+from ag2.events import ModelMessage
 
 from factory_app.workflows.AgentGenerator.tools.hook_primitive_catalog import (
     inject_primitive_catalog,
@@ -17,21 +18,35 @@ from factory_app.workflows.AgentGenerator.tools.workflow_quality_gate import (
     load_bundle_entries_from_root,
     validate_workflow_bundle_structure,
 )
-from mozaiksai.core.workflow.declarative.contracts import WorkflowProgressConfig
+from mozaiksai.core.workflow.declarative.contracts import (
+    ImageGenerationSpec,
+    WorkflowProgressConfig,
+)
+from mozaiksai.core.workflow.execution.middleware import MozaiksPromptMiddleware
 from mozaiksai.core.workflow.workflow_manager import UnifiedWorkflowManager
 from tests.test_smoke_agentgenerator_live_pack import _write_valid_workflow
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_bundle_builder_receives_the_runtime_progress_schema_without_drift():
-    agent = SimpleNamespace(name="WorkflowBundleBuilderAgent", system_message="Generate a workflow.")
-    inject_primitive_catalog(agent, [])
-    first = agent._system_message
-    schema = json.loads(first.split("[WORKFLOW PROGRESS CONTRACT]\n", 1)[1].split("\n", 1)[1])
-    assert schema == WorkflowProgressConfig.model_json_schema()
-    inject_primitive_catalog(agent, [])
-    assert agent._system_message == first
+@pytest.mark.asyncio
+async def test_bundle_builder_receives_the_runtime_progress_schema_without_drift():
+    context = SimpleNamespace(variables={})
+    middleware = MozaiksPromptMiddleware(
+        ModelMessage("Generate a workflow."), context,
+        middleware_functions=[inject_primitive_catalog, inject_primitive_catalog],
+        agent_name="WorkflowBundleBuilderAgent", base_system_message="Generate a workflow.",
+        context_bridge={},
+    )
+    first = await middleware._run_prompt_middleware(context)
+    for header, model in (
+        ("WORKFLOW PROGRESS CONTRACT", WorkflowProgressConfig),
+        ("GENERATED MEDIA REVIEW CONTRACT", ImageGenerationSpec),
+    ):
+        assert first.count(f"[{header}]") == 1
+        section = first.split(f"[{header}]\n", 1)[1].split("\n\n[", 1)[0]
+        assert json.loads(section.split("\n", 1)[1]) == model.model_json_schema()
+    assert await middleware._run_prompt_middleware(context) == first
 
 
 @pytest.mark.parametrize("stage_id,valid", [("reading", True), ("undeclared", False)])

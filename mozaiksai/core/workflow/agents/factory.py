@@ -931,6 +931,7 @@ async def create_agents(
             try:
                 raw_media_config = agent_config.get("image_generation") if isinstance(agent_config, Mapping) else None
                 media_generation_params = dict(raw_media_config) if isinstance(raw_media_config, Mapping) else {}
+                media_emit_ui = media_generation_params.pop("emit_ui", True)
                 media_promotion_targets = media_generation_params.get("promotion_targets")
                 middleware.append(
                     build_ag2_media_harvest_middleware(
@@ -939,6 +940,7 @@ async def create_agents(
                         context_variables=context_bridge,
                         generation_params=media_generation_params,
                         promotion_targets=media_promotion_targets if isinstance(media_promotion_targets, list) else None,
+                        emit_ui=media_emit_ui,
                     )
                 )
             except Exception as media_err:
