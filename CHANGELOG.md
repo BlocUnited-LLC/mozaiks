@@ -362,6 +362,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Account export and deletion in files `0.1.13`, notifications `0.1.13`,
+  commerce `0.1.14`, social `0.1.14`, and support `0.1.14` use the same
+  authenticated persistence bindings as module actions. Multi-page records are
+  handled without skipping rows during metadata updates, exports encode BSON
+  safely, and each module keeps its existing deletion or anonymization policy.
 - ThemeCapture retries recover a missing approved concept from its current
   artifact and matching completed owner/build session, without copying failed
   execution state or replacing existing refinement inputs.
