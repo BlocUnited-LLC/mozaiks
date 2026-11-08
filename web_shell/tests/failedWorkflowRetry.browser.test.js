@@ -63,7 +63,7 @@ for (const scenario of [
     const expression = source.slice(start, source.indexOf('  const renderedMessages =', start));
     const visible = vm.runInNewContext(`${expression}\nshowTypingIndicator;`, {
       loading: Boolean(scenario.loading), connectionStatus: 'connected', conversationMode: 'workflow',
-      messages: scenario.output ? [{ metadata: { event_type: 'tool_progress' } }] : [],
+      messages: scenario.output ? [{ metadata: { type: 'tool_call_agent_message' } }] : [],
       failedWorkflowRetry: scenario.failed ? { available: true, launching: Boolean(scenario.launching) } : null,
     });
     assert.equal(visible, scenario.expected);
@@ -274,7 +274,6 @@ test('failed workflow retry uses the existing authenticated launch path', async 
   await t.test('only current activity shows typing after interactive output or completion', async () => {
     const page = await open();
     const history = [
-      {id:'progress', sender:'agent', content:'8 tasks completed.', metadata:{event_type:'tool_progress'}},
       {id:'tool-message', sender:'agent', content:'Your app bundle is ready.', metadata:{type:'tool_call_agent_message'}},
     ];
     const typing = page.getByRole('status', {name:'Assistant is typing', exact:true});

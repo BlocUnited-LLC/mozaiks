@@ -1,6 +1,7 @@
 version: 1
 batches:
   - id: workflow_generation_tasks
+    progress_stage: building_workflows
     trigger_agent: PackBuildCoordinator
     source:
       kind: context_variable

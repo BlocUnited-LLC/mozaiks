@@ -43,6 +43,9 @@ This project follows a practical pre-1.0 changelog format:
   through `middleware.yaml`. Each model attempt receives fresh values from
   explicitly selected, model-visible context variables. AgentGenerator validates
   and exports the same declaration; existing workflows keep their prompt behavior.
+- Workflows can declare public progress stages for the shared chat status strip.
+  Long-running tools report measured item counts or an indeterminate stage;
+  progress stays separate from token usage and execution completion.
 - Chats show connection and run status beside the composer, with measured token
   usage for the current run when available. Ask and workflow receipts stay
   scoped to their owning chat; the wallet balance remains in the Tokens tab.
@@ -416,6 +419,12 @@ This project follows a practical pre-1.0 changelog format:
   resolved or terminal interactions.
 - Malformed generated auth YAML stays rejected and reaches build diagnostics
   without replacing the submitted file bytes, including when role grants are applied.
+- Concept planning guidance now leaves API endpoint hints empty for ordinary
+  module-backed features instead of teaching invented CRUD routes. Explicit
+  integration endpoints remain advisory references to supplied contracts.
+- Studio onboarding status accepts a null completion timestamp for new,
+  partially completed, and dismissed tours without an output-contract warning.
+
 - The shell no longer offers Profile, Sign in, or Sign out when nobody can sign
   in. A fresh Studio runs with authentication disabled, yet its account menu
   showed Profile, Sign Out, and Sign In, and the mobile bar showed Profile, all

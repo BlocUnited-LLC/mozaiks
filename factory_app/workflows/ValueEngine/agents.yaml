@@ -284,7 +284,7 @@ agents:
       - Produce a refined concept summary that renders as the ConceptBlueprint UI artifact
       - Define MVP scope vs deferred features
       - Identify unique differentiators
-      - Plan API endpoints
+      - Identify explicitly evidenced API integration boundaries without inventing module routes
       - Distinguish deterministic product capabilities from optional agentic augmentations
       - Emit capability-pack hints that downstream application planning can compile into modules, pages, integrations, and workflows
       - Emit coarse surface-realization hints without prematurely locking final module or workflow boundaries
@@ -333,7 +333,16 @@ agents:
         user choices and fill only unspecified details. Example values below are
         illustrative, never defaults that override this user's supplied intent.
       - Technical constraints
-      - Planned API endpoints
+      - Advisory API integration boundaries: for ordinary module-backed capabilities,
+        emit `api_endpoints: []`. Describe their behavior in `core_features` and
+        `surface_candidate_hints`; downstream declared module/action contracts own
+        the executable bindings. Do not invent REST paths or guess module/action
+        URLs from feature names. Include an endpoint only for an explicit existing
+        API or required custom integration boundary whose method and path are
+        present in the supplied contract. Preserve that evidence without treating
+        the concept hint as routing authority. If the boundary is required but its
+        contract is unavailable, record the unresolved requirement in `constraints`
+        and leave its endpoint unspecified.
       - UI capability requirements (one statement per major page need)
       - `capability_pack_hints`: canonical product capability families implied by the concept, such as `messaging_pack`, `commerce_pack`, `marketplace_pack`, `campaigns_pack`, `billing_pack`, `crud_pack`, `ai_review_pack`, `ai_analysis_pack`, or `ai_extraction_pack`. Use `commerce_pack` for storefronts, product catalogs, carts, checkout request flows, orders, and inventory. Use AI-native packs when the concept involves: autonomous evaluation of submitted records without a human reviewer for every item (`ai_review_pack`); automatic background enrichment when records are created or updated (`ai_analysis_pack`); parallel processing of document batches or collections (`ai_extraction_pack`).
       - `monetization_intent`: advisory core monetization hint. Set this when monetization_enabled is true or the concept mentions subscriptions, paid access, usage credits, checkout, marketplace, sponsorship, contributions, campaign funding, or revenue-share. Do not treat "monetized" as a final model. Use likely_revenue_models from: subscriptions, usage_based, custom, hybrid. Set subscription_contract_likely=true only for recurring access, seats, gated features, quotas, credits, token wallets, or token allowances.
@@ -423,11 +432,7 @@ agents:
           "appearance_hint": "light"
         },
         "constraints": ["Web-first", "Single-user MVP", "OpenAI API for reasoning"],
-        "api_endpoints": [
-          {"method": "GET", "path": "/api/tasks", "description": "List all tasks"},
-          {"method": "POST", "path": "/api/tasks", "description": "Create task"},
-          {"method": "POST", "path": "/api/prioritize", "description": "AI prioritization endpoint"}
-        ],
+        "api_endpoints": [],
         "app_ui_requirements": [
           "dashboard requires KPI stat cards showing task counts and completion rate",
           "task list needs a sortable filterable DataTable with inline row actions",

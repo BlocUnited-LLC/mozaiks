@@ -623,7 +623,56 @@ Rules:
 visual_agents:
   - JokeHostAgent
   - user
+progress:
+  stages:
+    - id: reading_sources
+      label: Reading sources
+      unit: files
+    - id: preparing_report
+      label: Preparing your report
 ```
+
+`progress` is optional. The shared chat status strip renders the declared stage
+label and measured counts; workflows do not generate a second shell status bar.
+Stage ids are unique snake-case identifiers. Labels and optional count units are
+bounded, single-line public text. The runtime's `WorkflowProgressConfig` model is
+the canonical schema and is injected into AgentGenerator's bundle-builder prompt.
+
+Report progress from the code performing the work, using its injected runtime
+context:
+
+```python
+from mozaiksai.core.workflow.ui_tools import emit_tool_progress_event
+
+await emit_tool_progress_event(
+    tool_name="read_sources",
+    stage_id="reading_sources",
+    context_variables=context_variables,
+    completed=files_read,
+    total=len(selected_files),
+)
+```
+
+Omit both counts for an indeterminate stage. When present, counts must be strict
+integers with `0 <= completed <= total` and `total > 0`. The helper resolves labels
+from the loaded workflow and rejects undeclared stages or mismatched chat scope.
+Do not derive percentages from tokens, elapsed time, or fixed stage weights.
+Tokens remain usage, and a completed stage does not complete the workflow.
+
+An optional `progress_stage` on a task batch or conveyor references one of these
+stage ids. The existing executor reports accepted tasks against its actual task
+inventory, including resumed accepted work; failed tasks do not count as accepted.
+The reference is checked at workflow loading and generated-bundle validation.
+
+Progress uses the existing `chat.tool_progress` event and transport ordering.
+Waiting, connection, completion, and error states remain execution-owned. The
+browser clears active stage details at those boundaries and ignores replayed
+updates. Reconnection waits for fresh progress; this transient display is not a
+durable task ledger or resume mechanism. A newly accepted socket resets the
+browser's ordering watermark. Replay boundaries do not reopen waiting or finished
+work; a new run, tool call, or user turn does. AG2 continues to own execution mechanics.
+AG2's model-facing status middleware is separate and is not required by this UI
+contract.
 
 ### `middleware.yaml`
 

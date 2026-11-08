@@ -3,3 +3,6 @@ visual_agents:
 - user
 - ProjectOverviewAgent
 - DownloadAgent
+progress:
+  stages:
+  - {id: building_workflows, label: Building your workflows, unit: workflows}

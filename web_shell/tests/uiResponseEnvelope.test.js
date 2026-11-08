@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { build, transform } from 'esbuild';
 import { chromium, expect } from '@playwright/test';
 import { submitToolCallResponse } from '../../chat-ui/src/adapters/uiToolResponse.js';
+import { applyChatProgressEvent, emptyChatStatusProgress } from '../../chat-ui/src/pages/chatStatusProgress.js';
 
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const bundle = await build({
@@ -71,6 +72,7 @@ test('ChatPage approvals preserve original request identity through real browser
       import {useWorkflowStart} from ${JSON.stringify(path.join(root,'chat-ui/src/hooks/useWorkflowStart.js'))};
       import {useChatStartupEffects} from ${JSON.stringify(path.join(root,'chat-ui/src/hooks/useChatStartupEffects.js'))};
       import {useConversationModeController} from ${JSON.stringify(path.join(root,'chat-ui/src/hooks/useConversationModeController.js'))};
+      import {applyChatProgressEvent,emptyChatStatusProgress} from ${JSON.stringify(path.join(root,'chat-ui/src/pages/chatStatusProgress.js'))};
       import HarnessDecisionCard from ${JSON.stringify(path.join(root,'factory_app/app/ui/components/HarnessDecisionCard.jsx'))};
       const authFetch=(...args)=>fetch(...args);
       function Fixture(){
@@ -82,6 +84,7 @@ test('ChatPage approvals preserve original request identity through real browser
         const auth={};
         const [currentChatId,changeChat]=useState('review-chat');
         const [connectionStatus,setConnectionStatus]=useState('connected');
+        const [,setChatStatusProgress]=useState(emptyChatStatusProgress);
         const [messages,setMessagesWithLogging]=useState([{id:'original-request',sender:'user',content:'Update the accent.'}]);
         const messagesRef=useRef(messages);messagesRef.current=messages;
         const currentChatIdRef=useRef(currentChatId),reviewContinuationRef=useRef(null);
@@ -103,6 +106,7 @@ test('ChatPage approvals preserve original request identity through real browser
         const setConversationMode=()=>{},setWorkflowCompleted=()=>{},setCompletionData=()=>{},setPendingTransitionId=()=>{},setPendingTransitionContext=()=>{};
         const setLoading=()=>{},setPendingWorkflowReply=()=>{};
         const conversationMode='workflow';
+        const conversationModeRef=useRef(conversationMode);
         const workflowConfig={resolveKnownWorkflowName:value=>value,getDefaultWorkflow:()=> 'AppReview'};
         const {resumeWorkflowSession}=useConversationModeController({
           currentChatId,setCurrentChatId,currentWorkflowName,currentWorkflowNameRef,
@@ -288,7 +292,7 @@ async function routeRevisionResult(triggerData, {
   const requests = [];
   const updates = [];
   const messages = [];
-  const state = {};
+  const state = {ChatStatusProgress: emptyChatStatusProgress()};
   const currentChatIdRef = { current: 'review-chat' };
   const reviewContinuationRef = { current: null };
   const queryResumeHandledRef = { current: 'review-chat:AppReview' };
@@ -312,6 +316,8 @@ async function routeRevisionResult(triggerData, {
     currentChatIdRef, reviewContinuationRef, queryResumeHandledRef, currentArtifactMessagesRef: { current: artifactMessages },
     revisionHandoffRef, pendingTransitionIdRef,
     currentWorkflowName:'AppReview',currentWorkflowNameRef:{current:'AppReview'},workflowConfig:null,
+    conversationModeRef:{current:'workflow'},applyChatProgressEvent,
+    setChatStatusProgress:update=>{state.ChatStatusProgress=typeof update==='function'?update(state.ChatStatusProgress):update;},
     isFailedWorkflowSession:status=>status===2,
     dynamicUIHandler: handler, console: {error() {}}, ...setters,
     URLSearchParams, location:{pathname:'/chat',search:'?workflow=AppReview&chat_id=review-chat&mode=workflow&app_id=studio-host'},
@@ -350,6 +356,20 @@ test('wire revision asks the canonical harness to propose scope without supplyin
   const payload=JSON.parse(requests[0].options.body).trigger_payload;
   assert.deepEqual(payload.coding_request,{});
   assert.equal(payload.refinement_request.artifact_version_id,'baseline');
+});
+
+test('ChatPage incoming events scope progress and clear it while awaiting a reply', async () => {
+  const {receive,state}=await routeRevisionResult({execution_mode:'harness_decision'});
+  const event={type:'chat.tool_progress',data:{chat_id:'review-chat',workflow_name:'AppReview',
+    stage_id:'reviewing',stage_label:'Reviewing changes',completed:1,total:3,sequence:1}};
+  await receive(event);
+  assert.equal(state.ChatStatusProgress.progress.label,'Reviewing changes');
+  await receive({...event,data:{...event.data,chat_id:'different-chat',sequence:2,completed:2}});
+  assert.equal(state.ChatStatusProgress.progress.completed,1);
+  await receive({type:'chat.awaiting_reply',data:{chat_id:'review-chat',sequence:3}});
+  await receive({...event,data:{...event.data,sequence:4,completed:3}});
+  assert.equal(state.ChatStatusProgress.progress,null);
+  assert.equal(state.ChatStatusProgress.blocked,true);
 });
 
 test('wire revision suppresses only its source completion during the handoff', async () => {

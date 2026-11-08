@@ -164,6 +164,7 @@ agents:
       - Each workflow entry carries the exact approved DesignDocs `design_surface_id`. Workflow pricing features are unavailable until workflow launch enforces plan grants.
       - Required dispatch field: `initial_agent: WorkflowBundleBuilderAgent`. This is a task-dispatch identifier, not an input source or conversational dependency.
       - `initial_message` is the scoped generation brief each independent task receives.
+      - Preserve approved progress needs in that brief when work has observable stages, a finite item batch, or a long-running tool. Describe what the user needs to understand; the bundle builder selects the supported progress declarations. Do not add a status agent or another workflow to report progress.
       - The `pattern_selection` tool validates the response and publishes `is_multi_workflow`, `pack_name`, `pack_partition_reason`, and `workflows_spec` after your turn.
   - id: instructions
     heading: '[INSTRUCTIONS]'
@@ -547,22 +548,28 @@ agents:
         mapping keyed by role/objective/context.
       - Write `prompt_sections` in block YAML style, not inline flow-map style.
         Every agent-level key must align under that same `- name:` entry.
+        Use `content: |-` block scalars for prose so colons, quotes, and newlines
+        remain text instead of YAML syntax.
         ```yaml
         agents:
           - name: PlannerAgent
             prompt_sections:
               - id: role
                 heading: '[ROLE]'
-                content: You are the planning agent.
+                content: |-
+                  You are the planning agent.
               - id: objective
                 heading: '[OBJECTIVE]'
-                content: Produce the plan.
+                content: |-
+                  Produce the plan.
               - id: instructions
                 heading: '[INSTRUCTIONS]'
-                content: Follow the workflow brief.
+                content: |-
+                  Follow the workflow brief.
               - id: output_format
                 heading: '[OUTPUT FORMAT]'
-                content: Return the expected output.
+                content: |-
+                  Return the expected output.
             max_consecutive_auto_reply: 1
             structured_outputs_required: true
         ```
@@ -933,7 +940,7 @@ agents:
       - every conveyor must include `id`
       - `decomposition_agent`
       - `execution_agents[]`
-      - optional `concurrency`, `failure_policy`, `retry_limit`, `timeout_seconds`, and `require_owned_paths`
+      - optional `concurrency`, `failure_policy`, `retry_limit`, `timeout_seconds`, `require_owned_paths`, and `progress_stage`
       - `execution_agents[]` must contain at least two distinct declared agents
         when the brief asks for conveyor, fan-out, batch, parallel, or downstream
         specialist work. Do not repeat the same worker name to satisfy the list.
@@ -1022,7 +1029,14 @@ agents:
       - Check whether some integrations may already be ready from the workspace integrations/admin surface before treating them as a missing dependency.
 
       ## UI CONTRACT RULES
+      - `ui_config.yaml` declares `visual_agents` as a list of agent-name strings,
+        for example `visual_agents: [PlannerAgent, user]`; never emit objects
+        such as `[{name: PlannerAgent}]`.
       - Every tool that presents UI must reference a `workflow_primitive` from the canonical workflow UI catalog.
+      - For long-running work, prefer the shared chat status strip. Declare optional `progress.stages` in `ui_config.yaml`, following the injected runtime schema. Each stage has a stable `id`, a concise public `label`, and an optional count `unit`. Omit progress when the workflow has no useful observable stages.
+      - Implement progress in the tool or lifecycle hook that actually performs the work. Call `mozaiksai.core.workflow.ui_tools.emit_tool_progress_event` with keyword arguments `tool_name`, `stage_id`, and the injected `context_variables`; supply `completed` and `total` together only when code knows the real item count. The declared stage supplies the visible label and unit. Omit both counts for an indeterminate stage. Never calculate completion from tokens, elapsed time, model guesses, or fixed stage weights.
+      - Progress is an observation, not an agent response or a success authority. Do not add model calls for status updates, expose private prompt/tool arguments in labels, or report the whole workflow complete when one stage finishes. Existing execution events own waiting, failure, and completion.
+      - For workflow-local task batches, set the batch or conveyor `progress_stage` to an id declared in `ui_config.yaml`. The existing executor reports accepted tasks against the actual task inventory; do not add a second counter, progress tool, or scheduler for those batches.
       - Use `progress_stepper` with `mode: inline` and `realization: generated_component` when a workflow needs an app-specific staged status card.
       - Do NOT emit workflow-local UI requirements for framework-owned shell status surfaces (status bar, notifications, header, generic run status feeds).
       - `composer_reply` is the primitive for agent-to-user text interactions; do not build a custom text surface for it.

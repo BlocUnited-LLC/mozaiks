@@ -77,7 +77,6 @@ const summarizeMessageList = (messageList) => {
   const messages = Array.isArray(messageList) ? messageList : [];
   const componentCounts = new Map();
   let uiMessageCount = 0;
-  let toolProgressCount = 0;
 
   for (const message of messages) {
     const metadata = message?.metadata && typeof message.metadata === 'object' ? message.metadata : {};
@@ -91,9 +90,6 @@ const summarizeMessageList = (messageList) => {
       || '',
     ).trim();
 
-    if (metadata.event_type === 'tool_progress') {
-      toolProgressCount += 1;
-    }
     if (message?.ui_mode || toolCall.tool_name || componentType) {
       uiMessageCount += 1;
     }
@@ -104,7 +100,6 @@ const summarizeMessageList = (messageList) => {
 
   return {
     total: messages.length,
-    toolProgressCount,
     uiMessageCount,
     componentTypes: Array.from(componentCounts.entries())
       .sort((left, right) => right[1] - left[1])
