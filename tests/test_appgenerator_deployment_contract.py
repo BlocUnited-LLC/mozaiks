@@ -1055,7 +1055,7 @@ def test_auth_scaffold_emits_provider_neutral_auth_contract_and_hardened_adapter
 
     assert "config/auth.yaml" in files
     assert "ui/auth/authAdapter.js" in files
-    assert "schema_version: mozaiks.auth.v1" in files["config/auth.yaml"]
+    assert "schema_version: mozaiks.auth.v2" in files["config/auth.yaml"]
     assert "strategy: oidc" in files["config/auth.yaml"]
     assert "mode: brokered_oidc" in files["config/auth.yaml"]
     assert "signup_enabled: false" in files["config/auth.yaml"]

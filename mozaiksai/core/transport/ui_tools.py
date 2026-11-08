@@ -86,8 +86,11 @@ class UIToolsMixin:
         event_id: str,
         display_type: str,
         payload: dict[str, Any],
+        awaiting_response: bool = False,
+        component_name: str | None = None,
+        agent_name: str | None = None,
     ) -> None:
-        """Persist the latest artifact-panel UI payload for chat restoration."""
+        """Persist pending interactions and the latest artifact before delivery."""
         if not chat_id or not isinstance(payload, dict):
             return
 
@@ -103,7 +106,7 @@ class UIToolsMixin:
         normalized_mode = display_mode.lower() if display_mode else None
         if not normalized_mode:
             return
-        if normalized_mode != "artifact":
+        if normalized_mode != "artifact" and not awaiting_response:
             return
 
         try:
@@ -130,16 +133,27 @@ class UIToolsMixin:
             artifact_doc = {
                 "tool_name": tool_name,
                 "tool_call_id": event_id,
-                "component_type": payload.get("component_type") or tool_name,
+                "component_type": component_name or payload.get("component_type") or tool_name,
                 "display": normalized_mode,
                 "workflow_name": payload.get("workflow_name") or workflow_name,
                 "payload": sanitized_payload,
             }
-            await pm.update_last_artifact(
-                chat_id=chat_id,
-                app_id=app_id,
-                artifact=artifact_doc,
-            )
+            if awaiting_response:
+                await pm.attach_tool_call_metadata(
+                    chat_id=chat_id, app_id=app_id, event_id=event_id,
+                    metadata={
+                        **artifact_doc,
+                        "agent_name": agent_name or payload.get("agent_name") or payload.get("agentName"),
+                        "tool_call_completed": False, "tool_call_status": "pending",
+                        "awaiting_response": True, "timestamp": datetime.now(UTC).isoformat(),
+                    },
+                )
+            if normalized_mode == "artifact":
+                await pm.update_last_artifact(
+                    chat_id=chat_id,
+                    app_id=app_id,
+                    artifact=artifact_doc,
+                )
         except Exception as persist_err:
             logger.debug("[UI_TOOL] Failed to persist last_artifact for chat %s: %s", chat_id, persist_err)
 
@@ -204,6 +218,9 @@ class UIToolsMixin:
                 event_id=event_id,
                 display_type=display_type,
                 payload=payload,
+                awaiting_response=awaiting_response,
+                component_name=component_name,
+                agent_name=agent_name,
             )
         except Exception as persist_exc:
             logger.debug("[UI_TOOL] Persist hook raised for chat %s: %s", chat_id, persist_exc)
@@ -336,6 +353,8 @@ class UIToolsMixin:
                 pm = self._get_or_create_persistence_manager()
                 conn = self.connections.get(chat_ref) or {}
                 app_id = conn.get("app_id")
+                if not app_id:
+                    app_id, _ = await self._resolve_chat_context(chat_ref, pm=pm)
                 if pm and app_id:
                     status = "responded"
                     completed = False
@@ -526,33 +545,13 @@ class UIToolsMixin:
                 return False
 
         future = self._resolve_tool_call_future(event_id)
-        if future is not None:
-            if not future.done():
-                self._complete_tool_call_future(future, response_data)
-                logger.debug("[UI_TOOL] Submitted response for event %s", event_id)
-                metadata = self._ui_tool_metadata.get(event_id)
-                self._mark_tool_call_response_resolved(event_id)
-                await self._finalize_tool_call_response(
-                    event_id=event_id,
-                    response_data=response_data,
-                    metadata=metadata,
-                )
-                return True
-            else:
-                self._mark_tool_call_response_resolved(event_id)
-                logger.debug("[UI_TOOL] Ignoring duplicate response for completed event %s", event_id)
-                return True
-        metadata = self._ui_tool_metadata.get(event_id)
-        if metadata is not None:
-            self._buffered_tool_call_responses[event_id] = response_data
+        if future is not None and future.done():
             self._mark_tool_call_response_resolved(event_id)
-            logger.debug("[UI_TOOL] Buffered early response for event %s", event_id)
-            await self._finalize_tool_call_response(
-                event_id=event_id,
-                response_data=response_data,
-                metadata=metadata,
-            )
+            logger.debug("[UI_TOOL] Ignoring duplicate response for completed event %s", event_id)
             return True
+        metadata = self._ui_tool_metadata.get(event_id)
+        if future is not None or metadata is not None:
+            return await self._accept_tool_call_response(event_id, response_data, metadata, future)
         input_request_text = self._coerce_input_request_response_text(response_data)
         if self._has_pending_input_request(event_id):
             input_chat_id = self._tool_call_chat_id(event_id)
@@ -566,6 +565,46 @@ class UIToolsMixin:
 
         logger.warning("[UI_TOOL] No pending event found for %s", event_id)
         return False
+
+    async def _accept_tool_call_response(
+        self,
+        event_id: str,
+        response_data: dict[str, Any],
+        metadata: dict[str, Any] | None,
+        future: asyncio.Future | None,
+    ) -> bool:
+        """Finish an accepted decision even if its HTTP/WS request is cancelled."""
+        self._mark_tool_call_response_resolved(event_id)
+
+        async def finalize_and_deliver() -> bool:
+            await self._finalize_tool_call_response(
+                event_id=event_id, response_data=response_data, metadata=metadata,
+            )
+            # The waiter may have registered while persistence was awaited.
+            waiter = self._resolve_tool_call_future(event_id) or future
+            if waiter is not None:
+                self._complete_tool_call_future(waiter, response_data)
+            else:
+                self._buffered_tool_call_responses[event_id] = response_data
+            logger.debug("[UI_TOOL] Submitted response for event %s", event_id)
+            return True
+
+        tasks = getattr(self, "_tool_call_response_tasks", None)
+        if tasks is None:
+            tasks = self._tool_call_response_tasks = set()
+        task = asyncio.create_task(finalize_and_deliver(), name=f"ui-response:{event_id}")
+        tasks.add(task)
+
+        def finished(completed: asyncio.Task) -> None:
+            tasks.discard(completed)
+            if completed.cancelled() or completed.exception() is not None:
+                self._get_resolved_tool_call_registry().pop(event_id, None)
+                if metadata is not None:
+                    self._ui_tool_metadata[event_id] = metadata
+                logger.warning("[UI_TOOL] Response finalization interrupted for %s; retry remains available", event_id)
+
+        task.add_done_callback(finished)
+        return await asyncio.shield(task)
 
     def _has_pending_input_request(self, event_id: str) -> bool:
         for registry in self._input_request_registries.values():

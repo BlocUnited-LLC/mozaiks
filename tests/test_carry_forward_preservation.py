@@ -54,6 +54,7 @@ _PREV_REF = "av_prior_001"
 _PRIOR_FILE_MAP = {
     "modules/settings/module.yaml": "id: settings\nactions: []\n",
     "modules/settings/contracts/events.yaml": "events: []\n",
+    "modules/settings/contracts/fixtures.yaml": "schema_version: mozaiks.module_smoke_fixtures.v1\nfixtures: [{action: get_settings, roles: [], setup: [], params: []}]\n",
     "modules/settings/contracts/reactions.yaml": "reactions: []\n",
     "modules/settings/contracts/notifications.yaml": "notifications: []\n",
     "modules/settings/contracts/policy_hooks.yaml": "hooks: []\n",
@@ -209,6 +210,7 @@ async def test_reuse_copies_all_allowlisted_contracts():
     expected = {
         "modules/settings/module.yaml",
         "modules/settings/contracts/events.yaml",
+        "modules/settings/contracts/fixtures.yaml",
         "modules/settings/contracts/reactions.yaml",
         "modules/settings/contracts/notifications.yaml",
         "modules/settings/contracts/policy_hooks.yaml",
@@ -218,6 +220,8 @@ async def test_reuse_copies_all_allowlisted_contracts():
         "modules/settings/contracts/relationships.yaml",
     }
     assert expected.issubset(set(report["preserved_paths"]))
+    fixture_path = "modules/settings/contracts/fixtures.yaml"
+    assert ctx["generated_files"][fixture_path] == _PRIOR_FILE_MAP[fixture_path]
 
 
 # ---------------------------------------------------------------------------

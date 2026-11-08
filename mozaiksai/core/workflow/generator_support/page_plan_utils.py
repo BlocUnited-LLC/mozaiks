@@ -26,9 +26,18 @@ from .code_files import (
     safe_relpath,
 )
 from .module_action_inventory import all_module_actions, pack_template_module_contracts
-from .page_action_bindings import generated_workflow_names, page_workflow_binding_errors
+from .page_action_bindings import (
+    generated_workflow_names,
+    page_refresh_binding_errors,
+    page_workflow_binding_errors,
+)
 from .page_binding_construction import construct_page_bindings
-from .page_data_bindings import page_data_binding_errors, schema_at_path, schema_field_paths
+from .page_data_bindings import (
+    page_data_binding_errors,
+    page_query_binding_errors,
+    schema_at_path,
+    schema_field_paths,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -710,6 +719,8 @@ def compile_page_data_sources(
         workflow_names=workflow_names, page=label,
     )
     errors = page_data_binding_errors(document, contracts)
+    errors.extend(failure["error"] for failure in page_query_binding_errors(document, contracts))
+    errors.extend(page_refresh_binding_errors(document))
     errors.extend(page_workflow_binding_errors(document, workflow_names or set()))
     messages = list(reference_errors)
     if errors:
@@ -1012,6 +1023,8 @@ def pack_template_page_errors(
         errors.append(f"{path}: {page_schema_error_details(error, expected_name=expected_name)}")
     contracts = {f"{module_id}/{action_id}": action for module_id, actions in modules.items() for action_id, action in actions.items()}
     bindings = page_data_binding_errors(document, contracts)
+    bindings.extend(failure["error"] for failure in page_query_binding_errors(document, contracts))
+    bindings.extend(page_refresh_binding_errors(document))
     bindings.extend(page_workflow_binding_errors(document, workflow_names or set()))
     if bindings:
         errors.append(f"{path}: Page bindings do not match declared contracts: " + "; ".join(bindings))

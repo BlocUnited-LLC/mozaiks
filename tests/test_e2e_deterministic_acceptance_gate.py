@@ -191,7 +191,7 @@ def _canonical_fixture() -> dict[str, str]:
                 capabilities: [tasks.view, tasks.create]
         """),
         "config/auth.yaml": textwrap.dedent("""\
-            schema_version: mozaiks.auth.v1
+            schema_version: mozaiks.auth.v2
             auth_required: true
             strategy: oidc
             mode: brokered_oidc

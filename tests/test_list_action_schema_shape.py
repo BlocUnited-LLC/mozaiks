@@ -30,7 +30,9 @@ def _object_wrapping_an_array() -> dict:
         "items_type": None,
         "properties": [
             {"name": "habits", "type": "array", "description": "records",
-             "required": True, "enum_values": [], "items_type": "object"}
+             "required": True, "enum_values": [], "items_type": "object",
+             "items_properties": [{"name": "habit_id", "type": "string", "description": "id",
+                                   "required": True, "enum_values": [], "items_type": None}]}
         ],
     }
 

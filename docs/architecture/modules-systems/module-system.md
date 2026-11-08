@@ -252,8 +252,21 @@ only for actions that are safe to expose without a user token, such as a plan
 catalog or landing-page read model. Use `internal` with `permissions: []` for
 event-bus reactions and trusted runtime calls, not for anonymous HTTP traffic.
 
-The platform host starts with the authenticated principal's auth scopes as the
-default granted permission list. Deployers can register a host-agnostic
+The loaded app's `config/auth.yaml` uses `mozaiks.auth.v2` and may declare
+`authorization.roles`, a list of `{id, permissions}` grants. The platform starts
+with token scopes plus permissions for roles held by a token-validated principal
+or an admitted local development identity. Unknown roles grant nothing; anonymous
+visitor roles do not grant module permissions. An empty authorization policy adds
+no permissions. Role ids and each role's permission list must be unique.
+
+The reserved `admin` role may also come from the loaded app's `app.json` `admins`
+allowlist: matching is ASCII-only and requires a verified email or already admitted
+local development access. This does not add other roles, grant all permissions,
+bypass persistence ownership, or confer platform-operator access.
+
+HTTP dispatch, live workflow tools, profile hydration, and relationship providers
+use the same app-bound resolver. Role grants are resolved before host hooks, so a
+hook can narrow the effective permission list. Deployers can register a host-agnostic
 `module_scope_resolver` platform hook through `RUNTIME_PLATFORM_EXTENSIONS` to
 map principals to app-local tenants, workspaces, memberships, teams, or roles.
 The hook returns the canonical `{app_id, user_id, tenant_id, workspace_id,

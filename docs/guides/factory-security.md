@@ -125,7 +125,7 @@ payment approvals, production deployments, or data-retention policy.
 ## Validation and migration
 
 AppLoader validates `config/auth.yaml` against the shared typed
-`mozaiks.auth.v1` contract and checks agreement with `app.json`. Generated-app
+`mozaiks.auth.v2` contract and checks agreement with `app.json`. Generated-app
 validation consumes that same model. Invalid or missing required declarations
 fail before the app is served.
 

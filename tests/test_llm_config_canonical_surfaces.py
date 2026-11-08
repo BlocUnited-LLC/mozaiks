@@ -58,7 +58,7 @@ async def test_llm_config_skip_mongo_uses_env_provider(monkeypatch: pytest.Monke
     providers = await module._load_raw_config_list(force=True)
 
     assert mongo_called is False
-    assert providers == [{"model": "gpt-4o-mini", "api_key": "test-openai-key"}]
+    assert providers == [{"model": "gpt-4o-mini", "api_type": "openai", "api_key": "test-openai-key"}]
 
 
 @pytest.mark.asyncio
@@ -84,7 +84,7 @@ async def test_openai_config_consumes_declared_vault_reference(monkeypatch, tmp_
     monkeypatch.setattr(app_secrets, "build_secret_client", Mock(return_value=client))
     try:
         assert await module._load_raw_config_list(force=True) == [
-            {"model": "gpt-4o-mini", "api_key": "local-openai-placeholder"},
+            {"model": "gpt-4o-mini", "api_type": "openai", "api_key": "local-openai-placeholder"},
         ]
         client.get_secret.assert_called_once_with("app-openai-key")
     finally:

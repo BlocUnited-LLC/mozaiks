@@ -52,8 +52,11 @@ def test_generated_server_mode_survives_json_and_runtime_roundtrip():
         }}],
     })
     document = page.model_dump(mode="json")
-    compile_page_data_sources(document, {"reports": {"list_reports": {"output_schema": {
-        "type": "object", "properties": {
+    compile_page_data_sources(document, {"reports": {"list_reports": {
+        "input_schema": {"type": "object", "additionalProperties": False, "properties": {
+            "page": {"type": "integer"}, "page_size": {"type": "integer"}, "search": {"type": "string"},
+        }}, "output_schema": {
+        "type": "object", "required": ["reports", "total"], "properties": {
             "reports": {"type": "array", "items": {"type": "object", "properties": {"title": {"type": "string"}}}},
             "total": {"type": "integer"},
         },

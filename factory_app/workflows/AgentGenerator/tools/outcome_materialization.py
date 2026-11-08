@@ -35,6 +35,7 @@ class WorkflowOutcomePlan(BaseModel):
     error_value: str
     max_attempts: int = Field(default=1, strict=True, ge=1, le=100)
     retry_on: list[str] = Field(default_factory=list)
+    retry_without_attempt: list[str] = Field(default_factory=list)
     routes: list[OutcomeRoute] = Field(min_length=1)
 
     def tool_outcome(self) -> ToolOutcomeSpec:

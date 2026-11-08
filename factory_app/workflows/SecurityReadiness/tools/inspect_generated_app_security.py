@@ -320,6 +320,10 @@ def _scan_module_contracts(files: dict[str, str], root: str) -> list[dict[str, A
     findings: list[dict[str, Any]] = []
     module_paths = sorted(path for path in files if path.startswith("modules/") and path.endswith("/module.yaml"))
     sign_in = _declares_sign_in(files)
+    role_permissions: set[str] = set()
+    if sign_in:
+        auth = validate_app_auth_contract(_yaml_file(files, "config/auth.yaml"))
+        role_permissions = {permission for role in auth.authorization.roles for permission in role.permissions}
     default_capabilities = _default_plan_capabilities(files)
     data_reach = BundleDataReach(files, valid_data_contract(files.get("data/contract.json")))
     for path in module_paths:
@@ -340,7 +344,7 @@ def _scan_module_contracts(files: dict[str, str], root: str) -> list[dict[str, A
             continue
         if not isinstance(module, dict):
             continue
-        declared_permissions = {
+        declared_permissions = role_permissions | {
             str(item.get("id") or "").strip()
             for item in _iterable(module.get("permissions"))
             if isinstance(item, dict)
@@ -394,7 +398,7 @@ def _scan_module_contracts(files: dict[str, str], root: str) -> list[dict[str, A
                         severity="high",
                         control_area="permissions",
                         title="Module action references undeclared permissions",
-                        description=f"Action {action_id or '<unknown>'} references permissions not declared in module.yaml: {unknown}.",
+                        description=f"Action {action_id or '<unknown>'} references permissions declared by neither module.yaml nor config/auth.yaml roles: {unknown}.",
                         evidence_path=root + path,
                         recommendation="Add the permission declarations or correct the action permission ids.",
                     )

@@ -36,6 +36,7 @@ from mozaiksai.core.workflow.generator_support.module_read_actions import (
     close_module_read_actions,
     materialize_module_read_actions,
     materialize_module_read_implementations,
+    module_read_implementation_ownership,
 )
 from mozaiksai.core.workflow.generator_support.module_write_actions import close_module_actions
 from tests.appgenerator_subscription_fixture import subscription_contract
@@ -130,6 +131,82 @@ def test_canonical_read_gate_is_preserved_and_contract_is_code_owned():
     assert read["permissions"] == []
     assert read["handler_method"] == "list_tasks"
     assert _closed(closed) == closed
+
+
+def _read_role_arguments(tenancy="per_user"):
+    return {
+        "app_build_plan": _plan(), "data_contract": _contract(tenancy),
+        "design_surface_map": {"surfaces": [{"surface_id": MODULE, "surface_kind": "module", "owner": "app"}]},
+        "access_policy": {
+            "roles": [{"role_id": "reader", "label": "Reader", "description": "Reads owned tasks."}],
+            "grants": [{"role_id": "reader", "collection": "tasks", "actions": ["get_tasks", "list_tasks"]}],
+        },
+    }
+
+
+@pytest.mark.parametrize("tenancy", ["per_user", "per_workspace"])
+@pytest.mark.parametrize("lane", ["typed", "raw", "materialize"])
+def test_direct_read_closure_preserves_only_explicit_read_grants(tenancy, lane):
+    args = _read_role_arguments(tenancy)
+    candidate = _closed(contract=args["data_contract"])
+    candidate["module_contract"]["module_yaml"]["actions"][-1]["permissions"] = ["unapproved.admin"]
+    before = deepcopy(candidate)
+    files = extract_code_file_map_from_payload(candidate)
+    if lane == "typed":
+        closed = close_module_read_actions(candidate, **args)
+        files = extract_code_file_map_from_payload(closed)
+        assert close_module_read_actions(closed, **args) == closed
+    elif lane == "raw":
+        raw = {"code_files": [{"filename": path, "content": content} for path, content in files.items()]}
+        files = extract_code_file_map_from_payload(close_module_read_actions(raw, **args))
+    else:
+        files.update(materialize_module_read_actions(files, **args))
+    manifest = yaml.safe_load(files[MANIFEST])
+    actions = {action["id"]: action for action in manifest["actions"]}
+    assert actions["get_tasks"]["permissions"] == ["tasks.get_tasks"]
+    assert actions["list_tasks"]["permissions"] == ["tasks.list_tasks"]
+    assert {entry["id"] for entry in manifest["permissions"]} == {"tasks.get_tasks", "tasks.list_tasks"}
+    assert actions["get_tasks"]["input_schema"]["required"] == ["id"]
+    assert actions["get_tasks"]["handler_method"] == "get_tasks"
+    assert materialize_module_read_actions(files, **args) == {}
+    assert module_read_implementation_ownership(
+        MODULE, manifest, app_build_plan=_plan(), data_contract=args["data_contract"],
+    ) == {"code_owned": ["get_tasks", "list_tasks"], "authored": []}
+    implementations = materialize_module_read_implementations(
+        files, app_build_plan=_plan(), data_contract=args["data_contract"],
+    )
+    assert "async def get_tasks" in implementations[f"{BACKEND}/service.py"]
+    assert "async def list_tasks" in implementations[f"{BACKEND}/service.py"]
+    assert candidate == before
+
+
+def test_app_wide_read_only_grants_require_authored_contracts_and_preserve_them():
+    args = _read_role_arguments("app_wide")
+    empty = _output()
+    empty["module_contract"]["module_yaml"]["actions"] = []
+    with pytest.raises(ValueError, match="approved read grants.*explicitly declare 'get_tasks'.*list_tasks"):
+        close_module_read_actions(empty, **args)
+    candidate = _closed(empty, args["data_contract"])
+    for action in candidate["module_contract"]["module_yaml"]["actions"]:
+        action["handler_method"] = f"authored_{action['id']}"
+        action["api_surface"] = "public_readonly"
+    closed = close_module_read_actions(candidate, **args)
+    for action in closed["module_contract"]["module_yaml"]["actions"]:
+        assert action["permissions"] == [f"tasks.{action['id']}"]
+        assert action["handler_method"] == f"authored_{action['id']}"
+        assert action["api_surface"] == "public_readonly"
+    assert module_read_implementation_ownership(
+        MODULE, closed["module_contract"]["module_yaml"], app_build_plan=_plan(), data_contract=args["data_contract"],
+    ) == {"code_owned": [], "authored": ["get_tasks", "list_tasks"]}
+
+
+def test_removing_explicit_owner_read_grants_restores_existing_default_without_inheritance():
+    args = _read_role_arguments()
+    closed = close_module_read_actions(_output(), **args)
+    revised = close_module_read_actions(closed, **{**args, "access_policy": {"roles": [], "grants": []}})
+    for action in revised["module_contract"]["module_yaml"]["actions"]:
+        if action["id"] in {"get_tasks", "list_tasks"}:
+            assert action["permissions"] == []
 
 
 def test_app_wide_protected_writes_require_exact_explicit_read_access_contract():

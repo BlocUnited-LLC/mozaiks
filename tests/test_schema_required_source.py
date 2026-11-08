@@ -169,7 +169,7 @@ def test_live_billing_contradiction_is_rejected_at_structured_boundary(models, l
 
 
 @pytest.mark.asyncio
-async def test_live_billing_action_with_only_flags_completes_task(monkeypatch, models, live_billing_action):
+async def test_live_billing_action_with_flags_and_declared_members_completes_task(monkeypatch, models, live_billing_action):
     # Replay only the captured action: the full rejected worker output also
     # emitted an unrelated raw admin.yaml while its typed admin field was null.
     output = _output()
@@ -181,9 +181,16 @@ async def test_live_billing_action_with_only_flags_completes_task(monkeypatch, m
     live_billing_action.pop("entitlement_gate", None)
     for key in ("input_schema", "output_schema"):
         del live_billing_action[key]["required"]
+    # The captured generic object also needs an explicit finite response shape.
+    # This member is a test declaration, not inferred from the captured prose.
+    live_billing_action["output_schema"]["properties"][0]["properties"] = [{
+        "name": "request_count", "type": "integer", "description": None,
+        "required": True, "enum_values": [], "items_type": None,
+    }]
     module = await _execute_module_task(monkeypatch, models, output)
     action = module["actions"][0]
     assert action["id"] == "get_usage_status"
     assert action["input_schema"]["required"] == ["user_id"]
     assert "required" not in action["output_schema"]
     assert action["output_schema"]["properties"]["usage_data"]["type"] == "object"
+    assert action["output_schema"]["properties"]["usage_data"]["required"] == ["request_count"]

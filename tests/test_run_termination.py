@@ -869,13 +869,13 @@ async def test_design_docs_exhausted_save_reports_its_last_rejection() -> None:
     try:
         assert result.status is RunStatus.FAILED
         assert result.close_reason == "workflow_failed"
-        assert len(rejections) == contract.max_attempts + 1
+        assert len(rejections) == contract.max_attempts
         assert rejections[-1]["outcome_error"] == "attempts_exhausted"
-        assert result.failure_message == rejections[-2]["error"]
+        assert result.failure_message == rejections[-1]["error"]
         event = _run_complete_event(
             workflow_name="DesignDocs", chat_id="design-failure", runner_result=result, pause_agent=None,
         )
-        assert event["error"] == rejections[-2]["error"]
+        assert event["error"] == rejections[-1]["error"]
         assert event["run_completed"] is False
     finally:
         if result.live_run is not None:

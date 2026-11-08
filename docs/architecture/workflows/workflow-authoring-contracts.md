@@ -346,6 +346,15 @@ Rules:
   - `file`
   - `build_context`
 
+`data_reference` sources may declare an ordered `sort` list, with each entry
+containing a field path and `direction: asc` or `direction: desc`. For example,
+artifact lookups use `sort: [{field: version_number, direction: desc},
+{field: created_at, direction: desc}]` to select the newest matching version.
+Without `sort`, MongoDB references retain descending `_id` ordering; random
+string IDs do not establish chronology. Authorization data-reference lookup
+errors abort context loading instead of being treated as missing data or
+falling back to an older policy.
+
 ### `structured_outputs.yaml`
 
 ```yaml
@@ -454,10 +463,11 @@ tools:
       context_key: document_outcome
       attempts_key: document_attempts
       result_field: status
-      values: [ready, needs_revision, blocked]
+      values: [ready, needs_revision, review_changes, blocked]
       error_value: blocked
       max_attempts: 2
-      retry_on: [needs_revision]
+      retry_on: [needs_revision, review_changes]
+      retry_without_attempt: [review_changes]
 ```
 
 The function accepts `context_variables` and returns a mapping or Pydantic model
@@ -472,9 +482,25 @@ the operation but must not write its outcome or attempt keys. The runtime:
 Exceptions, invalid results, invalid counter state, and exhausted attempts map
 to `error_value`. Cancellation propagates and leaves the operation blocked.
 Only a prior `retry_on` result permits another invocation. `max_attempts` counts
-all invocations, including the first, across this workflow execution and its
-continuations; it is a static integer from 1 to 100. The default is one attempt
-with no retry outcomes. Use a new workflow execution for a new operation.
+invocations, including the first, across this workflow execution and its
+continuations, except for the explicit exemption below; it is a static integer
+from 1 to 100. The default is one attempt with no retry outcomes. Use a new
+workflow execution for a new operation.
+
+The optional `retry_without_attempt` list defaults to `[]` and must be a subset
+of `retry_on`. A validated result in this list refunds only the invocation
+that returned it; earlier counted failures remain. Exhausted attempts and
+disallowed retries still stop before the tool executes. DesignDocs uses
+`review_changes` only after validating the authenticated owner's Request changes
+response against the exact pending review ID. Structural rejections remain
+counted as `revise`; owner feedback does not reset that repair budget.
+
+When the final counted attempt returns a `retry_on` outcome with a nonempty
+`error`, the runtime immediately replaces the outcome with `error_value` and
+sets `outcome_error: attempts_exhausted`, preserving the original error and other
+result fields. This routes the rejection to its declared failure destination
+without an extra repair turn. Successful outcomes that allow follow-up calls
+but carry no error keep their declared outcome.
 
 Both context keys must be declared with `source.type: state`, `persisted: true`,
 and `writer_ids: [deterministic_tool]`. The outcome key has `type: string`,

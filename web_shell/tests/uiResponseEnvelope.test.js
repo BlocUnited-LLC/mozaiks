@@ -687,3 +687,137 @@ for (const method of ['handleToolCall', 'handleUIRender']) {
     assert.ok(JSON.stringify(submitted).length < 1000);
   });
 }
+
+const transcriptSanitizer = chatPage.slice(
+  chatPage.indexOf('  const sanitizeVisibleWorkflowMessages ='),
+  chatPage.indexOf('  const isAskModeWorkflowLeak ='),
+);
+const transcriptMerge = chatPage.slice(
+  chatPage.indexOf('  const mergeWorkflowTranscriptMessages ='),
+  chatPage.indexOf('  const persistWorkflowTranscriptSnapshot ='),
+);
+const transcript = vm.runInNewContext(
+  transcriptSanitizer + transcriptMerge + '\n({sanitizeVisibleWorkflowMessages,mergeWorkflowTranscriptMessages});',
+  {useCallback:fn=>fn,shouldSuppressHiddenWorkflowMessage:()=>false},
+);
+const reviewMessage = (id, content = '', completed = false) => ({
+  id: 'tool-call-' + id, sender: 'agent', agentName: 'ReviewAgent', content,
+  tool_call_completed: completed,
+  toolCall: {tool_name:'ApprovalCard',component_type:'ApprovalCard',tool_call_id:id,
+    workflow_name:'DesignDocs',display:'inline',payload:{review_id:id,title:'Review '+id}},
+  metadata:{toolCallId:id,tool_call_id:id,workflow_name:'DesignDocs',display:'inline'},
+});
+
+for (const content of ['', 'Review the updated design.']) {
+  test('transcript retains distinct approval events with identical ' + (content ? 'text' : 'empty text'), () => {
+    const previous = reviewMessage('previous', content, true);
+    const pending = reviewMessage('revised', content);
+    for (const result of [
+      transcript.sanitizeVisibleWorkflowMessages([previous,pending]),
+      transcript.mergeWorkflowTranscriptMessages([previous],[pending]),
+    ]) {
+      assert.equal(result.length,2);
+      assert.equal(result[0],previous);
+      assert.equal(result[1],pending);
+      assert.equal(result[0].tool_call_completed,true);
+      assert.equal(result[1].tool_call_completed,false);
+    }
+  });
+}
+
+test('same-event transcript replay still updates one card and preserves its message identity', () => {
+  const initial = reviewMessage('same');
+  const replay = {...reviewMessage('same','',true),id:'replayed-message'};
+  const result = transcript.mergeWorkflowTranscriptMessages([initial],[replay]);
+  assert.equal(result.length,1);
+  assert.equal(result[0].id,initial.id);
+  assert.equal(result[0].tool_call_completed,true);
+  assert.equal(result[0].toolCall,replay.toolCall);
+});
+
+test('workflow text dedup remains limited to settled adjacent agent text', () => {
+  const first = {id:'first',sender:'agent',agentName:'ReviewAgent',content:'Same text'};
+  const duplicate = {...first,id:'duplicate'};
+  assert.equal(transcript.sanitizeVisibleWorkflowMessages([first,duplicate]).length,1);
+  for (const boundary of [
+    {toolCall:reviewMessage('review').toolCall},
+    {metadata:{event_type:'activity'}},
+    {isThinking:true},
+    {__streaming:true},
+    {sender:'user'},
+  ]) {
+    assert.equal(transcript.sanitizeVisibleWorkflowMessages([first,{...duplicate,...boundary}]).length,2);
+    assert.equal(transcript.sanitizeVisibleWorkflowMessages([{...first,...boundary},duplicate]).length,2);
+  }
+});
+
+test('Request changes keeps the revised inline approval actionable without reloading', async t => {
+  const interfaceSource = await fs.readFile(path.resolve(shell,'../chat-ui/src/components/chat/ChatInterface.jsx'),'utf8');
+  const renderer = interfaceSource.slice(interfaceSource.indexOf('const ToolCallRenderer ='),
+    interfaceSource.indexOf('const ModernChatInterface ='));
+  const fixture = await build({
+    stdin:{resolveDir:shell,loader:'jsx',contents:`
+      import React,{useCallback,useState} from 'react';
+      import {createRoot} from 'react-dom/client';
+      import ApprovalCard from ${JSON.stringify(path.resolve(shell,'../chat-ui/src/core/ui/ApprovalCard.js'))};
+      import {buildInlineToolCallMessageFromEvent,upsertInlineToolCallMessage} from ${JSON.stringify(path.resolve(shell,'../chat-ui/src/components/chat/inlineSurfaces.js'))};
+      import {submitToolCallResponse} from ${JSON.stringify(path.resolve(shell,'../chat-ui/src/adapters/uiToolResponse.js'))};
+      const UIToolRenderer=({event,onResponse})=><ApprovalCard payload={event.payload} workflowName={event.workflow_name} onResponse={onResponse}/>;
+      ${renderer}
+      function Fixture(){
+        const [messages,setMessages]=useState([]);
+        const shouldSuppressHiddenWorkflowMessage=()=>false;
+        ${transcriptSanitizer}
+        ${transcriptMerge}
+        window.deliverReview=event=>setMessages(previous=>sanitizeVisibleWorkflowMessages(
+          upsertInlineToolCallMessage(previous,buildInlineToolCallMessageFromEvent(event,'DesignDocs'))));
+        return <main>{messages.map(message=><section key={message.id} data-event={message.toolCall.tool_call_id}>
+          <ToolCallRenderer toolCall={message.toolCall} isCompleted={message.tool_call_completed}
+            onResponse={async response=>{
+              await submitToolCallResponse(message.toolCall.tool_call_id,response);
+              setMessages(previous=>previous.map(item=>item.id===message.id?{...item,tool_call_completed:true}:item));
+            }}/>
+        </section>)}</main>;
+      }
+      createRoot(document.getElementById('root')).render(<Fixture/>);
+    `},
+    bundle:true,write:false,format:'esm',jsx:'automatic',loader:{'.js':'jsx','.css':'empty','.png':'dataurl'},
+    nodePaths:[path.join(shell,'node_modules')],
+    alias:{react:path.join(shell,'node_modules/react'),'react-dom':path.join(shell,'node_modules/react-dom')},
+  });
+  const requests=[];
+  const server=http.createServer(async(req,res)=>{
+    if(req.url==='/api/tool-call/respond'){
+      let body='';for await(const chunk of req) body+=chunk;
+      requests.push(JSON.parse(body));
+      res.setHeader('Content-Type','application/json');res.end('{"status":"success"}');return;
+    }
+    const script=req.url==='/fixture.js';
+    res.setHeader('Content-Type',script?'text/javascript':'text/html');
+    res.end(script?fixture.outputFiles[0].text:'<!doctype html><div id="root"></div><script type="module" src="/fixture.js"></script>');
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const browser=await chromium.launch({headless:true});
+  t.after(async()=>{await browser.close();await new Promise(resolve=>{server.closeAllConnections();server.close(resolve);});});
+  const page=await browser.newPage();
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.goto('http://127.0.0.1:'+server.address().port);
+  await page.waitForFunction(()=>typeof window.deliverReview==='function');
+  const event=id=>({type:'chat.tool_call',tool_call_id:id,tool_name:'ApprovalCard',component_type:'ApprovalCard',
+    agent:'ReviewAgent',workflow_name:'DesignDocs',display:'inline',awaiting_response:true,
+    payload:{review_id:id,title:'Review '+id,summary:'Check this revision.'}});
+  await page.evaluate(event=>window.deliverReview(event),event('original'));
+  await page.locator('[data-event="original"]').getByTestId('approval-action-request_changes').click();
+  await expect(page.locator('[data-event="original"]').getByLabel('Completed',{exact:true})).toBeVisible();
+  await page.evaluate(event=>window.deliverReview(event),event('revised'));
+  const revised=page.locator('[data-event="revised"]');
+  await expect(revised.getByTestId('approval-action-approve')).toBeVisible();
+  await page.evaluate(event=>window.deliverReview(event),event('revised'));
+  await expect(revised).toHaveCount(1);
+  await expect(page.locator('[data-event="original"]').getByLabel('Completed',{exact:true})).toBeVisible();
+  await revised.getByTestId('approval-action-approve').click();
+  await expect(revised.getByLabel('Completed',{exact:true})).toBeVisible();
+  assert.deepEqual(requests.map(request=>[request.event_id,request.response_data.action]),
+    [['original','request_changes'],['revised','approve']]);
+  assert.deepEqual(errors,[]);
+});

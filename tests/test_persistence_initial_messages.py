@@ -833,7 +833,8 @@ async def test_append_run_user_message_persists_text_input_to_ag2_stream(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_attach_tool_call_metadata_persists_workflow_ui_state(monkeypatch):
+@pytest.mark.parametrize("has_assistant", [True, False])
+async def test_attach_tool_call_metadata_persists_workflow_ui_state(monkeypatch, has_assistant):
     manager = AG2PersistenceManager()
     doc = {"_id": "chat-1", "app_id": "app-1"}
     coll = _FakeCollection(doc)
@@ -847,7 +848,7 @@ async def test_attach_tool_call_metadata_persists_workflow_ui_state(monkeypatch)
         return [
             {"role": "user", "content": "hello"},
             {"role": "assistant", "content": "hi there"},
-        ]
+        ] if has_assistant else []
 
     monkeypatch.setattr(manager, "_coll", _fake_coll)
     monkeypatch.setattr(manager, "load_run_history", _fake_load_run_history)
@@ -868,13 +869,20 @@ async def test_attach_tool_call_metadata_persists_workflow_ui_state(monkeypatch)
     assert len(stored) == 1
     record = next(iter(stored.values()))
     assert record["tool_call_id"] == "tool.alpha_123"
-    assert record["message_index"] == 1
+    assert record.get("message_index") == (1 if has_assistant else None)
     assert record["tool_name"] == "ToolAlpha"
     assert record["tool_call_status"] == "pending"
     assert record["tool_call_completed"] is False
     assert record["payload"] == {"section": "plan"}
     assert isinstance(record["timestamp"], str)
     assert isinstance(record["updated_at"], str)
+    assert coll.update_filters == [{"_id": "chat-1", "app_id": "app-1"}]
+
+    await manager.update_tool_call_state(
+        chat_id="chat-1", app_id="app-1", event_id="tool.alpha_123", status="responded",
+    )
+    assert record["tool_call_status"] == "responded"
+    assert isinstance(record["responded_at"], str)
 
 
 @pytest.mark.asyncio

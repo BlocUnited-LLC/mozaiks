@@ -91,7 +91,8 @@ def test_plan_review_restates_the_split_in_the_live_business_services_task():
         assert f"modules/crm_core/backend/{name}.py" in authored
     assert "policy.py" not in authored
     assert "do not author them: modules/crm_core/backend/policy.py, modules/crm_core/backend/schemas.py" in message
-    assert "canonical create/update/delete and list/get methods to CrmCoreModule" in message
+    assert "constructed CRUD and read methods to CrmCoreModule" in message
+    assert "protected app-wide writes to implement with their declared request contracts" in message
     # Both tasks name one class.
     assert live["live_module_handler"] in _task(plan, "module_contract")["initial_message"]
     assert len(repairs) == 2
@@ -396,8 +397,7 @@ def test_service_agent_worked_example_is_the_handler_split():
     assert "from .base_handler import TaskManagerBaseModule" in handler["content"]
     assert "class TaskManagerModule(TaskManagerBaseModule):" in handler["content"]
     assert "async def" not in handler["content"]
-    mirror = {entry["filename"]: entry["content"] for entry in example["code_files"]}
-    assert mirror == {path: entry["content"] for path, entry in python_files.items()}
+    assert "code_files" not in example
     # No example or rule presents a flat module.handler class.
     assert "class TaskManagerModule:" not in prompt
     assert "`backend/handler.py` — action adapter only" not in prompt

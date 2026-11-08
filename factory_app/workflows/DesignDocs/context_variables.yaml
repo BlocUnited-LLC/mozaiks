@@ -1,4 +1,11 @@
 definitions:
+  access_policy:
+    type: object
+    authority_class: tool_only_information
+    authorization: true
+    writer_ids: [deterministic_tool]
+    description: Validated role grants written only after the matching owner review; absent while a proposal is awaiting review.
+    source: {type: computed, default: null}
   operator_capabilities:
     type: array
     description: Trusted operator-selected pack identifiers resolved against installed public build-context declarations.
@@ -28,7 +35,7 @@ definitions:
     description: >
       Why the last save was refused, written by the save tool so the retry turn
       can read it and the user can inspect it if the run fails. Set whenever the
-      outcome is `revise` or `blocked`. Never save
+      outcome is `revise`, `review_changes`, or `blocked`. Never save
       authority: a rejection reaching the agent does not make the agent's next
       bundle valid.
     source: {type: state, default: ""}

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -205,6 +205,23 @@ def all_module_actions(context_variables: Any) -> dict[str, list[str]]:
         for surface in surface_map.get("surfaces") or []
         if surface.get("surface_kind") == "module" and surface.get("owner") == "app"
     }
+
+
+def unapproved_module_actions_error(
+    module_id: str, action_ids: Iterable[str], approved_actions: Mapping[str, list[str]],
+) -> str | None:
+    """Describe unknown action identities against the existing closed inventory."""
+    if module_id not in approved_actions:
+        return None
+    unapproved = sorted(set(action_ids) - set(approved_actions[module_id]))
+    if not unapproved:
+        return None
+    return (
+        f"modules/{module_id}/module.yaml: unapproved module actions {unapproved}; every action must be declared "
+        "in DesignDocs owned_mutations/custom_reads or be a canonical collection action. "
+        f"Valid approved action ids: {sorted(approved_actions[module_id])}. "
+        "Remove unapproved declarations; do not retain alternate spellings alongside canonical ids."
+    )
 
 
 def approved_workflow_surface_ids(context_variables: Any) -> list[str]:

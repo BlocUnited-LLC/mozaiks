@@ -117,8 +117,31 @@ class AuthCustomization(_ContractModel):
         return value
 
 
+class AuthRoleGrant(_ContractModel):
+    id: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]*$")]
+    permissions: list[Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")]]
+
+    @field_validator("permissions")
+    @classmethod
+    def unique_permissions(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("role permissions must be unique")
+        return value
+
+
+class AuthAuthorization(_ContractModel):
+    roles: list[AuthRoleGrant] = Field(default_factory=list)
+
+    @field_validator("roles")
+    @classmethod
+    def unique_roles(cls, value: list[AuthRoleGrant]) -> list[AuthRoleGrant]:
+        if len(value) != len({role.id for role in value}):
+            raise ValueError("authorization role ids must be unique")
+        return value
+
+
 class AppAuthContract(_ContractModel):
-    schema_version: Literal["mozaiks.auth.v1"]
+    schema_version: Literal["mozaiks.auth.v2"]
     auth_required: Literal[True]
     strategy: Literal["oidc"]
     mode: AuthMode = "brokered_oidc"
@@ -126,6 +149,7 @@ class AppAuthContract(_ContractModel):
     routes: AuthRoutes
     frontend: AuthFrontend
     runtime: AuthRuntime
+    authorization: AuthAuthorization = Field(default_factory=AuthAuthorization)
     identity_providers: list[IdentityProvider] = Field(default_factory=list)
     login_methods: list[LoginMethod] = Field(default_factory=list)
     customization: AuthCustomization = Field(default_factory=AuthCustomization)

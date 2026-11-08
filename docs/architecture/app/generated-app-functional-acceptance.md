@@ -192,6 +192,109 @@ field types. `app_wide` collections get A's round trip only. Steps that need A's
 record report `not_run` when the create produced none; they never pass
 vacuously.
 
+**Stateful action inputs.** A schema describes input types, not which record
+already exists or which lifecycle state permits an action. An optional
+`modules/{module}/contracts/fixtures.yaml` supplies those test inputs through
+the strict `mozaiks.module_smoke_fixtures.v1` contract. The existing module
+contract output owns `fixtures_yaml`; deterministic materialization writes the
+companion file, and carry-forward/export preserve its exact bytes. It is test
+input, not an app runtime policy or an additional persistence interface.
+
+Each fixture names an exact action in its owning module, its explicit held
+roles, bounded ordered `setup` calls, and target `params`. Setup calls name exact
+module/action IDs and held roles. All action, role, request-field, response-path
+and record-field references must close against the assembled module, auth and
+data contracts before the observer issues any action request. Role lists must
+cover the action's permissions without unrelated or redundant roles; the
+observer does not augment those lists. No fixture may invoke internal actions,
+select required coverage, supply expected statuses, or skip checks.
+
+Parameter bindings use a finite set of sources:
+
+| Source | Value |
+| --- | --- |
+| `literal` | Bounded JSON in `value_json`, checked against the declared input field |
+| `response` | Exact `response_path` properties from an earlier setup `step_id` |
+| `actor_subject` | The observer's trusted current subject |
+| `relative_date` / `relative_datetime` | The run's UTC clock plus bounded `offset_days` |
+| `record` | A declared `record_field` from the actual row under canonical get/update/delete testing |
+
+There is no expression evaluator, arbitrary code, wildcard lookup, inferred
+foreign key, or fixture-side database seeding. Setup uses the real HTTP action
+boundary and must return 2xx. Resolved target inputs are validated again before
+dispatch; unavailable or wrong-type response fields fail the fixture rather
+than becoming synthetic IDs. Canonical get/update/delete fixtures must bind
+their target to the observer's actual `record`. Update and delete use the
+collection's canonical record ID field. Get binds its authored request key to
+the collection's canonical read lookup field (`search_by`, otherwise a declared
+`id` field, otherwise `_id`). Setup-response IDs, literals and caller identity
+cannot replace these record bindings. This identity check runs during module
+contract admission, before service generation; full cross-module and role
+closure still runs against the assembled bundle.
+
+A canonical update/delete fixture may also bind setup inputs to declared
+fields of that same observed row, for example to return an active loan
+before a returned-only deletion. Get/create/list/custom setup cannot use
+record inputs; get's missing-record probe keeps its existing independent
+lookup. Missing record context fails before setup calls. Preparation uses
+the real action boundary with its declared roles and the same trusted
+subject. It cannot replace the final target identity or remove the row
+under test. Update/delete storage checks take their baseline after setup:
+a prerequisite mutation cannot make a no-op target pass, and roleless
+target denial still checks storage after preparation.
+
+Update equality uses declared data field types. ISO date inputs match
+the same date stored as UTC-midnight BSON datetime; non-midnight values
+do not. Datetime values compare as UTC instants with BSON millisecond
+precision only for datetime storage. A timezone-required request retains
+that requirement; naive BSON datetimes use Mongo's UTC convention. Other
+fields keep exact equality. The same comparison rejects unchanged updates.
+
+The observer honors authored get request keys and list parameters without
+changing the app's API. Fixture reads preserve the stored lookup's declared
+type, including numeric and boolean keys. A missing-row probe must fit the
+request schema and be absent from the actual canonical collection. If no such
+probe can be established, its check fails explicitly. These inputs never
+replace the checks that A reads the created row and B cannot read or list it.
+Read fixtures with declared number, boolean or structured parameters use the
+existing JSON POST action route; strings and integers supported by the
+existing bounded GET decoder retain GET. The method is selected before
+dispatch, with no fallback after a failed response. This
+proves the selected module action transport, not GET query coercion for every
+JSON type.
+
+Module contract admission requires an exact read fixture when the ordinary CRUD
+observer's defaults (`{id: string}` for get, `{}` for list) cannot be proven to
+fit the declared input contract. Descriptions do not change compatibility, and
+the check does not rewrite native schemas. Internal reads and collections with
+no observed create action do not acquire a fixture requirement. The module
+contract task already owns the optional companion even if its initial file
+manifest omits it; another task's explicit ownership still takes precedence.
+Update fixtures must make an observable declared-field change when the action
+has such a field. Internal canonical reads remain explicitly
+`not_run` on the user HTTP surface; this does not prove their business behavior.
+
+The source-free observer receives only the allowlisted declarative fixture and
+runtime contracts. Setup success does not count as successful target execution.
+The independent role checks still require actual target 2xx and a roleless 403
+`PERMISSION_DENIED` with unchanged declared app storage. A missing fixture does
+not excuse a failed synthetic probe. A bad fixture receives its own diagnostic;
+it is not a reason to remove valid business safeguards from generated code.
+
+A positive probe returning 400, 403 or 404 without a declared target fixture
+routes repair to that module's fixture companion. Its inputs, prerequisites or
+actor have not yet established an implementation defect. The failed check stays
+failed; repair must supply valid inputs while preserving the admitted schema,
+permissions and business rules. Fixture-backed failures, exceptions, timeouts,
+500 responses, incorrect successful results, and negative authorization,
+isolation, storage and event checks retain their implementation owners.
+
+These inputs extend the existing external observer and its source/image-bound
+receipt; they do not change the acceptance scope or the event-observation limit
+in ADR 0020. Fixture roles belong to synthetic observer principals, not real
+identity-provider assignments. Cross-user business review, browser sign-in,
+rendered journeys, and scoped refinement still require separate acceptance.
+
 **Entitlements.** For every action with an `entitlement_gate`, a user on the
 default plan without the capability must receive 402. A user with an active
 assignment granting it must not be refused. The assignment is written through
