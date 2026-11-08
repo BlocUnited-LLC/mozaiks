@@ -1230,6 +1230,24 @@ result = await reply.content()
 - `TokenMonitor()` — token accounting without custom hooks.
 - `MemoryStream` — captures the full conversation for observability.
 
+`FileUpdate`, shared by `CodingWorkerPlan` and `SurfaceRegenerationResponse`,
+requires concrete `.yaml` and `.yml` contents to parse with the safe YAML loader
+(extensions are case-insensitive). Malformed YAML, including raw forbidden
+control characters, raises a Pydantic validation error with the relative path,
+parser error class, and location. The parser message does not echo file contents.
+AG2's existing `reply.content(retries=2)` schema correction receives the rejected
+response and validation feedback within the original scoped conversation; an
+unchanged invalid response exhausts that bound. No Mozaiks repair loop is added.
+
+The `path`/`content` wire fields and valid content bytes are unchanged. Non-YAML
+files and template suffixes such as `.yaml.j2` are unaffected. Quoted YAML escape
+sequences remain valid; raw forbidden control characters do not. Parseability
+does not admit a page schema, widen selected file scope, or grant promotion:
+the existing full candidate and runtime checks still decide acceptance. Staged
+proposals (including ACP output) use the same `FileUpdate` contract during
+finalization; invalid YAML fails there without another provider call or child
+artifact write.
+
 ### Agent Factory Injection
 
 Every LLM-backed handler accepts an `agent_factory` callable:

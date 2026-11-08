@@ -389,6 +389,12 @@ This project follows a practical pre-1.0 changelog format:
   response selector. Null or missing rows stay empty instead of displaying an
   unrelated response array; column checks and required server-paging rows remain strict.
 
+- Scoped refinement and surface regeneration reject malformed YAML inside the
+  shared file response contract, allowing AG2's existing bounded schema
+  correction to repair syntax before candidate validation. Staged coding
+  proposals fail closed on the same check; valid files, scope enforcement,
+  and final bundle/runtime admission remain unchanged.
+
 - Governance scans now inspect repository files when a checkout lives beneath
   `.local`, `build`, or another excluded directory name. Exclusions still apply
   to those directories inside the repository.
