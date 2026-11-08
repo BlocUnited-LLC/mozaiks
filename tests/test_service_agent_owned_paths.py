@@ -34,7 +34,8 @@ def test_service_agent_must_emit_every_owned_path() -> None:
     prompt = _agent_prompt("ServiceAgent")
 
     assert "Emit every model-owned path listed in `current_build_task.owned_paths`" in prompt
-    assert "Code renders the canonical create/update/delete and list/get implementations into the owned handler/service/repo files" in prompt
+    assert "Code renders only the canonical CRUD and read implementations assigned to code by the injected ownership inventories" in prompt
+    assert "protected app-wide writes whose narrowed input contracts and implementations stay authored" in prompt
     assert "the owned `backend/policy.py`, and the module's `backend/schemas.py`" in prompt
     assert "fails the whole batch" in prompt
 
@@ -87,7 +88,7 @@ def test_the_worked_example_emits_only_files_the_task_owns() -> None:
     """
     example = _service_output_example()
     emitted = [entry["path"] for entry in example.get("python_files", [])]
-    emitted += [entry["filename"] for entry in example.get("code_files", [])]
+    assert "code_files" not in example
 
     assert emitted, "the example must still show output"
     offenders = [path for path in emitted if path.endswith("backend/schemas.py")]
@@ -98,7 +99,7 @@ def test_the_worked_example_still_shows_the_schemas_import() -> None:
     """Removing the file must not remove the demonstration of how to use it."""
     example = _service_output_example()
     service = next(
-        entry for entry in example["code_files"] if entry["filename"].endswith("backend/service.py")
+        entry for entry in example["python_files"] if entry["path"].endswith("backend/service.py")
     )
 
     assert "from . import repo, schemas" in service["content"]

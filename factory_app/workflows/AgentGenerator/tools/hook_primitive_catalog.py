@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
+from mozaiksai.core.workflow.declarative.contracts import WorkflowProgressConfig
 from mozaiksai.core.workflow.transition_ui_catalog import (
     format_transition_ui_catalog_guidance,
 )
@@ -21,6 +23,7 @@ _TARGET_AGENTS = {"ToolPlanningAgent", "ToolsManagerAgent", "UIFileGenerator", "
 _SURFACE_HEADER = "[UI SURFACE TAXONOMY]"
 _WORKFLOW_HEADER = "[WORKFLOW UI PRIMITIVE CATALOG]"
 _TRANSITION_HEADER = "[TRANSITION UI PRIMITIVE CATALOG]"
+_PROGRESS_HEADER = "[WORKFLOW PROGRESS CONTRACT]"
 _TRANSITION_TARGET_AGENTS = {"PackMetadataAgent", "UIFileGenerator"}
 
 
@@ -75,6 +78,15 @@ def inject_primitive_catalog(agent: Any, messages: list[dict[str, Any]]) -> None
             _update_section(agent, _SURFACE_HEADER, format_ui_surface_taxonomy_guidance())
             _update_section(agent, _HEADER, body)
             _update_section(agent, _WORKFLOW_HEADER, format_workflow_ui_catalog_guidance())
+            if agent_name == "WorkflowBundleBuilderAgent":
+                _update_section(
+                    agent,
+                    _PROGRESS_HEADER,
+                    "Optional ui_config.yaml progress value, validated by the runtime. "
+                    "Use stages for observed work; labels are public. Tools report actual counts "
+                    "through emit_tool_progress_event. Do not generate shell UI or estimate percentages.\n"
+                    + json.dumps(WorkflowProgressConfig.model_json_schema(), separators=(",", ":")),
+                )
 
         if agent_name in _TRANSITION_TARGET_AGENTS:
             _update_section(agent, _TRANSITION_HEADER, format_transition_ui_catalog_guidance())

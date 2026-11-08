@@ -71,6 +71,9 @@ class WorkflowRunReplayer:
         messages: list[dict[str, Any]] = await pm.load_run_history(chat_id=chat_id, app_id=app_id)
         if not messages:
             self.logger.debug("[RUN_REPLAY] No messages to replay for %s", chat_id)
+            await self._replay_pending_tool_calls(
+                chat_id=chat_id, app_id=app_id, send_event=send_event, chat_status=status,
+            )
             return None
 
         replay_result = await self._replay_messages(
@@ -142,6 +145,9 @@ class WorkflowRunReplayer:
                 ),
                 chat_id,
             )
+            await self._replay_pending_tool_calls(
+                chat_id=chat_id, app_id=app_id, send_event=send_event, chat_status=status,
+            )
             return summary
 
         replay_result = await self._replay_messages(
@@ -205,6 +211,10 @@ class WorkflowRunReplayer:
             chat_id=chat_id,
             app_id=app_id,
         )
+        if str(chat_status).lower() not in {"0", "in_progress"}:
+            for state in tool_call_state_by_index.values():
+                state["tool_call_completed"] = True
+                state["awaiting_response"] = False
         replayed_messages: list[dict[str, Any]] = []
         last_index = start_index - 1
         for offset, message in enumerate(slice_messages):
@@ -288,6 +298,16 @@ class WorkflowRunReplayer:
             chat_id,
         )
 
+        await self._replay_pending_tool_calls(
+            chat_id=chat_id, app_id=app_id, send_event=send_event, chat_status=chat_status,
+            replayed_ids={
+                str(tool_call.get("tool_call_id") or "")
+                for message in replayed_messages
+                if isinstance(metadata := message.get("metadata"), dict)
+                and isinstance(tool_call := metadata.get("tool_call"), dict)
+            },
+        )
+
         # Re-emit pending input request if one exists
         # This ensures the UI knows input is still needed after resume
         try:
@@ -334,6 +354,49 @@ class WorkflowRunReplayer:
             self.logger.debug("[RUN_REPLAY] Failed to check pending input request: %s", e)
 
         return {"last_index": last_index, "replayed_messages": len(replayed_messages)}
+
+    async def _replay_pending_tool_calls(
+        self, *, chat_id: str, app_id: str | None, send_event: SendEventFunc,
+        chat_status: Any, replayed_ids: set[str] | None = None,
+    ) -> None:
+        """Restore pending UI independently of an uncommitted or consumed turn."""
+        if not app_id or str(chat_status).lower() not in {"0", "in_progress"}:
+            return
+        pm = self._get_persistence_manager()
+        loader = getattr(pm, "get_workflow_tool_call_states", None)
+        if loader is None:
+            return
+        states = await loader(chat_id=chat_id, app_id=app_id)
+        emitted_ids = set(replayed_ids or ())
+        for state in states or []:
+            if not isinstance(state, dict):
+                continue
+            event_id = state.get("tool_call_id")
+            payload = state.get("payload")
+            if (
+                not isinstance(event_id, str) or not event_id or event_id in emitted_ids
+                or state.get("tool_call_status") != "pending"
+                or state.get("tool_call_completed") is not False
+                or state.get("awaiting_response") is not True
+                or not isinstance(payload, dict)
+            ):
+                continue
+            await send_event(
+                {
+                    "kind": "tool_call", "tool_call_id": event_id, "corr": event_id,
+                    "tool_name": state.get("tool_name"),
+                    "component_type": state.get("component_type") or state.get("tool_name"),
+                    "workflow_name": state.get("workflow_name") or payload.get("workflow_name"),
+                    "agent_name": state.get("agent_name") or payload.get("agent_name"),
+                    "display": state.get("display") or "inline",
+                    "display_type": state.get("display") or "inline",
+                    "awaiting_response": True,
+                    "interaction_type": payload.get("interaction_type") or "ui_tool",
+                    "payload": self._json_safe(payload), "replay": True,
+                },
+                chat_id,
+            )
+            emitted_ids.add(event_id)
 
     def _resolve_hidden_initial_message(
         self,
@@ -507,6 +570,9 @@ class WorkflowRunReplayer:
         normalized = self._json_safe(dict(state))
         normalized.pop("message_index", None)
         normalized.pop("updated_at", None)
+        if normalized.get("tool_call_status") in {"responded", "completed", "dismissed", "cancelled", "skipped"}:
+            normalized["tool_call_completed"] = True
+            normalized["awaiting_response"] = False
         return normalized  # type: ignore[no-any-return]
 
     def _decorate_message_with_tool_call_state(

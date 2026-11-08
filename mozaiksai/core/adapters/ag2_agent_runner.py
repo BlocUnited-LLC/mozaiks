@@ -9,7 +9,7 @@ from ag2.middleware.builtin import RetryMiddleware
 from ag2.observers import TokenMonitor
 from pydantic import BaseModel
 
-from mozaiksai.core.adapters.llm_fallback import llm_config_to_ag2_config
+from mozaiksai.core.adapters.llm_fallback import llm_config_to_ag2_config, response_schema_to_ag2
 from mozaiksai.core.usage.context import AuxiliaryUsageContext
 from mozaiksai.core.usage.middleware import build_ag2_usage_middleware
 
@@ -96,6 +96,7 @@ class AG2StructuredAgentRunner:
         )
         if not isinstance(usage_context, AuxiliaryUsageContext):
             raise TypeError("Structured agent calls require a server-owned AuxiliaryUsageContext")
+        provider_schema = response_schema_to_ag2(response_schema, llm_config)
         middleware = [
             build_ag2_usage_middleware(
                 agent_name=agent_name,
@@ -115,7 +116,7 @@ class AG2StructuredAgentRunner:
             user_prompt,
             stream=self._stream_factory(),
             observers=[TokenMonitor()],
-            response_schema=response_schema,
+            response_schema=provider_schema,
         )
         result = await reply.content(retries=schema_validation_retries)
         if result is None:

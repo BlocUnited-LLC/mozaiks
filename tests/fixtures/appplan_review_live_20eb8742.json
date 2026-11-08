@@ -283,7 +283,7 @@
   "readiness_profile": "basic_app",
   "revenue_model": "free",
   "monetization_plan": null,
-  "monetization_provider": "null",
+  "monetization_provider": null,
   "external_integrations": [],
   "workspace_integration_status": [],
   "event_flows": [

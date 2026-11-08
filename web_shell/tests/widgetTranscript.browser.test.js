@@ -389,6 +389,7 @@ test('unmount closes the connection and rejects pending fetch and socket callbac
   const page = await fixture(t);
   await ack(page);
   await page.evaluate(() => window.unmountWidget());
+  await expect.poll(() => page.evaluate(() => window.connections[0].closed)).toBe(true);
   await resolve(page);
   await page.evaluate(() => window.connections[0].callbacks.onMessage({
     type: 'chat.mode_changed', data: { mode: 'general', general_chat_id: 'late' },

@@ -1,5 +1,36 @@
 schema_version: mozaiks.structured_outputs.v1
 models:
+  ManagedMonetizationProvider:
+    type: literal
+    values: [mozaiks_pay, entitlement_dispatch]
+
+  AppPageLayoutHint:
+    type: literal
+    values: [grid, sidebar, full-width, split]
+
+  AppPageTypeHint:
+    type: literal
+    values:
+    - record_list
+    - record_detail
+    - analytics_dashboard
+    - workflow_board
+    - activity_feed
+    - gallery
+    - wizard
+    - split_view
+    - settings
+    - landing
+    - checkout_success
+
+  AppImageVariant:
+    type: literal
+    values: [inline, banner]
+
+  AppAssetAspect:
+    type: literal
+    values: [square, landscape, portrait]
+
   AppInterviewResult:
     type: model
     description: A concise clarification of a missing implementation blocker or confirmation that the approved app scope is ready.
@@ -128,12 +159,9 @@ models:
         items: str
         description: CRUD or workflow actions supported by the page.
       ui_layout:
-        type: literal
-        values:
-        - grid
-        - sidebar
-        - full-width
-        - split
+        type: union
+        variants:
+        - AppPageLayoutHint
         - 'null'
         description: "Preferred layout hint for AppSchemaAgent: grid | sidebar | full-width | split. Null to let AppSchemaAgent decide."
       shell_mode_hint:
@@ -159,19 +187,9 @@ models:
           Custom React pages implement the approved experience when a real primitive
           gap remains. Changing this decision requires an updated approved ExperienceSpec.
       page_type_hint:
-        type: literal
-        values:
-        - record_list
-        - record_detail
-        - analytics_dashboard
-        - workflow_board
-        - activity_feed
-        - gallery
-        - wizard
-        - split_view
-        - settings
-        - landing
-        - checkout_success
+        type: union
+        variants:
+        - AppPageTypeHint
         - 'null'
         description: >
           Structural page archetype hint for AppSchemaAgent. Drives which primitives
@@ -1090,16 +1108,15 @@ models:
           apps set this to not_required unless they also sell app access tiers,
           quotas, credits, or token allowances.
       monetization_provider:
-        type: literal
-        values:
-        - mozaiks_pay
-        - entitlement_dispatch
+        type: union
+        variants:
+        - ManagedMonetizationProvider
         - 'null'
         description: >
           Explicit subscription assignment owner when subscription_contract_requirement
           is required. Use mozaiks_pay only when the user explicitly selects the
           managed MozaiksPay provider. Use entitlement_dispatch for the self-managed
-          OSS path. Null when subscription_contract_requirement is not_required.
+          OSS path. JSON null when subscription_contract_requirement is not_required.
           Do not emit custom or decorative provider ids.
       primary_payer:
         type: union
@@ -1329,15 +1346,15 @@ models:
           whether the app should route to custom app/operator capabilities
           without a subscription contract.
       monetization_provider:
-        type: literal
-        values:
-        - mozaiks_pay
-        - entitlement_dispatch
+        type: union
+        variants:
+        - ManagedMonetizationProvider
         - 'null'
         default: null
         description: >
           Explicit subscription assignment owner. Required when the approved
           subscription contract has contract_required=true, and invalid otherwise.
+          Use JSON null when no subscription contract is required.
           mozaiks_pay materializes the selected
           mozaikspay managed capability pack and app-owned billing_portal facade;
           entitlement_dispatch materializes the self-managed OSS assignment writer.
@@ -2205,6 +2222,65 @@ models:
         type: str
         description: Human-readable permission purpose.
 
+  JsonSchemaScalarType:
+    type: literal
+    values:
+    - string
+    - integer
+    - number
+    - boolean
+    - 'null'
+
+  JsonSchemaArrayItemType:
+    type: literal
+    values:
+    - string
+    - integer
+    - number
+    - boolean
+    - object
+    - 'null'
+
+  JsonSchemaLeafProperty:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Exact terminal object member name returned by the action.
+      type:
+        type: literal
+        values:
+        - string
+        - integer
+        - number
+        - boolean
+        - array
+        - 'null'
+        description: Terminal scalar or scalar-array type; nested object members are not supported.
+      description:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional member description; descriptions never declare fields.
+      required:
+        type: bool
+        description: Whether this member must be present; independent of nullability.
+      enum_values:
+        type: optional_list
+        items: str
+        description: Optional finite string values for a string member.
+      items_type:
+        type: union
+        variants:
+        - JsonSchemaScalarType
+        - 'null'
+        description: Exact scalar item type for an array member; null otherwise.
+      nullable:
+        type: bool
+        default: false
+        description: Permit JSON null in an output member. Closed action/capability requests require false.
+
   JsonSchemaProperty:
     type: model
     fields:
@@ -2238,9 +2314,21 @@ models:
       items_type:
         type: union
         variants:
-        - str
+        - JsonSchemaArrayItemType
         - 'null'
-        description: Array item type when type=array.
+        description: Exact array item type when type=array; null otherwise. Object items require items_properties.
+      properties:
+        type: optional_list
+        items: JsonSchemaLeafProperty
+        description: Exact terminal members for type=object; required and nonempty for an object property, null otherwise.
+      items_properties:
+        type: optional_list
+        items: JsonSchemaLeafProperty
+        description: Exact terminal row members for type=array with items_type=object; required and nonempty for object rows, null otherwise.
+      nullable:
+        type: bool
+        default: false
+        description: Permit JSON null in an output property. Closed action/capability requests require false.
 
   JsonSchemaContract:
     type: model
@@ -2269,9 +2357,13 @@ models:
       items_type:
         type: union
         variants:
-        - str
+        - JsonSchemaArrayItemType
         - 'null'
-        description: Array item type when type=array.
+        description: Exact array item type when type=array; null otherwise.
+      items_properties:
+        type: optional_list
+        items: JsonSchemaLeafProperty
+        description: Exact terminal members for top-level object-array items. Collection actions still return an object envelope with a named array property.
 
   ModuleApiSurface:
     type: literal
@@ -3125,6 +3217,81 @@ models:
           questions to app-owned module actions; they do not define hosted
           governance, wallet, payout, billing, campaign, or revenue behavior.
 
+  SmokeFixtureParam:
+    type: model
+    fields:
+      field:
+        type: str
+        description: Exact top-level input field of the declared action. Each field appears once.
+      source:
+        type: literal
+        values: [literal, response, actor_subject, relative_date, relative_datetime, record]
+        description: Finite input source. Set only the matching source fields; all others are null.
+      value_json:
+        type: optional_str
+        description: For literal only, JSON-encoded input value, at most 4096 characters, 8 levels and 256 nodes. No code, nonfinite numbers or duplicate object keys.
+      step_id:
+        type: optional_str
+        description: For response only, exact id of an earlier setup call in this fixture. Forward references and cycles are forbidden.
+      response_path:
+        type: optional_list
+        items: str
+        description: For response only, 1 to 8 exact declared object property names from the setup action output, without a transport envelope, wildcards or expressions.
+      offset_days:
+        type: union
+        variants: [int, 'null']
+        description: For relative_date or relative_datetime only, explicit whole-day offset from the observer's fixed UTC clock, between -3650 and 3650.
+      record_field:
+        type: optional_str
+        description: For record only, a declared field from the observer's currently tested collection row. Target canonical get/update/delete, or setup of a canonical update/delete fixture on that same observed row. No record setup for get/create/list/custom targets or arbitrary database access.
+  SmokeFixtureSetup:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Unique identifier for this setup response within the fixture.
+      module:
+        type: str
+        description: Exact declared module id; foreign-module prerequisites require explicit declared action references.
+      action:
+        type: str
+        description: Exact user-callable action id. Internal and admin_internal actions are forbidden.
+      roles:
+        type: list
+        items: str
+        description: Exact role ids from approved auth grants sufficient for this action. Each role must contribute a required permission; no unrelated or redundant roles. Empty for default-scope-only actions.
+      params:
+        type: list
+        items: SmokeFixtureParam
+        description: Complete required inputs and only declared input fields. At most 64 bindings. record may bind the existing canonical update/delete target row for lifecycle preparation; other fixture targets cannot use record in setup.
+  ModuleSmokeFixture:
+    type: model
+    fields:
+      action:
+        type: str
+        description: Exact target action id in this companion's owning module. One fixture per action.
+      roles:
+        type: list
+        items: str
+        description: Exact approved role subset for the target, without automatic role addition. Every role must uniquely contribute a required permission after default scopes.
+      setup:
+        type: list
+        items: SmokeFixtureSetup
+        description: At most 24 ordered public action calls creating valid prerequisites or preparing the same observed update/delete row. Every setup call must succeed; it never satisfies independent target-action coverage.
+      params:
+        type: list
+        items: SmokeFixtureParam
+        description: Complete target inputs, at most 64. record references preserve the canonical CRUD row being independently checked.
+  ModuleSmokeFixtures:
+    type: model
+    fields:
+      schema_version:
+        type: literal
+        values: [mozaiks.module_smoke_fixtures.v1]
+      fixtures:
+        type: list
+        items: ModuleSmokeFixture
+        description: 1 to 64 bounded fixtures, at most 128 total setup calls and 128 KiB per module. Test inputs only; no expected status, skip, coverage, permission or acceptance-policy fields.
   ModuleContractBundle:
     type: model
     fields:
@@ -3134,6 +3301,12 @@ models:
       module_yaml:
         type: ModuleManifest
         description: module.yaml contract object.
+      fixtures_yaml:
+        type: union
+        variants:
+          - ModuleSmokeFixtures
+          - 'null'
+        description: Optional contracts/fixtures.yaml, only when this module's declared actions need valid prerequisites or specific input values for contained smoke. The observer owns coverage and outcomes. Use null when unneeded or unowned.
       events_yaml:
         type: union
         variants:
@@ -4141,12 +4314,11 @@ models:
         - 'null'
         description: Optional caption under the image.
       variant:
-        type: literal
-        values:
-        - inline
-        - banner
+        type: union
+        variants:
+        - AppImageVariant
         - 'null'
-        description: banner for a full-width hero crop; inline for a picture in the content flow.
+        description: banner for a full-width hero crop; inline for a picture in the content flow; JSON null uses the runtime default.
 
   AppAlertConfig:
     type: model
@@ -5568,13 +5740,11 @@ models:
           illustrator. Required for a planned generated or uploaded asset that
           has no path or url yet.
       aspect:
-        type: literal
-        values:
-        - square
-        - landscape
-        - portrait
+        type: union
+        variants:
+        - AppAssetAspect
         - 'null'
-        description: Image shape for planned visual assets; null for non-image assets.
+        description: Image shape for planned visual assets; JSON null for non-image assets.
       path:
         type: union
         variants:
@@ -6504,10 +6674,6 @@ models:
         description: >
           Implemented module backend stub files. These are the typed source of truth
           for ServiceAgent-owned Python outputs and must align with module_contract.python_stubs.
-      code_files:
-        type: list
-        items: CodeFileEntry
-        description: Serialized file mirror. Extraction may rebuild canonical files from python_files.
       deleted_files:
         type: optional_list
         items: str

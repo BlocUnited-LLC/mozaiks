@@ -18,7 +18,7 @@ function options() {
       required: true,
       runtime: { enabled: true, provider: 'jwt', local_development: false, user: null },
       contract: {
-        schema_version: 'mozaiks.auth.v1', auth_required: true, strategy: 'oidc',
+        schema_version: 'mozaiks.auth.v2', auth_required: true, strategy: 'oidc',
         routes: { login: '/login', callback: '/auth/callback', logout: '/login', post_login_default: '/community' },
         frontend: { adapter: 'oidc_pkce', default_scopes: ['openid', 'profile', 'email'] },
       },

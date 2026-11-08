@@ -20,6 +20,9 @@ from mozaiksai.core.adapters.ag2_task_batch_runner import (
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.context.authority import ContextAuthorityPolicy
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_design_access_policy,
+)
 
 from .dependency_graph import deterministic_topological_order
 from .generator_support.code_files import (
@@ -246,6 +249,7 @@ class TaskBatchConveyor(BaseModel):
     retry_limit: int = Field(default=0, ge=0, le=5)
     timeout_seconds: int | None = Field(default=None, ge=1)
     require_owned_paths: bool = False
+    progress_stage: str | None = Field(default=None, strict=True, min_length=1)
 
     @field_validator("id", "decomposition_agent")
     @classmethod
@@ -295,6 +299,7 @@ class TaskBatchConveyor(BaseModel):
                 require_owned_paths=self.require_owned_paths,
             ),
             allowed_execution_agents=list(self.execution_agents),
+            progress_stage=self.progress_stage,
         )
 
 
@@ -310,6 +315,7 @@ class TaskBatchSpec(BaseModel):
     execution: TaskBatchExecution = Field(default_factory=TaskBatchExecution)
     result: TaskBatchResult
     recovery: TaskBatchRecovery | None = None
+    progress_stage: str | None = Field(default=None, strict=True, min_length=1)
     allowed_execution_agents: list[str] = Field(default_factory=list, exclude=True)
 
     @field_validator("id", "trigger_agent")
@@ -373,6 +379,20 @@ def parse_task_batches_config(payload: dict[str, Any]) -> TaskBatchesConfig:
     return TaskBatchesConfig.model_validate(payload)
 
 
+def validate_task_batch_progress(config: TaskBatchesConfig, ui_config: dict[str, Any]) -> None:
+    """Close optional batch progress references against the owning UI contract."""
+    from .declarative.contracts import WorkflowProgressConfig
+
+    raw_progress = ui_config.get("progress")
+    progress = WorkflowProgressConfig.model_validate(raw_progress) if raw_progress is not None else None
+    stage_ids = {stage.id for stage in progress.stages} if progress else set()
+    for batch in config.batches:
+        if batch.progress_stage is not None and batch.progress_stage not in stage_ids:
+            raise ValueError(
+                f"task_batches {batch.id!r} references undeclared progress stage {batch.progress_stage!r}"
+            )
+
+
 def get_task_batches_path(workflow_name: str, workflows_root: Path | None = None) -> Path:
     """Resolve the canonical task_batches.yaml path for a workflow."""
 
@@ -392,7 +412,11 @@ def load_task_batches_config(
     if not path.exists():
         return None
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return parse_task_batches_config(raw)
+    config = parse_task_batches_config(raw)
+    ui_path = path.parent.parent / "ui_config.yaml"
+    ui_config = (yaml.safe_load(ui_path.read_text(encoding="utf-8")) or {}) if ui_path.exists() else {}
+    validate_task_batch_progress(config, ui_config)
+    return config
 
 
 def workflow_has_task_batches(workflow_name: str, workflows_root: Path | None = None) -> bool:
@@ -775,6 +799,28 @@ async def _execute_one_batch(
 
     state_lock = asyncio.Lock()
 
+    async def report_progress() -> None:
+        if batch.progress_stage is None or not chat_id or not task_items:
+            return
+        from .ui_tools import emit_tool_progress_event
+
+        try:
+            await emit_tool_progress_event(
+                batch.id,
+                stage_id=batch.progress_stage,
+                context_variables={
+                    "chat_id": chat_id,
+                    "app_id": app_id,
+                    "workflow_name": workflow_name,
+                },
+                completed=len(completed),
+                total=len(task_items),
+            )
+        except Exception:
+            # Presentation failure (including a socket scope change) must not
+            # invalidate accepted task output or repeat completed model calls.
+            logger.warning("TASK_BATCH_PROGRESS_FAILED batch=%s chat=%s", batch.id, chat_id, exc_info=True)
+
     async def persist(status: str = "running") -> None:
         if batch.recovery:
             metadata["pending_tasks"] = list(pending)
@@ -849,10 +895,13 @@ async def _execute_one_batch(
             if batch.recovery:
                 metadata["in_flight"].pop(task_id, None)
                 await persist()
+            if not isinstance(outcome, Exception):
+                await report_progress()
         return outcome
 
     if batch.recovery:
         await persist()
+    await report_progress()
 
     while pending:
         # A task is "resolved" when all its dependencies have settled (completed or failed).
@@ -1145,14 +1194,20 @@ async def _run_one_task(
                         task.get("task_id"), agent_name, discarded,
                     )
                 authored_python = _authored_python_files(output)
+                approved_access_policy = resolve_design_access_policy(base_context)
+                if approved_access_policy and approved_access_policy["grants"]:
+                    for key in ("data_contract", "design_surface_map"):
+                        if detach(task_context.get(key)) != detach(base_context.get(key)):
+                            raise ValueError(f"Task context cannot replace {key} beneath approved role grants")
                 subscription_contract = resolve_subscription_contract(task_context)
-                companion_files = dict(task_context.get("generated_files") or {})
+                companion_files = dict(base_context.get("generated_files") or {})
                 for dependency in (task_context.get("dependency_task_outputs") or {}).values():
                     companion_files.update(extract_code_file_map_from_payload(dependency))
                 output = cast(dict[str, Any], close_module_actions(
-                    output, app_build_plan=task_context.get("app_build_plan"),
+                    output, app_build_plan=base_context.get("app_build_plan"),
                     data_contract=task_context.get("data_contract"),
                     design_surface_map=task_context.get("design_surface_map"),
+                    access_policy=approved_access_policy,
                     subscription_contract=subscription_contract, companion_files=companion_files,
                 ))
                 canonical_code_files = extract_code_file_entries_from_payload(
@@ -1214,6 +1269,8 @@ async def _run_one_task(
                     read_sources, app_build_plan=task_context.get("app_build_plan"),
                     data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
                     subscription_contract=subscription_contract,
+                    access_policy=approved_access_policy,
+                    design_surface_map=task_context.get("design_surface_map"),
                 ))
                 canonical_file_map = compile_module_entitlement_gates(
                     canonical_file_map,
@@ -1828,6 +1885,7 @@ __all__ = [
     "get_task_batches_path",
     "load_task_batches_config",
     "parse_task_batches_config",
+    "validate_task_batch_progress",
     "optional_task_output_paths",
     "task_evidence_digest",
     "task_inventory_digest",

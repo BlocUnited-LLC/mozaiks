@@ -313,7 +313,15 @@ class WebSocketProtocolMixin:
                     return
 
                 kind = event_dict.get("kind")
-                if kind == "text":
+                if kind == "tool_call":
+                    from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
+
+                    envelope = get_event_dispatcher().build_outbound_event_envelope(
+                        raw_event=event_dict, chat_id=chat_id, workflow_name=workflow_name,
+                    )
+                    if envelope is not None:
+                        await self._queue_message_with_backpressure(chat_id, envelope)
+                elif kind == "text":
                     # Convert to chat.text format
                     await self._queue_message_with_backpressure(
                         chat_id,

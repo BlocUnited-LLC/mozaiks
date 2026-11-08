@@ -4,6 +4,8 @@ import asyncio
 import logging
 import queue
 import threading
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -145,4 +147,113 @@ async def test_send_tool_call_event_emits_canonical_tool_call_envelope() -> None
     assert event["awaiting_response"] is True
     assert event["agent"] == "PlannerAgent"
     assert event["agent_name"] == "PlannerAgent"
+
+
+@pytest.mark.asyncio
+async def test_pending_inline_payload_is_persisted_before_delivery(monkeypatch) -> None:
+    transport = _FakeTransport()
+    pm = SimpleNamespace(attach_tool_call_metadata=AsyncMock(), update_last_artifact=AsyncMock())
+    transport._get_or_create_persistence_manager = Mock(return_value=pm)
+    transport._resolve_chat_context = AsyncMock(return_value=("app-1", "DesignDocs"))
+    monkeypatch.setattr(transport, "_persist_ui_tool_state", UIToolsMixin._persist_ui_tool_state.__get__(transport))
+    payload = {"review_id": "original-review", "checkpoints": ["Member may submit"]}
+
+    async def receive(event, chat_id):
+        pm.attach_tool_call_metadata.assert_awaited_once()
+        assert chat_id == "chat-1" and event["tool_call_id"] == "original-event"
+
+    transport.send_event_to_ui = receive
+    await transport.send_tool_call_event(
+        event_id="original-event", chat_id="chat-1", tool_name="review_policy",
+        component_name="ApprovalCard", display_type="inline", payload=payload,
+        agent_name="DesignDocsAgent", awaiting_response=True,
+    )
+    saved = pm.attach_tool_call_metadata.await_args.kwargs
+    assert saved["chat_id"] == "chat-1" and saved["app_id"] == "app-1"
+    assert saved["event_id"] == "original-event"
+    assert saved["metadata"]["payload"] == payload
+    assert saved["metadata"]["component_type"] == "ApprovalCard"
+    assert saved["metadata"]["workflow_name"] == "DesignDocs"
+    assert saved["metadata"]["agent_name"] == "DesignDocsAgent"
+    assert saved["metadata"]["tool_call_status"] == "pending"
+    assert saved["metadata"]["awaiting_response"] is True
+    pm.update_last_artifact.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("early", [False, True])
+async def test_response_state_is_saved_before_waiter_resumes_even_during_registration(early) -> None:
+    transport = _FakeTransport()
+    transport._ui_tool_metadata["review"] = {"chat_id": "chat", "tool_name": "review_policy", "display": "inline"}
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def persist(**kwargs):
+        assert kwargs["event_id"] == "review" and kwargs["status"] == "responded"
+        assert kwargs["app_id"] == "app" and kwargs["chat_id"] == "chat"
+        entered.set()
+        await release.wait()
+
+    pm = SimpleNamespace(update_tool_call_state=AsyncMock(side_effect=persist))
+    transport._get_or_create_persistence_manager = Mock(return_value=pm)
+    transport._resolve_chat_context = AsyncMock(return_value=("app", "DesignDocs"))
+    future = asyncio.get_running_loop().create_future()
+    if not early:
+        transport.pending_tool_call_responses["review"] = future
+    response = {"action": "approve", "review_id": "original"}
+    task = asyncio.create_task(transport.submit_tool_call_response("review", response))
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    if early:
+        transport.pending_tool_call_responses["review"] = future
+    assert not future.done()
+    assert await transport.submit_tool_call_response("review", response) is True
+    pm.update_tool_call_state.assert_awaited_once()
+    release.set()
+    assert await task is True
+    assert future.result() == response
+    assert not transport._buffered_tool_call_responses
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("waiter_registration", ["before", "during", "after"])
+async def test_cancelled_submission_finishes_original_decision_before_releasing_waiter(waiter_registration) -> None:
+    transport = _FakeTransport()
+    _FakeTransport._instance = transport
+    transport._ui_tool_metadata["review"] = {"chat_id": "chat", "tool_name": "review_policy", "display": "inline"}
+    entered, release = asyncio.Event(), asyncio.Event()
+    saved = []
+
+    async def persist(**kwargs):
+        entered.set()
+        await release.wait()
+        saved.append(kwargs)
+
+    pm = SimpleNamespace(update_tool_call_state=AsyncMock(side_effect=persist))
+    transport._get_or_create_persistence_manager = Mock(return_value=pm)
+    transport._resolve_chat_context = AsyncMock(return_value=("app", "DesignDocs"))
+    future = asyncio.get_running_loop().create_future()
+    if waiter_registration == "before":
+        transport.pending_tool_call_responses["review"] = future
+    response = {"approved": True, "review_id": "original"}
+    submission = asyncio.create_task(transport.submit_tool_call_response("review", response))
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    submission.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await submission
+
+    assert len(transport._tool_call_response_tasks) == 1
+    finalization = next(iter(transport._tool_call_response_tasks))
+    assert not finalization.done() and not future.done() and not saved
+    assert await transport.submit_tool_call_response("review", {"approved": False}) is True
+    pm.update_tool_call_state.assert_awaited_once()
+    if waiter_registration == "during":
+        transport.pending_tool_call_responses["review"] = future
+    release.set()
+    assert await asyncio.wait_for(finalization, timeout=2) is True
+    assert saved[0]["status"] == "responded"
+    if waiter_registration == "after":
+        assert await _FakeTransport.wait_for_tool_call_response("review", timeout=0.1) == response
+    else:
+        assert future.result() == response
+    assert not transport._tool_call_response_tasks
+    assert not transport._buffered_tool_call_responses
 

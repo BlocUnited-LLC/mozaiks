@@ -449,8 +449,8 @@ def test_appgenerator_writes_subscriptions_yaml_without_a_task() -> None:
     assert "`module_contract` must be a `ModuleContractBundle` wrapper" in agents_text
     assert "`module_contract.module_yaml` must use the runtime loader shape exactly" in agents_text
     assert "`input_schema` and `output_schema` must be typed `JsonSchemaContract` objects" in agents_text
-    assert "`properties` is a list of `{name, type, description, required, enum_values, items_type}`" in agents_text
-    assert "Every `JsonSchemaProperty` must include all six fields" in agents_text
+    assert "`properties` is a finite typed list" in agents_text
+    assert "an array with `items_type: object` requires nonempty `items_properties`" in agents_text
     assert "Never set an action's `input_schema` or `output_schema` to null" in agents_text
     assert "`permissions`, `actions`, and `capabilities` are top-level siblings" in agents_text
     assert "Capabilities do not use `id` or `grants`" in agents_text

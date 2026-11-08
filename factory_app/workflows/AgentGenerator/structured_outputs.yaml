@@ -225,6 +225,15 @@ models:
         - 'null'
         description: Whether to hide the agent's text output from the user UI (agent_text
           triggers only). True = hide token (e.g. NEXT), False = show message.
+  ContextDataSort:
+    type: model
+    fields:
+      field:
+        type: str
+        description: Canonical stored field path to order by, such as version_number or created_at.
+      direction:
+        type: literal
+        values: [asc, desc]
   ContextVariableSource:
     type: model
     fields:
@@ -301,6 +310,10 @@ models:
         description: 'When to refresh data: ''once'' (cache indefinitely), ''per_module''
           (refresh each module), ''on_demand'' (refresh when requested). Data_reference
           sources only.'
+      sort:
+        type: optional_list
+        items: ContextDataSort
+        description: Ordered data_reference sort fields. Artifact versions use version_number desc followed by created_at desc; random IDs do not establish recency.
       entity_schema:
         type: union
         variants:
@@ -2342,11 +2355,16 @@ models:
         description: A route value targeting user or failed termination for exceptions, unknown results, and exhausted attempts.
       max_attempts:
         type: int
-        description: Total invocations per workflow execution, including the first; 1 to 100.
+        description: Counted invocations per workflow execution, including the first; 1 to 100. Only retry_without_attempt outcomes refund their completed invocation.
       retry_on:
         type: list
         items: str
         description: Known recoverable route values permitting another invocation. Empty with max_attempts=1. Never include error_value.
+      retry_without_attempt:
+        type: list
+        items: str
+        default: []
+        description: Optional subset of retry_on for explicit external review corrections that do not spend a structural repair attempt. Empty by default. The tool must validate the external response before returning this outcome; exceptions, malformed results, and ordinary validation failures remain counted.
       routes:
         type: list
         items: WorkflowOutcomeRoute
@@ -2406,6 +2424,9 @@ models:
           orchestrator.yaml, agents.yaml, transition_graph.yaml, tools.yaml,
           context_variables.yaml, structured_outputs.yaml, middleware.yaml, ui_config.yaml.
           middleware.yaml declares prompt middleware and materialized statusbar middleware.
+          ui_config.yaml may declare progress.stages using the injected strict runtime
+          progress schema. Tools report actual counts through emit_tool_progress_event;
+          do not emit a workflow-local copy of the framework chat status bar.
           Complete Python tool implementations go under tools/<name>.py; unfinished stubs block export.
           UI components go under ui/<WorkflowName>/<Component>.jsx.
   PackBuildCoordinatorOutput:

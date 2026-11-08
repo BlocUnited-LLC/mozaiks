@@ -42,7 +42,7 @@ Owns the provider-neutral generated-app auth behavior contract.
 Authenticated generated apps use:
 
 ```yaml
-schema_version: mozaiks.auth.v1
+schema_version: mozaiks.auth.v2
 auth_required: true
 strategy: oidc
 mode: brokered_oidc
@@ -272,7 +272,7 @@ Do not move `entry_point` or `chat.chat_startup_mode` into `app/app.json`.
 Provider-neutral auth behavior example belongs in `app/config/auth.yaml`:
 
 ```yaml
-schema_version: mozaiks.auth.v1
+schema_version: mozaiks.auth.v2
 auth_required: true
 strategy: oidc
 mode: public_self_signup
@@ -379,7 +379,7 @@ For the broader manifest model, read
 After auth changes:
 
 1. verify `app/app.json` parses
-2. verify `app/config/auth.yaml` has schema_version `mozaiks.auth.v1`
+2. verify `app/config/auth.yaml` has schema_version `mozaiks.auth.v2`
 3. verify `app/config/ai.json` still contains only app-level AI boot settings
 4. verify the web shell can initialize the OIDC PKCE adapter
 5. verify login redirects to the intended OIDC provider

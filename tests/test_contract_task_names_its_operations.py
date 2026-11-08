@@ -152,6 +152,6 @@ def test_public_review_renders_explicit_approved_operations_without_guessing() -
     cached = detach(context.get("app_build_plan"))
     contract = next(task for task in cached["build_tasks"] if task["task_type"] == "module_contract")
     message = contract["initial_message"]
-    assert message.count("Actions for this module (authoritative") == 1
+    assert message.count("Approved module action inventory (DesignDocs and data_contract):") == 1
     assert all(f"`{operation}`" in message for operation in ["list_reports", "create_report", "archive_report"])
     assert cached["capability_packs"][0]["operations"] == ["list_reports", "create_report", "archive_report"]

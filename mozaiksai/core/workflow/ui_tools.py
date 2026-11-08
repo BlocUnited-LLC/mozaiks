@@ -311,48 +311,6 @@ async def use_ui_tool(
         component_name=component_name,
     )
 
-    # Persist UI tool metadata to enable restoration after reconnect/resume.
-    if chat_id:
-        try:
-            pm = None
-            app_id = None
-            try:
-                from mozaiksai.core.transport.simple_transport import SimpleTransport
-
-                transport = await SimpleTransport.get_instance()
-                if transport is not None and hasattr(transport, "_get_or_create_persistence_manager"):
-                    pm = transport._get_or_create_persistence_manager()  # type: ignore[attr-defined]
-                    if hasattr(transport, "connections"):
-                        conn = transport.connections.get(chat_id) or {}  # type: ignore[attr-defined]
-                        app_id = conn.get("app_id")
-            except Exception:
-                pm = None
-                app_id = None
-
-            if pm and app_id:
-                await _await_on_transport_loop(
-                    transport,
-                    pm.attach_tool_call_metadata(
-                        chat_id=chat_id,
-                        app_id=str(app_id),
-                        event_id=event_id,
-                        metadata={
-                            "tool_name": tool_id,
-                            "tool_call_id": event_id,
-                            "component_type": component_name,
-                            "display": resolved_display,
-                            "tool_call_completed": False,
-                            "tool_call_status": "pending",
-                            "awaiting_response": True,
-                            "payload": enriched_payload,
-                            "timestamp": _dt.datetime.now(_dt.UTC).isoformat(),
-                        },
-                    ),
-                )
-                wf_logger.debug("UI_TOOL_META_ATTACHED tool=%s event=%s", tool_id, event_id)
-        except Exception as meta_err:
-            wf_logger.warning("UI_TOOL_META_FAILED: %s", meta_err)
-
     try:
         # Try to log via tools logger (optional import)
         from logs.tools_logs import get_tool_logger as _get_tool_logger  # type: ignore
@@ -489,46 +447,72 @@ async def emit_ui_surface(
 
 async def emit_tool_progress_event(
     tool_name: str,
-    progress_percent: float,
-    status_message: str,
-    chat_id: str | None = None,
-    correlation_id: str | None = None
+    *,
+    stage_id: str,
+    context_variables: Any,
+    completed: int | None = None,
+    total: int | None = None,
+    correlation_id: str | None = None,
 ) -> None:
+    """Report a declared workflow stage to the shared chat status bar.
+
+    Pass the runtime-injected context from a tool or lifecycle hook. Labels
+    and units come from ``ui_config.yaml``; never pass model-generated status
+    prose or guessed percentages. Omit both counts for indeterminate work.
+    A completed stage does not mark the workflow run complete.
     """
-    X1: Emit a chat.tool_progress event for long-running tools.
-    
-    Args:
-        tool_name: Name of the tool reporting progress
-        progress_percent: Progress as a percentage (0-100)
-        status_message: Human-readable status description  
-        chat_id: Chat session ID
-        correlation_id: Optional correlation ID linking to original tool call
-    """
+    from mozaiksai.core.utils.context_vars import context_get
+
+    scope = {key: context_get(context_variables, key) for key in ("chat_id", "app_id", "workflow_name")}
+    if any(not isinstance(value, str) or not value.strip() for value in scope.values()):
+        raise ValueError("Workflow progress requires runtime chat_id, app_id, and workflow_name")
+    if not isinstance(tool_name, str) or not tool_name.strip():
+        raise ValueError("Workflow progress requires a tool_name")
+    chat_id = scope["chat_id"]
+    workflow_name = scope["workflow_name"]
+    config = workflow_manager.get_config(workflow_name)
+    stages = (config.get("progress") or {}).get("stages", [])
+    stage = next((entry for entry in stages if entry["id"] == stage_id), None)
+    if stage is None:
+        raise ValueError(f"Workflow {workflow_name!r} has no declared progress stage {stage_id!r}")
+    if completed is not None or total is not None:
+        if type(completed) is not int or type(total) is not int:
+            raise ValueError("Progress completed and total must both be integers or both omitted")
+        if total <= 0 or completed < 0 or completed > total:
+            raise ValueError("Progress counts require 0 <= completed <= total and total > 0")
+
     try:
         from mozaiksai.core.transport.simple_transport import SimpleTransport
         transport = await SimpleTransport.get_instance()
-        wf_logger = get_workflow_logger("tool_progress", chat_id=chat_id)
     except Exception as e:
         logger.error("[TOOL_PROGRESS] Transport unavailable: %s", e, exc_info=True)
         return
-    
-    # Validate progress percentage
-    progress_percent = max(0.0, min(100.0, float(progress_percent)))
-    
+
+    # A detached/reconnecting run may have no socket. An attached socket must
+    # belong to the same runtime scope before any user-visible event is sent.
+    connection = transport.connections.get(chat_id)
+    if connection is not None and any(connection.get(key) != scope[key] for key in ("app_id", "workflow_name")):
+        raise ValueError("Workflow progress does not match the connected chat scope")
+
+    wf_logger = get_workflow_logger(workflow_name, chat_id=chat_id)
     normalized = {
         "kind": "tool_progress",
         "chat_id": chat_id,
+        "workflow_name": workflow_name,
         "tool_name": tool_name,
-        "progress_percent": progress_percent,
-        "status_message": status_message,
-        "timestamp": _dt.datetime.now(_dt.UTC).isoformat()
+        "stage_id": stage["id"],
+        "stage_label": stage["label"],
+        "completed": completed,
+        "total": total,
+        "unit": stage.get("unit"),
+        "timestamp": _dt.datetime.now(_dt.UTC).isoformat(),
     }
     if correlation_id:
         normalized["corr"] = correlation_id
 
     try:
         await transport.send_event_to_ui(normalized, chat_id)
-        wf_logger.debug("Tool progress: %s at %.1f%% - %s", tool_name, progress_percent, status_message)
+        wf_logger.debug("Tool progress: %s stage=%s completed=%s total=%s", tool_name, stage_id, completed, total)
     except Exception as e:
         wf_logger.error("[TOOL_PROGRESS] Failed to emit progress event: %s", e, exc_info=True)
 

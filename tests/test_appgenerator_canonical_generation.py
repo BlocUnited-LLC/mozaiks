@@ -413,12 +413,12 @@ class TestStaticContractChecks:
         )
 
     def test_page_type_hint_aligns_with_page_type(self) -> None:
-        """AppBuildPage.page_type_hint must enumerate exactly the valid page types plus null."""
+        """The optional page hint uses the same finite taxonomy as runtime pages."""
         from factory_app.workflows._shared.generated_ui_contract import VALID_PAGE_TYPES
         so = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
-        hint_values = set(so["models"]["AppBuildPage"]["fields"]["page_type_hint"]["values"])
-        # null is allowed as an opt-out sentinel; strip it for comparison
-        hint_types = hint_values - {"null"}
+        hint = so["models"]["AppBuildPage"]["fields"]["page_type_hint"]
+        assert hint["variants"] == ["AppPageTypeHint", "null"]
+        hint_types = set(so["models"]["AppPageTypeHint"]["values"])
         assert hint_types == VALID_PAGE_TYPES, (
             f"page_type_hint mismatch with VALID_PAGE_TYPES.\n"
             f"  Only in page_type_hint: {hint_types - VALID_PAGE_TYPES}\n"

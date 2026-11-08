@@ -5,3 +5,6 @@ visual_agents:
 - IntegrationReadinessAgent
 - AppValidationAgent
 - DownloadAgent
+progress:
+  stages:
+  - {id: building_app, label: Building your app, unit: tasks}

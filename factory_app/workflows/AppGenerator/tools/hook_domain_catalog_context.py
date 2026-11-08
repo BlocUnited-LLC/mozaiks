@@ -48,14 +48,7 @@ _DOMAIN_CONTEXT_HEADER = "[DOMAIN CATALOG CONTEXT]"
 _MANIFEST_GUARD_HEADER = "[MODULE FILE MANIFEST GUARD]"
 
 # YAML files that constitute the full module contract set.
-_ALL_MODULE_YAML_FILES = {
-    "module.yaml",
-    "events.yaml",
-    "reactions.yaml",
-    "notifications.yaml",
-    "settings.yaml",
-    "admin.yaml",
-}
+_ALL_MODULE_YAML_FILES = {Path(path).name for path in _MODULE_CONTRACT_OUTPUT_PATHS.values()}
 
 # Context variable keys AppPlanAgent uses as concept signals.
 _CONCEPT_SIGNAL_KEYS = (
@@ -293,6 +286,7 @@ def _build_manifest_guard_body(
         "  9. Leave admin_yaml null if the module needs no admin panels.",
         "  10. Do NOT emit channels.yaml.",
         "  11. Leave a typed field null rather than populating it with only empty arrays or null objects.",
+        "  12. fixtures_yaml is optional test input, not product scope. Supply it for an authored read whose declared inputs reject the observer defaults (get: id string; list: empty object), or approved business prerequisites that schema-only inputs cannot satisfy. Use actual dependency contracts; never guess record IDs, relax validation or add runtime policy.",
     ]
 
     return "\n".join(lines)
@@ -345,7 +339,7 @@ def inject_module_file_manifest_guard(agent: Any, messages: list[dict[str, Any]]
     Reads current_build_task from context variables. If this is a module_contract
     task, derives the declared YAML files from owned_paths and injects a
     [MODULE FILE MANIFEST GUARD] block instructing the agent to generate only
-    those files — not the full six-file default set.
+    those files — not the full companion set.
 
     Exits silently if task_type is not module_contract or context is unavailable.
     """
@@ -389,8 +383,15 @@ def inject_module_file_manifest_guard(agent: Any, messages: list[dict[str, Any]]
             if manifest_yaml:
                 declared_yaml_files = manifest_yaml | {"module.yaml"}
 
-        body = _build_manifest_guard_body(module_id, declared_yaml_files, owned_paths)
+        from factory_app.workflows.AppGenerator.tools.task_integrity import task_allowed_paths
+
         plan = context_variables.get("app_build_plan") or {}
+        fixture_path = f"modules/{module_id}/{_MODULE_CONTRACT_OUTPUT_PATHS['fixtures_yaml']}"
+        if fixture_path in task_allowed_paths(current_build_task, plan.get("build_tasks") or []):
+            # Test inputs already belong to this task's optional companion lane;
+            # omitted file-manifest entries do not forbid mechanically required inputs.
+            declared_yaml_files.add("fixtures.yaml")
+        body = _build_manifest_guard_body(module_id, declared_yaml_files, owned_paths)
         planned_events = [
             event for event in plan.get("event_flows") or []
             if event.get("producer_pack_id") == module_id

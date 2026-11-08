@@ -887,6 +887,7 @@ class TestExistingTestsUnaffected:
             "module.yaml",
             "runtime_extensions.yaml",
             "contracts/events.yaml",
+            "contracts/fixtures.yaml",
             "contracts/reactions.yaml",
             "contracts/notifications.yaml",
             "contracts/policy_hooks.yaml",

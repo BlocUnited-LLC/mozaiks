@@ -1856,17 +1856,18 @@ class AG2PersistenceManager:
                     last_assistant_idx = idx
                     break
 
-            if last_assistant_idx is None:
-                logger.debug("[TOOL_CALL_METADATA] No assistant message found in run history for %s", chat_id)
-                return
-
             coll = await self._coll()
             now = datetime.now(UTC)
             tool_call_id = str((metadata or {}).get("tool_call_id") or event_id)
             storage_key = self._workflow_tool_call_storage_key(tool_call_id)
             state_doc = deepcopy(metadata if isinstance(metadata, dict) else {})
             state_doc["tool_call_id"] = tool_call_id
-            state_doc["message_index"] = last_assistant_idx
+            # An auto tool can await its first UI response before AG2 commits
+            # the assistant turn. Pending UI state does not require a transcript.
+            if last_assistant_idx is not None:
+                state_doc["message_index"] = last_assistant_idx
+            else:
+                state_doc.pop("message_index", None)
             state_doc["updated_at"] = now.isoformat()
             state_doc.setdefault("timestamp", now.isoformat())
 

@@ -34,8 +34,6 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import yaml
-from jsonschema import Draft202012Validator
-from jsonschema.exceptions import SchemaError
 
 from mozaiksai.core.runtime.app.page_schema import (
     discover_page_schema_paths,
@@ -48,6 +46,7 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
 from mozaiksai.core.workflow.generator_support.page_action_bindings import (
     PAGE_ACTION_FIELDS,
     generated_workflow_names,
+    page_refresh_binding_errors,
     page_workflow_binding_errors,
     reachable_page_action_keys,
 )
@@ -58,7 +57,7 @@ from mozaiksai.core.workflow.generator_support.page_binding_construction import 
 from mozaiksai.core.workflow.generator_support.page_data_bindings import (
     iter_data_bound_sections,
     page_data_binding_errors,
-    schema_field_paths,
+    page_query_binding_errors,
 )
 
 _logger = logging.getLogger("tools.validate_wiring")
@@ -338,92 +337,15 @@ def _actions_from_generated_module_files(files: dict[str, str]) -> set[str]:
     return set(contracts) | {key.split("/", 1)[1] for key in contracts}
 
 
-def _has_schema_reference(value: Any) -> bool:
-    if isinstance(value, dict):
-        return any(key in value for key in ("$ref", "$dynamicRef", "$recursiveRef")) or any(
-            _has_schema_reference(item) for item in value.values()
-        )
-    return isinstance(value, list) and any(_has_schema_reference(item) for item in value)
-
-
-def _required_output_type(schema: Any, key_path: Any, expected: str) -> bool:
-    if not isinstance(key_path, str) or not key_path:
-        return False
-    for key in key_path.split("."):
-        if not isinstance(schema, dict) or schema.get("type") != "object":
-            return False
-        properties = schema.get("properties")
-        if not isinstance(properties, dict) or key not in (schema.get("required") or []):
-            return False
-        schema = properties.get(key)
-    if not isinstance(schema, dict) or schema.get("type") != expected:
-        return False
-    if expected == "array":
-        items = schema.get("items")
-        return isinstance(items, dict) and items.get("type") == "object"
-    return True
-
-
-def _server_table_contract_error(config: dict[str, Any], action: dict[str, Any]) -> str | None:
-    surface = action.get("api_surface")
-    if surface is not None and not isinstance(surface, str):
-        return "Server paging requires a valid module action surface."
-    if surface in {"internal", "admin_internal"}:
-        return "Server paging cannot bind an internal-only module action."
-    inputs, outputs = action.get("input_schema"), action.get("output_schema")
-    if not isinstance(inputs, dict) or not isinstance(outputs, dict):
-        return "Server paging requires the generated action's input and output schemas."
-    try:
-        if _has_schema_reference(inputs) or _has_schema_reference(outputs):
-            return "Server paging requires inline query and response schemas; schema references are unsupported."
-        Draft202012Validator.check_schema(inputs)
-        Draft202012Validator.check_schema(outputs)
-        properties = inputs.get("properties", {})
-        for field, expected in (("page", "integer"), ("page_size", "integer"), ("search", "string")):
-            declaration = properties.get(field, {})
-            if declaration.get("type") != expected:
-                return f"Server paging requires an explicit {expected} input named {field}."
-        validator = Draft202012Validator(inputs)
-        queries = [(1, ""), (2, "")]
-        if config.get("search"):
-            queries.append((1, "a"))
-        for page, search in queries:
-            if not validator.is_valid({"page": page, "page_size": config.get("page_size"), "search": search}):
-                return "The action schema rejects the table's initial, next-page or enabled text-search query."
-        for field, expected in (("data_key", "array"), ("total_key", "integer")):
-            if not _required_output_type(outputs, config.get(field), expected):
-                suffix = " with explicitly typed object items" if expected == "array" else ""
-                valid = ", ".join(schema_field_paths(outputs)) or "(none declared)"
-                return f"Server paging {field} must resolve to a required {expected} response field{suffix}. Valid fields: {valid}."
-    except (SchemaError, TypeError, ValueError, RecursionError, AttributeError):
-        return "Server paging requires valid, inline action schemas."
-    return None
-
-
 def _server_table_binding_errors(pages: list[Any], contracts: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    failures: list[dict[str, Any]] = []
-
-    def visit(page_name: str, sections: Any) -> None:
-        for section in sections or []:
-            if not isinstance(section, dict) or not isinstance(section.get("config"), dict):
-                continue
-            config = section["config"]
-            if config.get("pagination_mode") == "server":
-                endpoint = config.get("api_endpoint")
-                key, _ = _endpoint_to_action_key(endpoint) if isinstance(endpoint, str) else (None, None)
-                error = _server_table_contract_error(config, contracts.get(key or "", {}))
-                if error:
-                    failures.append({
-                        "test": "wiring_server_table_contract", "page": page_name,
-                        "section": str(section.get("id") or "<no-id>"), "error": error,
-                        "fix_suggestion": "Align the table's page/page_size/search inputs and required data_key/total_key outputs with the generated module action contract.",
-                    })
-            visit(page_name, config.get("children"))
-
-    for page in pages:
-        if isinstance(page, dict):
-            visit(str(page.get("name") or "<unnamed>"), page.get("sections"))
-    return failures
+    return [
+        {"test": "wiring_server_table_contract", "page": str(page.get("name") or "<unnamed>"),
+         **failure,
+         "fix_suggestion": "Use the declared server query contract or repair the owning action/page realization; "
+                           "do not rename inputs or use client pagination for a bounded response."}
+        for page in pages if isinstance(page, dict)
+        for failure in page_query_binding_errors(page, contracts)
+    ]
 
 
 def _ask_context_binding_errors(pages: list[Any], contracts: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
@@ -619,6 +541,8 @@ async def validate_wiring(
         for test, errors, suggestion in (
             ("wiring_page_output", page_data_binding_errors(page, action_contracts),
              "Select KPI keys, table response keys and columns from the bound action's declared output_schema."),
+            ("wiring_page_refresh", page_refresh_binding_errors(page),
+             "Target a bound table by component_id; refresh does not accept query or filter fields."),
             ("wiring_page_workflow", page_workflow_binding_errors(page, workflow_names),
              "Use a workflow present in the generated bundle or a typed submit/delete module action."),
         ):

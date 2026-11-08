@@ -1,1 +1,2 @@
-visual_agents: null
+visual_agents:
+- DesignDocsAgent

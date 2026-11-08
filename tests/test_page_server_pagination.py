@@ -46,7 +46,9 @@ def _generated_page(**overrides):
 
 def _generation_context():
     return factory_context({"generated_files": {"modules/books/module.yaml": yaml.safe_dump({
-        "module": {"id": "books"}, "actions": [{"id": "list", "output_schema": {
+        "module": {"id": "books"}, "actions": [{"id": "list", "input_schema": {"type": "object", "properties": {
+            "page": {"type": "integer"}, "page_size": {"type": "integer"}, "search": {"type": "string"},
+        }}, "output_schema": {
             "type": "object", "required": ["items", "total"], "properties": {
                 "items": {"type": "array", "items": {
                     "type": "object", "properties": {"title": {"type": "string"}},
@@ -55,6 +57,14 @@ def _generation_context():
             },
         }}],
     })}})
+
+
+def _generation_context_unpaged():
+    context = _generation_context()
+    document = yaml.safe_load(context.get("generated_files")["modules/books/module.yaml"])
+    document["actions"][0]["input_schema"] = {"type": "object", "properties": {}}
+    context["generated_files"] = {"modules/books/module.yaml": yaml.safe_dump(document)}
+    return context
 
 
 @pytest.mark.parametrize("overrides", [
@@ -127,7 +137,7 @@ def test_typed_server_page_materializes_and_keeps_client_defaults(tmp_path, monk
         del client_page["sections"][0]["config"]["pagination_mode"]
         client_page["sections"][0]["primitive"] = name.removeprefix("App").removesuffix("Config")
         save_app_schema(manifest={"app_name": "Books", "pages": ["books"], "default_route": "/books"},
-                        pages=[models["AppPageSchema"].model_validate(client_page)], context_variables=_generation_context())
+                        pages=[models["AppPageSchema"].model_validate(client_page)], context_variables=_generation_context_unpaged())
         assert validate_page_schema(yaml.safe_load(output.read_text())).sections[0].config["pagination_mode"] == "client"
     assert AppDataTableConfig(columns=["title"], page_size=200).pagination_mode == "client"
     guidance = format_generated_page_ui_primitive_guidance()

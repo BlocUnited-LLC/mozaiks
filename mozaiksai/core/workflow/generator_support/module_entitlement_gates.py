@@ -10,6 +10,9 @@ import yaml
 
 from mozaiksai.core.taxonomy import SemanticCategory, validate_identifier_grammar
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    unapproved_module_actions_error,
+)
 
 
 def capability_id_for_feature(feature_id: str) -> str:
@@ -202,14 +205,8 @@ def compile_module_entitlement_gates(
                     "module manifest; existing entitlement gates cannot be removed without that authority."
                 )
         action_ids = [str(action.get("id") or "") for action in actions if isinstance(action, dict)]
-        if module_id in approved_actions:
-            unapproved = sorted(set(action_ids) - set(approved_actions[module_id]))
-            if unapproved:
-                raise ValueError(
-                    f"{path}: unapproved module actions {unapproved}; every action must be declared "
-                    "in DesignDocs owned_mutations/custom_reads or be a canonical collection read. "
-                    f"Valid approved action ids: {approved_actions[module_id]}."
-                )
+        if diagnostic := unapproved_module_actions_error(module_id, action_ids, approved_actions):
+            raise ValueError(diagnostic)
         missing = sorted(set(gates) - set(action_ids))
         duplicates = sorted({action_id for action_id in gates if action_ids.count(action_id) > 1})
         if missing or duplicates:

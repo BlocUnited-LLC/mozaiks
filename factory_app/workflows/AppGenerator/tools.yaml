@@ -209,7 +209,7 @@ tools:
     context_key: app_bundle_export_outcome
     attempts_key: app_bundle_export_attempts
     result_field: outcome
-    values: [ready, repair_schema, repair_database, repair_integration, repair_service, repair_frontend, repair_models, repair_controller, repair_tasks, repair_harness, cancelled, blocked]
+    values: [ready, repair_schema, repair_database, repair_integration, repair_service, repair_frontend, repair_models, repair_controller, repair_tasks, repair_harness, cancelled, blocked, superseded]
     error_value: blocked
     max_attempts: 3
     retry_on: [repair_schema, repair_database, repair_integration, repair_service, repair_frontend, repair_models, repair_controller, repair_tasks, repair_harness]
@@ -294,6 +294,12 @@ tools:
   auto_tool_call: false
   bind_to_agent: false
 lifecycle_tools:
+  - trigger: before_chat
+    agent: null
+    file: ../_shared/design_access_policy.py
+    function: hydrate_design_access_policy
+    description: Validate and hydrate only owner-reviewed role grants from the bound persisted DesignDocs summary.
+    tool_type: Agent_Tool
   - trigger: before_chat
     agent: null
     file: hydrate_app_revision_context.py

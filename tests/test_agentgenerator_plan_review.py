@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 import yaml
@@ -173,22 +173,28 @@ def test_unknown_design_surface_kind_is_rejected():
         partition.validate_selection(selection(), Context({"design_surface_map": surface_map("invented")}))
 
 
-def test_invalid_partition_has_bounded_correction_and_cannot_reuse_approval():
+def test_invalid_partition_has_bounded_correction_and_cannot_reuse_approval(monkeypatch):
     path = Path(__file__).resolve().parents[1] / "factory_app/workflows/AgentGenerator/tools.yaml"
     # Select by function, not position: the tools list is ordered by workflow
     # stage, so inserting an earlier-stage tool silently retargeted this.
     tools = yaml.safe_load(path.read_text(encoding="utf-8"))["tools"]
     spec = next(t for t in tools if t["function"] == "pattern_selection")["outcome"]
+    validate = Mock(wraps=partition.validate_selection)
+    monkeypatch.setattr(partition, "validate_selection", validate)
     wrapped = wrap_tool_outcome(partition.pattern_selection, ToolOutcomeSpec.model_validate(spec))
     ctx = Context({"structured_output": {"PatternSelection": selection([workflow()])},
                    "design_surface_map": surface_map("module"), "pattern_selection_attempts": 0,
                    "workflow_plan_review": {"status": "approved"}, "PatternSelection": selection()})
-    for _ in range(spec["max_attempts"]):
-        assert wrapped(context_variables=ctx)["outcome"] == "invalid"
+    for attempt in range(1, spec["max_attempts"] + 1):
+        result = wrapped(context_variables=ctx)
+        assert result["outcome"] == ("blocked" if attempt == spec["max_attempts"] else "invalid")
         assert ctx.data["PatternSelection"] is None
         assert ctx.data["workflow_plan_review"] is None
         assert "workflows: []" in ctx.data["pattern_selection_feedback"]
-    assert wrapped(context_variables=ctx)["outcome"] == "blocked"
+        assert result["error"] == ctx.data["pattern_selection_feedback"]
+    assert result["outcome_error"] == "attempts_exhausted"
+    assert wrapped(context_variables=ctx)["outcome_error"] == "attempts_exhausted"
+    assert validate.call_count == spec["max_attempts"]
     assert ctx.data["pattern_selection_attempts"] == spec["max_attempts"]
 
 

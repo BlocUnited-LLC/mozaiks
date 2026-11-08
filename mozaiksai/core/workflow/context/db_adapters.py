@@ -57,7 +57,7 @@ class MongoAdapter(DatabaseAdapter):
                 db_name,
                 collection,
             )
-            return None
+            raise ValueError("MongoDB data references require database_name and collection")
 
         try:
             from mozaiksai.core.core_config import get_mongo_client
@@ -65,9 +65,9 @@ class MongoAdapter(DatabaseAdapter):
             client = get_mongo_client()
             logger.debug("MongoAdapter querying %s.%s with query=%s, projection=%s", db_name, collection, query, projection)
             
-            # Sort by _id descending to get most recent document first (handles duplicates)
-            # MongoDB ObjectId contains timestamp, so this gives us chronological ordering
-            cursor = client[db_name][collection].find(query, projection).sort("_id", -1).limit(1)
+            # String IDs need an explicit chronology, such as artifact version_number.
+            order = [(item.field, 1 if item.direction == "asc" else -1) for item in source.sort or []]
+            cursor = client[db_name][collection].find(query, projection).sort(order or [("_id", -1)]).limit(1)
             docs = await cursor.to_list(length=1)
             doc = docs[0] if docs else None
             
@@ -78,7 +78,7 @@ class MongoAdapter(DatabaseAdapter):
         except Exception as err:
             logger.error(
                 "MongoAdapter failed fetching from %s.%s: %s", db_name, collection, err)
-            return None
+            raise
 
 
 _ADAPTER_REGISTRY: dict[str, DatabaseAdapter] = {

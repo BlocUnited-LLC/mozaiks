@@ -30,6 +30,7 @@ from mozaiksai.core.runtime.app.loader import AppLoader, AppLoadError
 from mozaiksai.core.runtime.composition.module_authority import ModuleDispatchAuthority
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
+from mozaiksai.core.runtime.composition.schema_validation import validate_json_schema
 from mozaiksai.core.runtime.persistence import (
     DataContractLoadError,
     MongoPersistenceContext,
@@ -514,6 +515,56 @@ STUDIO_PERMISSIONS = (
     "workspace_support.manage", "security_readiness.read", "security_readiness.manage",
     "onboarding.read", "onboarding.manage", "messages.read", "messages.write",
 )
+
+
+async def test_onboarding_status_contract_covers_incomplete_and_completed_tours(tmp_path, monkeypatch, mongo):
+    active = app_root(tmp_path, "tour-app", SCAFFOLD_CONTRACT)
+    loaded = await AppLoader.load(str(active), module_defaults_path=str(FACTORY))
+    onboarding = next(item for item in loaded.modules if item.name == "user_onboarding")
+    output_schema = next(
+        action.output_schema for action in onboarding.definition.actions
+        if action.id == "get_onboarding_status"
+    )
+    executor = executor_for(loaded, monkeypatch, client=mongo.client, database=mongo.database)
+
+    async def run(action="get_onboarding_status", params=None, *, user="tour-user"):
+        result = await executor.execute(ModuleRequest(
+            module="user_onboarding", action=action, params=params or {}, app_id="tour-app", user_id=user,
+            authority=authority(user, "onboarding.read", "onboarding.manage"),
+            persistence_principal=PersistencePrincipal(user, "tour-workspace"),
+        ))
+        assert result.success, (result.error_code, result.error)
+        if action == "get_onboarding_status":
+            assert validate_json_schema(result.data, output_schema) is None
+        return result.data
+
+    first = await run()
+    assert first["completed_at"] is None
+    assert first["progress"] == 0
+    assert first["dismissed"] is False
+    assert await run() == first
+
+    await run("complete_step", {"step_id": "create_app"})
+    partial = await run()
+    assert partial["progress"] == 33
+    assert partial["completed_at"] is None
+    await run("dismiss_onboarding")
+    dismissed = await run()
+    assert dismissed["dismissed"] is True
+    assert dismissed["completed_at"] is None
+
+    for step in ("explore_apps", "open_support"):
+        await run("complete_step", {"step_id": step})
+    completed = await run()
+    assert completed["progress"] == 100
+    assert isinstance(completed["completed_at"], str) and completed["completed_at"]
+    await run("complete_step", {"step_id": "open_support"})
+    assert await run() == completed
+    assert await run(user="another-user") == first
+
+    # Nullable completion does not admit unrelated output types.
+    for invalid in (False, 0, {}, []):
+        assert validate_json_schema({**first, "completed_at": invalid}, output_schema) is not None
 
 
 async def test_app_wide_platform_boundary_on_mongo_preserves_crud_and_refuses_foreign_stages(mongo):

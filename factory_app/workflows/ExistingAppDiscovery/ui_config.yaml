@@ -7,3 +7,19 @@ visual_agents:
   - ModuleDecomposerAgent
   - DiscoveryArtifactAssemblerAgent
   - user
+
+progress:
+  stages:
+    - {id: queued, label: Preparing app discovery}
+    - {id: resolving_sources, label: Locating app sources}
+    - {id: collecting_evidence, label: Reading app context}
+    - {id: selecting_source_files, label: Selecting source files}
+    - {id: fetching_source_files, label: Checking source files, unit: files}
+    - {id: extracting_symbols, label: Understanding app structure}
+    - {id: building_graph, label: Connecting app features}
+    - {id: building_snapshot, label: Preparing app context}
+    - {id: ready, label: App context ready}
+    - {id: partial, label: App context partially available}
+    - {id: repo_access_required, label: Repository access required}
+    - {id: unavailable, label: App context unavailable}
+    - {id: failed, label: App discovery needs attention}

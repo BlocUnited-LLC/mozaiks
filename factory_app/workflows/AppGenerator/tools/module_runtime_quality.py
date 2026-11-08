@@ -258,19 +258,24 @@ def _audit_ast(filename: str, content: str) -> list[str]:
         if isinstance(child, ast.Pass)
     }
     for node in ast.walk(tree):
-        direct_events = (
-            isinstance(node, ast.Attribute) and node.attr == "events"
-            and isinstance(node.value, ast.Name) and node.value.id in {"ctx", "context"}
-        )
-        optional_events = (
-            isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-            and node.func.id == "getattr" and len(node.args) >= 2
-            and isinstance(node.args[0], ast.Name) and node.args[0].id in {"ctx", "context"}
-            and isinstance(node.args[1], ast.Constant) and node.args[1].value == "events"
-        )
-        if isinstance(node, (ast.Attribute, ast.Call)) and (direct_events or optional_events):
+        context_attribute = None
+        if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                and node.value.id in {"ctx", "context"}):
+            context_attribute = node.attr
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in {"getattr", "hasattr"} and len(node.args) >= 2
+                and isinstance(node.args[0], ast.Name) and node.args[0].id in {"ctx", "context"}
+                and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str)):
+            context_attribute = node.args[1].value
+        if isinstance(node, (ast.Attribute, ast.Call)) and context_attribute == "events":
             warnings.append(
                 f"{filename}:{node.lineno}: ModuleContext has no events API; use await ctx.emit(event_type, payload)."
+            )
+        elif isinstance(node, (ast.Attribute, ast.Call)) and context_attribute in {"role", "roles", "principal"}:
+            warnings.append(
+                f"{filename}:{node.lineno}: ModuleContext has no {context_attribute!r} attribute. "
+                "Use ctx.permissions with admitted action permission IDs and the reviewed role-to-operation "
+                "policy; permission IDs are not role names. Preserve permission and ownership checks."
             )
         if (
             filename.endswith("/backend/repo.py")
@@ -389,7 +394,7 @@ def review_module_runtime_quality(
         revision_count = prior_attempts + 1
         revision_request = (
             "Revise the generated module backend before frontend/controller work. "
-            "Correct unsupported persistence calls, remove placeholder runtime facts, and make stats/counts repo-backed or "
+            "Correct unsupported runtime context and persistence calls, remove placeholder runtime facts, and make stats/counts repo-backed or "
             "return honest empty values with null trends:\n- "
             + "\n- ".join(warnings)
         )

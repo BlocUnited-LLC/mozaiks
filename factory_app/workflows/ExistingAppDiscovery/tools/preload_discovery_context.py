@@ -37,7 +37,7 @@ import yaml
 
 from factory_app.workflows._shared.platform.build_target import require_build_binding
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.ui_tools import emit_ui_surface
+from mozaiksai.core.workflow.ui_tools import emit_tool_progress_event, emit_ui_surface
 
 logger = logging.getLogger(__name__)
 
@@ -391,6 +391,22 @@ async def _emit_app_intelligence_progress_card(context_variables: Any) -> dict[s
         return {"skipped": True, "reason": "missing_app_intelligence_progress"}
 
     progress_status = _app_intelligence_progress_status(progress)
+    try:
+        details = progress.get("details") or {}
+        counts = {}
+        if progress.get("stage") == "fetching_source_files" and details.get("fetch_candidate_count", 0) > 0:
+            counts = {
+                "completed": details["downloaded_file_count"],
+                "total": details["fetch_candidate_count"],
+            }
+        await emit_tool_progress_event(
+            tool_name="preload_discovery_context",
+            stage_id=progress["stage"],
+            context_variables=context_variables,
+            **counts,
+        )
+    except Exception:
+        logger.debug("[ExistingAppDiscovery] Chat status emission skipped", exc_info=True)
     try:
         ui_event_id = await emit_ui_surface(
             "AppIntelligenceProgressCard",

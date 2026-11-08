@@ -52,6 +52,9 @@ from mozaiksai.core.workflow.generator_support.code_files import (
 from mozaiksai.core.workflow.generator_support.code_files import (
     extract_code_file_map_from_payload as _base_extract,
 )
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_design_access_policy,
+)
 from mozaiksai.core.workflow.generator_support.module_account_data import (
     materialize_task_module_account_handlers,
 )
@@ -259,6 +262,7 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
             app_build_plan=detach(context_variables.get("app_build_plan")),
             data_contract=detach(context_variables.get("data_contract")),
             design_surface_map=detach(context_variables.get("design_surface_map")),
+            access_policy=resolve_design_access_policy(context_variables),
             subscription_contract=subscription_contract,
             companion_files=admitted_module_file_map(context_variables),
         )
@@ -307,6 +311,8 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
         incoming.update(materialize_module_write_implementations(
             {**admitted, **incoming}, app_build_plan=detach(context_variables.get("app_build_plan")),
             data_contract=contract, owned_paths=owned_paths or [], subscription_contract=subscription_contract,
+            access_policy=resolve_design_access_policy(context_variables),
+            design_surface_map=detach(context_variables.get("design_surface_map")),
         ))
         incoming.update({path: content for path, content in schemas.items() if admitted.get(path) != content})
         incoming.update({path: content for path, content in policies.items() if admitted.get(path) != content})

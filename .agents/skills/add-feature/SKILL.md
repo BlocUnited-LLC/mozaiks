@@ -99,7 +99,7 @@ Next steps:
 ```
 Next steps:
 1. Update app/app.json: authRequired: true
-2. Add or review app/config/auth.yaml using schema_version: mozaiks.auth.v1
+2. Add or review app/config/auth.yaml using schema_version: mozaiks.auth.v2
 3. Configure .env with AUTH_PROVIDER=jwt plus MOZAIKS_OIDC_* / AUTH_* / VITE_OIDC_* env handles
 4. Use VITE_MOCK_MODE=true for local mock auth, or run the optional local OIDC broker from compose
 5. Restart backend

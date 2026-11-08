@@ -36,7 +36,7 @@ set `MONGO_URI` and launch repo scripts with `-SkipInfra`.
 - Python 3.11+
 - Node.js 20.19+ or 22.12+ (required by the Vite 8 frontend toolchain)
 - MongoDB Atlas or a local MongoDB server
-- an OpenAI API key (`OPENAI_API_KEY`); builds call OpenAI only today
+- a credential and installed SDK for the selected LLM provider; OpenAI is the default
 
 Tree-sitter parser packages are installed with Mozaiks itself. They are the
 baseline parser path for source-backed App Intelligence; deterministic
@@ -121,16 +121,20 @@ Set the minimum required environment:
     export AUTH_ANON_ROLES="admin,user"
     ```
 
-Builds call OpenAI only today. The default model is `gpt-5-nano`; set
-`DEFAULT_LLM_MODEL` to use another OpenAI model. The two `AUTH_` settings run
+Builds default to OpenAI with `gpt-5-nano`; set `DEFAULT_LLM_MODEL` to use
+another OpenAI model. For Anthropic or Gemini, install `mozaiks[anthropic]` or
+`mozaiks[gemini]`, set `LLM_PRIMARY_API_TYPE=anthropic` or `google`, and set
+`LLM_PRIMARY_MODEL` with the matching provider credential. The two `AUTH_` settings run
 Studio without sign-in for requests from this machine and give the anonymous
 user the admin role. With no auth setting at all, the backend refuses to start
 and names the settings to choose from.
 
 If the repo also has a `.env`, the backend script loads it too; values set in
-the shell win. A `.env` copied from `.env.example` sets
-`DEFAULT_LLM_MODEL=gemini-2.0-flash`, and the runtime would send that model
-name to OpenAI, so change it to an OpenAI model such as `gpt-5-nano`.
+the shell win. Keep the selected provider, model, and credential consistent.
+A `.env` copied from `.env.example` selects Google; override
+`LLM_PRIMARY_API_TYPE=openai` and `LLM_PRIMARY_MODEL` with the intended OpenAI
+model when using the OpenAI setup above. An explicit primary model takes
+precedence over `DEFAULT_LLM_MODEL`.
 
 Install the frontend dependencies once, from the repo root (the same commands
 in every shell):
@@ -324,16 +328,38 @@ connection string.
 
 ### LLM key errors
 
-Builds call OpenAI only today, whatever provider is configured elsewhere. Set
-`OPENAI_API_KEY`, and make sure `DEFAULT_LLM_MODEL`, when set, names an OpenAI
-model (the default is `gpt-5-nano`). Gemini and Anthropic keys are not used for
-builds yet.
+Check `LLM_PRIMARY_API_TYPE`, `LLM_PRIMARY_MODEL`, and the selected provider's
+credential together. `openai` uses `OPENAI_API_KEY`, `anthropic` uses
+`ANTHROPIC_API_KEY`, and `google` uses `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
+Install the corresponding optional SDK (`mozaiks[anthropic]` or
+`mozaiks[gemini]`) before selecting it. These settings govern both startup
+validation and Factory execution. An existing stored provider configuration
+takes precedence unless `MOZAIKS_LLM_CONFIG_SKIP_MONGO=1` selects environment-only
+configuration.
 
-If the backend log says `GEMINI_API_KEY / GOOGLE_API_KEY / LLM_PRIMARY_API_KEY
-is not set`, the environment has `LLM_PRIMARY_API_TYPE=google` (the
-`.env.example` value). That setting changes only the startup check and the
-Studio integrations summary; set it to `openai` so both report the key builds
-actually use.
+`LLM_MAX_TOKENS` optionally sets a positive provider-native `max_tokens` limit;
+leave it unset to keep the provider default. Anthropic's AG2 default is 4096,
+which may be too small for a full generated design. Choose a limit supported by
+the selected model. Gemini uses `max_output_tokens` instead and rejects this
+`max_tokens` setting; configure its native field through the stored provider
+configuration or explicit LLM config.
+
+### Native schema compilation errors
+
+`LLM_STRUCTURED_OUTPUT_MODE` defaults to `native`. If the selected provider
+cannot compile a workflow's schema, explicitly set
+`LLM_STRUCTURED_OUTPUT_MODE=prompted` and restart the host. This selects AG2's
+prompted schema transport while retaining the same declared model and local
+validation before automatic save/tools. Invalid output still fails; Mozaiks
+does not switch modes automatically after a provider error.
+
+For example, Anthropic documents a limit of 16 union-typed parameters across
+strict schemas, counting both `anyOf` and type arrays. A schema with more
+nullable fields can exceed that limit even when the intended answer uses
+mostly empty lists. See [Anthropic's schema complexity limits](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
+and the [AG2 transport mapping](architecture/workflows/declarative-ag2-mapping.md#structured_outputsyaml).
+Prompted mode adds the schema to model input; a successful schema probe alone
+does not prove a complete workflow or generated app.
 
 ### Port already in use
 

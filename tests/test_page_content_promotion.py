@@ -15,6 +15,7 @@ it from, so the fix has to change the content itself.
 
 from __future__ import annotations
 
+import pytest
 import yaml
 
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
@@ -84,12 +85,12 @@ def test_nested_sections_are_promoted_too() -> None:
     assert document["sections"][0]["config"]["children"][0]["primitive"] == "ResourceTable"
 
 
-def test_server_pagination_is_left_for_the_validator() -> None:
-    content = yaml.safe_dump(_page(default_sort="name", pagination_mode="server"))
-
-    normalized = normalize_planned_page_content(content, path="ui/pages/habits.yaml")
-
-    assert yaml.safe_load(normalized)["sections"][1]["primitive"] == "DataTable"
+def test_server_pagination_is_not_promoted_and_fails_missing_query_contract() -> None:
+    page = _page(default_sort="name", pagination_mode="server")
+    assert promote_page_table_primitives(page) == 0
+    assert page["sections"][1]["primitive"] == "DataTable"
+    with pytest.raises(ValueError, match="Server paging requires"):
+        normalize_planned_page_content(yaml.safe_dump(page), path="ui/pages/habits.yaml")
 
 
 def test_unparseable_content_is_passed_through() -> None:

@@ -1,4 +1,4 @@
-schema_version: mozaiks.auth.v1
+schema_version: mozaiks.auth.v2
 auth_required: true
 strategy: oidc
 mode: brokered_oidc

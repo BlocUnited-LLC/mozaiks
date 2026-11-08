@@ -346,6 +346,15 @@ Rules:
   - `file`
   - `build_context`
 
+`data_reference` sources may declare an ordered `sort` list, with each entry
+containing a field path and `direction: asc` or `direction: desc`. For example,
+artifact lookups use `sort: [{field: version_number, direction: desc},
+{field: created_at, direction: desc}]` to select the newest matching version.
+Without `sort`, MongoDB references retain descending `_id` ordering; random
+string IDs do not establish chronology. Authorization data-reference lookup
+errors abort context loading instead of being treated as missing data or
+falling back to an older policy.
+
 ### `structured_outputs.yaml`
 
 ```yaml
@@ -454,10 +463,11 @@ tools:
       context_key: document_outcome
       attempts_key: document_attempts
       result_field: status
-      values: [ready, needs_revision, blocked]
+      values: [ready, needs_revision, review_changes, blocked]
       error_value: blocked
       max_attempts: 2
-      retry_on: [needs_revision]
+      retry_on: [needs_revision, review_changes]
+      retry_without_attempt: [review_changes]
 ```
 
 The function accepts `context_variables` and returns a mapping or Pydantic model
@@ -472,9 +482,25 @@ the operation but must not write its outcome or attempt keys. The runtime:
 Exceptions, invalid results, invalid counter state, and exhausted attempts map
 to `error_value`. Cancellation propagates and leaves the operation blocked.
 Only a prior `retry_on` result permits another invocation. `max_attempts` counts
-all invocations, including the first, across this workflow execution and its
-continuations; it is a static integer from 1 to 100. The default is one attempt
-with no retry outcomes. Use a new workflow execution for a new operation.
+invocations, including the first, across this workflow execution and its
+continuations, except for the explicit exemption below; it is a static integer
+from 1 to 100. The default is one attempt with no retry outcomes. Use a new
+workflow execution for a new operation.
+
+The optional `retry_without_attempt` list defaults to `[]` and must be a subset
+of `retry_on`. A validated result in this list refunds only the invocation
+that returned it; earlier counted failures remain. Exhausted attempts and
+disallowed retries still stop before the tool executes. DesignDocs uses
+`review_changes` only after validating the authenticated owner's Request changes
+response against the exact pending review ID. Structural rejections remain
+counted as `revise`; owner feedback does not reset that repair budget.
+
+When the final counted attempt returns a `retry_on` outcome with a nonempty
+`error`, the runtime immediately replaces the outcome with `error_value` and
+sets `outcome_error: attempts_exhausted`, preserving the original error and other
+result fields. This routes the rejection to its declared failure destination
+without an extra repair turn. Successful outcomes that allow follow-up calls
+but carry no error keep their declared outcome.
 
 Both context keys must be declared with `source.type: state`, `persisted: true`,
 and `writer_ids: [deterministic_tool]`. The outcome key has `type: string`,
@@ -597,7 +623,56 @@ Rules:
 visual_agents:
   - JokeHostAgent
   - user
+progress:
+  stages:
+    - id: reading_sources
+      label: Reading sources
+      unit: files
+    - id: preparing_report
+      label: Preparing your report
 ```
+
+`progress` is optional. The shared chat status strip renders the declared stage
+label and measured counts; workflows do not generate a second shell status bar.
+Stage ids are unique snake-case identifiers. Labels and optional count units are
+bounded, single-line public text. The runtime's `WorkflowProgressConfig` model is
+the canonical schema and is injected into AgentGenerator's bundle-builder prompt.
+
+Report progress from the code performing the work, using its injected runtime
+context:
+
+```python
+from mozaiksai.core.workflow.ui_tools import emit_tool_progress_event
+
+await emit_tool_progress_event(
+    tool_name="read_sources",
+    stage_id="reading_sources",
+    context_variables=context_variables,
+    completed=files_read,
+    total=len(selected_files),
+)
+```
+
+Omit both counts for an indeterminate stage. When present, counts must be strict
+integers with `0 <= completed <= total` and `total > 0`. The helper resolves labels
+from the loaded workflow and rejects undeclared stages or mismatched chat scope.
+Do not derive percentages from tokens, elapsed time, or fixed stage weights.
+Tokens remain usage, and a completed stage does not complete the workflow.
+
+An optional `progress_stage` on a task batch or conveyor references one of these
+stage ids. The existing executor reports accepted tasks against its actual task
+inventory, including resumed accepted work; failed tasks do not count as accepted.
+The reference is checked at workflow loading and generated-bundle validation.
+
+Progress uses the existing `chat.tool_progress` event and transport ordering.
+Waiting, connection, completion, and error states remain execution-owned. The
+browser clears active stage details at those boundaries and ignores replayed
+updates. Reconnection waits for fresh progress; this transient display is not a
+durable task ledger or resume mechanism. A newly accepted socket resets the
+browser's ordering watermark. Replay boundaries do not reopen waiting or finished
+work; a new run, tool call, or user turn does. AG2 continues to own execution mechanics.
+AG2's model-facing status middleware is separate and is not required by this UI
+contract.
 
 ### `middleware.yaml`
 

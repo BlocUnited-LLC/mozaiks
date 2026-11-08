@@ -27,10 +27,38 @@ This project follows a practical pre-1.0 changelog format:
   eviction or a restart can record the same rejection twice. This is not a
   durable or cross-process exactly-once guarantee. Validation still fails
   closed, and an audit failure cannot change that.
+- Reviewed design role grants can protect canonical list/get and declared custom
+  reads. Selecting one canonical read requires both read grants explicitly;
+  generated permissions survive materialization while ownership remains enforced.
+- Generated module contracts can declare bounded object members and typed
+  array rows, including nullable custom/joined response fields. Missing row
+  fields fail producer admission before page bindings are generated; runtime
+  page validation and closed request enforcement remain strict.
+- Runtime-smoke fixtures target the observer's actual record for canonical
+  get/update/delete, reject substitute IDs during module contract admission,
+  and honor authored get/list input schemas while retaining missing-row and
+  cross-user isolation checks.
+- Service generation receives exact read implementation ownership from the
+  admitted module and data contracts. Protected shared reads stay authored;
+  ordinary scoped reads remain rendered, and missing handlers still fail validation.
+- Module `contracts/fixtures.yaml` can declare bounded runtime-smoke inputs and
+  prerequisite action calls. The contained observer resolves real response IDs,
+  caller identity and relative dates while independently requiring successful
+  role-bearing execution and roleless denial with unchanged app storage.
+- Factory and auxiliary structured calls can explicitly select AG2 prompted
+  output with `LLM_STRUCTURED_OUTPUT_MODE=prompted` when a provider cannot
+  compile the native schema. Native remains the default; the same typed
+  validation still gates output and automatic tools, with no automatic fallback.
+- Generated apps can grant module permissions to approved design roles through
+  `mozaiks.auth.v2`. Staff actions use verified role membership while preserving
+  record ownership; build tasks cannot authorize their own grants.
 - Workflows can opt individual local agents into AG2's transient status context
   through `middleware.yaml`. Each model attempt receives fresh values from
   explicitly selected, model-visible context variables. AgentGenerator validates
   and exports the same declaration; existing workflows keep their prompt behavior.
+- Workflows can declare public progress stages for the shared chat status strip.
+  Long-running tools report measured item counts or an indeterminate stage;
+  progress stays separate from token usage and execution completion.
 - Chats show connection and run status beside the composer, with measured token
   usage for the current run when available. Ask and workflow receipts stay
   scoped to their owning chat; the wallet balance remains in the Tokens tab.
@@ -52,6 +80,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Design permission repair identifies every conflicting action/collection
+  binding together. Factory guidance keeps one permission anchor per action
+  and describes cross-user review without bypassing record ownership.
 - Updated the AG2 runtime, provider extras and ACP proof images to 1.3.0.
   Native descendant usage remains covered by the existing token watchdog;
   status context does not replace runtime budget or permission enforcement.
@@ -343,6 +374,86 @@ This project follows a practical pre-1.0 changelog format:
   a candidate. The generated-UI Playwright configuration retries no test.
 
 ### Fixed
+
+- Account export and deletion in files `0.1.13`, notifications `0.1.13`,
+  commerce `0.1.14`, social `0.1.14`, and support `0.1.14` use the same
+  authenticated persistence bindings as module actions. Multi-page records are
+  handled without skipping rows during metadata updates, exports encode BSON
+  safely, and each module keeps its existing deletion or anonymization policy.
+- ThemeCapture retries recover a missing approved concept from its current
+  artifact and matching completed owner/build session, without copying failed
+  execution state or replacing existing refinement inputs.
+- AG2 virtual files use bounded immutable Mongo chunks with atomic head
+  publication, preserving UTF-8 append offsets and restart reads beyond 16 MiB.
+  Existing inline history converts on mutation; logical deletion retains chunks
+  until explicit namespace purge after readers and writers have stopped.
+- Revised workflow approval cards remain visible and actionable after requesting
+  changes, even when successive cards have identical or empty message text.
+  Replaying the same event still updates its existing card.
+- Runtime-smoke fixtures can prepare the same update/delete record through its
+  declared lifecycle actions. Preparation cannot satisfy the target mutation
+  check; declared date and datetime writes compare using Mongo's storage format.
+- Factory guidance keeps coordinated records under their approved module owner,
+  preserves conditional mutation and recovery order, and rejects invented
+  cross-module action or event authority.
+- Generated pages reject client pagination over declared bounded responses and
+  unsupported table-refresh filter payloads before materialization. The same
+  query contract is checked at final wiring; custom query interactions retain
+  the existing approved React route path.
+- Generated service guidance uses the actual `ModuleContext.permissions` API
+  and the reviewed role policy. Contract and service prompts receive exact
+  compiler-derived permission IDs; runtime quality checks reject nonexistent
+  context role/principal fields without changing app grants.
+- Module contract admission requires fixtures for incompatible default read
+  inputs and preserves their existing optional file ownership. Positive smoke
+  rejections without declared inputs route to fixture repair; authorization,
+  storage and implementation failures retain their independent checks.
+
+- Generated module contracts receive exact canonical read ids and report missing
+  protected reads together with unapproved action names in one rejection,
+  preserving explicit access decisions during repair.
+
+- ServiceAgent emits Python source once through its typed output; code builds the
+  assembly representation without asking the model to duplicate every file.
+- Role-granted shared-record submissions preserve explicit narrowed request
+  contracts and authored implementations, so server-derived requester identity
+  does not become required form input. Ordinary CRUD remains code-owned and
+  approved permission enforcement stays unchanged.
+- Free-app plans and optional page/image hints now accept JSON `null` for
+  absent selections. Provider names and UI choices remain finite, and string
+  sentinels such as `"null"` are rejected instead of standing in for absence.
+- Factory builds now preserve the explicitly selected provider, model, and
+  credential through the existing AG2 configuration path. Stored provider
+  changes invalidate cached configs, optional `LLM_MAX_TOKENS` reaches native
+  output limits, and config diagnostics omit credential values.
+
+- Design review reports missing canonical write grants across all affected
+  collections together. Owner-requested permission changes no longer consume
+  structural repair attempts; a rejected final counted attempt fails immediately
+  with its original diagnostic.
+- Pending inline workflow approval cards survive browser reconnects and
+  workflow switches even when emitted before the first assistant message.
+  Pending-call and transcript replay retain the review identity and suppress
+  resolved or terminal interactions.
+- Malformed generated auth YAML stays rejected and reaches build diagnostics
+  without replacing the submitted file bytes, including when role grants are applied.
+- Concept planning guidance now leaves API endpoint hints empty for ordinary
+  module-backed features instead of teaching invented CRUD routes. Explicit
+  integration endpoints remain advisory references to supplied contracts.
+- Studio onboarding status accepts a null completion timestamp for new,
+  partially completed, and dismissed tours without an output-contract warning.
+
+- Refining a pending app workbench opens an owned AppReview session for the new
+  build. The generation rechecks its current selection before starting an export
+  and before completion. Accepted child downloads use that version's saved checks
+  and verified archive. Saved builds' Continue in chat recovers an interrupted
+  handoff using its owned persisted lineage, reuses a selected successor, and
+  retries source settlement without repeating the edit or creating another chat.
+  Review admission uses the owned saved app bundle rather than requiring its
+  original generation to have completed. An interrupted manual review that was
+  incorrectly routed into generation can recover only with exact saved lineage,
+  an execution lease, and no newer saved artifact; its successor preserves cleanup
+  provenance for retry. Media and Security dependencies remain unchanged.
 
 - The shell no longer offers Profile, Sign in, or Sign out when nobody can sign
   in. A fresh Studio runs with authentication disabled, yet its account menu

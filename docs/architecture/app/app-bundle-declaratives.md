@@ -21,7 +21,7 @@ hardcoded app-specific branches.
 ### `app/config/`
 
 Authenticated apps declare `config/auth.yaml` using the shared typed
-`mozaiks.auth.v1` contract. AppLoader validates it and checks agreement with
+`mozaiks.auth.v2` contract. AppLoader validates it and checks agreement with
 `app.json.authRequired`. `/api/shell-config` exposes its public browser settings
 and the backend's effective auth mode. The shared shell enables local development
 identity only when the backend explicitly allows it. Factory exercises these

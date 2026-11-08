@@ -20,7 +20,7 @@ function config() {
   return {
     required: true,
     contract: {
-      schema_version: 'mozaiks.auth.v1', auth_required: true, strategy: 'oidc',
+      schema_version: 'mozaiks.auth.v2', auth_required: true, strategy: 'oidc',
       routes: { login: '/login', callback: '/auth/callback', logout: '/login', post_login_default: '/apps' },
       frontend: {
         adapter: 'oidc_pkce', authority_env: 'VITE_OIDC_AUTHORITY', discovery_url_env: 'VITE_OIDC_DISCOVERY_URL',

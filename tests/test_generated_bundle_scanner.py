@@ -58,7 +58,7 @@ actions: []
 
 def _auth_contract_yaml() -> str:
     return """
-schema_version: mozaiks.auth.v1
+schema_version: mozaiks.auth.v2
 auth_required: true
 strategy: oidc
 mode: brokered_oidc
@@ -701,7 +701,7 @@ def test_scan_generated_bundle_rejects_authenticated_app_without_auth_yaml() -> 
     errors = scan_generated_bundle(files, require_deployment_artifacts=True)
 
     assert any("config/auth.yaml" in error for error in errors)
-    assert any("mozaiks.auth.v1" in error for error in errors)
+    assert any("mozaiks.auth.v2" in error for error in errors)
 
 
 def test_scan_generated_bundle_rejects_auth_yaml_with_provider_url_literal() -> None:

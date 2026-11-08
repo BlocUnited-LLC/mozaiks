@@ -483,6 +483,15 @@ class UnifiedEventDispatcher:
         kind = str(event_dict.get('kind', 'unknown'))
         base_kind = kind.split('.', 1)[1] if kind.startswith('chat.') else kind
 
+        # Progress and its lifecycle boundaries share the transport's existing
+        # per-chat ordering. Clients can discard delayed updates after a pause,
+        # completion, or newer stage without inventing another run counter.
+        if base_kind in {
+            "tool_progress", "tool_call", "run_start", "run_complete",
+            "error", "awaiting_reply", "resume_boundary",
+        } and get_sequence_cb and chat_id:
+            event_dict["sequence"] = get_sequence_cb(chat_id)
+
         # ── Greeting echo detection (no workflow_manager dependency) ──
         # If ws_protocol already sent the UserDriven greeting, the AG2
         # run-history replay is just bookkeeping — emit as chat.greeting_echo

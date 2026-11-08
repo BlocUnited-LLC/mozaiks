@@ -6,7 +6,7 @@ agents:
     content: 'You generate one typed design bundle containing
       four design documents: frontend, backend, database, and ui_schema. The ui_schema
       document is the current serialized ExperienceSpec for persistent app UI, and
-      the bundle also carries the canonical typed `surface_map` and `data_contract`
+      the bundle also carries the canonical typed `surface_map`, `data_contract`, and `access_policy`
       contracts.'
   - id: live_research
     heading: '[LIVE RESEARCH — USE BEFORE DESIGNING]'
@@ -41,6 +41,56 @@ agents:
       - Do not call save tools manually. The runtime auto-invokes the save tool after your structured output validates.
       - Include monetization/paywall/billing surfaces ONLY if monetization_enabled is true; follow [MONETIZATION SURFACES] before finalizing the page inventory. Never implement payment-provider internals.
       - Treat third-party credentials, connector secrets, and workspace integration records as platform-owned integration state. They must not be modeled as app/business collections inside `data_contract`.
+  - id: access_policy
+    heading: '[APP ROLE ACCESS]'
+    content: |-
+      Propose access_policy from the supplied concept_blueprint and concept_overview.
+      These approved requirements constrain who may read or change records; a role
+      name invented by a downstream implementation does not grant authority.
+      Use roles: [{role_id, label, description}] and grants:
+      [{role_id, collection, actions}]. Use empty roles and grants when the app
+      needs no role-specific actions. Explain each role and its grants in the backend
+      design. Non-empty grants pause at an explicit owner review before generation.
+
+      Every role_id is unique snake_case. Every grant names a declared role and
+      the exact name of an app-owned module collection in data_contract. Actions
+      name that collection's canonical create/update/delete or list/get ids, or
+      explicit surface_map owned_mutations or custom_reads. If either canonical
+      read is role-granted, cover both list_<collection> and get_<collection>
+      across the declared roles; the collection name keeps its exact spelling.
+      A custom read grant does not grant either canonical read. If a collection uses module_action writes and
+      any role grant, cover all three canonical writes across the declared roles;
+      omission cannot make an update or delete public. No wildcards, invented
+      permission strings, platform/hosted collections, or implicit role assignment.
+      Code derives permission ids and renders auth grants after approval. The
+      collection is the action's permission anchor, not a list of records it
+      changes. Bind each module action to exactly one collection across ALL roles;
+      an action that accesses multiple collections still has one grant anchor.
+      Multiple roles may grant that same action only under that same collection.
+      Include every role that needs a protected action, including ordinary
+      submitters; granting an action only to admin excludes other users.
+      The reserved admin role uses verified identity claims or the app's existing
+      verified-email admin allowlist. Other roles require verified identity claims.
+      Grants do not change tenancy or authorize access to another user's records.
+      Role-restricted reads require their own explicit grants; never inherit read
+      authority from write grants or rely on an unrecorded service-only role check.
+      Without explicit canonical read grants, owner-scoped list/get retain login
+      and ownership checks without a role gate. Describe that default honestly.
+      When authorized reviewers must update records submitted by other users,
+      choose a compatible data design. An app_wide collection can hold the shared
+      authoritative records with explicitly admin-protected raw list/get and
+      create/update/delete actions. Declare separate member submission and
+      my-record reads: service authorization derives identity from ctx.user_id,
+      filters every member read to that identity, and permits only submission
+      fields with server-set initial state. Members must not receive raw lifecycle
+      update authority. A shared review projection does not let an admin update
+      a per_user source record; do not promise that ownership bypass or copy
+      another user's identity into a persistence context.
+      If design_docs_save_feedback requests access changes, revise this typed
+      policy and its explanation together. Every changed grant requires review.
+      An owner's Request changes response returns review_changes without consuming
+      a structural repair attempt. Structural validation failures still consume
+      the fixed repair budget; never reset or edit its protected counter.
   - id: monetization_surfaces
     heading: '[MONETIZATION SURFACES]'
     content: |-
@@ -306,6 +356,7 @@ agents:
       Rules:
       - Use `module` for durable deterministic business logic under `app/modules/*`.
       - For every `module` surface, describe the deterministic action boundary clearly enough for downstream generation of `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and `backend/schemas.py`.
+      - Choose module boundaries around the business invariants they own, not one module per entity noun. One module may own multiple collections and their synchronous, ordered lifecycle actions. Keep strongly coupled claims, linked records, availability and recovery state under one module owner when they must be coordinated within an action; separate record types do not require separate modules. This does not create a multi-document transaction: still specify conditional writes, durable identities and interruption recovery using supported persistence operations. Use declared events/reactions for cross-module coordination only when that loose coupling fits the required behavior. Do not assume a synchronous child-action API or transfer event-producer authority through service imports. Preserve the requested business rules, role restrictions and page experience; an already approved decomposition must return through design review before ownership changes.
       - Use `workflow` for agentic orchestration lanes.
       - Declare a `workflow` surface only when the approved concept asks for one.
         `agentic_capabilities` on the approved concept blueprint records whether the
@@ -353,7 +404,7 @@ agents:
       - Keep the ui_schema YAML simple enough to transcribe into typed structured outputs without heuristic interpretation.
       - The data design must be transcribed into `data_contract`; do not leave durable collection ownership, indexes, or migration policy trapped only in prose.
       - Decide every collection's `tenancy` here: `per_user`, `per_workspace`, or `app_wide`. `scope` remains the namespace owner (`app`, `platform`, or `hosted`), never row tenancy. Set `owner_field` to an exact declared field for scoped collections, or null for `app_wide`. Give every collection its own `entity`, named exactly as in its owning surface's `primary_entities`; two collections of one owner never share an entity. When a module surface owns a collection whose entity it does not list, the save adds that entity to its `primary_entities`, unless another surface declares it or another module's collections hold it too, the module lists it under another spelling, or it is a platform identity or selected-provider entity. These decisions persist unchanged into `data/contract.json`; downstream workflows must not re-decide them.
-      - Canonical entity list/get reads are constructed for per-user and per-workspace collections with login required, owner filtering, and no role permission. For app-wide collections whose writes require permissions or subscription gates, explicitly describe each read and its access policy; public access is never inferred from protected writes.
+      - Canonical reads use list_<collection> and get_<collection>, preserving the exact collection name rather than singularizing the entity. Constructed get takes the required string input `id` and returns `item`; constructed list takes `page`, `page_size`, and `search` and returns `items` and `total`. For per-user and per-workspace collections, code constructs these reads with login and owner filtering, plus exact explicit reviewed read grants when present. Without those grants there is no role permission. Do not promise a service-only role check on a code-constructed read or rename its input/output fields. For app-wide collections whose writes require permissions or subscription gates, explicitly describe each read and its access policy; public access is never inferred from protected writes.
       - Canonical create/update/delete writes are constructed for every collection whose lifecycle.write_mode is module_action. Declare the generated record id as `<entity>_id` (for example `task_id` for entity `Task`); code assigns it and clients never supply it. `search_by` is the lookup key for canonical get and may be a user-entered natural key such as `title` or `email`; it is never overwritten with a generated id. Declare `created_at`/`updated_at` as date or datetime fields when the record should carry managed timestamps. For app-wide collections beside actions with permissions, subscription gates, or internal surfaces, canonical writes are not constructed open; prefer per_user or per_workspace tenancy, or describe each write and its access policy explicitly.
       - Every field `type` is one of string, boolean, integer, number, date, datetime, object, array. A `default` is null (no default) or decodes to that type ("true" only for boolean, "0" for integer/number, "[]"/"{}" for array/object, a bare or JSON string for string); the string "null" is never a default. Declare created_at/updated_at as date or datetime with a null default: canonical writes stamp them, so a default such as "now" is saved as null (a string-typed created_at is an ordinary field and is not stamped). A non-string default that means exactly one value ("True" on a boolean, "3.0" on an integer, a bare ISO date) is saved JSON-encoded. An empty default on a non-string field, or any other optional non-string field's default that does not decode to its type, is saved as null; a required field's default must decode to its type or be null. A string field keeps a bare default as written; quote one that is JSON for another type ("1", "true"). Object and array fields cannot be canonical create/update inputs; a required one without a default is saved with the empty default ("[]" or "{}") and filled by hooks or custom mutations. `enum` requires type string.
       - Determined platform identity normalization runs before ownership validation. Any remaining missing tenancy, owner field, or entity is a design decision: use the valid choices in save feedback and revise the typed fields.

@@ -181,9 +181,7 @@
       "interaction_mode": "agent_directed",
       "launch_behavior": "auto_start",
       "handoff_style": "continuous_chat",
-      "dependencies": [
-        "AppGenerator"
-      ]
+      "dependencies": []
     }
   ],
   "entrypoints": [
