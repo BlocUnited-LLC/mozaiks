@@ -687,7 +687,22 @@ A browser cannot assert supersession when the registry still selects that build.
 AppReview can download the accepted selected version through the existing owned
 artifact download endpoint, which enforces validation and verifies the archive
 against the canonical manifest. Downloading does not approve, activate, or finish
-a workflow. If notification fails after the successor CAS, its registered review
-remains available through the existing current-build review entrypoint; the old
-build still fails the independent export/resume gates. This handoff does not rerun
+a workflow. If notification fails after the successor CAS, **Build Review →
+Continue in chat** uses the existing manual AppReview request to verify and reuse
+that exact registered successor, rebind routing, and retry source settlement.
+Normal launch preparation still checks authentication, prerequisites, context
+authority, and the current immutable binding before this admission; it does not
+create another chat or replace the current build. A partial, foreign, expired, or
+superseded handoff, caller overrides, or failed settlement returns an error rather
+than creating a second review. A held source execution lease can be retried through
+the same control after its holder exits.
+
+For an older inline result with no saved successor, this entrypoint may recover
+the pending AppGenerator workbench only through the exact owned current child,
+parent, unique validated/accepted refinement session, saved request, and persisted
+inline result. It does not scan history for a plausible source. Ordinary saved
+reviews without an interrupted handoff retain their normal launch behavior.
+Recovery does not rerun coding or fabricate a tool approval. The review's normal
+first agent turn still presents its workspace after the websocket opens. The old
+build still fails the independent export/resume gates; this handoff does not rerun
 Media or Security under the old generation's build identity.

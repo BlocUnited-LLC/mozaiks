@@ -428,7 +428,9 @@ This project follows a practical pre-1.0 changelog format:
 - Refining a pending app workbench opens an owned AppReview session for the new
   build. The generation rechecks its current selection before starting an export
   and before completion. Accepted child downloads use that version's saved checks
-  and verified archive.
+  and verified archive. Saved builds' Continue in chat recovers an interrupted
+  handoff using its owned persisted lineage, reuses a selected successor, and
+  retries source settlement without repeating the edit or creating another chat.
 
 - The shell no longer offers Profile, Sign in, or Sign out when nobody can sign
   in. A fresh Studio runs with authentication disabled, yet its account menu

@@ -8,6 +8,7 @@ from uuid import uuid4
 from anyio import CancelScope
 
 from factory_app.workflows.AppReview.tools.review_context import saved_review_context
+from mozaiksai.control_plane.contracts import CodingWorkerResult, SurfacePlanExecutionResult
 from mozaiksai.core.artifacts import ArtifactLifecycleStatus, ArtifactValidationStatus
 from mozaiksai.core.data.models import WorkflowStatus
 from mozaiksai.core.multitenant import build_app_scope_filter
@@ -109,6 +110,132 @@ async def continue_inline_app_review(
     binding: RunBuildBinding, baseline_id: str, result: Any,
     registry: Any, artifact_store: Any, persistence: Any, session_router: Any,
 ) -> dict[str, Any] | None:
+    return await _continue_app_review(
+        app_id=app_id, user_id=user_id, source_chat_id=source_chat_id, binding=binding,
+        baseline_id=baseline_id, candidate_id=(result.metadata or {}).get("build_record_id"),
+        validated=result.status in {"validated", "success"}, registry=registry,
+        artifact_store=artifact_store, persistence=persistence, session_router=session_router,
+    )
+
+
+async def recover_saved_app_review(
+    *, app_id: str, user_id: str, binding: RunBuildBinding, registry: Any,
+    artifact_store: Any, persistence: Any, session_router: Any,
+    has_launch_overrides: bool = False,
+) -> dict[str, Any] | None:
+    """Recover an owned handoff through ordinary saved-build review admission.
+
+    A selected successor already records its source. Older inline results need
+    the exact saved refinement and parent instead; neither path reruns the edit.
+    None means there is no interrupted handoff and normal review may open.
+    """
+    record = (await registry.get_app_record(
+        owner_user_id=user_id, build_registry_id=binding.build_registry_id,
+    )).get("app")
+    current = (record or {}).get("current_build_run") or {}
+    if (not record or record.get("chat_app_id") != app_id
+            or record.get("app_id") != binding.target_app_id
+            or current.get("build_id") != binding.build_id or current.get("phase") != binding.phase):
+        raise ValueError("The saved review build has changed")
+    if binding.phase != "refinement":
+        return None
+    version = await artifact_store.get_build_record(
+        app_id=binding.target_app_id, build_record_id=current.get("artifact_version_id"),
+    )
+    if version is None or version.id != current.get("artifact_version_id"):
+        raise ValueError("The saved review artifact is unavailable")
+    source_chat_id = None
+    baseline_id = None
+    successor_id = record.get("active_chat_id") if record.get("active_workflow_id") == "AppReview" else None
+    if successor_id:
+        successor = await (await persistence._coll()).find_one(
+            {"_id": successor_id, "user_id": user_id, **build_app_scope_filter(app_id)},
+            {"trigger_meta": 1},
+        )
+        if not successor:
+            raise ValueError("The selected review session is unavailable")
+        trigger = successor.get("trigger_meta") or {}
+        marker_keys = {"source_chat_id", "source_artifact_version_id", "source_tool_call_id"}
+        if not marker_keys.intersection(trigger):
+            return None
+        source_chat_id = trigger.get("source_chat_id")
+        baseline_id = trigger.get("source_artifact_version_id")
+    else:
+        if not version.parent_build_record_id:
+            return None
+        parent = await artifact_store.get_build_record(
+            app_id=binding.target_app_id, build_record_id=version.parent_build_record_id,
+        )
+        if parent is None:
+            raise ValueError("The saved refinement parent is unavailable")
+        if parent.build_family != "app_bundle" or parent.source_workflow != "AppGenerator" or not parent.source_chat_id:
+            return None
+        source = await (await persistence._coll()).find_one(
+            {"_id": parent.source_chat_id, "user_id": user_id, **build_app_scope_filter(app_id)},
+            {"workflow_name": 1, "status": 1},
+        )
+        if not source or source.get("workflow_name") != "AppGenerator":
+            raise ValueError("The saved refinement source is unavailable")
+        if source.get("status") in {WorkflowStatus.COMPLETED, WorkflowStatus.FAILED}:
+            return None
+        sessions = await artifact_store.list_refinement_sessions(
+            app_id=binding.target_app_id, result_build_record_id=version.id, limit=2,
+        )
+        if len(sessions) != 1:
+            raise ValueError("The saved refinement has no unique result session")
+        session = sessions[0]
+        change = await artifact_store.get_change_request(
+            app_id=binding.target_app_id, change_request_id=session.change_request_id,
+        )
+        if (session.app_id != binding.target_app_id or session.build_record_id != parent.id
+                or session.result_build_record_id != version.id or session.status not in {"validated", "accepted"}
+                or change is None or change.id != session.change_request_id or change.app_id != binding.target_app_id
+                or change.created_by_user_id != user_id or change.build_record_id != parent.id
+                or change.build_family != version.build_family or change.build_key != version.build_key):
+            raise ValueError("The saved refinement does not belong to this result and owner")
+        request = change.refinement_request
+        if (request.app_id not in {None, app_id} or request.user_id not in {None, user_id}
+                or request.target_app_id != binding.target_app_id or request.build_record_id != parent.id
+                or request.build_family != version.build_family or request.build_key != version.build_key
+                or request.source_surface != "app_workbench"):
+            raise ValueError("The saved refinement request does not identify this workbench")
+        result: CodingWorkerResult | SurfacePlanExecutionResult
+        if session.provider == "control_plane_coding":
+            result = CodingWorkerResult.model_validate(session.metadata.get("coding_worker"))
+            valid_result = result.eligible and result.status == "validated"
+        elif session.provider == "contract_surface_regeneration":
+            result = SurfacePlanExecutionResult.model_validate(session.metadata.get("surface_result"))
+            valid_result = result.status == "success"
+        else:
+            raise ValueError("The saved refinement is not an inline result")
+        if not valid_result or result.metadata.get("build_record_id") != version.id:
+            raise ValueError("The saved refinement result has not validated this artifact")
+        if (version.validation_status != ArtifactValidationStatus.PASSED or version.app_validation_status != "passed"
+                or version.lifecycle_status not in {ArtifactLifecycleStatus.DRAFT, ArtifactLifecycleStatus.CURRENT}):
+            raise ValueError("The saved refinement artifact has not passed validation")
+        source_chat_id, baseline_id = parent.source_chat_id, parent.id
+    if (not isinstance(source_chat_id, str) or not source_chat_id
+            or not isinstance(baseline_id, str) or not baseline_id or source_chat_id == successor_id):
+        raise ValueError("The selected review has incomplete handoff lineage")
+    if has_launch_overrides:
+        raise ValueError("Saved review recovery cannot override its persisted launch intent")
+    recovered = await _continue_app_review(
+        app_id=app_id, user_id=user_id, source_chat_id=source_chat_id, binding=binding,
+        baseline_id=baseline_id, candidate_id=version.id if version.id != baseline_id else None,
+        validated=(version.validation_status == ArtifactValidationStatus.PASSED and version.app_validation_status == "passed"
+                   and record.get("lifecycle_state") == "review"),
+        registry=registry, artifact_store=artifact_store, persistence=persistence, session_router=session_router,
+    )
+    if recovered is None:
+        raise ValueError("The saved review has no eligible source session")
+    return recovered
+
+
+async def _continue_app_review(
+    *, app_id: str, user_id: str, source_chat_id: str | None, binding: RunBuildBinding,
+    baseline_id: str, candidate_id: str | None, validated: bool,
+    registry: Any, artifact_store: Any, persistence: Any, session_router: Any,
+) -> dict[str, Any] | None:
     """Prepare one new review run; its websocket remains the only launch owner.
 
     A review run cannot acquire another build's immutable binding. Only an
@@ -158,7 +285,6 @@ async def continue_inline_app_review(
             or record.get("lifecycle_state") not in {"review", "needs_revision"}):
         raise ValueError("The completed refinement has been superseded")
 
-    candidate_id = (result.metadata or {}).get("build_record_id")
     version = await artifact_store.get_build_record(
         app_id=binding.target_app_id, build_record_id=candidate_id or baseline_id,
     )
@@ -177,7 +303,6 @@ async def continue_inline_app_review(
         or current.get("artifact_version_id") != version.id
     ):
         raise ValueError("The saved candidate does not belong to the settled refinement")
-    validated = result.status in {"validated", "success"}
     if validated and (
         not candidate_id or record["lifecycle_state"] != "review"
         or version.lifecycle_status not in {ArtifactLifecycleStatus.DRAFT, ArtifactLifecycleStatus.CURRENT}

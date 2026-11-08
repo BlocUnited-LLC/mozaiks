@@ -13,6 +13,35 @@ from mozaiksai.core.session.build_binding import RunBuildBinding
 _actual_settle = review._settle_superseded_workbench
 
 
+def _saved_refinement(fixture):
+    _generator_source(fixture)
+    request = SimpleNamespace(
+        app_id="factory", user_id="owner", target_app_id="target", build_record_id="parent",
+        build_family="app_bundle", build_key="app_bundle", source_surface="app_workbench",
+    )
+    change = SimpleNamespace(
+        id="change", app_id="target", created_by_user_id="owner", build_record_id="parent",
+        build_family="app_bundle", build_key="app_bundle", refinement_request=request,
+    )
+    session = SimpleNamespace(
+        id="refinement-session", app_id="target", build_record_id="parent", result_build_record_id="child",
+        change_request_id="change", status="accepted", provider="control_plane_coding",
+        metadata={"coding_worker": {"eligible": True, "status": "validated", "metadata": {"build_record_id": "child"}}},
+    )
+    fixture.request["artifact_store"].list_refinement_sessions = AsyncMock(return_value=[session])
+    fixture.request["artifact_store"].get_change_request = AsyncMock(return_value=change)
+    fixture.versions["child"].lifecycle_status = ArtifactLifecycleStatus.CURRENT
+    return session, change
+
+
+async def _recover(fixture, **extra):
+    return await review.recover_saved_app_review(
+        app_id="factory", user_id="owner", binding=fixture.binding,
+        registry=fixture.registry, artifact_store=fixture.request["artifact_store"],
+        persistence=fixture.persistence, session_router=fixture.router, **extra,
+    )
+
+
 @pytest.fixture
 def continuation(monkeypatch):
     binding = RunBuildBinding(
@@ -69,6 +98,117 @@ def continuation(monkeypatch):
         persistence=persistence, registry=registry, router=router, hooks=hooks, collection=collection,
         settle=settle,
     )
+
+
+@pytest.mark.asyncio
+async def test_saved_accepted_refinement_recovers_pending_generation_without_model_work(continuation):
+    fixture = continuation
+    _saved_refinement(fixture)
+    before = deepcopy(fixture.source)
+    result = await _recover(fixture)
+    assert result["artifact_version_id"] == "child"
+    assert result["source_chat_id"] == "review-parent"
+    assert fixture.source == before
+    fixture.persistence.create_chat_session.assert_awaited_once()
+    fixture.settle.assert_awaited_once()
+    assert fixture.request["artifact_store"].list_refinement_sessions.await_args.kwargs == {
+        "app_id": "target", "result_build_record_id": "child", "limit": 2,
+    }
+
+
+@pytest.mark.asyncio
+async def test_saved_surface_result_uses_its_persisted_success(continuation):
+    fixture = continuation
+    session, _ = _saved_refinement(fixture)
+    session.provider = "contract_surface_regeneration"
+    session.metadata = {"surface_result": {"status": "success", "metadata": {"build_record_id": "child"}}}
+    assert (await _recover(fixture))["artifact_version_id"] == "child"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("damage", [
+    "host", "current_build", "missing_child", "missing_parent", "source_owner", "no_session", "duplicate_session",
+    "session_app", "session_parent", "session_child", "session_status", "missing_change", "change_owner",
+    "change_parent", "request_target", "request_owner", "request_parent", "request_surface", "provider",
+    "worker_status", "worker_child", "worker_invalid", "child_failed", "child_stale", "caller_overrides",
+])
+async def test_saved_refinement_recovery_rejects_incomplete_or_foreign_records(continuation, damage):
+    fixture = continuation
+    session, change = _saved_refinement(fixture)
+    store = fixture.request["artifact_store"]
+    if damage == "host":
+        fixture.record["chat_app_id"] = "other"
+    elif damage == "current_build":
+        fixture.record["current_build_run"]["build_id"] = "newer"
+    elif damage == "missing_child":
+        fixture.versions.pop("child")
+    elif damage == "missing_parent":
+        fixture.versions.pop("parent")
+    elif damage == "source_owner":
+        fixture.collection.find_one.return_value = None
+    elif damage in {"no_session", "duplicate_session"}:
+        store.list_refinement_sessions.return_value = [] if damage == "no_session" else [session, session]
+    elif damage.startswith("session_"):
+        setattr(session, {"session_app": "app_id", "session_parent": "build_record_id",
+                          "session_child": "result_build_record_id", "session_status": "status"}[damage], "other")
+    elif damage == "missing_change":
+        store.get_change_request.return_value = None
+    elif damage in {"change_owner", "change_parent"}:
+        setattr(change, "created_by_user_id" if damage == "change_owner" else "build_record_id", "other")
+    elif damage.startswith("request_"):
+        setattr(change.refinement_request, {"request_target": "target_app_id", "request_owner": "user_id",
+                                           "request_parent": "build_record_id", "request_surface": "source_surface"}[damage], "other")
+    elif damage == "provider":
+        session.provider = "other"
+    elif damage == "worker_status":
+        session.metadata["coding_worker"]["status"] = "failed"
+    elif damage == "worker_child":
+        session.metadata["coding_worker"]["metadata"]["build_record_id"] = "other"
+    elif damage == "worker_invalid":
+        session.metadata["coding_worker"]["unexpected"] = True
+    elif damage == "child_failed":
+        fixture.versions["child"].app_validation_status = "failed"
+    elif damage == "child_stale":
+        fixture.versions["child"].lifecycle_status = ArtifactLifecycleStatus.STALE
+    with pytest.raises(ValueError):
+        await _recover(fixture, has_launch_overrides=damage == "caller_overrides")
+    fixture.persistence.create_chat_session.assert_not_awaited()
+    fixture.registry.update_build_status.assert_not_awaited()
+    fixture.settle.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ordinary", ["genesis", "root", "workflow_parent", "completed_source", "failed_source", "manual_review"])
+async def test_ordinary_saved_review_does_not_recover_a_waiter(continuation, ordinary):
+    fixture = continuation
+    _saved_refinement(fixture)
+    if ordinary == "genesis":
+        fixture.binding = fixture.binding.model_copy(update={"phase": "genesis"})
+        fixture.record["current_build_run"]["phase"] = "genesis"
+    elif ordinary == "root":
+        fixture.versions["child"].parent_build_record_id = None
+    elif ordinary == "workflow_parent":
+        fixture.versions["parent"].build_family = "workflow_bundle"
+    elif ordinary in {"completed_source", "failed_source"}:
+        fixture.source["status"] = 1 if ordinary == "completed_source" else 2
+    else:
+        fixture.record.update(active_chat_id="manual-review", active_workflow_id="AppReview")
+        fixture.collection.find_one.return_value = {"trigger_meta": {"trigger_source": "manual"}}
+    assert await _recover(fixture) is None
+    fixture.persistence.create_chat_session.assert_not_awaited()
+    fixture.registry.update_build_status.assert_not_awaited()
+    fixture.settle.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_partial_saved_successor_marker_cannot_fall_through_to_another_chat(continuation):
+    fixture = continuation
+    fixture.record.update(active_chat_id="saved", active_workflow_id="AppReview")
+    fixture.collection.find_one.return_value = {"trigger_meta": {"source_tool_call_id": "event"}}
+    with pytest.raises(ValueError, match="incomplete"):
+        await _recover(fixture)
+    fixture.persistence.create_chat_session.assert_not_awaited()
+    fixture.registry.update_build_status.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -429,7 +569,8 @@ async def test_cold_settlement_requires_available_execution_authority(monkeypatc
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failed_step", ["bind", "settle", "cancel"])
-async def test_committed_successor_is_reused_after_interrupted_notification(continuation, failed_step):
+@pytest.mark.parametrize("entrypoint", ["inline", "saved"])
+async def test_committed_successor_is_reused_after_interrupted_notification(continuation, failed_step, entrypoint):
     fixture = continuation
     _generator_source(fixture)
     sessions = {"review-parent": fixture.source}
@@ -453,7 +594,7 @@ async def test_committed_successor_is_reused_after_interrupted_notification(cont
         await review.continue_inline_app_review(**fixture.request)
     selected = fixture.record["active_chat_id"]
     target.side_effect = None
-    descriptor = await review.continue_inline_app_review(**fixture.request)
+    descriptor = await (_recover(fixture) if entrypoint == "saved" else review.continue_inline_app_review(**fixture.request))
     assert descriptor["chat_id"] == selected
     fixture.persistence.create_chat_session.assert_awaited_once()
     fixture.persistence.mark_chat_failed.assert_not_awaited()
@@ -464,7 +605,8 @@ async def test_committed_successor_is_reused_after_interrupted_notification(cont
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("damage", ["source", "baseline", "binding", "artifact", "completed", "event"])
-async def test_recovery_cannot_adopt_another_selected_review(continuation, damage):
+@pytest.mark.parametrize("entrypoint", ["inline", "saved"])
+async def test_recovery_cannot_adopt_another_selected_review(continuation, damage, entrypoint):
     fixture = continuation
     _generator_source(fixture)
     fixture.record.update(active_chat_id="saved", active_workflow_id="AppReview")
@@ -483,9 +625,9 @@ async def test_recovery_cannot_adopt_another_selected_review(continuation, damag
         successor["status"] = 1
     else:
         successor["trigger_meta"].pop("source_tool_call_id")
-    fixture.collection.find_one.side_effect = lambda query, projection: fixture.source if query["_id"] == "review-parent" else successor
+    fixture.collection.find_one.side_effect = lambda query, projection: {"review-parent": fixture.source, "saved": successor}.get(query["_id"])
     with pytest.raises(ValueError):
-        await review.continue_inline_app_review(**fixture.request)
+        await (_recover(fixture) if entrypoint == "saved" else review.continue_inline_app_review(**fixture.request))
     fixture.persistence.create_chat_session.assert_not_awaited()
     fixture.registry.update_build_status.assert_not_awaited()
     fixture.settle.assert_not_awaited()
