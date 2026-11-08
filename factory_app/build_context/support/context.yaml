@@ -8,7 +8,7 @@ assets:
     kind: templates
 pack:
   id: support
-  version: "0.1.14"
+  version: "0.1.15"
   status: active
   capability_source: generated_module
 capabilities:

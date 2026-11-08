@@ -80,7 +80,9 @@ def timestamp_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def coerce_limit(value: Any, default: int = 20, maximum: int = 100) -> int:
+# List pages read one row past the page to detect a next page, and a persistence
+# read returns at most 100 rows, so a page holds at most 99.
+def coerce_limit(value: Any, default: int = 20, maximum: int = 99) -> int:
     try:
         parsed = int(value)
     except Exception:

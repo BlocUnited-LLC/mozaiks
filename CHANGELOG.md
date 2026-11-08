@@ -445,6 +445,37 @@ This project follows a practical pre-1.0 changelog format:
   incorrectly routed into generation can recover only with exact saved lineage,
   an execution lease, and no newer saved artifact; its successor preserves cleanup
   provenance for retry. Media and Security dependencies remain unchanged.
+- Several shipped capability packs failed during assembly or runtime loading.
+  A per-pack wiring suite (`tests/test_capability_pack_proof.py`) uses the real
+  assembler and deterministic acceptance checks, then exercises HTTP actions
+  against a real MongoDB with explicit test-app role grants. Missing grants remain
+  failures. Docker containment, real sign-in and successful business execution
+  require separate acceptance evidence; synthetic business errors and internal
+  actions are not counted as that evidence. The suite exposed these fixes:
+  - files, commerce, social, support and notifications shipped data migrations
+    in the retired surfaces format, so assembly refused them. Each now declares
+    its collections in `data/contract.json` and migrates with additive operations.
+  - files, notifications, and the social `friends` and `activity_feed` modules
+    sent `app_id` in their own queries, which persistence rejects, so their reads
+    and updates failed with a server error. Persistence owns app scoping.
+  - files saves `created_at`, so file lists sort by upload time.
+  - private files are readable only by their owner, listings show the caller's
+    files, and deletion requires ownership. Public reads still require
+    `files.read`; malformed owner/public arrays cannot grant access.
+  - friend and activity pages reserve one row within persistence's 100-row cap
+    for cursor detection, allowing maximum-size requests to traverse later pages.
+  - notification settings handlers could not be called at all; they now take the
+    declared inputs and always act for the signed-in user.
+  - the files module would not load (its notification rule used a retired
+    audience shape), and its public-upload alert also fired for private files.
+  - the support pack had no `ui/index.js`, so its page never registered.
+  - mozaiks_cloud modules declared no handler, and their read actions answer 400
+    instead of 500 when a required id is missing.
+  - commerce stores carts, products, orders and checkout requests through
+    `ctx.persistence`, and its cart upsert no longer conflicts on `cart_id`.
+  - social moderation uses admitted `user_posts.moderate` or `user_posts.admin`
+    permissions instead of a nonexistent runtime roles field. Author deletion,
+    the action's create permission, app scoping and post soft deletion remain enforced.
 
 - The shell no longer offers Profile, Sign in, or Sign out when nobody can sign
   in. A fresh Studio runs with authentication disabled, yet its account menu

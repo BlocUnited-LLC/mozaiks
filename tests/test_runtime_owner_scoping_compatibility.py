@@ -361,20 +361,10 @@ async def test_real_entitlement_template_alias_with_owned_sibling_on_real_mongo(
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(os.getenv("MOZAIKS_RUN_REAL_MONGO_TESTS") != "1", reason="requires opt-in local Mongo")
-async def test_real_commerce_product_repo_alias_with_owned_sibling_on_real_mongo(tmp_path, monkeypatch):
+async def test_real_commerce_product_repo_with_owned_sibling_on_real_mongo():
     pack = _PACK.parents[1] / "commerce/templates"
-    migration = json.loads((pack / "data/migrations/001_commerce_collections.json").read_text())
-    for surface in migration["surfaces"]:
-        surface["surface_kind"] = "module"
-        for collection in surface["collections"]:
-            collection.update({"name": collection["data_alias"].split(".")[-1], "scope": "app", "fields": []})
     contract = _mixed_contract("app_wide")
-    contract["surfaces"].extend(migration["surfaces"])
-    app_root = tmp_path / "app"
-    (app_root / "data").mkdir(parents=True)
-    (app_root / "app.json").write_text(json.dumps({"appName": "Mixed Commerce", "appId": contract["app_id"]}))
-    (app_root / "data/contract.json").write_text(json.dumps(contract))
-    monkeypatch.setenv("PLATFORM_PATH", str(app_root))
+    contract["surfaces"].extend(json.loads((pack / "data/contract.json").read_text(encoding="utf-8"))["surfaces"])
     spec = importlib.util.spec_from_file_location("commerce_compatibility_repo", pack / "modules/commerce/backend/repo.py")
     assert spec is not None and spec.loader is not None
     loaded_repo = importlib.util.module_from_spec(spec)
@@ -387,7 +377,6 @@ async def test_real_commerce_product_repo_alias_with_owned_sibling_on_real_mongo
     )
     ctx = SimpleNamespace(persistence=context)
     try:
-        assert isinstance(app_data_from_context(ctx).collection("commerce.products"), GuardedAliasCollection)
         for product_id in ("one", "two"):
             await repo.insert(ctx, doc={
                 "product_id": product_id, "slug": product_id, "title": product_id,
@@ -400,7 +389,7 @@ async def test_real_commerce_product_repo_alias_with_owned_sibling_on_real_mongo
         assert [row["product_id"] for row in await repo.list(ctx, query={}, limit=2, before="2026-01-02")] == ["one"]
         updated = await repo.update(ctx, product_id="one", updates={"title": "Updated"})
         assert updated["title"] == "Updated"
-        assert await client[database_name]["commerce_products"].count_documents({}) == 2
+        assert await client[database_name][context.collection_name("commerce", "products")].count_documents({}) == 2
         with pytest.raises(PersistenceScopeError):
             context.literal_collection(context.collection_name("tasks", "tasks"))
     finally:

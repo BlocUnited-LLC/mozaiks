@@ -1,20 +1,32 @@
 {
+  "schema_version": "mozaiks.data_migration.v1",
   "migration_id": "001_notification_preferences_collection",
-  "module": "notification_settings",
-  "description": "Declare the notifications.preferences data alias for notification_settings module preference records.",
-  "aliases": [
+  "version": "1",
+  "description": "Ensure the notification_settings preferences collection for module preference records and its unique per-user index without rewriting records.",
+  "operations": [
     {
-      "alias": "notifications.preferences",
-      "collection": "notification_settings__preferences",
+      "type": "ensure_collection",
       "module_id": "notification_settings",
-      "entity": "preferences"
-    }
-  ],
-  "indexes": [
+      "entity_name": "preferences"
+    },
     {
-      "alias": "notifications.preferences",
-      "keys": [{"app_id": 1}, {"user_id": 1}],
-      "options": {"unique": true, "name": "notification_settings_preferences_user_unique"}
+      "type": "ensure_index",
+      "module_id": "notification_settings",
+      "entity_name": "preferences",
+      "index": {
+        "name": "notification_settings_preferences_user_unique",
+        "keys": [
+          [
+            "app_id",
+            1
+          ],
+          [
+            "user_id",
+            1
+          ]
+        ],
+        "unique": true
+      }
     }
   ]
 }

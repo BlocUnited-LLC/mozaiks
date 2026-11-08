@@ -6,11 +6,11 @@ notifications:
     event_type: domain.files.file_uploaded
     condition:
       field: is_public
-      value: true
+      equals: true
     channels:
       - in_app
     audience:
-      strategy: app_admins
+      roles: [admin]
     template:
       title: "New file available"
       body: "{{filename}} has been uploaded."

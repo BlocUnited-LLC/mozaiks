@@ -9,10 +9,8 @@ contract_type: build_pack_instructions
 # event-producing module. Select this pack only when the app must deliver
 # domain-event alerts through a provider-backed external channel.
 #
-# Generated outputs are all owner: generator because external delivery
-# adapters are highly provider-specific and must be customized per-app.
-# AppGenerator generates provider-neutral stubs; operators fill in their
-# chosen provider (SendGrid, AWS SES, Firebase, Twilio, etc.).
+# Templates own preference storage. App-owned external delivery adapters
+# require a configured provider implementation.
 
 selection_rules:
   - id: select_for_external_delivery
@@ -45,15 +43,14 @@ recommended_domains:
   - social
   - ecommerce
 
-avoid_when:
-  - App only needs in-app alerts and notification center — declare contracts/notifications.yaml on the event-producing module instead.
-  - App uses a managed notification platform that handles external delivery — use that platform's client as a managed_capability or service integration.
-
-# All required outputs are owner: generator because external delivery adapters
-# are provider-specific and must be customized per deployment target.
-# AppGenerator produces provider-neutral stubs. Operators select their
-# provider and fill in credentials + API calls in the adapter.
 required_outputs:
+  - path: data/contract.json
+    owner: templates
+    notes: >
+      Declares the notification_settings module's preferences collection
+      (app_wide tenancy; the module scopes every read and write to the acting
+      user itself) with its fields and the unique per-user index.
+
   - path: modules/notification_settings/module.yaml
     owner: templates
     notes: >
@@ -79,7 +76,9 @@ required_outputs:
 
   - path: modules/notification_settings/backend/repo.py
     owner: templates
-    notes: Persists preference records to notifications.preferences data alias via ctx.persistence.
+    notes: >
+      Persists preference records to the notification_settings preferences
+      collection via ctx.persistence.collection("notification_settings", "preferences").
 
   - path: modules/notification_settings/backend/schemas.py
     owner: templates
@@ -114,9 +113,10 @@ required_outputs:
   - path: data/migrations/001_notification_preferences_collection.json
     owner: templates
     notes: >
-      Declares notifications.preferences data alias for the notification_settings
-      module. Does NOT create notification delivery log collections — those belong
-      in the external provider.
+      Additive operations only: ensures the notification_settings preferences
+      collection and its unique per-user index. The collection itself is declared
+      in data/contract.json. Does NOT create notification delivery log
+      collections — those belong in the external provider.
 
 forbidden_outputs:
   - path_prefix: modules/notifications/
@@ -133,6 +133,13 @@ forbidden_outputs:
     reason: Push mechanics belong in services/adapters/notifications/push.py.
 
 runtime_boundaries:
+  - id: external_delivery_only
+    rule: >
+      Apps needing only in-app alerts use contracts/notifications.yaml on the
+      event-producing module, without this pack. Apps whose managed notification
+      platform already owns external delivery use that platform's client through
+      its managed capability or service integration.
+
   - id: no_duplicate_in_app_channel
     rule: >
       Do not re-implement in-app notification storage or websocket delivery.

@@ -1,5 +1,4 @@
 schema_version: mozaiks.reactions.v1
-module_id: notification_settings
 
 # These reactions fire external delivery adapters when domain events arrive.
 # In-app notification storage is handled separately by contracts/notifications.yaml
