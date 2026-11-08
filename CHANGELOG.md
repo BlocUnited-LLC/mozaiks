@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Social pack proof now checks soft deletion through mounted HTTP actions and
+  real MongoDB, including admitted permissions, app isolation, retained tombstones
+  and hidden public reads. The generic physical-delete mismatch stays visible.
+
 - Generated bundle validation can resolve approved compiler inputs from the exact
   owned build record. Factory saves actual design/subscription input identities,
   and coding/media children preserve those inputs while validating fresh bytes.

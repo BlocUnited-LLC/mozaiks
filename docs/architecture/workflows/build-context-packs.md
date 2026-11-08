@@ -1055,6 +1055,27 @@ For that reason, a reusable builder pack should be designed in this order:
 4. Add templates only for deterministic files the pack owns.
 5. Use prompt projections to give each agent only the relevant catalog slice.
 
+## Pack Lifecycle Evidence
+
+The shipped-pack proof assembles trusted templates, mounts their module HTTP
+actions, and uses a disposable real MongoDB database. Generic CRUD observations
+and action-wiring responses do not by themselves prove a pack's business lifecycle.
+
+Social post deletion deliberately retains a `status: deleted` record. Its explicit
+semantic probe checks author and admitted moderator/admin deletion, required action
+permissions, foreign-user and foreign-app refusal, and an unchanged stored identity
+and body in the tombstone. Detail and both public lists must hide deleted posts from
+author, member and administrator while a separate published control stays visible.
+The generic observer's physical-removal failure remains verbatim in
+`observer_mismatches`; it is never changed into a passed CRUD result. Every named
+Social semantic assertion must pass before that mismatch is accepted by the pack
+proof. Missing assertions, success-only responses and broken lifecycle mutations
+fail the proof.
+
+This trusted-fixture probe records action emissions. It does not establish
+downstream reaction delivery, Docker containment or external provider acceptance.
+The production runtime observer and generated data contracts are unchanged.
+
 ## Cross References
 
 - [Workflow Architecture](workflow-architecture.md)

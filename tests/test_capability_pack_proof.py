@@ -55,6 +55,7 @@ from tests.factory_context import factory_context
 from tests.pack_proof_action_sweep import _bad_params, run_action_sweep
 from tests.pack_proof_provider_fixture import PACKS as PROVIDER_FIXTURE_PACKS
 from tests.pack_proof_provider_fixture import run_provider_probe
+from tests.pack_proof_social_lifecycle import SOCIAL_PROOF_ROLES, SOCIAL_SEMANTIC_CHECKS
 from tests.test_app_runtime_smoke import mongo  # noqa: F401 - real MongoDB and its leaked-database guard
 
 BUILD_CONTEXT = Path(__file__).resolve().parents[1] / "factory_app" / "build_context"
@@ -103,18 +104,18 @@ _SUPPORT_CROSS_MODULE_EMIT = (
 # Runtime failures (smoke or action sweep) a pack is known to have, by check id,
 # with the reason. The proof fails when one stops failing, so this list only shrinks.
 KNOWN_RUNTIME_FAILURES: dict[str, dict[str, str]] = {
-    "social": {
-        "crud.user_posts.posts.a_delete": (
-            "delete_post has the canonical delete name but soft-deletes (status deleted, record "
-            "kept). The data contract cannot declare a soft-delete lifecycle, so the smoke's "
-            "canonical delete check expects the record gone."
-        ),
-    },
     "support": {
         f"event.support.create_support_request.domain.messages.{event}": _SUPPORT_CROSS_MODULE_EMIT
         for event in ("thread_created", "message_sent")
     },
 }
+
+
+# The generic physical-removal assertion remains failed and is included verbatim
+# in the receipt. Only independently observed Social semantics can explain it.
+OBSERVER_MISMATCHES = {"social": {
+    "crud.user_posts.posts.a_delete": "The declared Social lifecycle retains a deleted post tombstone.",
+}}
 
 
 def _feedback_records_contract() -> dict[str, Any]:
@@ -197,6 +198,10 @@ def _auth_fixture(pack_id: str) -> str:
     permissions = sorted({permission for member in _required_packs(pack_id)
                           for permission in APP_PERMISSIONS[member]})
     auth["authorization"] = {"roles": [{"id": PROOF_ROLE, "permissions": permissions}] if permissions else []}
+    if pack_id == "social":
+        auth["authorization"]["roles"].extend(
+            {"id": role, "permissions": permissions} for role, permissions in SOCIAL_PROOF_ROLES.items()
+        )
     return yaml.safe_dump(auth, sort_keys=False)
 
 
@@ -230,13 +235,20 @@ def _assert_runtime_results(pack_id: str, rows: list[dict[str, Any]]) -> dict[st
     """Retain every failure and require each known row to match its recorded cause."""
     failures = [row for row in rows if row.get("status") == "failed"]
     known = KNOWN_RUNTIME_FAILURES.get(pack_id, {})
+    expected = {**known, **OBSERVER_MISMATCHES.get(pack_id, {})}
     unexpected = [row for row in failures
-                  if row["check"] not in known or not _matches_known_runtime_failure(row)]
+                  if row["check"] not in expected or not _matches_known_runtime_failure(row)]
     assert not unexpected, f"{pack_id} fails at runtime: {unexpected}"
     failed_checks = {row["check"] for row in failures}
-    assert set(known) <= failed_checks, (
-        f"{pack_id} no longer fails {sorted(set(known) - failed_checks)}: remove them from KNOWN_RUNTIME_FAILURES"
+    assert set(expected) <= failed_checks, (
+        f"{pack_id} no longer fails {sorted(set(expected) - failed_checks)}: remove the obsolete expected failure"
     )
+    if pack_id == "social":
+        semantic = [row for row in rows if row["check"].startswith("semantic.social.posts.")]
+        assert len(semantic) == len(SOCIAL_SEMANTIC_CHECKS) and {
+            row["check"] for row in semantic if row["status"] == "passed"
+            and row.get("details", {}).get("coverage") == "social_post_lifecycle"
+        } == SOCIAL_SEMANTIC_CHECKS, "Social observer mismatch requires complete independent semantic assertions"
     return known
 
 
@@ -380,7 +392,7 @@ async def _prove(pack_id: str, mongo: Any, tmp_path: Path) -> None:  # noqa: F81
         provider_fixture = {"smoke": smoke["provider_fixture"], "sweep": sweep_result["provider_fixture"]}
     else:
         smoke = await run_app_runtime_smoke(app_root, mongo_uri=mongo.uri)
-        swept = await run_action_sweep(app_root, mongo_uri=mongo.uri)
+        swept = await run_action_sweep(app_root, mongo_uri=mongo.uri, semantic_pack="social" if pack_id == "social" else None)
     rows = smoke.get("results") or []
     assert rows and smoke.get("skipped_reason") is None, f"{pack_id} smoke did not run: {smoke.get('skipped_reason')}"
     declared = _declared_actions(files)
@@ -410,7 +422,11 @@ async def _prove(pack_id: str, mongo: Any, tmp_path: Path) -> None:  # noqa: F81
         "authorization": yaml.safe_load(files["config/auth.yaml"])["authorization"],
         "provider_fixture": provider_fixture,
         "known_failures": {check: known[check] for check in sorted(known)},
-        "outcome": "wiring_smoke_passed" if not known else "wiring_smoke_with_known_failures",
+        "observer_mismatches": [row for row in rows if row["check"] in OBSERVER_MISMATCHES.get(pack_id, {})],
+        "semantic_assertions": [row for row in swept if row["check"].startswith("semantic.")],
+        "semantic_scope": "Mounted HTTP actions, authorization and Mongo storage; no downstream reaction delivery" if pack_id == "social" else None,
+        "outcome": ("semantic_proof_passed_with_observer_mismatch" if pack_id in OBSERVER_MISMATCHES
+                    else "wiring_smoke_passed" if not known else "wiring_smoke_with_known_failures"),
     }
     text = json.dumps(receipt, sort_keys=True, indent=2) + "\n"
     (tmp_path / f"{pack_id}.pack-proof.json").write_text(text, encoding="utf-8")
@@ -511,7 +527,10 @@ def _known_failure_rows(pack_id: str) -> list[dict[str, Any]]:
 
 @pytest.mark.parametrize("pack_id", ["social", "support"])
 def test_known_runtime_failure_accepts_only_recorded_cause(pack_id):
-    assert _assert_runtime_results(pack_id, _known_failure_rows(pack_id)) == KNOWN_RUNTIME_FAILURES[pack_id]
+    rows = _known_failure_rows(pack_id)
+    if pack_id == "social":
+        rows += _social_semantic_rows()
+    assert _assert_runtime_results(pack_id, rows) == KNOWN_RUNTIME_FAILURES.get(pack_id, {})
 
 
 @pytest.mark.parametrize("pack_id", ["social", "support"])
@@ -571,3 +590,81 @@ def test_known_runtime_failure_matches_canonical_event_observer(label):
         )
         smoke._SmokeRun._record_rejected_event(run, "support", "create_support_request", principal, rejection)
     assert _assert_runtime_results("support", rows) == KNOWN_RUNTIME_FAILURES["support"]
+
+
+def test_social_observer_mismatch_requires_independent_semantics():
+    with pytest.raises(AssertionError, match="semantic"):
+        _assert_runtime_results("social", _known_failure_rows("social"))
+
+
+def _social_semantic_rows():
+    return [{"check": check, "status": "passed", "details": {"coverage": "social_post_lifecycle"}}
+            for check in sorted(SOCIAL_SEMANTIC_CHECKS)]
+
+
+@pytest.mark.parametrize("change", ["missing", "not_run", "duplicate", "http_only", "failed"])
+def test_social_semantic_evidence_cannot_be_incomplete_or_only_http_success(change):
+    semantic = _social_semantic_rows()
+    if change == "missing":
+        semantic.pop()
+    elif change == "not_run":
+        semantic[0]["status"] = "not_run"
+    elif change == "duplicate":
+        semantic[-1] = semantic[0]
+    elif change == "http_only":
+        semantic[0]["details"] = {"http_status": 200, "coverage": "http_wiring"}
+    else:
+        semantic[0]["status"] = "failed"
+    with pytest.raises(AssertionError):
+        _assert_runtime_results("social", [*_known_failure_rows("social"), *semantic])
+
+
+@pytest.mark.asyncio
+@pytest.mark.flaky(reruns=0)
+@pytest.mark.parametrize("fault,expected", [
+    ("no_op", "author_tombstone"),
+    ("physical_delete", "author_tombstone"),
+    ("deleted_detail_visible", "author_hidden"),
+    ("deleted_list_visible", "author_hidden"),
+    ("foreign_author_allowed", "foreign_member_denied"),
+    ("action_permission_removed", "missing_create_denied"),
+    ("missing_post_reports_success", "foreign_app_denied"),
+])
+async def test_social_semantic_probe_rejects_broken_candidate_bytes(fault, expected, tmp_path, mongo):  # noqa: F811
+    """Mutation controls exercise the observer through actual HTTP and MongoDB."""
+    files, _context, _identities = await _assemble("social")
+    root = "modules/user_posts/"
+    if fault == "action_permission_removed":
+        module = yaml.safe_load(files[root + "module.yaml"])
+        action = next(row for row in module["actions"] if row["id"] == "delete_post")
+        assert action["permissions"] == ["user_posts.create"]
+        action["permissions"] = []
+        files[root + "module.yaml"] = yaml.safe_dump(module, sort_keys=False)
+    else:
+        mutations = {
+            "no_op": ("backend/repo.py", '"status": "deleted"', '"status": "published"'),
+            "physical_delete": ("backend/repo.py", '''update_one(
+            {"post_id": post_id},
+            {"$set": {"status": "deleted", "updated_at": deleted_at}},
+        )''', '''delete_one({"post_id": post_id})'''),
+            "deleted_detail_visible": ("backend/policy.py",
+                'and post.get("status") == POST_STATUS_PUBLISHED',
+                'and post.get("status") in {POST_STATUS_PUBLISHED, "deleted"}'),
+            "deleted_list_visible": ("backend/policy.py",
+                '"status": {"$eq": POST_STATUS_PUBLISHED, "$not": {"$type": "array"}},',
+                '"status": {"$in": [POST_STATUS_PUBLISHED, "deleted"], "$not": {"$type": "array"}},'),
+            "foreign_author_allowed": ("backend/policy.py",
+                'return post.get("author_id") == user_id or bool(',
+                'return True or post.get("author_id") == user_id or bool('),
+            "missing_post_reports_success": ("backend/service.py",
+                'return {"success": False, "error": "Post not found."}',
+                'return {"success": True}'),
+        }
+        path, original, replacement = mutations[fault]
+        assert files[root + path].count(original) == 1
+        files[root + path] = files[root + path].replace(original, replacement)
+    app_root = tmp_path / "app"
+    _write_files_to_dir(app_root, files)
+    rows = await run_action_sweep(app_root, mongo_uri=mongo.uri, semantic_pack="social")
+    assert any(row["check"] == f"semantic.social.posts.{expected}" and row["status"] == "failed" for row in rows), rows
+    assert any(row["check"] == "sweep.error" and row["status"] == "failed" for row in rows)
