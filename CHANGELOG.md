@@ -377,6 +377,15 @@ This project follows a practical pre-1.0 changelog format:
 - Failed automatic workflow steps now show a safe conversation notice without
   enabling debug messages, exposing result details, or changing retry eligibility.
 
+- Module handler reactions receive contract-bounded persistence from the
+  platform host. Owned collections require the active authenticated dispatch;
+  event actors and notification recipients cannot supply storage authority.
+
+- Reaction handlers now validate emitted events against their own declared internal
+  action and event schema, preserve source identity and causation, and report
+  rejected emissions as failed delivery without rolling back earlier writes.
+  Social activity reactions declare their internal emission contracts.
+
 - Account export and deletion in files `0.1.13`, notifications `0.1.13`,
   commerce `0.1.14`, social `0.1.14`, and support `0.1.14` use the same
   authenticated persistence bindings as module actions. Multi-page records are

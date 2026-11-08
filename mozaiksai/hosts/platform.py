@@ -420,6 +420,8 @@ async def _platform_startup() -> None:
                 event_emitter=dispatcher.emit,
                 capability_invoker=invoke_capability,
                 idempotency_store=_reaction_idempotency_store,
+                data_contract=load_result.data_contract,
+                platform_modules=load_result.platform_modules,
             )
             module_event_router.register(dispatcher)
             app.state.module_event_router = module_event_router
