@@ -366,6 +366,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Client tables accept declared nullable arrays and preserve their explicit
+  response selector. Null or missing rows stay empty instead of displaying an
+  unrelated response array; column checks and required server-paging rows remain strict.
+
 - Workflow data references retain MongoDB `_id` when explicitly requested, so
   generated bundle exports can verify their bound DesignDocs compilation inputs.
   Unrequested identities remain omitted.
