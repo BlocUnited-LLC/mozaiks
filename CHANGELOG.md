@@ -14,6 +14,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Generated bundle validation can resolve approved compiler inputs from the exact
+  owned build record. Factory saves actual design/subscription input identities,
+  and coding/media children preserve those inputs while validating fresh bytes.
+
 - Reviewed design role grants can protect canonical list/get and declared custom
   reads. Selecting one canonical read requires both read grants explicitly;
   generated permissions survive materialization while ownership remains enforced.
