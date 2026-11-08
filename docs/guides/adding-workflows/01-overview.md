@@ -266,6 +266,22 @@ async def show_build_plan(context_variables: Any = None) -> Dict[str, Any]:
 Tools should read already-reasoned structured output, persist or emit it, and
 return a small result. Do not put LLM-style inference in Python tools.
 
+For a one-way artifact that must survive browser disconnection, pass
+`display="artifact", require_persistence=True` to `emit_ui_surface`. Call this
+from a runtime-invoked workflow tool: the helper binds the save to that active
+invocation's app, chat, and workflow, rather than trusting payload identity.
+It returns the event ID only after an acknowledged write matched the scoped
+chat. Missing sessions, serialization failures, and unavailable persistence
+raise `UIToolError` before live delivery; callers must leave readiness false.
+The default remains best-effort emission for existing status surfaces.
+
+A successful durable call confirms storage, not that a browser rendered it or
+a person approved it. Live delivery may fail after saving; the canonical
+`workflow_ui_state.last_artifact` projection restores the latest artifact on
+reconnect. This projection replaces the prior artifact and is not an immutable
+artifact history or a publication receipt. Interactive response-bearing tools
+still use `use_ui_tool` and its separate response lifecycle.
+
 ### Workflow UI JavaScript
 
 ```jsx

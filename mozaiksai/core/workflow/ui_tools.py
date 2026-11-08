@@ -150,6 +150,7 @@ async def _emit_tool_call_core(
     agent_name: str | None = None,
     awaiting_response: bool = True,
     component_name: str | None = None,
+    require_persistence: bool = False,
 ) -> str:
     """
     Core function to emit a response-aware tool_call to the frontend.
@@ -167,6 +168,20 @@ async def _emit_tool_call_core(
     Returns:
         The unique event ID for this interaction.
     """
+    persistence_options: dict[str, Any] = {}
+    if require_persistence:
+        from mozaiksai.core.workflow.agents.factory import active_workflow_tool_run
+
+        try:
+            run_workflow, run_app, run_chat, _ = active_workflow_tool_run()
+        except PermissionError as exc:
+            raise UIToolError("Durable UI emission requires an active workflow tool invocation") from exc
+        if (chat_id, workflow_name) != (run_chat, run_workflow):
+            raise UIToolError("Durable UI emission does not match the active workflow scope")
+        if display != "artifact" or awaiting_response:
+            raise UIToolError("Durable UI emission requires a one-way artifact surface")
+        persistence_options = {"require_persistence": True, "persistence_app_id": run_app}
+
     event_id = f"{tool_id}_{str(uuid.uuid4())[:8]}"
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id)
     chat_logger = get_workflow_logger("ui_tools", chat_id=chat_id)
@@ -193,7 +208,7 @@ async def _emit_tool_call_core(
         agent_name = payload_to_send.get("agent_name")
     
     try:
-        await transport.send_tool_call_event(
+        persisted = await transport.send_tool_call_event(
             event_id=event_id,
             chat_id=chat_id,
             tool_name=tool_id,  # use actual tool id
@@ -202,7 +217,10 @@ async def _emit_tool_call_core(
             payload=payload_to_send,
             agent_name=agent_name,
             awaiting_response=awaiting_response,
+            **persistence_options,
         )
+        if require_persistence and persisted is not True:
+            raise UIToolError("Artifact persistence was not confirmed")
         wf_logger.debug("UI_TOOL_EMIT_OK event=%s", event_id)
         return event_id
     except Exception as e:
@@ -400,11 +418,19 @@ async def emit_ui_surface(
     workflow_name: str,
     display: str | None = None,
     agent_name: str | None = None,
+    require_persistence: bool = False,
 ) -> str:
     """Emit a one-way UI surface without awaiting a response.
 
     Use this for read-only artifacts or status surfaces where the frontend should
     render the component but no user response is required.
+
+    Set ``require_persistence=True`` for an artifact emitted by an active
+    workflow tool. The returned event ID then confirms an acknowledged,
+    app/chat-scoped save to the canonical last-artifact projection. A failed
+    save raises ``UIToolError`` before delivery. This is not a browser render
+    acknowledgement: a disconnected viewer can restore the saved artifact.
+    Default emission remains best effort.
     """
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id)
     enriched_payload, tool_record = _enrich_payload_with_ui_contract(tool_id, payload, wf_logger)
@@ -421,6 +447,7 @@ async def emit_ui_surface(
         agent_name=resolved_agent_name,
         awaiting_response=False,
         component_name=component_name,
+        require_persistence=require_persistence,
     )
 
     try:
