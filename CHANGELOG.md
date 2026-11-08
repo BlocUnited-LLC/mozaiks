@@ -18,6 +18,9 @@ This project follows a practical pre-1.0 changelog format:
   owned build record. Factory saves actual design/subscription input identities,
   and coding/media children preserve those inputs while validating fresh bytes.
 
+- Image-generating agents can set `image_generation.emit_ui: false` when an app
+  supplies its own draft review. Assets and workflow context are still saved;
+  the shared media review card remains enabled by default.
 - Reviewed design role grants can protect canonical list/get and declared custom
   reads. Selecting one canonical read requires both read grants explicitly;
   generated permissions survive materialization while ownership remains enforced.
@@ -386,6 +389,10 @@ This project follows a practical pre-1.0 changelog format:
   response selector. Null or missing rows stay empty instead of displaying an
   unrelated response array; column checks and required server-paging rows remain strict.
 
+- Governance scans now inspect repository files when a checkout lives beneath
+  `.local`, `build`, or another excluded directory name. Exclusions still apply
+  to those directories inside the repository.
+
 - Workflow data references retain MongoDB `_id` when explicitly requested, so
   generated bundle exports can verify their bound DesignDocs compilation inputs.
   Unrequested identities remain omitted.
@@ -411,6 +418,9 @@ This project follows a practical pre-1.0 changelog format:
   authenticated persistence bindings as module actions. Multi-page records are
   handled without skipping rows during metadata updates, exports encode BSON
   safely, and each module keeps its existing deletion or anonymization policy.
+- Authenticated users can preview and download private generated media from
+  their own persisted chat. App/chat scope and ownership are checked before
+  serving bytes or redirects; a preview does not publish or promote the asset.
 - ThemeCapture retries recover a missing approved concept from its current
   artifact and matching completed owner/build session, without copying failed
   execution state or replacing existing refinement inputs.
@@ -684,6 +694,15 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Generated media ignores provider-supplied publication authority. Public reads
+  require server-owned public visibility, and explicit promotion records that
+  visibility. Private/backer-only visibility overrides old promotion metadata;
+  metadata-only publication records require authorized republication. Chat
+  promotion actions now atomically require the asset's persisted source chat to
+  match the authenticated connection.
+- The model-invoked brand promotion tool uses immutable active workflow scope,
+  verifies source ownership before any manifest write, and reports failed
+  publication instead of silently returning success.
 - Workspace handler extensions are checked so that annotations and defaults
   cannot run code at import, and service arguments must come from the
   override's own parameters. These checks are targeted guards, not

@@ -170,7 +170,8 @@ def _relative(path: Path, repo_root: Path) -> str:
 
 def _excluded(path: Path, repo_root: Path) -> bool:
     relative = _relative(path, repo_root)
-    if any(part in EXCLUDED_DIRS for part in path.parts):
+    # Checkout ancestors (for example .local/worktrees) are not repository content.
+    if any(part in EXCLUDED_DIRS for part in Path(relative).parts):
         return True
     return any(relative == prefix or relative.startswith(f"{prefix}/") for prefix in EXCLUDED_PREFIXES)
 
