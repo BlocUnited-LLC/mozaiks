@@ -16,6 +16,7 @@ from factory_app.workflows._shared.generated_ui_contract import (
     audit_custom_route_bundle_integrity,
     audit_generated_react_files,
     audit_page_schemas,
+    audit_route_auth_action_contracts,
     custom_route_bundle_page_files,
     dedupe,
 )
@@ -1650,6 +1651,15 @@ def save_app_schema(
             )
             for page in page_list:
                 validate_page_schema(page, asset_ids=asset_index.keys())
+            route_auth_errors = audit_route_auth_action_contracts(
+                [
+                    {"filename": path, "content": content}
+                    for path, content in {**baseline_files, **rendered_files}.items()
+                ],
+                require_module_contracts=False,
+            )
+            if route_auth_errors:
+                raise ValueError("; ".join(route_auth_errors))
         except (ValueError, PageSchemaValidationError) as exc:
             message = str(exc)
             if isinstance(exc, PageSchemaValidationError):
