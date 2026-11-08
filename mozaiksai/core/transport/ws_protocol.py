@@ -302,9 +302,14 @@ class WebSocketProtocolMixin:
                     except Exception as cfg_err:
                         logger.warning("[RUN_REPLAY] Failed to get workflow config: %s", cfg_err)
 
-            from mozaiksai.core.transport.run_replay import WorkflowRunReplayer
+            from functools import partial
 
-            replayer = WorkflowRunReplayer()
+            from mozaiksai.core.transport.run_replay import WorkflowRunReplayer
+            from mozaiksai.core.transport.ui_tools import project_ui_tool_response_state
+
+            replayer = WorkflowRunReplayer(
+                project_ui_tool_response_state=partial(project_ui_tool_response_state, transport=self),
+            )
 
             async def send_event_wrapper(event_dict: dict[str, Any], target_chat_id: str | None) -> None:
                 """Wrapper to convert replay events to transport format."""

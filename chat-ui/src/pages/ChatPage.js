@@ -779,6 +779,7 @@ const ChatPage = () => {
             },
             display: cachedDisplay,
             component_type: cached.component_type || cachedToolCall.component_type || cachedPayload.component_type || cachedToolName,
+            response_available: cachedPayload.interaction_type === 'ui_surface' ? undefined : false,
             restored: true,
           },
         };
@@ -2068,6 +2069,7 @@ const ChatPage = () => {
       tool_name: lastArtifact.tool_name,
       tool_call_id: lastArtifact.tool_call_id || null,
       component_type: lastArtifact.component_type || lastArtifact.tool_name,
+      response_available: lastArtifact.response_available,
       workflow_name: targetWorkflowName,
       payload: lastArtifact.payload || {},
       display: lastArtifact.display || 'artifact',
@@ -2094,6 +2096,7 @@ const ChatPage = () => {
         onResponse: null,
         display: cachedArtifact.display,
         component_type: cachedArtifact.component_type || cachedArtifact.tool_name,
+        response_available: cachedArtifact.response_available,
         restored: true,
       },
     };
@@ -2136,7 +2139,9 @@ const ChatPage = () => {
           return [restoredArtifactMessage];
         }
         if (Array.isArray(prev) && prev.length > 0) {
-          return prev;
+          return prev.map(message => message?.toolCall?.tool_call_id === cachedArtifact.tool_call_id
+            ? {...message, toolCall: {...message.toolCall, response_available: cachedArtifact.response_available}}
+            : message);
         }
         return [restoredArtifactMessage];
       });
@@ -3153,6 +3158,7 @@ const ChatPage = () => {
             component_type: componentType,
             workflow_name: resolvedWorkflowName,
             display: derivedDisplay,
+            response_available: envelope.response_available ?? detail.response_available,
             agent: envelope.agent || detail.agent || envelope.agent_name || detail.agent_name,
             agentName: envelope.agent || detail.agent || envelope.agent_name || detail.agent_name,
             payload: {
@@ -3227,6 +3233,7 @@ const ChatPage = () => {
           display: displayMode,
           display_mode: displayMode,
           awaiting_response: awaiting,
+          response_available: inner.response_available,
           agent,
           agentName: agent,
           interaction_type: interactionType,
@@ -4976,6 +4983,7 @@ const ChatPage = () => {
                   onResponse,
                   display: 'composer',
                   component_type: componentType,
+                  response_available: update.response_available,
                 },
                 metadata: {
                   type: 'composer_tool_call',
@@ -5093,7 +5101,7 @@ const ChatPage = () => {
                 agentName: resolvedAgentName,
                 content: artifactPayload.structured_output || artifactPayload.content || artifactPayload || {},
                 isStreaming: false,
-                toolCall: { tool_name: toolName, payload: artifactPayload, tool_call_id: toolCallId, workflow_name, onResponse, display: displayMode, component_type: componentType }
+                toolCall: { tool_name: toolName, payload: artifactPayload, tool_call_id: toolCallId, workflow_name, onResponse, display: displayMode, component_type: componentType, response_available: update.response_available }
               };
               setCurrentArtifactMessages([artifactMsg]);
               artifactCacheValidRef.current = true;
@@ -5190,6 +5198,7 @@ const ChatPage = () => {
               onResponse,
               display: displayMode || 'inline',
               component_type: componentType,
+              response_available: update.response_available,
             },
             metadata: {
               toolCallId: messageKey,
@@ -5233,7 +5242,7 @@ const ChatPage = () => {
     ]);
 
   const isComposerInputRequestToolCall = (toolCall, message = null) => {
-    if (!toolCall?.tool_call_id || message?.tool_call_completed) {
+    if (!toolCall?.tool_call_id || message?.tool_call_completed || toolCall.response_available === false) {
       return false;
     }
     const payload = toolCall.payload || {};

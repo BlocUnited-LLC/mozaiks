@@ -23,6 +23,7 @@ from mozaiksai.core.auth.dependencies import (
 )
 from mozaiksai.core.chat_attachments.attachments import handle_chat_upload
 from mozaiksai.core.multitenant import build_app_scope_filter
+from mozaiksai.core.transport.ui_tools import project_ui_tool_response_state
 from mozaiksai.hosts import runtime as runtime_app
 
 router = APIRouter(tags=["chat"])
@@ -269,7 +270,9 @@ async def chat_meta(
             "status": doc.get("status"),
             "failure_message": failure_message,
             "run_history_count": run_history_count,
-            "last_artifact": extract_last_artifact(doc),
+            "last_artifact": project_ui_tool_response_state(
+                extract_last_artifact(doc), chat_id=chat_id, transport=runtime_app.simple_transport,
+            ),
             "artifact_instance_id": artifact_instance_id,
             "artifact_state": artifact_state,
             "app_id": app_id,

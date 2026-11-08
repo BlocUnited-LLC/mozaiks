@@ -20,7 +20,10 @@ SendEventFunc = Callable[[dict[str, Any], str | None], Awaitable[None]]
 class WorkflowRunReplayer:
     """Replays persisted workflow events for websocket reconnects and client handshakes."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self, *, project_ui_tool_response_state: Callable[..., dict[str, Any] | None] | None = None,
+    ) -> None:
+        self._project_ui_tool_response_state = project_ui_tool_response_state
         self.logger = get_core_logger("run_replay")
         self._persistence_manager = None
 
@@ -303,22 +306,24 @@ class WorkflowRunReplayer:
                         pending.get("request_id"),
                         chat_id,
                     )
-                    await send_event(
-                        self._build_input_request_event(
-                            request_id=pending.get("request_id", ""),
-                            agent=pending.get("agent", "Agent"),
-                            prompt=pending.get("prompt", ""),
-                            chat_id=chat_id,
-                            component_type=pending.get("component_type"),
-                            workflow_name=pending.get("workflow_name"),
-                            tool_name=pending.get("tool_name"),
-                            display=pending.get("display") or "inline",
-                            interaction_type=pending.get("interaction_type") or "input_request",
-                            password=bool(pending.get("password", False)),
-                            raw_payload=pending.get("raw_payload") if isinstance(pending.get("raw_payload"), dict) else None,
-                        ),
-                        chat_id,
+                    input_event = self._build_input_request_event(
+                        request_id=pending.get("request_id", ""),
+                        agent=pending.get("agent", "Agent"),
+                        prompt=pending.get("prompt", ""),
+                        chat_id=chat_id,
+                        component_type=pending.get("component_type"),
+                        workflow_name=pending.get("workflow_name"),
+                        tool_name=pending.get("tool_name"),
+                        display=pending.get("display") or "inline",
+                        interaction_type=pending.get("interaction_type") or "input_request",
+                        password=bool(pending.get("password", False)),
+                        raw_payload=pending.get("raw_payload") if isinstance(pending.get("raw_payload"), dict) else None,
                     )
+                    if self._project_ui_tool_response_state is not None:
+                        input_event = self._project_ui_tool_response_state(
+                            input_event, chat_id=chat_id,
+                        ) or input_event
+                    await send_event(input_event, chat_id)
                     raw_payload = pending.get("raw_payload") if isinstance(pending.get("raw_payload"), dict) else {}
                     if raw_payload.get("resume_ui_kind") == "awaiting_reply":
                         await send_event(
@@ -402,6 +407,8 @@ class WorkflowRunReplayer:
                     "display": tool_call_meta.get("display", "inline"),
                     "workflow_name": message.get("workflow_name") or tool_call_meta.get("workflow_name"),
                     "component_type": tool_call_meta.get("component_type") or tool_call_meta.get("tool_name"),
+                    **({"response_available": tool_call_meta["response_available"]}
+                       if "response_available" in tool_call_meta else {}),
                 }
                 normalized["tool_call_completed"] = tool_call_meta.get("tool_call_completed", False)
                 normalized["tool_call_status"] = tool_call_meta.get("tool_call_status", "pending")
@@ -485,6 +492,10 @@ class WorkflowRunReplayer:
                 if not isinstance(message_index, int) or message_index < 0:
                     continue
                 normalized_state = self._normalize_tool_call_state(state)
+                if self._project_ui_tool_response_state is not None:
+                    normalized_state = self._project_ui_tool_response_state(
+                        normalized_state, chat_id=chat_id,
+                    ) or normalized_state
                 existing = indexed.get(message_index)
                 if existing is None:
                     indexed[message_index] = normalized_state
