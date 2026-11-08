@@ -84,6 +84,12 @@ of defaults, preserving `false`, `0`, and empty strings. An omitted or null
 default falls back to the primitive's empty value (false for checkboxes, an empty
 string otherwise).
 
+Inside a `Modal`, `AlertBanner` and `ActionButton` actions inherit the row
+selection that opened the modal, so payloads such as
+`{selected_row.record_id}` resolve to that record. These controls do not own
+selection. A nested table's actions use that table's explicit selection instead;
+an empty selection does not fall back to the modal's row.
+
 Both `DataTable` and `ResourceTable` accept `config.search_keys`, an optional
 list of row keys. With `search: true`, `search_keys: [title, author]` searches
 only those keys, even when notes are also displayed. Omitted or null keys search

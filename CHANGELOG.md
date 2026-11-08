@@ -394,6 +394,8 @@ This project follows a practical pre-1.0 changelog format:
   correction to repair syntax before candidate validation. Staged coding
   proposals fail closed on the same check; valid files, scope enforcement,
   and final bundle/runtime admission remain unchanged.
+- AlertBanner actions inside a modal retain the selected record for confirmation
+  requests. Nested table actions still use their own selection, including no row.
 
 - Governance scans now inspect repository files when a checkout lives beneath
   `.local`, `build`, or another excluded directory name. Exclusions still apply

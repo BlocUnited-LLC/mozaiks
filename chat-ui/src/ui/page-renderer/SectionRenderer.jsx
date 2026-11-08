@@ -749,9 +749,9 @@ export function SectionRenderer({
         variant: config.variant ?? 'info',
         dismissible: config.dismissible ?? false,
         actions: bannerActions,
-        onAction: (actionId, selectedRows) => {
+        onAction: (actionId) => {
           const action = bannerActions.find((a) => (a.id ?? a.label) === actionId);
-          if (action) void executeAction(action, { selectedRows });
+          if (action) void executeAction(action);
         },
       };
       break;
