@@ -85,6 +85,10 @@ forbidden_outputs:
   - path_prefix: app/capability_packs/
 
 runtime_boundaries:
+  - id: admin_page_registration
+    rule: Declare the commerce page in app/admin/admin_registry.yaml when exposing the pack's schema admin panels. Preserve each panel's commerce and ops.admin permissions; the app registry owns admin navigation.
+  - id: approved_subscription_gates
+    rule: Commerce actions retain their declared permissions. Pricing gates are compiled only from approved subscription feature selections; selecting commerce alone does not require a paid plan.
   - id: persistence_layer
     rule: Generated repo.py must use app_data_from_context and data aliases. No direct Motor clients and no hardcoded database names.
   - id: payment_provider_boundary

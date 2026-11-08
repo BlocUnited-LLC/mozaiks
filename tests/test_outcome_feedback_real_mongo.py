@@ -47,6 +47,7 @@ async def generated_feedback(monkeypatch, tmp_path):
             app_root=app_root,
             contract=contract,
             service=importlib.import_module(f"{package.__name__}.service").OutcomeFeedbackService(),
+            reads=importlib.import_module(f"{package.__name__}.service"),
             account=importlib.import_module(f"{package.__name__}.account_data_handler").AccountDataHandler,
         )
     finally:
@@ -145,6 +146,16 @@ async def test_authenticated_receipt_survives_manager_restart_and_generated_stor
         assert records[0]["ui_event_id"] == "evt-owned"
         assert (await service.list_my_feedback(context(user="other")))["records"] == []
         assert (await service.list_my_feedback(context(app="other")))["records"] == []
+        reads = generated_feedback.reads
+        listed = await reads.list_records(context(), page=1, page_size=1)
+        assert listed["total"] == 1 and listed["items"][0]["feedback_id"] == records[0]["feedback_id"]
+        assert (await reads.get_records(context(), id=records[0]["feedback_id"]))["item"]["response"]["rating"] == 3
+        from mozaiksai.core.runtime import ModuleRecordNotFoundError
+
+        for denied in (context(user="other"), context(app="other")):
+            assert await reads.list_records(denied) == {"items": [], "total": 0}
+            with pytest.raises(ModuleRecordNotFoundError):
+                await reads.get_records(denied, id=records[0]["feedback_id"])
         with pytest.raises(PermissionError, match="authenticated workflow"):
             await service.record_workflow_feedback(context(surface="http"), **args)
         with pytest.raises(PermissionError, match="receipt not found"):
