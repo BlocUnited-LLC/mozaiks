@@ -382,6 +382,9 @@ This project follows a practical pre-1.0 changelog format:
 - DesignDocs rejection feedback now lists exact approved action ids for the
   selected collection. Prompt and schema guidance distinguish collection-based
   read names from entity-based writes without renaming or authorizing invalid grants.
+- Client tables accept declared nullable arrays and preserve their explicit
+  response selector. Null or missing rows stay empty instead of displaying an
+  unrelated response array; column checks and required server-paging rows remain strict.
 
 - Workflow data references retain MongoDB `_id` when explicitly requested, so
   generated bundle exports can verify their bound DesignDocs compilation inputs.

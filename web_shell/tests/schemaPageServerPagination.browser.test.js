@@ -17,7 +17,7 @@ const styles = postcss([tailwindcss()]).process(
   { from: path.join(shell, 'styles.css') },
 ).then(result => result.css);
 
-async function fixture(t, { primitive = 'DataTable', serverMode = true } = {}) {
+async function fixture(t, { primitive = 'DataTable', serverMode = true, dataKey = 'items', responseExtra = {} } = {}) {
   const requests = [];
   const pending = new Map();
   let rejectOnce = true;
@@ -29,7 +29,7 @@ async function fixture(t, { primitive = 'DataTable', serverMode = true } = {}) {
   const schema = {
     name: 'books', title: 'Books', layout: 'full-width', sections: [{
       id: 'books', primitive, config: {
-        api_endpoint: '/api/modules/books/list', data_key: 'items',
+        api_endpoint: '/api/modules/books/list', ...(dataKey === null ? {} : { data_key: dataKey }),
         columns: [{ key: 'title', label: 'Title', sortable: true }, { key: 'author', label: 'Author' }, { key: 'notes', label: 'Notes' }],
         pagination: true, page_size: 20, pagination_mode: serverMode ? 'server' : 'client',
         ...(serverMode ? { total_key: 'stats.total' } : {}), search: true, search_keys: ['title', 'author'], selection: 'single',
@@ -74,7 +74,7 @@ async function fixture(t, { primitive = 'DataTable', serverMode = true } = {}) {
       const filtered = rows.filter(row => [row.title, row.author].some(value => value.toLowerCase().includes(query.toLowerCase())));
       const page = Number(url.searchParams.get('page') ?? 1);
       const size = Number(url.searchParams.get('page_size') ?? 20);
-      const reply = { items: serverMode ? filtered.slice((page - 1) * size, page * size) : rows, stats: { total: filtered.length } };
+      const reply = { items: serverMode ? filtered.slice((page - 1) * size, page * size) : rows, stats: { total: filtered.length }, ...responseExtra };
       if (query.startsWith('stale-') || query === 'abort-old') {
         pending.set(query, () => {
           res.statusCode = query === 'stale-error' ? 500 : 200;
@@ -237,3 +237,26 @@ test('ResourceTable server mode fails closed before any module fetch', async t =
   await page.getByText('Unable to load records', { exact: true }).waitFor();
   assert.equal(requests.length, 0);
 });
+
+for (const primitive of ['DataTable', 'ResourceTable']) {
+  for (const value of ['null', 'absent']) {
+    test(`${primitive} explicit ${value} rows never display an unrelated fallback array`, async t => {
+      const { page, requests } = await fixture(t, {
+        primitive, serverMode: false, dataKey: 'recent', responseExtra: value === 'null' ? { recent: null } : {},
+      });
+      await page.waitForLoadState('networkidle');
+      assert.ok(requests.length > 0);
+      await page.getByText('No results', { exact: true }).waitFor();
+      assert.equal(await page.getByRole('cell', { name: 'Book 001', exact: true }).count(), 0);
+      assert.equal(await page.getByRole('button', { name: 'Delete', exact: true }).isDisabled(), true);
+    });
+  }
+  test(`${primitive} explicit rows win over other arrays and an omitted selector keeps legacy rows`, async t => {
+    const selected = await fixture(t, { primitive, serverMode: false, dataKey: 'recent',
+      responseExtra: { recent: [{ id: 'selected', title: 'Selected row', author: 'Selected author' }] } });
+    await selected.page.getByRole('cell', { name: 'Selected row', exact: true }).waitFor();
+    assert.equal(await selected.page.getByRole('cell', { name: 'Book 001', exact: true }).count(), 0);
+    const legacy = await fixture(t, { primitive, serverMode: false, dataKey: null });
+    await legacy.page.getByRole('cell', { name: 'Book 001', exact: true }).waitFor();
+  });
+}
