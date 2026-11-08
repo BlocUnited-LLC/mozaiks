@@ -369,6 +369,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- App Studio cancels abandoned data loads during navigation and development
+  StrictMode replay, preventing duplicate detail requests while keeping refresh available.
+
 - Factory generation preserves explicitly required roles, including a sole
   `member` role. Typed page roles join the existing owner review and survive
   planning, generation and artifact-bound refinement validation; changed gates
