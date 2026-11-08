@@ -86,7 +86,6 @@ actions:
     api_surface: public
     description: Create a draft or active product with price, currency, SKU, category, and inventory metadata.
     handler_method: create_product
-    entitlement_gate: commerce.products.manage
     input_schema:
       type: object
       additionalProperties: false
@@ -278,7 +277,6 @@ actions:
     api_surface: public
     description: Snapshot the current cart into an order and emit a checkout request for the selected payment facade.
     handler_method: start_checkout
-    entitlement_gate: commerce.checkout.start
     input_schema:
       type: object
       additionalProperties: false

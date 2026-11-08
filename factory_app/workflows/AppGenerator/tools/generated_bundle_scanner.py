@@ -2499,6 +2499,7 @@ def _scan_resolved_pack_outputs(
     entries: list[dict[str, Any]],
     *,
     managed_owners: set[str],
+    compiled_templates: dict[str, str] | None = None,
 ) -> list[str]:
     """Hold the bundle to each resolved pack's verified identity and template content.
 
@@ -2510,7 +2511,9 @@ def _scan_resolved_pack_outputs(
     (shared composition roots aside) must be present, and the output of every
     static template (one that renders without build-time context, any file
     but ``.j2``) must equal the verified template text, line endings
-    normalized. A ``.j2`` output renders from the build's template variables,
+    normalized, after any supplied approved canonical module compilation.
+    The expected compilation starts from verified sources, never this bundle.
+    A ``.j2`` output renders from the build's template variables,
     which this check does not have, so nothing is rendered here: it is
     verified through the pack's declared outputs and its pinned identity.
     """
@@ -2543,10 +2546,13 @@ def _scan_resolved_pack_outputs(
                 continue
             if path not in files_map:
                 errors.append(f"{path}: template-owned output of the {label} is missing. {remedy}")
-            elif path in static and not _template_bytes_match(path, files_map[path], static[path], managed_owners):
+            elif path in static and not _template_bytes_match(
+                path, files_map[path], (compiled_templates or {}).get(path, static[path]), managed_owners,
+            ):
                 errors.append(
                     f"{path}: differs from the verified template of the {label}. A template-owned pack output "
-                    f"must be the verified template content, whatever the bundle's provenance records. {remedy}"
+                    f"must be the verified template content after approved canonical compilation, "
+                    f"whatever the bundle's provenance records. {remedy}"
                 )
     return errors
 
@@ -2645,7 +2651,20 @@ def scan_generated_bundle(
     auth_errors = _scan_auth_app_contract(scannable_files_map)
     errors.extend(error for error in auth_errors if error not in errors)
     errors.extend(_scan_pack_provenance_manifest(scannable_files_map))
-    errors.extend(_scan_resolved_pack_outputs(files_map, entries, managed_owners=managed_owners))
+    compiled_templates = None
+    if entries and context_variables is not None and (planned_data_contract is not None or subscription_contract is not None):
+        from .assembly_phase import compiled_pack_module_templates
+
+        try:
+            compiled_templates = compiled_pack_module_templates(
+                context_variables=persistence_context, data_contract=planned_data_contract,
+                subscription_contract=subscription_contract,
+            )
+        except (ValueError, ManagedCapabilityTemplateError) as exc:
+            errors.append(f"Selected CapabilityPack approved compilation failed: {exc}")
+    errors.extend(_scan_resolved_pack_outputs(
+        files_map, entries, managed_owners=managed_owners, compiled_templates=compiled_templates,
+    ))
     errors.extend(_scan_route_manifest_component_files(scannable_files_map))
     errors.extend(
         _scan_selected_managed_capability_boundaries(
