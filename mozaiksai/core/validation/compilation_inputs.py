@@ -200,6 +200,8 @@ async def resolve_app_compilation_inputs(
     The host supplies authenticated ownership and registry scope. Returning
     None leaves old/unbound bundles on strict static-template validation.
     """
+    from factory_app.workflows._shared.artifact_bundle import APP_BUNDLE_MAX_TOTAL_BYTES
+
     store = artifact_store or get_artifact_store()
     record = await store.get_build_record(app_id=app_id, build_record_id=build_record_id)
     selected = record
@@ -238,7 +240,7 @@ async def resolve_app_compilation_inputs(
             if record.source_workflow != "AppGenerator" or saved.inputs.binding != binding:
                 raise ValueError("Approved compilation origin is not the bound Factory save")
             context = await _context_from_inputs(saved.inputs, store=store, owner_user_id=owner_user_id)
-            await read_verified_artifact_bundle(selected)
+            await read_verified_artifact_bundle(selected, max_bytes=APP_BUNDLE_MAX_TOTAL_BYTES)
             context["capability_packs"] = deepcopy(selected.commit_metadata.metadata.get("capability_packs") or [])
             return ApprovedAppCompilation(key=_RESOLVER_KEY, context=context, binding=first, record=selected)
         if saved.parent_record_id != record.parent_build_record_id:

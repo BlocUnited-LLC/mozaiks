@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import zipfile
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
 from importlib import import_module
@@ -106,6 +107,33 @@ async def test_resolver_replays_only_exact_saved_inputs(saved):
         approval.context_for("foreign")
     with pytest.raises(TypeError, match="resolver|resolve_app"):
         ApprovedAppCompilation(key=object(), context={}, binding=None, record=None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asset_count", [5, 10])
+async def test_resolver_preserves_shared_app_bundle_archive_limit(saved, asset_count):
+    from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
+    from mozaiksai.core.artifacts.content_store import ContentIntegrityError
+
+    _, _, bundle = saved
+    path = Path(bundle.commit_metadata.metadata["artifact_path"])
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED) as archive:
+        for index in range(asset_count):
+            archive.writestr(f"bundle/ui/assets/{index}.png", b"x" * 7_000_000)
+    raw = path.read_bytes()
+    sha = hashlib.sha256(raw).hexdigest()
+    bundle.files_manifest[0].sha256 = sha
+    bundle.files_manifest[0].size_bytes = len(raw)
+    bundle.commit_metadata.metadata["compilation_inputs"]["archive_sha256"] = sha
+    if asset_count == 5:
+        assert len(raw) > 32_000_000
+        files, diagnostics = await read_artifact_bundle(bundle, include_binary=True)
+        assert len(files) == asset_count and not diagnostics
+        assert (await resolve(saved)).context_for("target")["run_build_binding"]["build_id"] == "genesis"
+    else:
+        for read in (lambda: read_artifact_bundle(bundle, include_binary=True), lambda: resolve(saved)):
+            with pytest.raises(ContentIntegrityError, match="archive_too_large"):
+                await read()
 
 
 @pytest.mark.asyncio
