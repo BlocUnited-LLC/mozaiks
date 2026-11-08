@@ -362,6 +362,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Module actions return a sanitized `DEPENDENCY_UNAVAILABLE` HTTP 503 when the
+  generated Cloud or Pay client cannot resolve its required connector
+  configuration. Permission denials still precede connector lookup and provider calls.
+
 - Account export and deletion in files `0.1.13`, notifications `0.1.13`,
   commerce `0.1.14`, social `0.1.14`, and support `0.1.14` use the same
   authenticated persistence bindings as module actions. Multi-page records are

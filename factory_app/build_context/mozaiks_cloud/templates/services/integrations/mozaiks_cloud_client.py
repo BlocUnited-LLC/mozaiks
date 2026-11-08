@@ -6,6 +6,8 @@ from typing import Any
 
 import httpx
 
+from mozaiksai.core.runtime.composition.module_executor import ModuleDependencyUnavailableError
+
 _CONNECTOR_SERVICE = "mozaiks_cloud"
 _DEFAULT_TIMEOUT = 20.0
 _DEFAULT_MAX_RETRIES = 2
@@ -27,7 +29,7 @@ class MozaiksCloudError(Exception):
     """Base error raised by Mozaiks Cloud integration clients."""
 
 
-class MozaiksCloudConfigurationError(MozaiksCloudError):
+class MozaiksCloudConfigurationError(MozaiksCloudError, ModuleDependencyUnavailableError):
     """Raised when the Mozaiks Cloud connector is not configured."""
 
 

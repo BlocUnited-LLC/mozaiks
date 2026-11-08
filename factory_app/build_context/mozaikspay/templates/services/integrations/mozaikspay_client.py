@@ -16,6 +16,8 @@ from typing import Any
 
 import httpx
 
+from mozaiksai.core.runtime.composition.module_executor import ModuleDependencyUnavailableError
+
 _DEFAULT_TIMEOUT = 20.0
 _MAX_RETRIES = 2
 _CONNECTOR_SERVICE = "mozaikspay"
@@ -27,7 +29,7 @@ class MozaiksPayError(Exception):
     """Base exception for MozaiksPay client errors."""
 
 
-class MozaiksPayConfigurationError(MozaiksPayError):
+class MozaiksPayConfigurationError(MozaiksPayError, ModuleDependencyUnavailableError):
     """Raised when MozaiksPay provider config is unavailable."""
 
 
