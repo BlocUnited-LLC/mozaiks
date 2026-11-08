@@ -5,7 +5,7 @@ Verifies that:
 - contract.yaml required_outputs all exist under templates; forbidden paths absent
 - The files module declares expected actions and capabilities with alignment
 - user_data_scope declared and account_data_handler.py ships (file records = user PII)
-- Data migration declares the stable files.records collection alias
+- Data contract declares the stable files.records collection; its migration ensures it
 - Backend files compile and use canonical persistence pattern
 - Service emits domain.files.* events
 - Service does not deliver notifications directly
@@ -171,17 +171,30 @@ def test_files_contract_declares_account_data_handler_as_required_output() -> No
 # Data migration
 # ---------------------------------------------------------------------------
 
-def test_files_data_migration_declares_files_records_alias() -> None:
+def test_files_data_contract_and_migration_declare_files_records_collection() -> None:
+    contract_path = TEMPLATES / "data" / "contract.json"
+    assert contract_path.exists()
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+
+    collections = {
+        (surface["surface_id"], collection["name"])
+        for surface in contract.get("surfaces", [])
+        for collection in surface.get("collections", [])
+    }
+    assert ("files", "records") in collections, f"Expected files.records in contract collections, got: {collections}"
+
     migration_path = TEMPLATES / "data" / "migrations" / "001_files_collections.json"
     assert migration_path.exists()
     migration = json.loads(migration_path.read_text(encoding="utf-8"))
-
-    aliases = {
-        collection["data_alias"]
-        for surface in migration.get("surfaces", [])
-        for collection in surface.get("collections", [])
+    assert not {"surfaces", "aliases", "shared_collections"} & set(migration), (
+        "collections and aliases belong in data/contract.json; the migration emits additive operations"
+    )
+    ensured = {
+        (operation["module_id"], operation["entity_name"])
+        for operation in migration.get("operations", [])
+        if operation.get("type") == "ensure_collection"
     }
-    assert "files.records" in aliases, f"Expected files.records in aliases, got: {aliases}"
+    assert ("files", "records") in ensured, f"Expected an ensure_collection for files.records, got: {ensured}"
 
 
 # ---------------------------------------------------------------------------

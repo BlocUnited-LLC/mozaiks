@@ -6,9 +6,9 @@ includes mozaikspay + commerce packs.
 
 Three drift surfaces are guarded:
 
-1. Commerce module.yaml template — entitlement_gate wiring on paid actions.
-   If a future edit removes or renames entitlement_gate on start_checkout or
-   create_product, those actions become unguarded and any user can call them.
+1. Compiled commerce module.yaml — approved entitlement gates on paid actions.
+   Raw templates retain action permissions; approved subscription selections
+   determine the final pricing gates.
 
 2. Pack mutual-exclusion contract — mozaikspay declares subscription_write_path
    and the entitlement_dispatch contract forbids co-selection with it.
@@ -17,7 +17,7 @@ Three drift surfaces are guarded:
 
 3. Subscriptions fixture + ConfiguredEntitlementAdapter — commerce capability IDs
    declared in a fixture subscriptions.yaml are correctly granted/denied by the
-   runtime adapter.  If the capability ID strings in the module template and the
+   runtime adapter. If the capability ID strings in the compiled module and the
    subscriptions config drift apart, users silently get ENTITLEMENT_REQUIRED even
    with an active paid subscription.
 """
@@ -30,8 +30,12 @@ from typing import Any
 import pytest
 import yaml
 
+from factory_app.workflows.AppGenerator.tools.module_entitlement_gates import (
+    apply_entitlement_gates,
+)
 from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+from tests.appgenerator_subscription_fixture import subscription_contract
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -73,38 +77,41 @@ class _FakeCollection:
 
 
 def _commerce_subscriptions_config() -> SubscriptionsConfig:
-    """Fixture subscriptions.yaml with commerce capability IDs in a paid plan."""
+    """The approved feature-selection fixture consumed by the gate compiler."""
     return SubscriptionsConfig.model_validate(
         {
-            "schema_version": "mozaiks.subscriptions.v1",
+            **subscription_contract("commerce", "start_checkout", "create_product")["subscription_config_file"],
             "label": "Commerce SaaS",
-            "default_plan_id": "free",
             "assignment_store": {
                 "data_alias": "billing.subscriptions",
                 "user_id_field": "user_id",
                 "active_statuses": ["active"],
             },
-            "plans": [
-                {
-                    "plan_id": "free",
-                    "label": "Free",
-                    "capabilities": [],
-                },
-                {
-                    "plan_id": "merchant",
-                    "label": "Merchant",
-                    "capabilities": [
-                        "commerce.checkout.start",
-                        "commerce.products.manage",
-                        "commerce.orders.manage",
-                    ],
-                },
-            ],
         }
     )
 
 
-def _active_commerce_grant(*, plan_id: str = "merchant") -> dict[str, Any]:
+def _compiled_commerce(*, gated: bool = True) -> dict[str, Any]:
+    context = {
+        "subscription_contract": subscription_contract("commerce", "start_checkout", "create_product") if gated else None,
+        "design_surface_map": {"surfaces": [{
+            "surface_id": "commerce", "surface_kind": "module", "owner": "app",
+            "owned_mutations": [
+                "create_product", "update_product", "archive_product", "adjust_inventory",
+                "add_cart_item", "update_cart_item", "remove_cart_item", "clear_cart",
+                "start_checkout", "record_checkout_result", "update_order_status",
+            ],
+            "custom_reads": ["list_products", "get_product", "get_cart", "list_orders", "get_order"],
+        }]},
+    }
+    compiled = apply_entitlement_gates([{
+        "filename": "modules/commerce/module.yaml",
+        "content": _COMMERCE_MODULE_YAML.read_text(encoding="utf-8"),
+    }], context_variables=context)
+    return yaml.safe_load(compiled[0]["content"])
+
+
+def _active_commerce_grant(*, plan_id: str = "pro") -> dict[str, Any]:
     return {
         "app_id": "commerce-app",
         "user_id": "merchant-1",
@@ -113,70 +120,50 @@ def _active_commerce_grant(*, plan_id: str = "merchant") -> dict[str, Any]:
         "plan_id": plan_id,
         "status": "active",
         "granted_capabilities": [
-            {"capability_id": "commerce.checkout.start"},
-            {"capability_id": "commerce.products.manage"},
-            {"capability_id": "commerce.orders.manage"},
+            {"capability_id": "feature.module.commerce.start_checkout"},
+            {"capability_id": "feature.module.commerce.create_product"},
         ],
     }
 
 
 # ---------------------------------------------------------------------------
-# 1. Commerce module.yaml template — entitlement_gate drift guard
+# 1. Compiled commerce module.yaml — entitlement gate and permission drift guards
 # ---------------------------------------------------------------------------
 
 
-def test_commerce_start_checkout_declares_entitlement_gate() -> None:
-    """start_checkout must declare entitlement_gate: commerce.checkout.start.
-
-    Without this gate any unauthenticated user can start a checkout session
-    on any generated commerce app regardless of their subscription tier.
-    """
-    module_yaml = _read_yaml(_COMMERCE_MODULE_YAML)
-    actions = {a["id"]: a for a in module_yaml.get("actions") or []}
-
-    assert "start_checkout" in actions, "commerce module.yaml must declare start_checkout action"
-    gate = actions["start_checkout"].get("entitlement_gate")
-    assert gate == "commerce.checkout.start", (
-        f"start_checkout must declare entitlement_gate: commerce.checkout.start, got {gate!r}"
+@pytest.mark.parametrize("gated", [False, True])
+def test_commerce_compiled_pricing_gates_preserve_permissions(gated: bool) -> None:
+    raw = _read_yaml(_COMMERCE_MODULE_YAML)
+    assert not any(action.get("entitlement_gate") for action in raw["actions"])
+    compiled = _compiled_commerce(gated=gated)
+    actions = {action["id"]: action for action in compiled["actions"]}
+    assert {key: row["entitlement_gate"] for key, row in actions.items() if row.get("entitlement_gate")} == (
+        {key: "feature.module.commerce." + key for key in ("start_checkout", "create_product")} if gated else {}
     )
+    assert compiled["permissions"] == raw["permissions"]
+    assert {key: row.get("permissions") for key, row in actions.items()} == {
+        action["id"]: action.get("permissions") for action in raw["actions"]
+    }
+    assert actions["start_checkout"]["permissions"] == ["commerce.checkout.start"]
+    assert actions["create_product"]["permissions"] == ["commerce.catalog.manage"]
 
 
-def test_commerce_create_product_declares_entitlement_gate() -> None:
-    """create_product must declare entitlement_gate: commerce.products.manage.
-
-    Without this gate any user (including free-tier) can create products,
-    bypassing the subscription requirement for merchant capabilities.
-    """
-    module_yaml = _read_yaml(_COMMERCE_MODULE_YAML)
-    actions = {a["id"]: a for a in module_yaml.get("actions") or []}
-
-    assert "create_product" in actions, "commerce module.yaml must declare create_product action"
-    gate = actions["create_product"].get("entitlement_gate")
-    assert gate == "commerce.products.manage", (
-        f"create_product must declare entitlement_gate: commerce.products.manage, got {gate!r}"
-    )
-
-
-def test_commerce_entitlement_gate_capability_ids_match_declared_capabilities() -> None:
-    """The entitlement_gate values on actions must be declared in the module's capabilities list.
-
-    If the gate capability ID and the declared capability ID drift apart the gate
-    will always deny because ConfiguredEntitlementAdapter checks the granted list,
-    not the action permission string.
-    """
-    module_yaml = _read_yaml(_COMMERCE_MODULE_YAML)
+def test_commerce_entitlement_gate_capability_ids_match_approved_plan_capabilities() -> None:
+    """Compiled pricing gates resolve to approved plans, separately from permissions."""
+    module_yaml = _compiled_commerce()
     declared_cap_ids = {
-        cap["capability_id"] for cap in (module_yaml.get("capabilities") or [])
+        capability for plan in _commerce_subscriptions_config().plans for capability in plan.capabilities
     }
     gated_actions = [
         a for a in (module_yaml.get("actions") or []) if a.get("entitlement_gate")
     ]
 
+    assert len(gated_actions) == 2
     for action in gated_actions:
         gate_cap = action["entitlement_gate"]
         assert gate_cap in declared_cap_ids, (
             f"action '{action['id']}' declares entitlement_gate: {gate_cap!r} "
-            f"but that capability_id is not in the module capabilities list. "
+            f"but that capability_id is not in the approved subscription plans. "
             f"Declared: {sorted(declared_cap_ids)}"
         )
 
@@ -263,10 +250,8 @@ def test_entitlement_dispatch_cross_pack_integration_forbids_co_selection() -> N
 async def test_active_merchant_subscription_grants_commerce_checkout_start() -> None:
     """A subscription record granting commerce capabilities allows start_checkout.
 
-    This test uses the actual capability ID strings from the commerce module.yaml
-    template and verifies the runtime adapter reads them correctly.  If the capability
-    IDs in the module template drift from the subscriptions.yaml fixture, this test
-    will catch it.
+    This uses the gate from the compiled manifest so a mismatch with the approved
+    subscription plan fails at the runtime adapter.
     """
     config = _commerce_subscriptions_config()
     collection = _FakeCollection([_active_commerce_grant()])
@@ -275,8 +260,9 @@ async def test_active_merchant_subscription_grants_commerce_checkout_start() -> 
         collection_resolver=lambda alias: collection,
     )
 
+    action = next(action for action in _compiled_commerce()["actions"] if action["id"] == "start_checkout")
     result = await adapter.check(
-        "commerce.checkout.start",
+        action["entitlement_gate"],
         app_id="commerce-app",
         user_id="merchant-1",
     )
@@ -287,7 +273,7 @@ async def test_active_merchant_subscription_grants_commerce_checkout_start() -> 
 
 @pytest.mark.asyncio
 async def test_active_merchant_subscription_grants_commerce_products_manage() -> None:
-    """Merchant subscription grants commerce.products.manage (required by create_product gate)."""
+    """An active subscription grants the compiled create_product gate."""
     config = _commerce_subscriptions_config()
     collection = _FakeCollection([_active_commerce_grant()])
     adapter = ConfiguredEntitlementAdapter(
@@ -295,8 +281,9 @@ async def test_active_merchant_subscription_grants_commerce_products_manage() ->
         collection_resolver=lambda alias: collection,
     )
 
+    action = next(action for action in _compiled_commerce()["actions"] if action["id"] == "create_product")
     result = await adapter.check(
-        "commerce.products.manage",
+        action["entitlement_gate"],
         app_id="commerce-app",
         user_id="merchant-1",
     )
@@ -307,7 +294,7 @@ async def test_active_merchant_subscription_grants_commerce_products_manage() ->
 
 @pytest.mark.asyncio
 async def test_free_plan_user_denied_commerce_checkout_start() -> None:
-    """A user with no subscription record is denied commerce.checkout.start.
+    """A user with no subscription record is denied the paid checkout feature.
 
     The free plan declares no capabilities, so the default plan check must deny.
     This is the denial half of the gate: without an active paid subscription the
@@ -320,8 +307,9 @@ async def test_free_plan_user_denied_commerce_checkout_start() -> None:
         collection_resolver=lambda alias: collection,
     )
 
+    action = next(action for action in _compiled_commerce()["actions"] if action["id"] == "start_checkout")
     result = await adapter.check(
-        "commerce.checkout.start",
+        action["entitlement_gate"],
         app_id="commerce-app",
         user_id="free-user",
     )
@@ -331,7 +319,7 @@ async def test_free_plan_user_denied_commerce_checkout_start() -> None:
 
 @pytest.mark.asyncio
 async def test_cancelled_merchant_subscription_denied_commerce_checkout_start() -> None:
-    """A cancelled subscription no longer grants commerce.checkout.start.
+    """A cancelled subscription no longer grants the paid checkout feature.
 
     This tests the expiry/cancellation half: once a subscription is cancelled
     the entitlement gate must deny the user even if the record still exists.
@@ -344,8 +332,9 @@ async def test_cancelled_merchant_subscription_denied_commerce_checkout_start() 
         collection_resolver=lambda alias: collection,
     )
 
+    action = next(action for action in _compiled_commerce()["actions"] if action["id"] == "start_checkout")
     result = await adapter.check(
-        "commerce.checkout.start",
+        action["entitlement_gate"],
         app_id="commerce-app",
         user_id="merchant-1",
     )
@@ -357,19 +346,19 @@ async def test_cancelled_merchant_subscription_denied_commerce_checkout_start() 
 async def test_commerce_capability_ids_are_not_in_free_plan_default() -> None:
     """Commerce paid capabilities must not appear in the free default plan.
 
-    If commerce.checkout.start or commerce.products.manage were accidentally
-    added to the free plan, the entitlement gate would become a no-op for all users.
+    If paid checkout or product-management features were accidentally added to
+    the free plan, the entitlement gate would become a no-op for all users.
     This test validates the fixture contract, not the runtime adapter.
     """
     config = _commerce_subscriptions_config()
     free_plan = next(p for p in config.plans if p.plan_id == "free")
     free_caps = set(free_plan.capabilities)
 
-    assert "commerce.checkout.start" not in free_caps, (
-        "commerce.checkout.start must not be in the free plan — "
+    assert "feature.module.commerce.start_checkout" not in free_caps, (
+        "The paid checkout feature must not be in the free plan — "
         "it must require an active paid subscription."
     )
-    assert "commerce.products.manage" not in free_caps, (
-        "commerce.products.manage must not be in the free plan — "
+    assert "feature.module.commerce.create_product" not in free_caps, (
+        "The paid product-management feature must not be in the free plan — "
         "it must require an active paid subscription."
     )

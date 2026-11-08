@@ -34,6 +34,8 @@ requires:
       reason: "support stores message_thread_id and delegates conversations to messages module"
 
 required_outputs:
+  - path: data/contract.json
+    owner: templates
   - path: data/migrations/001_support_collections.json
     owner: templates
   - path: modules/support/module.yaml
@@ -59,6 +61,8 @@ required_outputs:
   - path: modules/support/contracts/reactions.yaml
     owner: templates
   - path: modules/support/contracts/notifications.yaml
+    owner: templates
+  - path: ui/index.js
     owner: templates
   - path: ui/pages/custom/Support.jsx
     owner: templates

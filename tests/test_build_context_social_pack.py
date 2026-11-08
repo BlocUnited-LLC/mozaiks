@@ -5,7 +5,8 @@ Verifies that:
 - contract.yaml required_outputs all exist under templates; forbidden paths are absent
 - Each module (friends, activity_feed, user_posts) declares its expected actions and
   capabilities, with capabilities pointing at declared actions
-- Data migration declares all six stable collection aliases
+- data/contract.json declares all six stable collections, and the data migration
+  ensures exactly those collections and their indexes through additive operations
 - Backend Python files compile and use the canonical persistence pattern
 - Event, reaction, notification, and profile contracts are correctly declared
 - AppGenerator capability_directory and capability_routing wire the pack correctly
@@ -165,6 +166,9 @@ def test_activity_feed_module_declares_expected_actions() -> None:
         "get_feed",
         "get_profile_activity",
         "record_activity",
+        "on_friendship_created",
+        "on_post_published",
+        "on_post_commented",
     }
 
 
@@ -271,26 +275,61 @@ def test_user_posts_delete_is_soft_not_hard() -> None:
 # Data migration
 # ---------------------------------------------------------------------------
 
-def test_social_data_migration_declares_stable_collection_aliases() -> None:
-    import json
+SOCIAL_COLLECTIONS = {
+    ("friends", "friendships"),
+    ("friends", "requests"),
+    ("activity_feed", "events"),
+    ("user_posts", "posts"),
+    ("user_posts", "reactions"),
+    ("user_posts", "comments"),
+}
 
+
+def test_social_data_contract_and_migration_declare_stable_collections() -> None:
+    import json
+    import re
+
+    contract = json.loads((TEMPLATES / "data" / "contract.json").read_text(encoding="utf-8"))
     migration_path = TEMPLATES / "data" / "migrations" / "001_social_collections.json"
     assert migration_path.exists()
     migration = json.loads(migration_path.read_text(encoding="utf-8"))
 
-    aliases = {
-        collection["data_alias"]
-        for surface in migration.get("surfaces", [])
-        for collection in surface.get("collections", [])
+    # Collections belong in data/contract.json; the migration only emits additive operations.
+    assert {"surfaces", "aliases", "shared_collections"}.isdisjoint(migration)
+    assert migration["migration_id"] == "social_001_collections"
+    assert contract["shared_collections"] == []
+    assert {surface["surface_kind"] for surface in contract["surfaces"]} == {"module"}
+    collections = {
+        (surface["surface_id"], collection["name"]): collection
+        for surface in contract["surfaces"]
+        for collection in surface["collections"]
     }
-    assert aliases == {
-        "friends.friendships",
-        "friends.requests",
-        "activity_feed.events",
-        "user_posts.posts",
-        "user_posts.reactions",
-        "user_posts.comments",
+    assert set(collections) == SOCIAL_COLLECTIONS
+    for collection in collections.values():
+        assert collection["tenancy"] == "app_wide" and collection["owner_field"] is None
+        assert collection["lifecycle"] == {"write_mode": "module_action"}
+
+    operations = migration["operations"]
+    assert {(op["module_id"], op["entity_name"]) for op in operations if op["type"] == "ensure_collection"} == SOCIAL_COLLECTIONS
+    migrated_indexes = {
+        (op["module_id"], op["entity_name"], op["index"]["name"]): op["index"]
+        for op in operations if op["type"] == "ensure_index"
     }
+    declared_indexes = {
+        (*key, index["name"]): index for key, collection in collections.items() for index in collection["indexes"]
+    }
+    assert set(migrated_indexes) == set(declared_indexes)
+    for key, index in declared_indexes.items():
+        migrated = migrated_indexes[key]
+        assert migrated["keys"] == [[item["field"], item["order"]] for item in index["keys"]]
+        assert migrated.get("unique") == index.get("unique")
+
+    # The contract declares exactly the collections each module's backend opens through ctx.persistence.
+    for module_id in ("friends", "activity_feed", "user_posts"):
+        backend = TEMPLATES / "modules" / module_id / "backend"
+        source = "\n".join(_read_text(path) for path in (backend / "repo.py", backend / "account_data_handler.py"))
+        used = set(re.findall(r'(?<![A-Za-z_])_collection\([^)"]*"([a-z_]+)"\)', source))
+        assert {(module_id, name) for name in used} == {key for key in SOCIAL_COLLECTIONS if key[0] == module_id}
 
 
 # ---------------------------------------------------------------------------

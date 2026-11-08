@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
+from .policy import actor_id
 from .repo import get_file, list_files, register_file, soft_delete_file
 from .schemas import build_file_record, metadata_entries_to_map, safe_file_record
 
@@ -46,7 +47,7 @@ class FilesService:
         if not storage_url:
             return {"success": False, "error": "storage_url is required"}
 
-        created_by = str(getattr(ctx, "user_id", None) or "anonymous").strip() or "anonymous"
+        created_by = actor_id(ctx)
         app_id = str(getattr(ctx, "app_id", None) or "")
 
         record = build_file_record(
@@ -69,6 +70,7 @@ class FilesService:
             storage_url=record["storage_url"],
             is_public=record["is_public"],
             created_by=record["created_by"],
+            created_at=record["created_at"],
             metadata=record.get("metadata"),
         )
 
@@ -100,7 +102,7 @@ class FilesService:
         mime_type: str | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
-        created_by = str(getattr(ctx, "user_id", None) or "").strip() or None
+        created_by = actor_id(ctx)
         docs = await list_files(
             ctx,
             created_by=created_by,
@@ -112,7 +114,7 @@ class FilesService:
         return {"files": files, "total": len(files)}
 
     async def delete_file(self, ctx, *, file_id: str) -> dict[str, Any]:
-        deleted_by = str(getattr(ctx, "user_id", None) or "anonymous").strip() or "anonymous"
+        deleted_by = actor_id(ctx)
         app_id = getattr(ctx, "app_id", None)
 
         matched = await soft_delete_file(ctx, file_id=file_id, deleted_by=deleted_by)

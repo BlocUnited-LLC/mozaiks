@@ -35,6 +35,7 @@ from urllib.parse import urlsplit
 
 import yaml
 
+from factory_app.workflows._shared.generated_ui_contract import audit_route_auth_action_contracts
 from mozaiksai.core.runtime.app.page_schema import (
     discover_page_schema_paths,
     validate_ask_context_references,
@@ -536,7 +537,21 @@ async def validate_wiring(
         ask_pages, action_contracts,
     )
     workflow_names = generated_workflow_names(contract_files, context_variables)
-    page_binding_failures: list[dict[str, Any]] = []
+    route_files = [{"filename": path, "content": content} for path, content in contract_files.items()]
+    if not has_file_snapshot:
+        route_files.extend(
+            {"filename": f"ui/pages/{index}.yaml", "content": yaml.safe_dump(page)}
+            for index, page in enumerate(app_pages) if isinstance(page, dict)
+        )
+    page_binding_failures: list[dict[str, Any]] = [
+        {
+            "test": "wiring_route_auth", "error": warning,
+            "fix_suggestion": "Bind routeAuth to an existing module action whose output_schema requires a non-null boolean allowed field.",
+        }
+        for warning in audit_route_auth_action_contracts(
+            route_files, require_module_contracts=has_file_snapshot,
+        )
+    ]
     for page in app_pages:
         for test, errors, suggestion in (
             ("wiring_page_output", page_data_binding_errors(page, action_contracts),

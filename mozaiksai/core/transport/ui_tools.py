@@ -35,6 +35,37 @@ if TYPE_CHECKING:
 logger = logging.getLogger("simple_transport.ui_tools")
 
 
+def project_ui_tool_response_state(
+    tool_call: dict[str, Any] | None, *, chat_id: str, transport: Any = None,
+) -> dict[str, Any] | None:
+    """Describe current response availability without restoring a waiter.
+
+    Persisted UI is display state, not execution authority. Reopening it must
+    not start AG2 or make an old decision executable in a new process.
+    """
+    if not isinstance(tool_call, dict):
+        return None
+    payload = tool_call.get("payload")
+    if (
+        tool_call.get("awaiting_response") is False
+        or isinstance(payload, dict) and payload.get("interaction_type") == "ui_surface"
+    ):
+        return dict(tool_call)
+    event_id = tool_call.get("tool_call_id")
+    available = False
+    if (
+        transport is not None and isinstance(event_id, str) and event_id
+        and transport._tool_call_chat_id(event_id) == chat_id
+        and not transport._is_tool_call_response_resolved(event_id)
+    ):
+        future = transport._resolve_tool_call_future(event_id)
+        available = bool(
+            future is not None and not future.done()
+            or event_id in transport._input_request_registries.get(chat_id, {})
+        )
+    return {**tool_call, "response_available": available}
+
+
 class UIToolsMixin:
     """Mixin providing UI tool interaction functionality.
 

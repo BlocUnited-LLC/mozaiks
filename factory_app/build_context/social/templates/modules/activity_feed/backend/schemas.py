@@ -27,7 +27,7 @@ def timestamp_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def coerce_limit(value: Any, default: int = 20, maximum: int = 100) -> int:
+def coerce_limit(value: Any, default: int = 20, maximum: int = 99) -> int:
     try:
         return max(1, min(int(value), maximum))
     except (TypeError, ValueError):

@@ -10,6 +10,7 @@ from .acceptance import (
     ValidationRegistry,
     ValidationRun,
 )
+from .compilation_inputs import ApprovedAppCompilation, resolve_app_compilation_inputs
 from .functional_generated_app import (
     FunctionalGeneratedAppDiagnostic,
     scan_functional_generated_app,
@@ -24,6 +25,8 @@ from .generated_app import (
 from .workspace import validate_app_workspace
 
 __all__ = [
+    "ApprovedAppCompilation",
+    "resolve_app_compilation_inputs",
     "validate_app_workspace",
     "AcceptanceController",
     "AcceptanceResult",

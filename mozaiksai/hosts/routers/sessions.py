@@ -22,6 +22,7 @@ from mozaiksai.core.auth.dependencies import (
     validate_user_id_against_principal,
 )
 from mozaiksai.core.multitenant import build_app_scope_filter
+from mozaiksai.core.transport.ui_tools import project_ui_tool_response_state
 from mozaiksai.hosts import runtime as runtime_app
 from mozaiksai.hosts.workflow_runnability import (
     get_ordered_workflow_names,
@@ -90,7 +91,9 @@ async def list_user_sessions(
                 "workflow_name": session.get("workflow_name"),
                 "created_at": session.get("created_at").isoformat() if session.get("created_at") else None,
                 "last_updated_at": session.get("last_updated_at").isoformat() if session.get("last_updated_at") else None,
-                "last_artifact": extract_last_artifact(session),
+                "last_artifact": project_ui_tool_response_state(
+                    extract_last_artifact(session), chat_id=session["_id"], transport=runtime_app.simple_transport,
+                ),
             })
         return {"sessions": result, "count": len(result)}
     except Exception as exc:

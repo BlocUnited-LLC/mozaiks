@@ -425,7 +425,7 @@ def _module_contracts_from_files(
             warnings.append(f"{source_label} {filename}.actions must be a list.")
             actions = []
 
-        action_ids: set[str] = set()
+        action_schemas: dict[str, Any] = {}
         for action in actions:
             if isinstance(action, dict):
                 action_id = str(action.get("id") or action.get("name") or "").strip()
@@ -434,15 +434,15 @@ def _module_contracts_from_files(
             else:
                 continue
             if action_id:
-                action_ids.add(action_id)
+                action_schemas[action_id] = action.get("output_schema") if isinstance(action, dict) else None
 
         if module_id in contracts:
             warnings.append(
                 f"{source_label} {filename} duplicates module id '{module_id}' already declared by {contracts[module_id]['path']}."
             )
-            contracts[module_id]["actions"].update(action_ids)
+            contracts[module_id]["actions"].update(action_schemas)
             continue
-        contracts[module_id] = {"path": filename, "actions": action_ids}
+        contracts[module_id] = {"path": filename, "actions": action_schemas}
 
     return contracts, saw_module_contract, warnings
 
@@ -481,6 +481,21 @@ def _audit_route_auth_action_contracts(
             warnings.append(
                 f"{source_label} {ref['path']} references action '{module_id}/{action_id}' but {contract['path']} does not declare that action."
             )
+            continue
+        schema = contract["actions"][action_id]
+        properties = schema.get("properties") if isinstance(schema, dict) else None
+        allowed = properties.get("allowed") if isinstance(properties, dict) else None
+        required = schema.get("required") if isinstance(schema, dict) else None
+        if not (
+            isinstance(schema, dict) and schema.get("type") == "object"
+            and isinstance(required, list) and "allowed" in required
+            and isinstance(allowed, dict) and allowed.get("type") == "boolean"
+        ):
+            warnings.append(
+                f"{source_label} {ref['path']} references action '{module_id}/{action_id}' but "
+                f"{contract['path']} must declare an output_schema object with required boolean 'allowed' "
+                "(non-null). RouteRenderer reads allowed; another field cannot substitute for it."
+            )
     return warnings
 
 
@@ -494,6 +509,53 @@ def _yaml_page_files(files: dict[str, str]) -> list[tuple[str, str]]:
             continue
         page_files.append((filename, content))
     return page_files
+
+
+def _collect_route_auth_references(
+    files: dict[str, str], route_pages: Sequence[dict[str, Any]], *, source_label: str,
+) -> tuple[list[dict[str, str]], list[str]]:
+    references: list[dict[str, str]] = []
+    warnings: list[str] = []
+    pages: list[tuple[str, dict[str, Any]]] = []
+    for filename, content in _yaml_page_files(files):
+        page, parse_warnings = _parse_yaml_mapping_content(content, source_label=source_label, file_label=filename)
+        warnings.extend(parse_warnings)
+        if isinstance(page, dict):
+            pages.append((filename, page))
+    pages.extend((f"route_manifest.json pages[{index}]", page) for index, page in enumerate(route_pages))
+    for label, page in pages:
+        meta = page.get("meta")
+        if meta is not None and not isinstance(meta, dict):
+            warnings.append(f"{source_label} {label}.meta must be an object or null.")
+        elif isinstance(meta, dict):
+            path = f"{label}.meta.routeAuth"
+            warnings.extend(f"{source_label} {warning}" for warning in _audit_route_auth(meta.get("routeAuth"), path=path))
+            reference = _route_auth_reference(meta.get("routeAuth"), path=path)
+            if reference is not None:
+                references.append(reference)
+    return references, warnings
+
+
+def audit_route_auth_action_contracts(
+    code_files: Sequence[dict[str, Any]], *, source_label: str = "app route authorization",
+    require_module_contracts: bool = True,
+) -> list[str]:
+    """Check route guards against the exact companion actions without executing app code."""
+    files = _bundle_file_map(code_files)
+    pages, warnings = _route_manifest_pages_from_content(
+        files["ui/route_manifest.json"], source_label=source_label,
+    ) if "ui/route_manifest.json" in files else ([], [])
+    references, reference_warnings = _collect_route_auth_references(files, pages, source_label=source_label)
+    if not references:
+        return dedupe([*warnings, *reference_warnings])
+    contracts, saw_module_contract, module_warnings = _module_contracts_from_files(files, source_label=source_label)
+    return dedupe([
+        *warnings, *reference_warnings, *module_warnings,
+        *_audit_route_auth_action_contracts(
+            references, contracts, saw_module_contract=saw_module_contract or require_module_contracts,
+            source_label=source_label,
+        ),
+    ])
 
 
 def audit_generated_react_files(
@@ -1112,6 +1174,7 @@ def audit_app_ui_bundle_integrity(
     code_files: Sequence[dict[str, Any]],
     *,
     source_label: str = "app UI bundle",
+    require_module_contracts: bool = False,
 ) -> list[str]:
     """Return route/component/admin registry drift warnings for app UI files.
 
@@ -1129,7 +1192,6 @@ def audit_app_ui_bundle_integrity(
 
     warnings: list[str] = []
     route_pages: list[dict[str, Any]] = []
-    route_auth_refs: list[dict[str, str]] = []
 
     route_manifest_content = files.get("ui/route_manifest.json")
     if route_manifest_content is not None:
@@ -1145,29 +1207,8 @@ def audit_app_ui_bundle_integrity(
     )
     warnings.extend(module_warnings)
 
-    for filename, content in _yaml_page_files(files):
-        page_schema, page_warnings = _parse_yaml_mapping_content(
-            content,
-            source_label=source_label,
-            file_label=filename,
-        )
-        warnings.extend(page_warnings)
-        if not isinstance(page_schema, dict):
-            continue
-        meta = page_schema.get("meta")
-        if meta is not None and not isinstance(meta, dict):
-            warnings.append(f"{source_label} {filename}.meta must be an object or null.")
-            continue
-        if not isinstance(meta, dict):
-            continue
-        route_auth = meta.get("routeAuth")
-        warnings.extend(
-            f"{source_label} {warning}"
-            for warning in _audit_route_auth(route_auth, path=f"{filename}.meta.routeAuth")
-        )
-        ref = _route_auth_reference(route_auth, path=f"{filename}.meta.routeAuth")
-        if ref is not None:
-            route_auth_refs.append(ref)
+    route_auth_refs, reference_warnings = _collect_route_auth_references(files, route_pages, source_label=source_label)
+    warnings.extend(reference_warnings)
 
     registered_files, registry_warnings = resolve_registered_component_files(files, source_label=source_label)
     warnings.extend(registry_warnings)
@@ -1177,17 +1218,6 @@ def audit_app_ui_bundle_integrity(
         route_path = str(page.get("path") or page.get("route") or "").strip()
         component = str(page.get("component") or "").strip()
         label = f"route_manifest.json pages[{index}]"
-        meta = page.get("meta")
-        if meta is not None and not isinstance(meta, dict):
-            warnings.append(f"{source_label} {label}.meta must be an object or null.")
-        elif isinstance(meta, dict):
-            warnings.extend(
-                f"{source_label} {warning}"
-                for warning in _audit_route_auth(meta.get("routeAuth"), path=f"{label}.meta.routeAuth")
-            )
-            ref = _route_auth_reference(meta.get("routeAuth"), path=f"{label}.meta.routeAuth")
-            if ref is not None:
-                route_auth_refs.append(ref)
         if not component:
             continue
         route_components.setdefault(component, set()).add(route_path or "<missing path>")
@@ -1263,7 +1293,7 @@ def audit_app_ui_bundle_integrity(
         _audit_route_auth_action_contracts(
             route_auth_refs,
             module_contracts,
-            saw_module_contract=saw_module_contract,
+            saw_module_contract=saw_module_contract or require_module_contracts,
             source_label=source_label,
         )
     )
@@ -1277,6 +1307,7 @@ __all__ = [
     "audit_custom_route_bundle_integrity",
     "audit_generated_react_files",
     "audit_page_schemas",
+    "audit_route_auth_action_contracts",
     "custom_route_bundle_page_files",
     "dedupe",
     "resolve_registered_component_files",

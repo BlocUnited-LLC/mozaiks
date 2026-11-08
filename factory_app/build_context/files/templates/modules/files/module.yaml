@@ -62,7 +62,7 @@ actions:
       - domain.files.file_uploaded
 
   - id: get_file
-    description: Fetch a single file record by file_id.
+    description: Fetch a live file owned by the current user or marked public, by file_id.
     handler_method: get_file
     input_schema:
       type: object
@@ -76,7 +76,7 @@ actions:
       required: [file]
       properties:
         file:
-          type: object
+          type: [object, "null"]
     permissions:
       - files.read
 
@@ -105,7 +105,7 @@ actions:
       - files.read
 
   - id: delete_file
-    description: Soft-delete a file record by file_id.
+    description: Soft-delete a live file owned by the current user, by file_id.
     handler_method: delete_file
     input_schema:
       type: object

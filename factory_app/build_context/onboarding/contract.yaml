@@ -58,12 +58,6 @@ recommended_domains:
   - saas
   - creator
 
-avoid_when:
-  - App is a single-page tool with one primary action.
-  - App surface is operator-only or admin-only.
-  - App navigation has fewer than three distinct sections.
-  - App is a CLI, API, or developer-facing tool with no meaningful UI.
-
 required_outputs:
   - path: config/onboarding.yaml
     owner: generator
@@ -129,6 +123,12 @@ forbidden_outputs:
       is an overlay, not a navigation destination.
 
 runtime_boundaries:
+  - id: tour_applicability
+    rule: >
+      Do not add a tour to a single-action tool, an operator-only or admin-only
+      app, navigation with fewer than three distinct sections, or a CLI/API
+      with no meaningful user interface.
+
   - id: tour_overlay_is_oss
     rule: >
       The tour spotlight, tooltip, backdrop, step progression, and installTour()

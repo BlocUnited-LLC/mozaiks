@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from .policy import actor_id, app_scope
+from .policy import actor_id
 from .repo import FriendRequestRepo, FriendshipRepo
 from .schemas import (
     REQUEST_STATUS_ACCEPTED,
@@ -24,18 +24,17 @@ class FriendsService:
 
     async def send_friend_request(self, ctx, *, recipient_id: str) -> dict:
         user_id = actor_id(ctx)
-        app_id = getattr(ctx, "app_id", None)
 
         if user_id == recipient_id:
             return {"success": False, "error": "You cannot send a friend request to yourself."}
 
         # Already friends?
-        existing = await self._friendships.find(ctx, user_id=user_id, friend_user_id=recipient_id, app_id=app_id)
+        existing = await self._friendships.find(ctx, user_id=user_id, friend_user_id=recipient_id)
         if existing:
             return {"success": False, "error": "You are already friends with this user."}
 
         # Pending request already exists?
-        pending = await self._requests.find_pending(ctx, requester_id=user_id, recipient_id=recipient_id, app_id=app_id)
+        pending = await self._requests.find_pending(ctx, requester_id=user_id, recipient_id=recipient_id)
         if pending:
             return {"success": False, "error": "A pending friend request already exists.", "request": pending}
 
@@ -48,7 +47,6 @@ class FriendsService:
             "status": REQUEST_STATUS_PENDING,
             "created_at": now,
             "updated_at": now,
-            **app_scope(ctx),
         }
         await self._requests.create(ctx, doc)
 
@@ -60,7 +58,7 @@ class FriendsService:
             "created_at": now,
         })
 
-        return {"success": True, "request": {k: v for k, v in doc.items() if k != "app_id"}}
+        return {"success": True, "request": doc}
 
     async def accept_friend_request(self, ctx, *, request_id: str) -> dict:
         user_id = actor_id(ctx)
@@ -77,7 +75,7 @@ class FriendsService:
         await self._requests.update_status(ctx, request_id=request_id, status=REQUEST_STATUS_ACCEPTED, updated_at=now)
 
         friendship_id = f"fs_{uuid4().hex}"
-        base = {"friendship_id": friendship_id, "since": now, "created_at": now, **app_scope(ctx)}
+        base = {"friendship_id": friendship_id, "since": now, "created_at": now}
         doc_a = {**base, "user_id": req["requester_id"], "friend_user_id": user_id}
         doc_b = {**base, "user_id": user_id, "friend_user_id": req["requester_id"]}
         await self._friendships.create_pair(ctx, doc_a, doc_b)
@@ -91,7 +89,7 @@ class FriendsService:
             "created_at": now,
         })
 
-        return {"success": True, "friendship": {k: v for k, v in doc_a.items() if k != "app_id"}}
+        return {"success": True, "friendship": doc_a}
 
     async def decline_friend_request(self, ctx, *, request_id: str) -> dict:
         user_id = actor_id(ctx)
@@ -143,9 +141,8 @@ class FriendsService:
 
     async def remove_friend(self, ctx, *, friend_user_id: str) -> dict:
         user_id = actor_id(ctx)
-        app_id = getattr(ctx, "app_id", None)
 
-        deleted = await self._friendships.delete_pair(ctx, user_id=user_id, friend_user_id=friend_user_id, app_id=app_id)
+        deleted = await self._friendships.delete_pair(ctx, user_id=user_id, friend_user_id=friend_user_id)
         if not deleted:
             return {"success": False, "error": "Friendship not found."}
 
@@ -160,9 +157,8 @@ class FriendsService:
 
     async def list_friends(self, ctx, *, limit: int | None = None, before: str | None = None) -> dict:
         user_id = actor_id(ctx)
-        app_id = getattr(ctx, "app_id", None)
         bounded = coerce_limit(limit)
-        rows = await self._friendships.list(ctx, user_id=user_id, app_id=app_id, limit=bounded + 1, before=before)
+        rows = await self._friendships.list(ctx, user_id=user_id, limit=bounded + 1, before=before)
         has_more = len(rows) > bounded
         page = rows[:bounded]
         return {
@@ -172,9 +168,8 @@ class FriendsService:
         }
 
     async def list_friends_of(self, ctx, *, user_id: str, limit: int | None = None, before: str | None = None) -> dict:
-        app_id = getattr(ctx, "app_id", None)
         bounded = coerce_limit(limit)
-        rows = await self._friendships.list(ctx, user_id=user_id, app_id=app_id, limit=bounded + 1, before=before)
+        rows = await self._friendships.list(ctx, user_id=user_id, limit=bounded + 1, before=before)
         has_more = len(rows) > bounded
         page = rows[:bounded]
         return {
@@ -220,17 +215,16 @@ class FriendsService:
 
     async def get_friendship_status(self, ctx, *, other_user_id: str) -> dict:
         user_id = actor_id(ctx)
-        app_id = getattr(ctx, "app_id", None)
 
-        friendship = await self._friendships.find(ctx, user_id=user_id, friend_user_id=other_user_id, app_id=app_id)
+        friendship = await self._friendships.find(ctx, user_id=user_id, friend_user_id=other_user_id)
         if friendship:
             return {"status": "friends", "friendship": friendship}
 
-        sent = await self._requests.find_pending(ctx, requester_id=user_id, recipient_id=other_user_id, app_id=app_id)
+        sent = await self._requests.find_pending(ctx, requester_id=user_id, recipient_id=other_user_id)
         if sent:
             return {"status": "request_sent", "request": sent}
 
-        received = await self._requests.find_pending(ctx, requester_id=other_user_id, recipient_id=user_id, app_id=app_id)
+        received = await self._requests.find_pending(ctx, requester_id=other_user_id, recipient_id=user_id)
         if received:
             return {"status": "request_received", "request": received}
 
@@ -238,6 +232,5 @@ class FriendsService:
 
     async def get_friends_count(self, ctx) -> dict:
         user_id = actor_id(ctx)
-        app_id = getattr(ctx, "app_id", None)
-        count = await self._friendships.count(ctx, user_id=user_id, app_id=app_id)
+        count = await self._friendships.count(ctx, user_id=user_id)
         return {"count": count}

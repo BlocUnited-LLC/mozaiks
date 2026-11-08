@@ -16,6 +16,7 @@ import inspect
 import re
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Iterable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -26,7 +27,12 @@ from mozaiksai.core.events.unified_event_dispatcher import (
     EventDeliveryEvidence,
     EventDispatchOutcome,
 )
-from mozaiksai.core.runtime.app.module_loader import LoadedModule
+from mozaiksai.core.runtime.app.module_loader import ActionDef, LoadedModule
+from mozaiksai.core.runtime.composition.module_event_contract import (
+    build_module_event_envelope,
+    module_event_id,
+    module_event_rejection,
+)
 from mozaiksai.core.runtime.composition.module_event_provenance import (
     ModuleEventProvenance,
     ModuleEventRejection,
@@ -46,6 +52,16 @@ from mozaiksai.core.runtime.composition.schema_validation import (
     SchemaValidationDiagnostic,
     validate_json_schema,
 )
+from mozaiksai.core.runtime.composition.workflow_trigger_guard import WORKFLOW_TRIGGER_TRACE_KEY
+from mozaiksai.core.runtime.persistence.adapter import (
+    ModulePersistenceContext,
+    PersistencePrincipal,
+    PersistenceScopeError,
+)
+from mozaiksai.core.runtime.persistence.intent_loader import DataContract
+from mozaiksai.core.runtime.persistence.mongo import MongoPersistenceContext
+from mozaiksai.core.runtime.persistence.platform_modules import PlatformModuleDeclarations
+from mozaiksai.core.runtime.persistence.request_scope import current_persistence_principal
 
 logger = get_workflow_logger("module_event_router")
 
@@ -150,6 +166,9 @@ class _ReactionCtx:
         tenant_id: str,
         user_id: str,
         event_emitter: EventEmitter | None,
+        workspace_id: str | None = None,
+        module_id: str | None = None,
+        persistence: ModulePersistenceContext | None = None,
         event_provenance: ModuleEventProvenance | None = None,
         reaction_provenance: ModuleReactionProvenance | None = None,
         permissions: Iterable[str] | None = None,
@@ -157,6 +176,9 @@ class _ReactionCtx:
         self.app_id = app_id
         self.tenant_id = tenant_id
         self.user_id = user_id
+        self.workspace_id = workspace_id
+        self.module_id = module_id
+        self.persistence = persistence
         self.event_provenance = event_provenance
         self.reaction_provenance = reaction_provenance
         self.permissions = list(permissions or [])
@@ -164,7 +186,7 @@ class _ReactionCtx:
         self.causation_id = event_provenance.causation_id if event_provenance is not None else None
         self._event_emitter = event_emitter
 
-    async def emit(self, event_type: str, payload: dict[str, Any]) -> EventDispatchOutcome | None:
+    async def emit(self, event_type: str, payload: dict[str, Any]) -> EventDispatchOutcome | ModuleEventRejection | None:
         if self._event_emitter is not None:
             return await ModuleEventRouter._maybe_await(self._event_emitter(event_type, payload))
         return None
@@ -242,11 +264,19 @@ class ModuleEventRouter:
         notification_store: NotificationStore | None = None,
         capability_invoker: CapabilityInvoker | None = None,
         idempotency_store: ReactionIdempotencyStore | None = None,
+        data_contract: DataContract | None = None,
+        platform_modules: PlatformModuleDeclarations | None = None,
+        persistence_database: str | None = None,
+        persistence_client: Any | None = None,
     ) -> None:
         self._event_emitter = event_emitter
         self._notification_store = notification_store
         self._capability_invoker = capability_invoker
         self._idempotency_store = idempotency_store
+        self._data_contract = data_contract
+        self._platform_modules = platform_modules
+        self._persistence_database = persistence_database
+        self._persistence_client = persistence_client
         self._reactions_by_event: dict[str, list[dict]] = defaultdict(list)
         self._notifications_by_event: dict[str, list[dict]] = defaultdict(list)
         self._notifications_by_key: dict[tuple[str, str], dict] = {}
@@ -255,7 +285,8 @@ class ModuleEventRouter:
         self._event_schemas_by_type: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
         self._capability_ids: set[str] = set()
         self._capability_index_available = False
-        self._handler_emits_by_module_method: dict[tuple[str, str], list[str]] = {}
+        self._handler_actions_by_module_method: dict[tuple[str, str], list[ActionDef]] = defaultdict(list)
+        self._declared_event_producers: dict[tuple[str, str], str] = {}
         self._processed_reaction_keys: dict[
             tuple[str, ...], tuple[Literal["claimed", "completed"], str | None]
         ] = {}
@@ -631,9 +662,8 @@ class ModuleEventRouter:
                         self._capability_ids.add(capability_id)
                 for action in actions or []:
                     handler_method = str(getattr(action, "handler_method", "") or "").strip()
-                    emits = [str(event).strip() for event in getattr(action, "emits", []) or [] if str(event).strip()]
                     if handler_method:
-                        self._handler_emits_by_module_method[(module_id, handler_method)] = emits
+                        self._handler_actions_by_module_method[(module_id, handler_method)].append(action)
             events_manifest = getattr(manifests, "events", None)
             if events_manifest is not None:
                 events = getattr(events_manifest, "events", None)
@@ -641,6 +671,7 @@ class ModuleEventRouter:
                     events = []
                 for event in events:
                     event_type = str(getattr(event, "type", "") or "").strip()
+                    self._declared_event_producers[(module_id, event_type)] = str(getattr(event, "producer", "") or "").strip()
                     payload_schema = getattr(event, "payload_schema", None)
                     if event_type and payload_schema is not None:
                         schema = dict(payload_schema) if isinstance(payload_schema, dict) else payload_schema
@@ -707,7 +738,11 @@ class ModuleEventRouter:
                     continue
                 module_id = str(reaction.get("module_id") or "").strip()
                 handler_method = str(target.get("handler_method") or "").strip()
-                for emitted_event in self._handler_emits_by_module_method.get((module_id, handler_method), []):
+                emitted_events = dict.fromkeys(
+                    event for action in self._handler_actions_by_module_method.get((module_id, handler_method), [])
+                    for event in action.emits
+                )
+                for emitted_event in emitted_events:
                     edges[event_type].append((emitted_event, reaction))
 
         visiting: list[str] = []
@@ -1149,6 +1184,61 @@ class ModuleEventRouter:
             )
             return {"success": False, "error_code": "SERVICE_ADAPTER_DISPATCH_ERROR"}
 
+    def _build_handler_emitter(
+        self, *, module_id: str, handler_method: str,
+        event_provenance: ModuleEventProvenance, event_identity: str,
+        permissions: Iterable[str], rejected_events: list[ModuleEventRejection],
+        trigger_trace: Any,
+    ) -> EventEmitter:
+        actions = self._handler_actions_by_module_method.get((module_id, handler_method), [])
+        action = actions[0] if len(actions) == 1 else None
+        admitted = action is not None and action.api_surface == "internal" and not action.permissions
+        action_id = action.id if action is not None else handler_method
+        declared_emits = tuple(action.emits) if admitted and action is not None else ()
+        granted = tuple(permissions)
+        trace = deepcopy(trigger_trace)
+        actor = (
+            {"type": event_provenance.actor_type, "id": event_provenance.actor_id}
+            if event_provenance.actor_id else None
+        )
+
+        async def emit(event_type: str, payload: dict[str, Any]) -> Any:
+            event_type = str(event_type or "").strip()
+            event_id = module_event_id()
+            owns_event = self._declared_event_producers.get((module_id, event_type)) == module_id
+            schema = self._event_schemas_by_producer.get((module_id, event_type))
+            # Empty emits makes missing/ambiguous action or foreign/missing event
+            # ownership a named refusal, using the same contract as action emits.
+            rejection = module_event_rejection(
+                module_id=module_id, action_id=action_id, event_id=event_id,
+                event_type=event_type, payload=payload,
+                declared_emits=declared_emits if owns_event and schema is not None else (),
+                payload_schema=schema,
+            )
+            if rejection is not None:
+                rejected_events.append(rejection)
+                logger.error(
+                    "MODULE_REACTION_EVENT_REJECTED: module=%s action=%s event=%s event_id=%s "
+                    "category=%s validator=%s schema_path=%s (not dispatched; prior writes are retained)",
+                    module_id, action_id, rejection.event_type, rejection.event_id,
+                    rejection.category, rejection.validator, rejection.schema_path,
+                    extra={"module_event_rejection": rejection.to_dict()},
+                )
+                return rejection
+            envelope = build_module_event_envelope(
+                module_id=module_id, action_id=action_id, app_id=event_provenance.app_id or "",
+                tenant_id=event_provenance.tenant_id, workspace_id=event_provenance.workspace_id,
+                actor=actor, correlation_id=event_provenance.correlation_id,
+                causation_id=event_identity, authority={"permissions": list(granted)},
+                event_id=event_id, event_type=event_type, payload=payload,
+                trigger_trace=trace,
+            )
+            if self._event_emitter is not None:
+                return await self._maybe_await(self._event_emitter(event_type, envelope))
+            return None
+
+        return emit
+
     async def _dispatch_handler(
         self,
         reaction: dict,
@@ -1184,13 +1274,22 @@ class ModuleEventRouter:
             )
             return "skipped", "handler method not callable", None
 
+        rejected_events: list[ModuleEventRejection] = []
         tenant = envelope.get("tenant") if isinstance(envelope.get("tenant"), dict) else {}
         actor = envelope.get("actor") if isinstance(envelope.get("actor"), dict) else {}
         ctx = _ReactionCtx(
             app_id=str(tenant.get("app_id") or event_provenance.app_id or ""),
             tenant_id=str(tenant.get("tenant_id") or event_provenance.tenant_id or ""),
             user_id=str(actor.get("id") or event_provenance.actor_id or ""),
-            event_emitter=self._event_emitter,
+            workspace_id=event_provenance.workspace_id,
+            module_id=module_id,
+            event_emitter=self._build_handler_emitter(
+                module_id=module_id, handler_method=handler_method,
+                event_provenance=event_provenance,
+                event_identity=module_event_identity(event_type, envelope, event_provenance),
+                permissions=permissions or (), rejected_events=rejected_events,
+                trigger_trace=envelope.get(WORKFLOW_TRIGGER_TRACE_KEY),
+            ),
             event_provenance=event_provenance,
             reaction_provenance=reaction_provenance,
             permissions=permissions,
@@ -1207,6 +1306,7 @@ class ModuleEventRouter:
         else:
             payload = {}
         try:
+            ctx.persistence = self._build_persistence_context(ctx)
             result = await self._maybe_await(method(ctx, **payload))
         except Exception as exc:
             logger.error(
@@ -1217,6 +1317,10 @@ class ModuleEventRouter:
                 exc_info=True,
             )
             return "failed", type(exc).__name__, None
+        if rejected_events:
+            # A handler may ignore emit's return value after committing writes.
+            # Preserve those writes but do not record a successful delivery/ack.
+            return "failed", f"event rejected: {rejected_events[0].category}", None
         if _reaction_result_failed(result):
             return "failed", (
                 str(result.get("error_code") or "handler returned success=false")
@@ -1224,6 +1328,28 @@ class ModuleEventRouter:
                 else "handler returned false"
             ), None
         return "ok", None, result.effect_id if isinstance(result, ModuleReactionEffectAck) else None
+
+    def _build_persistence_context(self, ctx: _ReactionCtx) -> ModulePersistenceContext | None:
+        if not ctx.app_id or (self._data_contract is None and self._platform_modules is None):
+            return None
+        app_id, user_id, workspace_id, tenant_id = ctx.app_id, ctx.user_id, ctx.workspace_id, ctx.tenant_id
+
+        def principal() -> PersistencePrincipal | None:
+            # Event identity is evidence only. Reuse the active authenticated
+            # dispatch, and let the adapter refuse owned data when it ends.
+            active = current_persistence_principal(app_id)
+            if active is not None:
+                for field, claimed in (("user_id", user_id), ("workspace_id", workspace_id), ("tenant_id", tenant_id)):
+                    if claimed and claimed != getattr(active, field):
+                        raise PersistenceScopeError(f"Reaction {field} does not match the active persistence principal")
+            return active
+
+        return MongoPersistenceContext(
+            app_id=app_id, tenant_id=tenant_id, user_id=user_id, workspace_id=workspace_id,
+            database_name=self._persistence_database, client=self._persistence_client,
+            data_contract=self._data_contract, principal=principal,
+            platform_modules=self._platform_modules, module_id=ctx.module_id,
+        )
 
     async def _emit_reaction_audit(self, audit: ModuleReactionAudit) -> None:
         """Emit payload-free reaction audit metadata without affecting fan-out."""
