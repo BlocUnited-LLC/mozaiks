@@ -4,7 +4,10 @@ import json
 import logging
 from typing import Any
 
-from mozaiksai.core.workflow.declarative.contracts import WorkflowProgressConfig
+from mozaiksai.core.workflow.declarative.contracts import (
+    ImageGenerationSpec,
+    WorkflowProgressConfig,
+)
 from mozaiksai.core.workflow.transition_ui_catalog import (
     format_transition_ui_catalog_guidance,
 )
@@ -24,6 +27,7 @@ _SURFACE_HEADER = "[UI SURFACE TAXONOMY]"
 _WORKFLOW_HEADER = "[WORKFLOW UI PRIMITIVE CATALOG]"
 _TRANSITION_HEADER = "[TRANSITION UI PRIMITIVE CATALOG]"
 _PROGRESS_HEADER = "[WORKFLOW PROGRESS CONTRACT]"
+_MEDIA_HEADER = "[GENERATED MEDIA REVIEW CONTRACT]"
 _TRANSITION_TARGET_AGENTS = {"PackMetadataAgent", "UIFileGenerator"}
 
 
@@ -86,6 +90,17 @@ def inject_primitive_catalog(agent: Any, messages: list[dict[str, Any]]) -> None
                     "Use stages for observed work; labels are public. Tools report actual counts "
                     "through emit_tool_progress_event. Do not generate shell UI or estimate percentages.\n"
                     + json.dumps(WorkflowProgressConfig.model_json_schema(), separators=(",", ":")),
+                )
+                _update_section(
+                    agent,
+                    _MEDIA_HEADER,
+                    "Optional agents.yaml image_generation value, validated by the runtime. "
+                    "Image generation is enabled when this object is present. "
+                    "emit_ui defaults to true for the shared generated-media review card. "
+                    "Set emit_ui: false only when the workflow or app supplies its own review surface. "
+                    "Assets are still persisted and exposed through generated_media_assets and "
+                    "last_generated_media_assets; this option neither publishes media nor hides agent text.\n"
+                    + json.dumps(ImageGenerationSpec.model_json_schema(), separators=(",", ":")),
                 )
 
         if agent_name in _TRANSITION_TARGET_AGENTS:

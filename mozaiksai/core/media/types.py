@@ -117,8 +117,9 @@ class AssetVisibility(StrEnum):
     """Access control state for a generated media asset.
 
     private
-        Default. Only app operators and admin-role principals may retrieve the
-        asset. Suitable for draft and review states.
+        Default. The authenticated owner of the persisted source chat, app
+        operators, and admin-role principals may retrieve the asset. Suitable
+        for draft and review states; reading does not publish or promote it.
 
     investor_preview
         Verified campaign backers (plus operators/admins) may retrieve the asset.

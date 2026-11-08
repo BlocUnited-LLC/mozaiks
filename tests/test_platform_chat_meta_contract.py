@@ -52,5 +52,5 @@ async def test_platform_chat_meta_returns_run_history_count(monkeypatch: pytest.
     assert payload["chat_id"] == "chat-1"
     assert payload["workflow_name"] == "AgentGenerator"
     assert payload["run_history_count"] == 2
-    assert payload["last_artifact"] == {"tool_name": "RenderPlan"}
+    assert payload["last_artifact"] == {"tool_name": "RenderPlan", "response_available": False}
     assert "last_sequence" not in payload

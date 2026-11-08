@@ -1,5 +1,5 @@
 export async function submitToolCallResponse(eventId, responseData, { baseUrl = '', token, fetchImpl = fetch } = {}) {
-  if (!eventId) throw new Error('This review is no longer active. Reopen the workflow to load its current review.');
+  if (!eventId) throw new Error('This review is no longer active. If the workflow is unfinished, send a message in this chat to resume it and request a fresh review.');
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
   let response;
@@ -12,7 +12,7 @@ export async function submitToolCallResponse(eventId, responseData, { baseUrl = 
     throw new Error('The server did not confirm your decision. Reconnect to check the current review before retrying.');
   }
   if (response.status === 404) {
-    throw new Error('This review is no longer active. Your decision was not applied. Reopen the workflow to load its current review.');
+    throw new Error('This review is no longer active. Your decision was not applied. If the workflow is unfinished, send a message in this chat to resume it and request a fresh review.');
   }
   if (!response.ok) throw new Error('Your decision was not accepted. Please retry after reconnecting to the workflow.');
   const body = await response.json().catch(() => null);

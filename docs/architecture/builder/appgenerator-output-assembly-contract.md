@@ -1178,6 +1178,19 @@ lets the shell show the denial reason. This gate protects deep links and avoids
 rendering pages before scope is known, but backend module actions must
 still perform their own authorization checks.
 
+The referenced action's `output_schema` must be an object whose `required` list
+includes `allowed` and whose `properties.allowed.type` is `boolean`. A missing,
+optional, nullable or differently typed field fails the shared route-contract
+audit; an `authorized` field cannot substitute for `allowed`. Other declared
+response metadata remains optional. This checks the response shape, not the
+correctness of the app's authorization decision.
+
+AppGenerator wiring and refinement validation resolve both declarative and custom
+route references against the exact module/action companion schema. Final snapshots
+cannot defer a missing module contract. Page saving uses the same check before
+publishing whenever companion contracts are available; a partial page-only output
+defers that check until assembly instead of inventing an action schema.
+
 ### 2b. AdminRegistryAgent
 
 `AdminRegistryAgent` runs after `AppUIQualityAgent` passes and before `AssemblyAgent`.

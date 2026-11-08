@@ -18,6 +18,9 @@ This project follows a practical pre-1.0 changelog format:
   owned build record. Factory saves actual design/subscription input identities,
   and coding/media children preserve those inputs while validating fresh bytes.
 
+- Image-generating agents can set `image_generation.emit_ui: false` when an app
+  supplies its own draft review. Assets and workflow context are still saved;
+  the shared media review card remains enabled by default.
 - Reviewed design role grants can protect canonical list/get and declared custom
   reads. Selecting one canonical read requires both read grants explicitly;
   generated permissions survive materialization while ownership remains enforced.
@@ -378,12 +381,26 @@ This project follows a practical pre-1.0 changelog format:
   approved build inputs while rejecting changes to verified implementations.
   Commerce no longer requires fixed pricing gates, uses current schema admin panels,
   and declares the product response envelopes used by its mutation actions.
+- Failed automatic workflow steps now show a safe conversation notice without
+  enabling debug messages, exposing result details, or changing retry eligibility.
+
+- Module handler reactions receive contract-bounded persistence from the
+  platform host. Owned collections require the active authenticated dispatch;
+  event actors and notification recipients cannot supply storage authority.
+
+- Reaction handlers now validate emitted events against their own declared internal
+  action and event schema, preserve source identity and causation, and report
+  rejected emissions as failed delivery without rolling back earlier writes.
+  Social activity reactions declare their internal emission contracts.
 
 - Account export and deletion in files `0.1.13`, notifications `0.1.13`,
   commerce `0.1.14`, social `0.1.14`, and support `0.1.14` use the same
   authenticated persistence bindings as module actions. Multi-page records are
   handled without skipping rows during metadata updates, exports encode BSON
   safely, and each module keeps its existing deletion or anonymization policy.
+- Authenticated users can preview and download private generated media from
+  their own persisted chat. App/chat scope and ownership are checked before
+  serving bytes or redirects; a preview does not publish or promote the asset.
 - ThemeCapture retries recover a missing approved concept from its current
   artifact and matching completed owner/build session, without copying failed
   execution state or replacing existing refinement inputs.
@@ -489,6 +506,15 @@ This project follows a practical pre-1.0 changelog format:
   - social moderation uses admitted `user_posts.moderate` or `user_posts.admin`
     permissions instead of a nonexistent runtime roles field. Author deletion,
     the action's create permission, app scoping and post soft deletion remain enforced.
+
+- Generated route authorization now requires the referenced module action to
+  declare a required boolean `allowed` response. Page saving, assembled wiring
+  and refinement validation reject mismatched responses before promotion.
+- Saved workflow reviews restored after a server restart now show inactive
+  decision controls and explain how to request a fresh review through the chat.
+  Pending reviews saved before a committed chat turn receive the same state.
+  Reconnecting to a still-live review keeps its controls available. Failed
+  response submissions no longer make an inline review appear completed.
 
 - The shell no longer offers Profile, Sign in, or Sign out when nobody can sign
   in. A fresh Studio runs with authentication disabled, yet its account menu
@@ -648,6 +674,15 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Generated media ignores provider-supplied publication authority. Public reads
+  require server-owned public visibility, and explicit promotion records that
+  visibility. Private/backer-only visibility overrides old promotion metadata;
+  metadata-only publication records require authorized republication. Chat
+  promotion actions now atomically require the asset's persisted source chat to
+  match the authenticated connection.
+- The model-invoked brand promotion tool uses immutable active workflow scope,
+  verifies source ownership before any manifest write, and reports failed
+  publication instead of silently returning success.
 - Workspace handler extensions are checked so that annotations and defaults
   cannot run code at import, and service arguments must come from the
   override's own parameters. These checks are targeted guards, not

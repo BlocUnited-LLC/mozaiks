@@ -169,7 +169,7 @@ test('concept review stays concise and preserves declared review actions on desk
     await page.getByRole('button', {name: 'Next draft', exact: true}).click();
     await page.evaluate(() => {window.staleReview = true;});
     await approve.click();
-    await expect(page.getByRole('alert')).toHaveText('This review is no longer active. Your decision was not applied. Reopen the workflow to load its current review.');
+    await expect(page.getByRole('alert')).toHaveText('This review is no longer active. Your decision was not applied. If the workflow is unfinished, send a message in this chat to resume it and request a fresh review.');
     await expect(page.getByRole('status').filter({hasText: 'Review submitted'})).toHaveCount(0);
     await expect(approve).toBeEnabled();
     await page.evaluate(() => {window.staleReview = false;});
