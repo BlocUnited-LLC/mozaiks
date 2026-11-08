@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Notifications packs include SMTP email delivery with TLS and a credential-free
+  loopback test mode. Push still requires a provider implementation; SMTP
+  acceptance does not establish delivery to an external inbox.
 - Reviewed design role grants can protect canonical list/get and declared custom
   reads. Selecting one canonical read requires both read grants explicitly;
   generated permissions survive materialization while ownership remains enforced.

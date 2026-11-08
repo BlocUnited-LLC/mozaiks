@@ -306,14 +306,12 @@ def test_adapters_do_not_hardcode_credentials() -> None:
         assert "SG." not in text, f"{adapter_file.name} must not contain hardcoded SendGrid keys"
 
 
-def test_adapters_have_not_implemented_stub() -> None:
-    """Adapter stubs must raise NotImplementedError so operators know they need to fill in the body."""
-    for adapter_file in [ADAPTERS / "email.py", ADAPTERS / "push.py"]:
-        text = _read_text(adapter_file)
-        assert "NotImplementedError" in text, (
-            f"{adapter_file.name} must raise NotImplementedError — "
-            "it is a stub; operators fill in their provider SDK"
-        )
+def test_email_implements_smtp_while_push_remains_an_explicit_provider_gap() -> None:
+    from mozaiksai.core.validation.functional_generated_app import scan_placeholder_implementations
+
+    files = {f"services/adapters/notifications/{name}.py": _read_text(ADAPTERS / f"{name}.py") for name in ("email", "push")}
+    diagnostics = scan_placeholder_implementations(files)
+    assert [item.path for item in diagnostics] == ["services/adapters/notifications/push.py"]
 
 
 # ---------------------------------------------------------------------------

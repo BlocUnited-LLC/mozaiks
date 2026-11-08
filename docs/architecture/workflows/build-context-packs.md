@@ -1043,6 +1043,42 @@ For that reason, a reusable builder pack should be designed in this order:
 4. Add templates only for deterministic files the pack owns.
 5. Use prompt projections to give each agent only the relevant catalog slice.
 
+## Notifications email delivery
+
+The notifications pack's `services/adapters/notifications/email.py` implements
+the existing `send_email(to, subject, body, template_id, template_data)` interface
+using SMTP. Pass a rendered subject and body; provider-hosted template arguments
+are rejected. The adapter returns `True` only after SMTP acceptance, which does
+not prove delivery to an external inbox.
+
+Configure the host environment; never put credential values in generated files:
+
+| Name | Meaning |
+| --- | --- |
+| `SMTP_HOST` | Required SMTP server hostname or address |
+| `SMTP_FROM` | Required sender mailbox |
+| `SMTP_SECURITY` | `starttls` (default), `ssl`, or `none` |
+| `SMTP_PORT` | Defaults to 587 for STARTTLS or 465 for SSL |
+| `SMTP_USER`, `SMTP_PASSWORD` | Optional paired authentication handles |
+
+`none` permits only a credential-free loopback test sink. Remote connections
+require certificate-verified TLS; failure never falls back to plaintext. The
+operation has a 15-second socket timeout and runs outside the async event loop.
+
+The app module owns the triggering domain event, recipient identity, ownership
+and opt-in check. Resolve those from app-owned records before calling the
+adapter; an event's supplied address or opt-in flag is not approval. The SMTP
+adapter does not access app persistence, grant permissions, or store delivery
+records. Canonical handler reactions receive a minimal reaction context, so an
+app must establish its scoped record access explicitly; this pack does not yet
+wire its preference persistence into event delivery.
+
+The SMTP tests deliver to a real local sink and exercise the canonical event
+router with explicit in-memory fixture policy. They do not prove external
+inbox delivery or production preference persistence. Push remains an unfinished
+provider integration and still fails placeholder validation. Selecting the
+whole notifications pack is therefore not evidence that every channel works.
+
 ## Cross References
 
 - [Workflow Architecture](workflow-architecture.md)
