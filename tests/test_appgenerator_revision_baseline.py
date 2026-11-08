@@ -5,7 +5,7 @@ import json
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, call
 
 import pytest
 import yaml
@@ -293,7 +293,9 @@ def _stub_download_boundaries(monkeypatch, tmp_path):
     monkeypatch.setattr(generate_and_download.AppRegistryService, "update_build_status", registry)
     ui = AsyncMock(return_value={"status": "completed", "action": "continue"})
     monkeypatch.setattr(generate_and_download, "use_ui_tool", ui)
-    return SimpleNamespace(registry=registry, ui=ui, register=register)
+    selection = AsyncMock(return_value=None)
+    monkeypatch.setattr(generate_and_download, "_check_workbench_selection", selection)
+    return SimpleNamespace(registry=registry, ui=ui, register=register, selection=selection)
 
 
 @pytest.mark.asyncio
@@ -347,6 +349,10 @@ async def test_revision_final_zip_preserves_exact_binary_and_canonical_manifest(
     assert [entry.model_dump() for entry in record.files_manifest[1:]] == manifest
     boundaries.registry.assert_awaited_once()
     boundaries.ui.assert_awaited_once()
+    assert boundaries.selection.await_args_list == [call(
+        context, app_id="factory-host", user_id="owner", artifact_version_id=None,
+        response={"status": "completed", "action": "continue"},
+    )] * 2
 
 
 @pytest.mark.asyncio
@@ -484,6 +490,10 @@ async def test_revision_source_survives_register_then_export(baseline, monkeypat
     assert export_app_code.resolve_export_gate(context)["allow_export"] is True
     assert result["deployment"].get("blocked") is not True, result
     provider.assert_awaited_once()
+    assert boundaries.selection.await_args_list == [call(
+        context, app_id="factory-host", user_id="owner", artifact_version_id="artifact_2",
+        response={"status": "completed", "action": "export_to_github"},
+    )] * 2
     assert baseline.store.get_build_record.await_count >= 3
     assert all(call.kwargs["build_record_id"] == "artifact_1" for call in baseline.store.get_build_record.await_args_list)
 
