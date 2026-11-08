@@ -97,6 +97,62 @@ actions:
     permissions: [activity_feed.admin]
     emits: [domain.social.activity.recorded]
 
+  - id: on_friendship_created
+    api_surface: internal
+    description: Record friendship activity from the declared event reaction.
+    handler_method: on_friendship_created
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [friendship_id, user_a_id, user_b_id, requester_id, request_id]
+      properties:
+        friendship_id: { type: string }
+        user_a_id: { type: string }
+        user_b_id: { type: string }
+        requester_id: { type: string }
+        request_id: { type: string }
+        created_at: { type: string }
+    output_schema: { type: "null" }
+    permissions: []
+    emits: [domain.social.activity.recorded]
+
+  - id: on_post_published
+    api_surface: internal
+    description: Record post activity from the declared event reaction.
+    handler_method: on_post_published
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [post_id, author_id]
+      properties:
+        post_id: { type: string }
+        author_id: { type: string }
+        body_preview: { type: string }
+        visibility: { type: string }
+        created_at: { type: string }
+    output_schema: { type: "null" }
+    permissions: []
+    emits: [domain.social.activity.recorded]
+
+  - id: on_post_commented
+    api_surface: internal
+    description: Record comment activity from the declared event reaction.
+    handler_method: on_post_commented
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [post_id, post_author_id, comment_id, author_id]
+      properties:
+        post_id: { type: string }
+        post_author_id: { type: string }
+        comment_id: { type: string }
+        author_id: { type: string }
+        body_preview: { type: string }
+        created_at: { type: string }
+    output_schema: { type: "null" }
+    permissions: []
+    emits: [domain.social.activity.recorded]
+
 capabilities:
   - capability_id: social.feed.read
     kind: action
