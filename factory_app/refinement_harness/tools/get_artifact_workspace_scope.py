@@ -4,6 +4,8 @@ from typing import Any
 
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
 from mozaiksai.core.artifacts.store import ArtifactStore, get_artifact_store
+from mozaiksai.core.runtime.app.auth_contract import AppAuthContract
+from mozaiksai.core.runtime.app.paths import APP_AUTH_CONFIG_PATH
 
 from ._artifact_workspace import (
     load_artifact_workspace,
@@ -58,6 +60,13 @@ async def get_artifact_workspace_scope(
         "file_tree": list_head(file_tree, limit=_MAX_FILE_COUNT),
         "selected_file_paths": selected_paths,
         "selected_scope": selected_scope,
+        "selected_file_contracts": {
+            APP_AUTH_CONFIG_PATH: AppAuthContract.model_json_schema(),
+        } if (
+            artifact.build_family == "app_bundle"
+            and APP_AUTH_CONFIG_PATH in selected_paths
+            and APP_AUTH_CONFIG_PATH in file_map
+        ) else {},
         "related_file_previews": related_previews,
     }
 
