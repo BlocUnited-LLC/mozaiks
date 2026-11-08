@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -70,6 +71,8 @@ class _Transport(UIToolsMixin, WebSocketProtocolMixin):
         self._message_queues = {}
         self._max_queue_size = 100
         self._ui_tool_metadata = {}
+        self._input_request_registries = {}
+        self.pending_tool_call_responses = {}
         self._background_tasks = {}
 
     def _get_conn_meta(self, chat_id):
@@ -136,9 +139,13 @@ async def _reconnect(transport, socket, mode):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["connect", "switch"])
-async def test_pending_review_emit_persist_and_replay_reaches_actual_socket(replay_transport, mode):
+@pytest.mark.parametrize("live", [False, True])
+async def test_pending_review_emit_persist_and_replay_reaches_actual_socket(replay_transport, mode, live):
     transport, socket, collection, _ = replay_transport
     payload = await _emit_review(transport)
+    future = asyncio.get_running_loop().create_future() if live else None
+    if future is not None:
+        transport.pending_tool_call_responses["original-event"] = future
     stored = next(iter(collection.doc["workflow_ui_state"]["tool_calls"].values()))
     assert stored["payload"] == payload
     assert "message_index" not in stored
@@ -158,6 +165,11 @@ async def test_pending_review_emit_persist_and_replay_reaches_actual_socket(repl
     assert event["display"] == "inline"
     assert event["awaiting_response"] is True
     assert event["replay"] is True
+    assert event["response_available"] is live
+    assert len(transport.pending_tool_call_responses) == int(live)
+    if future is not None:
+        assert transport.pending_tool_call_responses["original-event"] is future
+        assert not future.done()
     assert collection.doc == before
     assert all(query["app_id"] == "app" for query in collection.queries)
 
@@ -215,6 +227,7 @@ async def test_actual_replay_adapters_keep_history_tool_deduplication(replay_tra
     tool = messages[0]["metadata"]["tool_call"]
     assert tool["tool_call_id"] == "original-event"
     assert tool["payload"] == payload
+    assert tool["response_available"] is False
 
 
 @pytest.mark.asyncio
@@ -241,6 +254,7 @@ async def test_actual_replay_adapters_forward_canonical_composer_tool_call(repla
     assert event["display"] == "composer"
     assert event["interaction_type"] == "input_request"
     assert event["awaiting_response"] is True
+    assert event["response_available"] is False
     assert event["payload"]["prompt"] == "Explain the change"
     assert event["payload"]["input_mode"] == "text"
     assert collection.doc == before

@@ -45,6 +45,59 @@ async function failureMessageFromEvent() {
   return messages[0];
 }
 
+async function toolResponseCase() {
+  const source = await fs.readFile(path.join(ui, 'pages/ChatPage.js'), 'utf8');
+  return source.split("case 'tool_response':")[1].split("case 'usage_delta':")[0];
+}
+
+const autoToolFailure = {
+  type: 'tool_response', interaction_type: 'auto_tool', tool_name: 'generate_and_download',
+  call_id: 'export-turn', corr: 'export-turn', status: 'error', success: false,
+  content: 'private-path-and-secret',
+  payload: { exception: 'private-path-and-secret', outcome_error: 'retry_not_permitted' },
+};
+const safeToolFailure = 'An automatic step couldn’t finish.';
+
+async function projectToolResponses(events, showSystemMessages = false) {
+  const handler = await toolResponseCase();
+  let messages = [];
+  for (const data of events) {
+    vm.runInNewContext(`(() => { switch (data.type) { case 'tool_response': ${handler} } })()`, {
+      data, showSystemMessages,
+      setMessagesWithLogging: update => { messages = update(messages); },
+    });
+  }
+  return messages;
+}
+
+for (const debug of [false, true]) {
+  test(`automatic tool failures show safe text without result details (debug=${debug})`, async () => {
+    const messages = await projectToolResponses([autoToolFailure], debug);
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].content, `⚠️ ${safeToolFailure}`);
+    assert.equal(messages[0].sender, 'system');
+    assert.doesNotMatch(JSON.stringify(messages), /private-path-and-secret|retry_not_permitted/);
+    assert.equal((await projectToolResponses([{ ...autoToolFailure, success: true, status: 'ok' }], debug)).length, 0);
+  });
+}
+
+test('automatic failure replay is deduplicated by invocation, retaining different tools and turns', async () => {
+  const messages = await projectToolResponses([
+    autoToolFailure, autoToolFailure,
+    { ...autoToolFailure, tool_name: 'validate_bundle' },
+    { ...autoToolFailure, call_id: 'next-turn' },
+  ]);
+  assert.equal(messages.length, 3);
+  assert.equal(new Set(messages.map(message => message.id)).size, 3);
+});
+
+test('missing automatic result and ordinary tool diagnostics stay hidden without debug', async () => {
+  assert.equal((await projectToolResponses([
+    { ...autoToolFailure, success: undefined },
+    { ...autoToolFailure, interaction_type: 'tool' },
+  ])).length, 0);
+});
+
 test('terminal failure metadata identifies the card and preserves the complete server message', async () => {
   await failureMessageFromEvent();
 });
@@ -161,6 +214,7 @@ test('ChatPage observes persisted status on reopen and refreshes it after termin
 });
 
 test('failed workflow retry uses the existing authenticated launch path', async (t) => {
+  const automaticResponse = await toolResponseCase();
   const api = await fs.readFile(path.join(ui, 'adapters/api.js'), 'utf8');
   const authHelpers = api.slice(api.indexOf('function _firstString('), api.indexOf('export class ApiAdapter'));
   const stubs = {
@@ -207,6 +261,10 @@ test('failed workflow retry uses the existing authenticated launch path', async 
         window.fixture.retry = retry.retry;
         window.fixture.setMessages = setMessages;
         window.fixture.setLoading = setLoading;
+        window.fixture.toolResponse = (data, showSystemMessages = false) => {
+          const setMessagesWithLogging = setMessages;
+          switch (data.type) { case 'tool_response': ${automaticResponse} }
+        };
       });
       return <main style={{ height: '100vh', maxWidth: 960, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
         <ChatInterface messages={messages} onSendMessage={() => {}} workflowName={scope.workflowName}
@@ -270,6 +328,28 @@ test('failed workflow retry uses the existing authenticated launch path', async 
       chat_id: 'failed-chat', app_id: 'execution-host', workflow_name: 'ExampleWorkflow', ...patch }), patch);
   }
   const retryButton = page => page.getByRole('button', { name: 'Retry failed workflow', exact: true });
+
+  for (const debug of [false, true]) {
+    await t.test(`automatic failure is visible during a paused workflow without granting retry (debug=${debug})`, async () => {
+      const page = await open();
+      await observe(page, { status: 0 });
+      await page.evaluate(() => window.fixture.setScope({ blocked: true }));
+      await page.evaluate(({ event, debug }) => window.fixture.toolResponse(event, debug), { event: autoToolFailure, debug });
+      const message = page.getByText(`⚠️ ${safeToolFailure}`, { exact: true });
+      await message.waitFor({ timeout: 2000 });
+      await page.evaluate(({ event, debug }) => {
+        window.fixture.toolResponse(event, debug);
+        window.fixture.toolResponse({ ...event, success: true, status: 'ok' }, debug);
+      }, { event: autoToolFailure, debug });
+      assert.equal(await message.count(), 1);
+      assert.doesNotMatch(await page.locator('body').innerText(), /private-path-and-secret|retry_not_permitted/);
+      assert.equal(await page.getByRole('region', { name: 'Workflow failure', exact: true }).count(), 0);
+      assert.equal(await retryButton(page).count(), 0);
+      assert.deepEqual(await page.evaluate(() => window.fixture.requests), []);
+      assert.deepEqual(await page.evaluate(() => window.fixture.navigations), []);
+      await page.close();
+    });
+  }
 
   await t.test('only current activity shows typing after interactive output or completion', async () => {
     const page = await open();
