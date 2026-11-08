@@ -95,14 +95,12 @@ const ToolCallRenderer = React.memo(({ toolCall, onResponse, isCompleted, onArti
   }
 
   const handleResponse = async (resp) => {
-    try {
-      if (onResponse) {
-        await onResponse(resp);
-      }
-    } finally {
-      if (displayMode === 'inline') {
-        setCompleted(true);
-      }
+    if (!onResponse) throw new Error('This review cannot receive a decision.');
+    if (await onResponse(resp) === false) {
+      throw new Error('The server has not accepted this response.');
+    }
+    if (displayMode === 'inline') {
+      setCompleted(true);
     }
   };
 
@@ -346,6 +344,9 @@ const ModernChatInterface = ({
   const handleAgentAction = (action) => {
     if (onAgentAction) {
       return onAgentAction(action);
+    }
+    if (action?.type === 'tool_call_response') {
+      throw new Error('The workflow response connection is unavailable.');
     }
     return undefined;
   };

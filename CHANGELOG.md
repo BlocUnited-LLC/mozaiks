@@ -374,6 +374,8 @@ This project follows a practical pre-1.0 changelog format:
   approved build inputs while rejecting changes to verified implementations.
   Commerce no longer requires fixed pricing gates, uses current schema admin panels,
   and declares the product response envelopes used by its mutation actions.
+- Failed automatic workflow steps now show a safe conversation notice without
+  enabling debug messages, exposing result details, or changing retry eligibility.
 
 - Account export and deletion in files `0.1.13`, notifications `0.1.13`,
   commerce `0.1.14`, social `0.1.14`, and support `0.1.14` use the same
@@ -489,6 +491,12 @@ This project follows a practical pre-1.0 changelog format:
 - Generated route authorization now requires the referenced module action to
   declare a required boolean `allowed` response. Page saving, assembled wiring
   and refinement validation reject mismatched responses before promotion.
+- Saved workflow reviews restored after a server restart now show inactive
+  decision controls and explain how to request a fresh review through the chat.
+  Pending reviews saved before a committed chat turn receive the same state.
+  Reconnecting to a still-live review keeps its controls available. Failed
+  response submissions no longer make an inline review appear completed.
+
 - The shell no longer offers Profile, Sign in, or Sign out when nobody can sign
   in. A fresh Studio runs with authentication disabled, yet its account menu
   showed Profile, Sign Out, and Sign In, and the mobile bar showed Profile, all

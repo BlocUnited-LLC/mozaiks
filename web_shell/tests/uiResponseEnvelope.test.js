@@ -33,6 +33,35 @@ const incomingEnd = chatPage.indexOf('    handleIncomingRef.current = handleInco
 const incomingCallback = chatPage.slice(incomingStart + '  const handleIncoming = useCallback('.length,
   chatPage.lastIndexOf('}, [', incomingEnd) + 1);
 
+for (const type of ['tool_call', 'ui.render']) {
+  test(`${type} preserves server response availability without submitting`, async () => {
+    const handler = new DynamicUIHandler();
+    let update;
+    handler.uiUpdateCallbacks.add(value => { update = value; });
+    for (const available of [false, true]) {
+      await handler.processUIEvent({
+        type, tool_name: 'Review', component: 'Review', component_type: 'Review',
+        tool_call_id: 'original-event', display: 'artifact', response_available: available,
+        payload: {review_id: 'original-review'},
+      }, () => assert.fail('Presentation must not submit a response'));
+      assert.equal(update.response_available, available);
+      assert.equal(update.tool_call_id, 'original-event');
+      assert.equal(update.payload.review_id, 'original-review');
+    }
+  });
+}
+
+test('inactive composer input does not intercept the normal resume message', () => {
+  const start = chatPage.indexOf('  const isComposerInputRequestToolCall =');
+  const end = chatPage.indexOf('  const findPendingComposerInputRequestToolCall =', start);
+  const isPending = vm.runInNewContext(chatPage.slice(start, end) + '\nisComposerInputRequestToolCall;');
+  const tool = {tool_call_id:'old-input', display:'composer', payload:{interaction_type:'input_request'}};
+  assert.equal(isPending({...tool, response_available:false}), false);
+  assert.equal(isPending({...tool, response_available:true}), true);
+  assert.equal(isPending(tool), true);
+  assert.equal(isPending({...tool, response_available:true}, {tool_call_completed:true}), false);
+});
+
 test('previous socket metadata cannot revert a synchronously adopted review successor', () => {
   const start=chatPage.indexOf('          onMessage: (data) => {',chatPage.indexOf('connection = api.createWebSocketConnection('));
   const callback=chatPage.slice(start,chatPage.indexOf('          onError:',start));

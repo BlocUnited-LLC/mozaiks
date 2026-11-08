@@ -18,6 +18,24 @@ const UIToolRenderer = ({ event, onResponse, className = '', onArtifactAction, a
     return null;
   }
 
+  if (event.response_available === false) {
+    return (
+      <section className={className} aria-label="Inactive saved review">
+        <p role="status">
+          This saved review is not active. If the workflow is unfinished, send a message
+          in this chat to resume it and request a fresh review. This saved review cannot accept a decision.
+        </p>
+        <div ref={(element) => { if (element) element.inert = true; }} aria-disabled="true">
+          <UIToolRenderer
+            event={{...event, response_available: undefined}}
+            onResponse={async () => { throw new Error('This saved review is not active.'); }}
+            className="opacity-60"
+          />
+        </div>
+      </section>
+    );
+  }
+
   const payload = event.payload || {};
   const isCore = isCoreArtifact(payload) || (typeof event.tool_name === 'string' && event.tool_name.startsWith('core.'));
   const hasArtifactType = payload?.artifact_type || payload?.data?.artifact_type;
