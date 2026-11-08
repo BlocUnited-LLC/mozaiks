@@ -658,3 +658,76 @@ to workflow-local `ui/` plus Python tools. If AgentGenerator emits a transition,
 it must keep routing/context deterministic and bind `ui.component` to a
 registered transition component key. Product-specific copy/images/layout belong
 in the React stub.
+
+
+### Refining a pending app workbench
+
+An inline refinement of a response-required AppGenerator workbench uses the
+existing `continue_inline_app_review` successor owner. The source must be owned,
+in progress, and waiting on exactly one workbench for the selected baseline;
+that baseline must belong to the source chat and its immutable `RunBuildBinding`.
+The new AppReview session carries the refinement build identity and the saved
+candidate's evidence. The registry selects it with the existing build, artifact,
+lifecycle, and active-chat compare-and-set checks. It never rebinds the source
+session or copies parent validation/security claims onto a child.
+
+Only after that successor is durably selected does the server settle the exact
+old waiter with a non-approval `superseded` disposition. A cold source is rechecked
+under its execution lease, then its superseded failure context and terminal state
+are persisted through the existing session owner. Lease contention leaves the
+selected successor recoverable without terminalizing a running source.
+AppGenerator independently checks its
+current artifact after the wait and again before reporting ready. A superseded
+build ends through the existing `workflow_failed` graph route with an explicit
+reason; it does not advance the old build sequence. An already superseded build
+cannot start an export after the wait. The final check prevents a ready result
+if refinement wins during an export; it cannot roll back that in-flight export.
+A browser cannot assert supersession when the registry still selects that build.
+
+AppReview can download the accepted selected version through the existing owned
+artifact download endpoint, which enforces validation and verifies the archive
+against the canonical manifest. Downloading does not approve, activate, or finish
+a workflow. If notification fails after the successor CAS, **Build Review →
+Continue in chat** uses the existing manual AppReview request to verify and reuse
+that exact registered successor, rebind routing, and retry source settlement.
+Normal launch preparation still checks authentication, prerequisites, context
+authority, and the current immutable binding before this admission; it does not
+create another chat or replace the current build. A partial, foreign, expired, or
+superseded handoff, caller overrides, or failed settlement returns an error rather
+than creating a second review. A held source execution lease can be retried through
+the same control after its holder exits.
+
+AppReview has no completed-AppGenerator dependency: its admission requires the
+owned current saved app bundle through `load_registered_review_context`. A
+generation may still be waiting on the workbench whose refined child is ready
+for review. Media and Security keep their generation dependencies. Removing the
+review dependency neither completes generation nor bypasses artifact ownership,
+current-build selection, platform prerequisites, or caller-context validation.
+
+An interrupted manual AppReview launch that the former dependency redirected to
+AppGenerator can leave that same refinement build marked `building`. Recovery
+requires the exact server-persisted manual/requested-AppReview/resolved-AppGenerator
+marker, owner, immutable binding, current accepted child, and saved inline-result
+lineage. Under the interrupted chat's execution lease, it also requires a valid
+creation timestamp and no app artifact updated at or after that timestamp. This
+is a check for newer saved artifacts, not a claim that no model work occurred.
+The existing registry compare-and-set selects the new review directly from that
+exact active chat and building state. Only then is the misrouted chat marked
+failed with a superseded diagnostic, followed by settlement of the original
+workbench. Server-owned successor provenance retains that interrupted chat ID so
+the same manual control can retry cleanup after selection without creating a
+second successor. A live lease, missing marker, newer saved artifact, or ordinary
+generation does not authorize this reconciliation.
+The saved-build control may offer this request for a current accepted refinement
+child while building; that offer is not proof of recoverability, and every server
+admission check above still applies.
+
+For an older inline result with no saved successor, this entrypoint may recover
+the pending AppGenerator workbench only through the exact owned current child,
+parent, unique validated/accepted refinement session, saved request, and persisted
+inline result. It does not scan history for a plausible source. Ordinary saved
+reviews without an interrupted handoff retain their normal launch behavior.
+Recovery does not rerun coding or fabricate a tool approval. The review's normal
+first agent turn still presents its workspace after the websocket opens. The old
+build still fails the independent export/resume gates; this handoff does not rerun
+Media or Security under the old generation's build identity.

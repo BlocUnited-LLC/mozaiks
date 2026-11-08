@@ -478,6 +478,18 @@ ISO 8601 strings, including nested values. The contract's export example is
 tested against real BSON values and JSON serialization; this verifies guidance
 and materialization, not arbitrary model-generated implementations.
 
+The files, commerce, social, notifications, and support pack account handlers
+use the injected `persistence` constructor contract. They verify its app and
+principal before resolving the same module/collection IDs used by module actions;
+they do not fall back to raw database names. Existing deletion policies remain:
+files soft-delete metadata without deleting blobs, activity-feed records retain
+other participants' content while removing the departing user's references, and
+the other handlers delete the records their existing policies identify.
+Multi-page exports and conditional metadata updates traverse `_id` in ascending
+order, so changing the matching set does not skip rows. Activity export retains
+its existing newest-500 limit. These templates affect newly materialized pack
+files; they do not rewrite previously exported apps.
+
 Migration history records use `in_progress`, `applied`, and `failed`. The
 `mozaiksai.AppDatabaseMigrations` collection also acts as the migration lock:
 the runtime atomically claims a migration by inserting an `in_progress` record

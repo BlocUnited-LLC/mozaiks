@@ -362,6 +362,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Account export and deletion in files `0.1.13`, notifications `0.1.13`,
+  commerce `0.1.14`, social `0.1.14`, and support `0.1.14` use the same
+  authenticated persistence bindings as module actions. Multi-page records are
+  handled without skipping rows during metadata updates, exports encode BSON
+  safely, and each module keeps its existing deletion or anonymization policy.
 - ThemeCapture retries recover a missing approved concept from its current
   artifact and matching completed owner/build session, without copying failed
   execution state or replacing existing refinement inputs.
@@ -424,6 +429,18 @@ This project follows a practical pre-1.0 changelog format:
   integration endpoints remain advisory references to supplied contracts.
 - Studio onboarding status accepts a null completion timestamp for new,
   partially completed, and dismissed tours without an output-contract warning.
+
+- Refining a pending app workbench opens an owned AppReview session for the new
+  build. The generation rechecks its current selection before starting an export
+  and before completion. Accepted child downloads use that version's saved checks
+  and verified archive. Saved builds' Continue in chat recovers an interrupted
+  handoff using its owned persisted lineage, reuses a selected successor, and
+  retries source settlement without repeating the edit or creating another chat.
+  Review admission uses the owned saved app bundle rather than requiring its
+  original generation to have completed. An interrupted manual review that was
+  incorrectly routed into generation can recover only with exact saved lineage,
+  an execution lease, and no newer saved artifact; its successor preserves cleanup
+  provenance for retry. Media and Security dependencies remain unchanged.
 
 - The shell no longer offers Profile, Sign in, or Sign out when nobody can sign
   in. A fresh Studio runs with authentication disabled, yet its account menu

@@ -23,6 +23,7 @@ from pydantic import Field
 
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
 from factory_app.workflows._shared.platform.build_target import require_build_binding
+from factory_app.workflows._shared.platform.current_build import resolve_current_build_artifact
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     admitted_app_file_map,
@@ -66,6 +67,43 @@ except Exception:  # pragma: no cover
     _log_tool_event = None  # type: ignore
 
 BuilderArtifactStore = None
+
+
+async def _check_workbench_selection(
+    context_variables: Any, *, app_id: str, user_id: str | None,
+    artifact_version_id: str | None, response: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Re-admit the saved selection after the user can have refined it."""
+    try:
+        if not user_id:
+            raise ValueError("workbench_owner_missing")
+        _, _, artifact = await resolve_current_build_artifact(
+            context_variables, app_id=app_id, user_id=user_id, error_prefix="workbench",
+        )
+        selected = response.get("artifact_version_id")
+        if selected is None and isinstance(response.get("data"), dict):
+            selected = response["data"].get("artifact_version_id")
+        if artifact.id != artifact_version_id or (selected is not None and selected != artifact.id):
+            raise ValueError("workbench_artifact_not_current")
+        if response.get("status") == "superseded":
+            # A browser cannot manufacture the server's lifecycle disposition.
+            raise ValueError("workbench_supersession_unverified")
+        return None
+    except ValueError as exc:
+        superseded = str(exc) == "workbench_build_superseded"
+        outcome = "superseded" if superseded else "blocked"
+        message = (
+            "This generation was superseded by a refinement and cannot complete. Continue in the new app review."
+            if superseded else "This saved version is no longer available for this workbench. Reopen the app review."
+        )
+        _context_set(context_variables, "download_status", outcome)
+        _context_set(context_variables, "app_download_ready", False)
+        _context_set(context_variables, "download_result", None)
+        _context_set(context_variables, "generated_app_dir", None)
+        _context_set(context_variables, "generated_app_zip", None)
+        if superseded:
+            _context_set(context_variables, "app_build_failure_message", message)
+        return {"status": outcome, "outcome": outcome, "error": str(exc), "message": message, "ui_files": []}
 
 
 def _repo_root() -> Path:
@@ -1104,6 +1142,13 @@ async def generate_and_download(
         wf_logger.error("UI interaction failed: %s", e, exc_info=True)
         raise UIToolError("Failed during file download UI interaction") from e
 
+    selection_failure = await _check_workbench_selection(
+        context_variables, app_id=app_id, user_id=user_id,
+        artifact_version_id=artifact_version_id, response=response,
+    )
+    if selection_failure:
+        return selection_failure
+
     if response.get("status") == "cancelled":
         _context_set(context_variables, "download_status", "cancelled")
         _context_set(context_variables, "app_download_ready", False)
@@ -1193,6 +1238,13 @@ async def generate_and_download(
     except Exception as deploy_err:
         wf_logger.warning("GitHub export flow failed: %s", deploy_err)
         deployment_result = {"success": False, "error": "GitHub export failed; inspect export status before retrying."}
+
+    selection_failure = await _check_workbench_selection(
+        context_variables, app_id=app_id, user_id=user_id,
+        artifact_version_id=artifact_version_id, response=response,
+    )
+    if selection_failure:
+        return selection_failure
 
     download_result = {
         "bundle_dir": str(app_dir.resolve()),
