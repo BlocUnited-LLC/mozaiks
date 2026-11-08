@@ -9,8 +9,9 @@ contract_type: build_pack_instructions
 # event-producing module. Select this pack only when the app must deliver
 # domain-event alerts through a provider-backed external channel.
 #
-# Templates own preference storage. App-owned external delivery adapters
-# require a configured provider implementation.
+# Templates own preference storage. The email adapter uses configured SMTP.
+# Push remains a provider integration
+# requirement; its unfinished template must not be presented as verified delivery.
 
 selection_rules:
   - id: select_for_external_delivery
@@ -100,9 +101,12 @@ required_outputs:
   - path: services/adapters/notifications/email.py
     owner: templates
     notes: >
-      Provider-neutral email adapter stub. Declares send_email(to, subject, body, template_id).
-      Operators replace the stub body with their chosen provider SDK (SendGrid,
-      AWS SES, Postmark, Mailgun). No provider credentials committed.
+      SMTP email adapter with send_email(to, subject, body, template_id, template_data).
+      Pass rendered subject/body; provider-hosted template arguments are rejected.
+      Configure SMTP_HOST, SMTP_FROM, optional SMTP_PORT and SMTP_SECURITY
+      (starttls by default, ssl, or none for a credential-free loopback sink).
+      SMTP_USER and SMTP_PASSWORD must be configured together when authentication
+      is required. True means SMTP acceptance, not confirmed inbox delivery.
 
   - path: services/adapters/notifications/push.py
     owner: templates
@@ -162,9 +166,9 @@ runtime_boundaries:
 
   - id: no_credentials_in_adapters
     rule: >
-      Generated adapter stubs must not include provider API keys, secrets,
-      or credential values. Credentials are loaded from env vars
-      (EMAIL_API_KEY, FCM_SERVER_KEY, etc.) at adapter initialization.
+      Generated adapters must not include provider API keys, secrets,
+      or credential values. SMTP credentials use SMTP_USER and SMTP_PASSWORD;
+      push provider credentials remain deployment-owned environment handles.
       env.example must list required credential names.
 
   - id: reactions_not_service_calls

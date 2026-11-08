@@ -385,10 +385,10 @@ capabilities:
       - email delivery
       - external notifications
     generator_notes:
-      - Generate the notification_settings facade module for user preferences and a provider-neutral adapter stub under services/adapters/notifications/.
+      - Generate the notification_settings facade module for user preferences and the configured SMTP email adapter under services/adapters/notifications/. Push still requires a complete provider integration before acceptance.
       - Do not re-implement in-app notification storage or websocket delivery — the runtime handles those via contracts/notifications.yaml on event-producing modules.
       - Do not embed provider SDK calls in module service.py — delivery mechanics belong in services/adapters/notifications/{channel}.py.
-      - Generated adapter stubs must not include credential values — load from env vars (EMAIL_API_KEY, FCM_SERVER_KEY, etc.).
+      - Generated adapters must not include credential values. SMTP uses SMTP_HOST, SMTP_FROM, SMTP_PORT, SMTP_SECURITY and optional paired SMTP_USER/SMTP_PASSWORD environment handles.
     alternatives:
       - id: managed_notification_platform
         capability_kind: managed_capability
