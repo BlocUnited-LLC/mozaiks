@@ -30,6 +30,9 @@ from factory_app.workflows.AppGenerator.tools.app_plan_review import (
     review_app_build_plan,
     validate_plan_dispatch,
 )
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    verify_pack_integrity,
+)
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
@@ -65,7 +68,10 @@ def _fixture() -> dict:
 def _live_context() -> ContextVariablesBridge:
     variables = deepcopy(_fixture()["context_variables"])
     for pack in variables.get("capability_packs") or []:
-        pack["pack_source_path"] = str(ROOT / pack["pack_source_path"])
+        # Project the current source and its verified pins, retaining the raw fixture.
+        source = ROOT / pack["pack_source_path"]
+        metadata = verify_pack_integrity(source, pack["id"])
+        pack.update(pack_source_path=str(source), version=metadata["version"], digest=metadata["digest"])
     return ContextVariablesBridge(variables)
 
 
