@@ -356,6 +356,7 @@ export class DynamicUIHandler {
       this.notifyUIUpdate({
         type: UI_RENDER,
         tool_name: toolName,
+        response_available: eventData.response_available,
         tool_call_id: toolCallId,
         component_type: component,
         payload,
@@ -509,6 +510,7 @@ export class DynamicUIHandler {
   this.notifyUIUpdate({
         type: 'tool_call',
         tool_name: toolName,
+        response_available: eventData.response_available,
         tool_call_id: toolCallId,
         component_type: component_type || payload?.component_type || toolName,
         payload,
