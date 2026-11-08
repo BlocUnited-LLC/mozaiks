@@ -87,7 +87,7 @@ def _scan(files, context):
 
 
 def _commerce_modules(context):
-    # Exercise module compilation independently of commerce's legacy migration
+    # Exercise module compilation independently of commerce's migration
     # correction, which is owned by the pack persistence change.
     files = resolve_managed_capability_templates(context["capability_packs"], context_variables=context)
     compiled = _merge_code_files(
