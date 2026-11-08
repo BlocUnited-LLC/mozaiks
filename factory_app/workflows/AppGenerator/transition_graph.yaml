@@ -479,6 +479,14 @@ transition_rules:
   transition_type: condition
   condition_type: context_equals
   condition_key: app_bundle_export_outcome
+  condition_value: superseded
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
+- source_agent: DownloadAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: app_bundle_export_outcome
   condition_value: ready
   transition_target: TerminateTarget
 - source_agent: DownloadAgent

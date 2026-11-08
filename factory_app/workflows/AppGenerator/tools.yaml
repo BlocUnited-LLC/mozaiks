@@ -209,7 +209,7 @@ tools:
     context_key: app_bundle_export_outcome
     attempts_key: app_bundle_export_attempts
     result_field: outcome
-    values: [ready, repair_schema, repair_database, repair_integration, repair_service, repair_frontend, repair_models, repair_controller, repair_tasks, repair_harness, cancelled, blocked]
+    values: [ready, repair_schema, repair_database, repair_integration, repair_service, repair_frontend, repair_models, repair_controller, repair_tasks, repair_harness, cancelled, blocked, superseded]
     error_value: blocked
     max_attempts: 3
     retry_on: [repair_schema, repair_database, repair_integration, repair_service, repair_frontend, repair_models, repair_controller, repair_tasks, repair_harness]

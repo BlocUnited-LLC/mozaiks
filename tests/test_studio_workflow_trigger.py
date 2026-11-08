@@ -695,7 +695,7 @@ def test_studio_trigger_endpoint_rejects_refinement_when_control_plane_disabled(
     assert "Control-plane harness" not in detail
 
 
-@pytest.mark.parametrize("continuation_case", ["none", "ready", "unavailable"])
+@pytest.mark.parametrize("continuation_case", ["none", "ready", "unavailable", "generator_ready"])
 def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch, _owned_build_target, continuation_case):
     from mozaiksai.core.auth import reset_auth_adapter
 
@@ -706,7 +706,7 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch,
 
     continuation = None
     continuation_error = None
-    if continuation_case != "none":
+    if continuation_case in {"ready", "unavailable"}:
         _owned_build_target.repo = SimpleNamespace(get_owned_chat_binding=AsyncMock(return_value=_BINDING.model_dump()))
         continuation = {"chat_id": "review-child", "workflow_id": "AppReview", "artifact_version_id": "av_child_code_1"}
         reopen = AsyncMock(return_value=continuation)
@@ -718,6 +718,73 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch,
                 "Open the app's saved builds to review the result."
             )
         monkeypatch.setattr(studio_app, "continue_inline_app_review", reopen)
+
+    if continuation_case == "generator_ready":
+        from factory_app.workflows._shared.platform import review_continuation as review
+        from mozaiksai.core.session import launcher
+        from mozaiksai.core.transport.simple_transport import SimpleTransport
+
+        source_binding = _BINDING.model_copy(update={"build_id": "genesis", "phase": "genesis"})
+        source = {"workflow_name": "AppGenerator", "status": 0, "run_build_binding": source_binding.model_dump(),
+                  "workflow_ui_state": {"tool_calls": {"workbench": {
+                      "tool_name": "AppWorkbench", "tool_call_id": "workbench", "tool_call_status": "pending",
+                      "tool_call_completed": False, "awaiting_response": True,
+                      "payload": {"artifact_version_id": "av_456", "source_chat_id": "review-parent",
+                                  "build_registry_id": "appreg_1", "target_app_id": "app_1"},
+                  }}}}
+        sessions = {"review-parent": source}
+        collection = SimpleNamespace(find_one=AsyncMock(side_effect=lambda query, projection: sessions.get(query["_id"])))
+        persistence = SimpleNamespace(_coll=AsyncMock(return_value=collection), mark_chat_failed=AsyncMock())
+        async def create_session(**kwargs):
+            sessions[kwargs["chat_id"]] = {**kwargs["extra_fields"], "workflow_name": kwargs["workflow_name"], "status": 0}
+        async def persist_fields(**kwargs):
+            sessions[kwargs["chat_id"]].update(kwargs["fields"])
+        persistence.create_chat_session = AsyncMock(side_effect=create_session)
+        persistence.persist_server_owned_session_fields = AsyncMock(side_effect=persist_fields)
+        monkeypatch.setattr(launcher, "_PERSISTENCE_MANAGER", persistence)
+        monkeypatch.setattr(review, "get_platform_hooks", lambda: SimpleNamespace(call_chat_prereqs=AsyncMock(return_value=(True, None))))
+        record = _owned_build_target.get_app_record.return_value["app"]
+        record["current_build_run"] = {**source_binding.model_dump(), "artifact_version_id": "av_456"}
+        _owned_build_target.repo = SimpleNamespace(get_owned_chat_binding=AsyncMock(return_value=source_binding.model_dump()))
+        async def begin_refinement(**_kwargs):
+            record["current_build_run"] = {**_BINDING.model_dump(), "artifact_version_id": "av_child_code_1"}
+            return _BINDING
+        _owned_build_target.begin_refinement_run.side_effect = begin_refinement
+        _owned_build_target.resolve_build_binding = AsyncMock(return_value=_BINDING)
+        handoff_order = []
+        async def select_review(**kwargs):
+            assert kwargs["expected_build_id"] == _BINDING.build_id
+            if "active_chat_id" not in kwargs:
+                assert kwargs["status"] == "review"
+                assert kwargs["artifact_version_id"] == "av_child_code_1"
+                record["lifecycle_state"] = kwargs["status"]
+                record["current_build_run"]["artifact_version_id"] = kwargs["artifact_version_id"]
+                return {"success": True, "app": record}
+            assert kwargs["expected_artifact_version_id"] == "av_child_code_1"
+            record.update(active_chat_id=kwargs["active_chat_id"], active_workflow_id="AppReview")
+            handoff_order.append("select")
+            return {"success": True, "app": record}
+        _owned_build_target.update_build_status.side_effect = select_review
+        router = studio_app.get_session_router()
+        monkeypatch.setattr(router, "for_target", lambda target: router)
+        monkeypatch.setattr(router, "route_trigger", AsyncMock(return_value=SimpleNamespace(journey_id=None)))
+        monkeypatch.setattr(router, "bind_workflow_session", AsyncMock(side_effect=lambda **kwargs: handoff_order.append("bind")))
+        transport = SimpleNamespace(
+            connections={"review-parent": {"app_id": "factory", "user_id": "demo-user"}},
+            _ui_tool_metadata={"workbench": {"chat_id": "review-parent", "tool_name": "AppWorkbench", "workflow_name": "AppGenerator"}},
+            _is_tool_call_response_resolved=lambda event_id: False,
+        )
+        async def submit_response(event_id, response):
+            assert handoff_order == ["select", "bind"]
+            assert record["active_chat_id"] != "review-parent"
+            handoff_order.append("settle")
+            return True
+        transport.submit_tool_call_response = AsyncMock(side_effect=submit_response)
+        monkeypatch.setattr(SimpleTransport, "get_instance", AsyncMock(return_value=transport))
+        baseline = _BaselineStore.versions["av_456"]
+        baseline.source_chat_id = "review-parent"
+        baseline.commit_metadata.author_user_id = "demo-user"
+        baseline.commit_metadata.metadata.update(source_binding.model_dump())
 
     persisted_changes: list[dict] = []
     persisted_sessions: list[dict] = []
@@ -824,6 +891,21 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch,
     )
 
     assert response.status_code == 200
+    if continuation_case == "generator_ready":
+        continuation = response.json()["review_continuation"]
+        assert continuation is not None, response.json()["review_continuation_error"]
+        assert continuation["artifact_version_id"] == "av_child_code_1"
+        assert continuation["source_chat_id"] == "review-parent"
+        assert continuation["workflow_id"] == "AppReview"
+        assert continuation["chat_id"] == record["active_chat_id"] != "review-parent"
+        assert sessions[continuation["chat_id"]]["run_build_binding"] == _BINDING.model_dump()
+        assert sessions[continuation["chat_id"]]["artifact_version_id"] == "av_child_code_1"
+        assert source["run_build_binding"] == source_binding.model_dump()
+        assert handoff_order == ["select", "bind", "settle"]
+        transport.submit_tool_call_response.assert_awaited_once_with("workbench", {
+            "status": "superseded", "approved": False, "data": {"artifact_version_id": "av_456"},
+        })
+        persistence.mark_chat_failed.assert_not_awaited()
     assert response.json() == {
         "execution_mode": "coding_worker",
         "chat_id": None,
@@ -891,7 +973,7 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch,
             },
     }
     assert persisted_changes[0]["router_decision"]["execution_mode"] == "coding_worker"
-    if continuation_case != "none":
+    if continuation_case in {"ready", "unavailable"}:
         reopen.assert_awaited_once()
         assert reopen.await_args.kwargs["source_chat_id"] == "review-parent"
         assert reopen.await_args.kwargs["baseline_id"] == "av_456"

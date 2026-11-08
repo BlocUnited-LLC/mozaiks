@@ -658,3 +658,36 @@ to workflow-local `ui/` plus Python tools. If AgentGenerator emits a transition,
 it must keep routing/context deterministic and bind `ui.component` to a
 registered transition component key. Product-specific copy/images/layout belong
 in the React stub.
+
+
+### Refining a pending app workbench
+
+An inline refinement of a response-required AppGenerator workbench uses the
+existing `continue_inline_app_review` successor owner. The source must be owned,
+in progress, and waiting on exactly one workbench for the selected baseline;
+that baseline must belong to the source chat and its immutable `RunBuildBinding`.
+The new AppReview session carries the refinement build identity and the saved
+candidate's evidence. The registry selects it with the existing build, artifact,
+lifecycle, and active-chat compare-and-set checks. It never rebinds the source
+session or copies parent validation/security claims onto a child.
+
+Only after that successor is durably selected does the server settle the exact
+old waiter with a non-approval `superseded` disposition. A cold source is rechecked
+under its execution lease, then its superseded failure context and terminal state
+are persisted through the existing session owner. Lease contention leaves the
+selected successor recoverable without terminalizing a running source.
+AppGenerator independently checks its
+current artifact after the wait and again before reporting ready. A superseded
+build ends through the existing `workflow_failed` graph route with an explicit
+reason; it does not advance the old build sequence. An already superseded build
+cannot start an export after the wait. The final check prevents a ready result
+if refinement wins during an export; it cannot roll back that in-flight export.
+A browser cannot assert supersession when the registry still selects that build.
+
+AppReview can download the accepted selected version through the existing owned
+artifact download endpoint, which enforces validation and verifies the archive
+against the canonical manifest. Downloading does not approve, activate, or finish
+a workflow. If notification fails after the successor CAS, its registered review
+remains available through the existing current-build review entrypoint; the old
+build still fails the independent export/resume gates. This handoff does not rerun
+Media or Security under the old generation's build identity.

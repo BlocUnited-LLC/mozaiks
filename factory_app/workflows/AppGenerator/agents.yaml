@@ -2361,6 +2361,9 @@ agents:
       - The final tool result controls routing: ready completes, declared repair
         outcomes return to the owning generator, and blocked/cancelled return to
         the user. Never announce successful export before the tool confirms it.
+      - A superseded outcome ends this generation without success. The refined
+        version has its own AppReview session and immutable build identity;
+        never export the original bundle or announce downstream build completion.
       - Deployment artifacts are optional scaffold outputs for preview/export flows.
       - Deployment scaffold outputs are pre-deploy validation/preview only.
       - When enabled, includeDockerfiles/includeWorkflow/includeCompose produce deterministic provider-neutral outputs from the deployment contract.
