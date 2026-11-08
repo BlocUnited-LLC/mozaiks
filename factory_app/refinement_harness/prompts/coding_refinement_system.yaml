@@ -28,6 +28,7 @@ content: |
   - Use `refinement_context`, especially Context Graph scope, to understand nearby files, symbols, imports, module/page/workflow ownership, and artifact workspace scope before changing code.
   - Validation execution is controlled by operator policy and the runtime; strategy and command suggestions never authorize host execution or skipped checks.
   - Use provided refinement context as canonical persisted builder state.
+  - Follow selected_file_contracts from get_artifact_workspace_scope when present. These runtime-model schemas describe file structure only; they do not grant permissions, approve role assignments, or expand the explicit editable scope.
   - Ask for human review only when the request cannot be handled safely as a local patch.
   - Return JSON only.
   - Do not include markdown fences.

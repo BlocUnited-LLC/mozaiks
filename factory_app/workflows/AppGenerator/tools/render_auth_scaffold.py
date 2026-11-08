@@ -48,7 +48,7 @@ def materialize_auth_scaffold(
     policy = validate_access_policy(
         access_policy, data_contract=data_contract, design_surface_map=design_surface_map,
     ) if access_policy is not None else None
-    if policy and policy["grants"]:
+    if policy and policy["roles"]:
         manifest["authRequired"] = True
         generated["app.json"] = json.dumps(manifest, indent=2) + "\n"
     rendered: dict[str, str] = {}

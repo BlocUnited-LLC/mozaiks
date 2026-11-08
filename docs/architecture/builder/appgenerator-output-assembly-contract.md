@@ -118,7 +118,17 @@ AppSchemaAgent receives accepted module actions with their declared input and
 output schemas and entitlement gates. A metric's `value_key` selects a declared
 output field. A table's `data_key` selects a declared array, and its columns
 select fields declared on that array's items. These checks apply to client and
-server pagination. Compilation fills canonical `items`/`total` list bindings
+server pagination. Client tables also accept the canonical nullable array type
+`["array", "null"]`, including an optional response field. An explicit
+`data_key` that returns null or is absent renders no rows; it never selects a
+different array from the response. Its columns still require declared row
+properties. Server paging continues to require nonnullable, required rows and
+totals. Declared `page`/`page_size` inputs and a required nonnullable integer
+`total` identify the paged envelope even when its rows are nullable; client mode
+cannot bypass the server requirements for that envelope. Optional or nullable
+totals retain the existing noncanonical-envelope classification, which does not
+establish a valid server paging contract.
+Compilation fills canonical `items`/`total` list bindings
 when the action contract determines them; it does not guess semantic metric
 renames or invent row fields. Invalid selections identify the bound action and
 list the valid fields so the page worker can revise them.

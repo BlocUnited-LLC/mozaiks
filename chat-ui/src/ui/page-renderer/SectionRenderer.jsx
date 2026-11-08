@@ -188,7 +188,7 @@ function resolveTableData(config, liveData) {
   if (Array.isArray(config.data)) return config.data;
   if (typeof config.data_key === 'string' && config.data_key.trim()) {
     const resolved = resolvePath(liveData, config.data_key.trim());
-    if (Array.isArray(resolved)) return resolved;
+    return Array.isArray(resolved) ? resolved : [];
   }
   if (Array.isArray(liveData)) return liveData;
   if (isRecord(liveData)) {
@@ -749,9 +749,9 @@ export function SectionRenderer({
         variant: config.variant ?? 'info',
         dismissible: config.dismissible ?? false,
         actions: bannerActions,
-        onAction: (actionId, selectedRows) => {
+        onAction: (actionId) => {
           const action = bannerActions.find((a) => (a.id ?? a.label) === actionId);
-          if (action) void executeAction(action, { selectedRows });
+          if (action) void executeAction(action);
         },
       };
       break;

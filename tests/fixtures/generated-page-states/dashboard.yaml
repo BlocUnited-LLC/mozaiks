@@ -1,0 +1,62 @@
+schema_version: mozaiks.app_page.v1
+name: dashboard
+route: /dashboard
+title: Dashboard
+page_type: analytics_dashboard
+layout: grid
+shell_mode: standard
+roles:
+- member
+navigation:
+  id: dashboard
+  label: Dashboard
+  scope: global
+  order: 1
+  visible: true
+sections:
+- id: dash-summary
+  primitive: SummaryStrip
+  config:
+    items:
+    - label: My Notes
+      value_key: note_count
+    - label: Latest Note
+      value_key: latest_note_title
+    api_endpoint: /api/modules/notes/summarize_notes
+- id: recent-notes
+  primitive: DataTable
+  title: Recent notes
+  config:
+    columns:
+    - key: title
+      label: Title
+      sortable: false
+      type: text
+    - key: updated_at
+      label: Updated
+      sortable: false
+      type: text
+    - key: created_at
+      label: Created
+      sortable: false
+      type: text
+    data_key: recent_notes
+    selection: none
+    pagination: false
+    pagination_mode: client
+    search: false
+    empty:
+      message: No recent notes found.
+    api_endpoint: /api/modules/notes/summarize_notes
+- id: empty-state
+  primitive: InlineEmptyState
+  config:
+    title: You don’t have any notes yet!
+    action:
+      id: go-to-notes
+      label: Go to Notes
+      variant: primary
+      requires_selection: false
+      closes_modal: false
+      action_type: navigate
+      href: /notes

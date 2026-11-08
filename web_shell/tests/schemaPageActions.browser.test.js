@@ -20,11 +20,16 @@ const styles = postcss([tailwindcss()]).process(
 ).then(async result => result.css + '\n' + await fs.readFile(path.join(root, 'chat-ui/src/components/layout/header-styles.css'), 'utf8'));
 
 for (const tablePrimitive of ['ResourceTable', 'DataTable']) {
-test(`${tablePrimitive} CRUD carries selection, authenticates and keeps failed dialogs open`, async (t) => {
+for (const confirmationPrimitive of ['Modal', 'AlertBanner', 'ActionButton']) {
+test(`${tablePrimitive}/${confirmationPrimitive} CRUD carries selection, authenticates and keeps failed dialogs open`, async (t) => {
   const requests = [];
   let rejectDelete = true;
   let rejectList = tablePrimitive === 'DataTable';
   const modulePath = '/api/modules/records/';
+  const confirmAction = {
+    id: 'confirm', label: 'Confirm delete', action_type: 'delete', href: modulePath + 'delete',
+    payload: { record_id: '{selected_row.record_id}' }, closes_modal: true,
+  };
   const pageSchema = {
     name: 'records', title: 'Records', layout: 'full-width', sections: [
       { id: 'summary', primitive: 'SummaryStrip', config: {
@@ -62,9 +67,20 @@ test(`${tablePrimitive} CRUD carries selection, authenticates and keeps failed d
             payload: id === 'create' ? null : { record_id: '{selected_row.record_id}', name: '{form.name}', notes: '{form.notes}' } },
         } },
       ] } })),
-      { id: 'delete', primitive: 'Modal', config: { title: 'Confirm deletion', description: 'Delete {selected_row.name}?', actions: [
-        { id: 'confirm', label: 'Confirm delete', action_type: 'delete', href: modulePath + 'delete', payload: { record_id: '{selected_row.record_id}' }, closes_modal: true },
-      ] } },
+      { id: 'delete', primitive: 'Modal', config: {
+        title: 'Confirm deletion', description: 'Delete {selected_row.name}?',
+        ...(confirmationPrimitive === 'Modal' ? { actions: [confirmAction] } : { children: [
+          { id: 'confirmation', primitive: confirmationPrimitive, config: {
+            ...(confirmationPrimitive === 'AlertBanner' ? { message: 'This cannot be undone.' } : {}),
+            actions: [confirmAction],
+          } },
+          ...(confirmationPrimitive === 'ActionButton' ? [{ id: 'selection-probe', primitive: tablePrimitive, config: {
+            api_endpoint: modulePath + 'inspect_list', data_key: 'records', columns: [{ key: 'name', label: 'Name' }],
+            selection: 'single', actions: [{ id: 'inspect', label: 'Inspect selection', requires_selection: false,
+              action_type: 'submit', href: modulePath + 'selection_probe', payload: { record_id: '{selected_row.record_id}' } }],
+          } }] : []),
+        ] }),
+      } },
     ],
   };
   const entry = `
@@ -98,7 +114,8 @@ test(`${tablePrimitive} CRUD carries selection, authenticates and keeps failed d
       res.setHeader('Content-Type', 'application/json');
       if (req.url.endsWith('/list') && rejectList) { res.statusCode = 404; rejectList = false; res.end('{}'); return; }
       if (req.url.endsWith('/delete') && rejectDelete) { res.statusCode = 409; rejectDelete = false; res.end('{}'); return; }
-      res.end(JSON.stringify(req.url.endsWith('/list') ? { records: [
+      res.end(JSON.stringify(req.url.endsWith('/inspect_list') ? { records: [{ record_id: 'inner', name: 'Nested row' }] }
+        : req.url.endsWith('/list') ? { records: [
         { record_id: 'r1', name: 'Ada', notes: 'Original note', email: 'first@example.test', status: 'complete', count: 4, notify: false },
         { record_id: 'r2', name: 'Zoe', notes: 'Another note', email: 'zoe@example.test' },
       ] } : req.url.endsWith('/summary') ? { total: 7 } : { success: true }));
@@ -162,8 +179,17 @@ test(`${tablePrimitive} CRUD carries selection, authenticates and keeps failed d
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
   await page.getByRole('dialog').getByText('Delete Ada?', { exact: true }).waitFor();
+  if (confirmationPrimitive === 'ActionButton') {
+    await page.getByRole('dialog').getByRole('cell', { name: 'Nested row', exact: true }).waitFor();
+    const response = page.waitForResponse(response => response.url().endsWith('/selection_probe'));
+    await page.getByRole('dialog').getByRole('button', { name: 'Inspect selection', exact: true }).click();
+    await response;
+    assert.deepEqual(requests.find(r => r.path.endsWith('/selection_probe')).body, {},
+      'a table with explicit empty selection must not fall back to the inherited modal row');
+  }
   await page.getByRole('button', { name: 'Confirm delete', exact: true }).click();
   await page.getByRole('dialog').getByRole('alert').waitFor();
+  assert.deepEqual(requests.filter(r => r.path.endsWith('/delete')).at(-1).body, { record_id: 'r1' });
   await page.getByRole('button', { name: 'Confirm delete', exact: true }).click();
   await page.getByRole('dialog').waitFor({ state: 'hidden' });
   const deletes = requests.filter(r => r.path.endsWith('/delete'));
@@ -210,4 +236,5 @@ test(`${tablePrimitive} CRUD carries selection, authenticates and keeps failed d
   assert.ok(requests.every(r => r.authorization === 'Bearer test-session'));
   assert.deepEqual(errors, []);
 });
+}
 }

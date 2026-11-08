@@ -29,7 +29,10 @@ from mozaiksai.core.workflow.generator_support.data_contract_fields import (
     normalize_structured_defaults,
     validate_collection_fields,
 )
-from mozaiksai.core.workflow.generator_support.design_access_policy import access_policy_sha256
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    access_policy_sha256,
+    validate_design_page_roles,
+)
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     canonical_read_actions_for_surface,
 )
@@ -60,12 +63,15 @@ class _AccessPolicyCancellation(BaseModel):
     ui_event_id: str | None = None
 
 
-async def _review_access_policy(policy: dict[str, Any], *, binding: Any, context_variables: Any) -> dict[str, Any]:
+async def _review_access_policy(
+    policy: dict[str, Any], *, experience_spec: dict[str, Any], binding: Any, context_variables: Any,
+) -> dict[str, Any]:
+    page_roles = validate_design_page_roles(experience_spec, policy)
     receipt = {
-        "status": "not_required", "policy_sha256": access_policy_sha256(policy),
+        "status": "not_required", "policy_sha256": access_policy_sha256(policy, experience_spec),
         "target_app_id": binding.target_app_id, "build_id": binding.build_id,
     }
-    if not policy["grants"]:
+    if not policy["grants"] and not any(page_roles.values()):
         return receipt
     user_id, chat_id = _cv_get(context_variables, "user_id"), _cv_get(context_variables, "chat_id")
     if not user_id or not chat_id:
@@ -77,11 +83,18 @@ async def _review_access_policy(policy: dict[str, Any], *, binding: Any, context
         f"{labels[grant['role_id']]} may {', '.join(grant['actions'])} on {grant['collection']}."
         for grant in policy["grants"]
     )
+    checkpoints.extend(
+        f"Page {route}: " + (
+            "requires a verified role of " + ", ".join(f"{labels[role]} ({role})" for role in roles) + "."
+            if roles else "no page-role gate; authentication and record ownership still apply."
+        )
+        for route, roles in page_roles.items()
+    )
     raw_response = await use_ui_tool(
         "save_design_docs_bundle",
         {
             "title": "Review app role permissions",
-            "summary": "Approve who may perform the listed read and write actions. People without a granted role cannot perform these actions. Record ownership still applies.",
+            "summary": "Approve who may perform the listed read and write actions and open each page. People without a granted role cannot use restricted actions or pages. Login does not assign roles. Record ownership still applies.",
             "review_id": review_id, "checkpoints": checkpoints,
             "actions": [
                 {"id": action, "label": label, "variant": variant, "approved": action == "approve",
@@ -1060,6 +1073,7 @@ async def save_design_docs_bundle(
         access_policy = validate_access_policy(
             bundle.get("access_policy"), data_contract=data_contract, design_surface_map=surface_map,
         )
+        validate_design_page_roles(experience_spec, access_policy)
         if not frontend_markdown or not backend_markdown or not database_markdown:
             raise ValueError("DesignDocsBundle must include all three Markdown documents")
         normalization_messages = [
@@ -1173,7 +1187,7 @@ async def save_design_docs_bundle(
 
     try:
         access_policy_review = await _review_access_policy(
-            access_policy, binding=binding, context_variables=context_variables,
+            access_policy, experience_spec=experience_spec, binding=binding, context_variables=context_variables,
         )
     except Exception as err:
         return _refused(context_variables, "access_policy_review_failed", str(err), outcome="blocked")

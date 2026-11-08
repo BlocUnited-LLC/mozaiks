@@ -454,6 +454,46 @@ def _candidate_evidence(strategy="docker"):
     }
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["valid", "invalid_syntax", "invalid_contract"])
+async def test_staged_yaml_finalization_keeps_candidate_validation_authority(tmp_path, case):
+    path = "ui/pages/notes.yaml"
+    original = "title: Notes\n"
+    content = "title: Updated\n" if case == "valid" else "title: \x18Notes\n" if case == "invalid_syntax" else "null\n"
+    request = _candidate_request(validation_strategy="docker").model_copy(update={
+        "files": {path: original}, "baseline_files": {"app.json": '{"appId":"app_1"}', path: original},
+    })
+    # ACP proposals enter the same finalizer; syntax does not authorize promotion.
+    proposal = _candidate_proposal().model_copy(update={
+        "provider_id": "acp", "owned_paths": [path],
+        "changed_files": [ProposedFileChange(path=path, content=content)],
+    })
+    evidence = _candidate_evidence()
+    if case == "invalid_contract":
+        evidence.update(validation_status="failed", errors=["page must be a mapping"])
+        evidence["app_bundle_acceptance_result"] = {"passed": False, "status": "failed"}
+        evidence["app_validation_result"]["validation_status"] = "pending"
+    validate = AsyncMock(return_value=evidence)
+    store = _FakeArtifactStore()
+    worker = ScopedRefinementCodingWorker(candidate_validation_runner=validate, artifact_store=store, output_root=tmp_path)
+    result = await worker.finalize_proposal(request, proposal)
+    assert result.provider == "acp"
+    if case == "invalid_syntax":
+        assert result.status == "failed"
+        assert f"{path}: invalid YAML (ReaderError)" in result.error
+        validate.assert_not_awaited()
+        assert store.calls == []
+        assert result.applied_files == {}
+    else:
+        validate.assert_awaited_once_with(
+            files={"app.json": '{"appId":"app_1"}', path: content}, app_id="app_1",
+            validation_strategy="docker", timeout_seconds=120, capability_packs=[],
+        )
+        assert result.status == ("validated" if case == "valid" else "failed")
+        assert store.calls[0]["validation_status"].value == ("passed" if case == "valid" else "failed")
+        assert result.applied_files == {path: content}
+
+
 def _selected_pack_contracts():
     return [{
         "id": "operator_readiness", "capability_source": "config_file",
