@@ -696,7 +696,7 @@ definitions:
         source_workflow: DesignDocs
         lifecycle_status: current
       sort: [{field: version_number, direction: desc}, {field: created_at, direction: desc}]
-      fields: [app_id, build_family, build_key, source_workflow, lifecycle_status, commit_metadata]
+      fields: [_id, app_id, build_family, build_key, source_workflow, lifecycle_status, commit_metadata]
       default: null
   design_docs_build_artifact:
     type: object
@@ -716,7 +716,7 @@ definitions:
         lifecycle_status: {$in: [current, draft]}
         commit_metadata.metadata.summary_payload.access_policy_review.build_id: '{{run_build_binding.build_id}}'
       sort: [{field: version_number, direction: desc}, {field: created_at, direction: desc}]
-      fields: [app_id, build_family, build_key, source_workflow, lifecycle_status, commit_metadata]
+      fields: [_id, app_id, build_family, build_key, source_workflow, lifecycle_status, commit_metadata]
       default: null
   access_policy:
     type: object
@@ -797,8 +797,16 @@ definitions:
         build_key: subscription_contract
         lifecycle_status: current
       fields:
+      - _id
       - commit_metadata
       default: null
+  subscription_contract_artifact_version_id:
+    type: string
+    authority_class: tool_only_information
+    writer_ids: [lifecycle_tool, transition_router]
+    model_visible: false
+    description: Exact saved subscription input carried from its owning workflow; never reconstructed from candidate files.
+    source: {type: state, default: null}
   revenue_model:
     type: string
     description: >

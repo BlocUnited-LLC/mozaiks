@@ -35,6 +35,7 @@ from mozaiksai.core.artifacts.store import get_artifact_store
 from mozaiksai.core.media.store import get_media_asset_store
 from mozaiksai.core.media.types import GeneratedMediaAsset
 from mozaiksai.core.utils.path_containment import contains_symlink_component, resolve_inside
+from mozaiksai.core.validation.compilation_inputs import resolve_app_compilation_inputs
 from mozaiksai.core.validation.generated_app import validate_generated_app_candidate
 from mozaiksai.core.workflow.agents.factory import active_workflow_tool_run
 from mozaiksai.core.workflow.context.frozen import detach
@@ -131,6 +132,7 @@ async def _register_media_version(
     validation: dict[str, Any],
     chat_id: str,
     user_id: str,
+    approved_compilation: Any = None,
 ) -> tuple[BuildRecord, str]:
     metadata = dict(parent.commit_metadata.metadata)
     bundle_name = metadata["bundle_name"]
@@ -158,6 +160,8 @@ async def _register_media_version(
         "validation_evidence": validation["app_bundle_acceptance_result"].get("validation_evidence"),
         "app_validation_result": validation["app_validation_result"],
     })
+    if approved_compilation is not None:
+        metadata["compilation_inputs"] = approved_compilation.for_child(sha)
     content_store = get_artifact_content_store()
     if content_store.backend_name != "local":
         metadata["content_ref"] = await content_store.put_bundle(
@@ -269,11 +273,17 @@ async def publish_app_media(context_variables: Any = None) -> dict[str, Any]:
         "asset_manifest_sha256": hashlib.sha256(manifest_text.encode("utf-8")).hexdigest(),
     }
     try:
+        approved_compilation = await resolve_app_compilation_inputs(
+            app_id=parent.app_id, build_record_id=parent.id, owner_user_id=user_id,
+            build_registry_id=binding.build_registry_id,
+            artifact_store=get_artifact_store(),
+        )
         validation = await validate_generated_app_candidate(
             files=files,
             app_id=parent.app_id,
             validation_strategy=parent.app_validation_strategy,
             capability_packs=parent.commit_metadata.metadata.get("capability_packs") or [],
+            **({"approved_compilation": approved_compilation} if approved_compilation is not None else {}),
         )
         acceptance = validation.get("app_bundle_acceptance_result") or {}
         build_validation = validation.get("app_validation_result") or {}
@@ -285,6 +295,7 @@ async def publish_app_media(context_variables: Any = None) -> dict[str, Any]:
             return _finish(context_variables, {"published": False, "error": f"{ERROR_PREFIX}_validation_failed"})
         child, bundle_path = await _register_media_version(
             parent=parent, files=files, overlay=overlay, validation=validation, chat_id=chat_id, user_id=user_id,
+            approved_compilation=approved_compilation,
         )
     except (OSError, ValueError, RuntimeError) as exc:
         logger.warning("App media version registration failed: %s", exc)

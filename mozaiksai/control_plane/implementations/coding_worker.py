@@ -1526,11 +1526,13 @@ class ScopedRefinementCodingWorker:
         self._output_root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="validation-", dir=self._output_root.resolve()) as root:
             materialize_coding_workspace(merged_files, workspace_root=Path(root))
+            approved_compilation = await self._approved_compilation(request)
             result = await self._candidate_validation_runner(
                 files=dict(merged_files),
                 app_id=request.artifact_app_id,
                 validation_strategy=validation_strategy,
                 capability_packs=deepcopy(capability_packs),
+                **({"approved_compilation": approved_compilation} if approved_compilation is not None else {}),
                 timeout_seconds=self._bounded_int(
                     request.metadata.get("validation_timeout_seconds"), default=120, minimum=5, maximum=900,
                 ),
@@ -1547,6 +1549,18 @@ class ScopedRefinementCodingWorker:
         ):
             raise ValueError("Candidate validator passed without completed acceptance and build checks")
         return payload
+
+    async def _approved_compilation(self, request: CodingWorkerRequest):
+        from mozaiksai.core.validation.compilation_inputs import resolve_app_compilation_inputs
+
+        if not request.build_record_id:
+            return None
+        return await resolve_app_compilation_inputs(
+            app_id=request.artifact_app_id, build_record_id=request.build_record_id,
+            owner_user_id=str(request.user_id or ""),
+            build_registry_id=request.run_build_binding.build_registry_id if request.run_build_binding else "",
+            artifact_store=self._artifact_store or get_artifact_store(),
+        )
 
     async def _persist_refinement_artifact(
         self,
@@ -1635,6 +1649,12 @@ class ScopedRefinementCodingWorker:
                 ) from cs_exc
 
         artifact_store = self._artifact_store or get_artifact_store()
+        parent = await artifact_store.get_build_record(app_id=request.artifact_app_id, build_record_id=request.build_record_id)
+        if parent is None:
+            raise ValueError("Refinement parent disappeared before candidate persistence")
+        approved_compilation = await self._approved_compilation(request)
+        if approved_compilation is not None:
+            commit_content_metadata["compilation_inputs"] = approved_compilation.for_child(zip_sha)
         validation_status = self._artifact_validation_status(validation_result)
         build_result = validation_result["app_validation_result"]
         commit_content_metadata["validation_status"] = validation_status.value
@@ -1643,6 +1663,7 @@ class ScopedRefinementCodingWorker:
             build_family=resolved_artifact_kind,
             build_key="app_bundle",
             parent_build_record_id=request.build_record_id,
+            canonical_inputs_version=dict(parent.canonical_inputs_version),
             source_workflow=request.requested_workflow_id or "control_plane_coding",
             source_chat_id=None,
             lifecycle_status=ArtifactLifecycleStatus.DRAFT,
