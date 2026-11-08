@@ -112,6 +112,7 @@ export default function DownloadCenter({ payload = {}, onResponse, onCancel, col
         if (errors.length) return;
         await sendPrimitiveResponse(respond, action, {
           files,
+          artifact_version_id: payload.artifact_version_id,
           download_accepted: errors.length === 0,
           errors,
         });
@@ -121,6 +122,7 @@ export default function DownloadCenter({ payload = {}, onResponse, onCancel, col
       if (action.id === 'export_to_github') {
         await sendPrimitiveResponse(respond, action, {
           files,
+          artifact_version_id: payload.artifact_version_id,
           repo_name: repoName.trim() || null,
           commit_message: commitMessage.trim() || 'Initial code generation from Mozaiks AI',
         });

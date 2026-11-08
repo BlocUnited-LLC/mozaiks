@@ -433,6 +433,18 @@ This project follows a practical pre-1.0 changelog format:
 - Studio onboarding status accepts a null completion timestamp for new,
   partially completed, and dismissed tours without an output-contract warning.
 
+- Refining a pending app workbench opens an owned AppReview session for the new
+  build. The generation rechecks its current selection before starting an export
+  and before completion. Accepted child downloads use that version's saved checks
+  and verified archive. Saved builds' Continue in chat recovers an interrupted
+  handoff using its owned persisted lineage, reuses a selected successor, and
+  retries source settlement without repeating the edit or creating another chat.
+  Review admission uses the owned saved app bundle rather than requiring its
+  original generation to have completed. An interrupted manual review that was
+  incorrectly routed into generation can recover only with exact saved lineage,
+  an execution lease, and no newer saved artifact; its successor preserves cleanup
+  provenance for retry. Media and Security dependencies remain unchanged.
+
 - The shell no longer offers Profile, Sign in, or Sign out when nobody can sign
   in. A fresh Studio runs with authentication disabled, yet its account menu
   showed Profile, Sign Out, and Sign In, and the mobile bar showed Profile, all

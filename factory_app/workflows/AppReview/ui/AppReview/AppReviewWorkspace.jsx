@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@mozaiks/chat-ui/ui';
+import DownloadCenter from '@mozaiks/chat-ui/core/ui/DownloadCenter.js';
 import { studioFetch } from '../../../../app/admin/pages/studioApi.js';
 import PreviewPane from '../../../_shared/ui/app_preview/PreviewPane.js';
 import { useSandbox } from '../../../_shared/ui/app_preview/useSandbox.js';
@@ -115,6 +116,20 @@ export default function AppReviewWorkspace({ payload = {} }) {
         </Button>
       )}
       {body && <AppReviewSummary key={`${identity}/${refresh}`} payload={reviewPayload} />}
+      {body && validationPassed && !pending && !incomplete && body.review.lifecycle_status === 'current' && (
+        <DownloadCenter
+          key={`download/${identity}/${refresh}`}
+          payload={{
+            app_id: body.workbench.app_id,
+            artifact_version_id: reviewedId,
+            build_registry_id: registryId,
+            title: 'Download this accepted version',
+            files: [{name: `${targetAppId}-${reviewedId}.zip`, type: 'zip'}],
+            actions: [{id: 'download_complete', label: 'Download accepted app', variant: 'secondary'}],
+          }}
+          onResponse={() => { /* Downloading does not complete or approve a workflow. */ }}
+        />
+      )}
     </div>
   );
 }

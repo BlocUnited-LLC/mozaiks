@@ -5,7 +5,8 @@
 One generated, authenticated app passed its business acceptance sequence on
 2026-11-08. Comet Notes was generated through the Studio browser with real
 model calls, corrected through one normal Workbench refinement, accepted, and
-downloaded through the authenticated artifact endpoint. Its exact exported
+downloaded through the owner-scoped artifact endpoint using Studio's local
+development identity. Its exact exported
 bytes ran in a separate local container and database with real OIDC logins.
 No generated source was manually patched to obtain this result.
 
@@ -43,7 +44,7 @@ was activated or promoted.
 
 ## What passed
 
-- Authenticated export: 17 checks passed. The stored manifest, downloaded ZIP,
+- Owner-scoped Studio export: 17 checks passed. The stored manifest, downloaded ZIP,
   staged files, source identity, and image identity matched.
 - Contained runtime: 23 checks passed, including six role-holder/non-holder
   action pairs. Completion and scoped cleanup were verified.
@@ -112,6 +113,9 @@ the pinned PR head. That tree differs from the live proof source above.
 
 ## Remaining limits
 
+- Studio used authentication-disabled local access as `demo-user`. Its export
+  checks did not prove a bearer-authenticated Studio login or download. The three
+  generated-app OIDC logins above are separate authentication evidence.
 - The old AppGenerator Workbench did not hand the refined child to a new review
   session or complete its original waiter. That separate fix must preserve
   immutable run/build bindings and prevent exporting the superseded parent.

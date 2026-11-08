@@ -1143,7 +1143,7 @@ definitions:
     persisted: true
     description: >
       User-facing reason the build cannot continue, listing the blocking errors.
-      Written when planning or validation ends the run as blocked, null otherwise.
+      Written when planning or validation blocks the run, or its build is superseded.
       orchestrator.yaml names it as the failure message for workflow_failed ends.
     source:
       type: state
@@ -1591,7 +1591,7 @@ definitions:
       default: null
   download_status:
     type: string
-    description: Download packaging status, such as ready or cancelled.
+    description: Download packaging status, such as ready, cancelled, or superseded.
     source:
       type: computed
       default: null

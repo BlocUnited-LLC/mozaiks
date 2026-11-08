@@ -50,6 +50,7 @@ def _external_boundaries(monkeypatch, tmp_path, historical_outputs):
     monkeypatch.setattr(AG2PersistenceManager, "gather_latest_agent_jsons", history)
     artifact = AsyncMock(return_value=None)
     monkeypatch.setattr(generate_and_download, "_register_app_bundle_artifact_version", artifact)
+    monkeypatch.setattr(generate_and_download, "resolve_current_build_artifact", AsyncMock(return_value=(None, {}, SimpleNamespace(id=None))))
     registry = AsyncMock(return_value={"success": True})
     monkeypatch.setattr(generate_and_download.AppRegistryService, "update_build_status", registry)
     ui = AsyncMock(return_value={"status": "success", "action": "export_to_github"})
@@ -73,6 +74,7 @@ def _external_boundaries(monkeypatch, tmp_path, historical_outputs):
 
 
 async def _download_and_assert_snapshot(context, boundaries):
+    context.set("user_id", "owner")
     context.set("app_validation_status", "passed")
     context.set("app_validation_strategy_used", "docker")
     result = await generate_and_download.generate_and_download(

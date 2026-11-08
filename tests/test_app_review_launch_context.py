@@ -1,5 +1,6 @@
 """New review sessions hydrate saved build facts before the first model turn."""
 
+import json
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,6 +21,7 @@ from mozaiksai.core.session import launcher
 from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.authority import build_context_authority_policy
+from mozaiksai.core.workflow.pack.schema import parse_global_pack_graph
 
 
 @pytest.fixture
@@ -264,3 +266,68 @@ async def test_current_build_policy_does_not_replace_explicit_or_resumed_binding
         )
     fixture.repo.update_lifecycle_state.assert_not_awaited()
     fixture.repo.upsert_app_record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("damage", [None, "missing_artifact", "foreign_artifact", "superseded", "prerequisite"])
+async def test_saved_review_uses_actual_routes_without_completed_generation(current_review, monkeypatch, damage):
+    from mozaiksai.core.session import router as router_module
+    from tests.test_session_router import _FakePersistence
+
+    fixture = current_review
+    pack = parse_global_pack_graph(json.loads((Path(__file__).resolve().parents[1]
+        / "factory_app/workflows/extended_orchestration/extension_registry.json").read_text(encoding="utf-8")))
+    monkeypatch.setattr(router_module, "load_global_pack_graph", lambda: pack)
+    persistence = _FakePersistence()
+    persistence.create_chat_session = AsyncMock()
+    persistence.persist_server_owned_session_fields = AsyncMock()
+    monkeypatch.setattr(launcher, "_PERSISTENCE_MANAGER", persistence)
+    router = router_module.SessionRouter(persistence=persistence).for_target("target")
+    for workflow in ("ValueEngine", "ThemeCapture", "DesignDocs", "SubscriptionContractDesigner", "AgentGenerator"):
+        persistence._default._docs[workflow] = {
+            "_id": workflow, "app_id": "factory", "user_id": "owner", "workflow_name": workflow,
+            "status": 1, "run_build_binding": fixture.binding.model_dump(),
+        }
+    persistence._default._docs["unfinished"] = {
+        "_id": "unfinished", "app_id": "factory", "user_id": "owner", "workflow_name": "AppGenerator",
+        "status": 0, "run_build_binding": fixture.binding.model_dump(),
+    }
+    if damage == "missing_artifact":
+        fixture.store.get_build_record.return_value = None
+    elif damage == "foreign_artifact":
+        fixture.version.commit_metadata.author_user_id = "another-owner"
+    elif damage == "superseded":
+        fixture.version.commit_metadata.metadata["build_id"] = "older"
+    elif damage == "prerequisite":
+        monkeypatch.setattr(fixture.hooks, "call_chat_prereqs", AsyncMock(return_value=(False, "Access denied")))
+
+    async def prepare():
+        return await launcher.prepare_routed_workflow_launch(
+            workflow_id="AppReview", app_id="factory", user_id="owner", trigger_source="manual",
+            context_variables={}, build_registry_id="registry", session_router=router,
+        )
+
+    if damage:
+        with pytest.raises(ValueError):
+            await prepare()
+        persistence.create_chat_session.assert_not_awaited()
+        persistence.persist_server_owned_session_fields.assert_not_awaited()
+        assert not persistence._named  # No routing state written before admission.
+        return
+
+    launch = await prepare()
+    assert launch.workflow_id == "AppReview"
+    assert launch.requested_workflow_id == "AppReview"
+    assert launch.routing_decision.rerouted_by_dependency is False
+    result = await launcher.launch_prepared_workflow(launch)
+    assert result.workflow_id == "AppReview"
+    assert persistence.create_chat_session.await_args.kwargs["extra_fields"]["artifact_version_id"] == "saved"
+    assert persistence._default._docs["unfinished"]["status"] == 0
+    # Reviews are artifact-gated; generated media and security retain their
+    # ordinary dependency on a completed generation.
+    for workflow in ("AppMediaGenerator", "SecurityReadiness"):
+        decision = await router.route_trigger(router_module.TriggerInput(
+            app_id="factory", user_id="owner", trigger_source="manual", workflow_id=workflow,
+        ))
+        assert decision.workflow_id == "AppGenerator"
+        assert decision.rerouted_by_dependency is True
