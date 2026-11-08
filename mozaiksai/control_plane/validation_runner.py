@@ -311,7 +311,8 @@ def _route_component_validation(files: dict[str, str]) -> RefinementValidationIt
             reason="No route/component surfaces were present in the staged workspace.",
         )
 
-    warnings = audit_app_ui_bundle_integrity(entries, source_label="staged app bundle")
+    entries += _module_contract_entries(files)
+    warnings = audit_app_ui_bundle_integrity(entries, source_label="staged app bundle", require_module_contracts=True)
     if warnings:
         return _result(
             name="route_component_validation",
@@ -627,7 +628,9 @@ def _app_bundle_validation(files: dict[str, str], *, plan: RefinementExecutionPl
 
     warnings = list(page_warnings)
     if route_entries:
-        warnings.extend(audit_app_ui_bundle_integrity(route_entries, source_label="staged app bundle"))
+        warnings.extend(audit_app_ui_bundle_integrity(
+            route_entries + module_entries, source_label="staged app bundle", require_module_contracts=True,
+        ))
     if page_entries:
         warnings.extend(audit_page_schemas(page_entries, source_label="staged page schemas"))
     if module_entries:

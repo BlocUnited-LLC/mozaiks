@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 from factory_app.workflows._shared.generated_ui_contract import audit_app_ui_bundle_integrity
 from factory_app.workflows.AppGenerator.tools.save_admin_registry import save_admin_registry
@@ -67,11 +69,15 @@ def _neutral_generated_app_contract_files(*, route_auth_action: str = "authorize
                 input_schema:
                   type: object
                   required: [project_id]
-                  properties: []
+                  properties:
+                    project_id:
+                      type: string
                 output_schema:
                   type: object
                   required: [allowed]
-                  properties: []
+                  properties:
+                    allowed:
+                      type: boolean
                 permissions: [project.manage]
                 emits: []
             capabilities: []
@@ -99,6 +105,115 @@ def _neutral_generated_app_contract_files(*, route_auth_action: str = "authorize
             """,
         },
     ]
+
+
+def _route_auth_output_files(output_schema, *, custom):
+    files = _neutral_generated_app_contract_files()
+    module = yaml.safe_load(files[1]["content"])
+    module["actions"][0]["output_schema"] = output_schema
+    files[1]["content"] = yaml.safe_dump(module)
+    if custom:
+        page = yaml.safe_load(files[0]["content"])
+        files[0] = {"filename": "ui/route_manifest.json", "content": json.dumps({"pages": [{
+            "id": "project-settings", "path": page["route"], "component": "ProjectSettings",
+            "meta": page["meta"],
+        }]})}
+        files.extend([
+            {"filename": "ui/pages/custom/ProjectSettings.jsx", "content": "export default function ProjectSettings(){ return <main />; }"},
+            {"filename": "ui/index.js", "content": "import ProjectSettings from './pages/custom/ProjectSettings.jsx'; export function register(registerComponent){registerComponent('ProjectSettings', ProjectSettings);}"},
+        ])
+    return files
+
+
+@pytest.mark.parametrize("custom", [False, True])
+@pytest.mark.parametrize("schema", [
+    None,
+    {"type": "object", "required": ["authorized"], "properties": {"authorized": {"type": "boolean"}}},
+    {"type": "object", "properties": {"allowed": {"type": "boolean"}}},
+    {"type": "object", "required": ["allowed"], "properties": {"allowed": {"type": "string"}}},
+    {"type": "object", "required": ["allowed"], "properties": {"allowed": {"type": ["boolean", "null"]}}},
+    {"type": "array", "items": {"type": "boolean"}},
+])
+def test_routeauth_requires_declared_nonnullable_boolean_allowed(schema, custom):
+    warnings = audit_app_ui_bundle_integrity(_route_auth_output_files(schema, custom=custom))
+    assert any("project_access/authorize_project_route" in warning and "required boolean 'allowed'" in warning for warning in warnings)
+
+
+@pytest.mark.parametrize("custom", [False, True])
+def test_routeauth_accepts_boolean_allowed_with_optional_response_metadata(custom):
+    schema = {"type": "object", "required": ["allowed"], "properties": {
+        "allowed": {"type": "boolean"}, "reason": {"type": "string"},
+        "status": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}},
+    }}
+    assert audit_app_ui_bundle_integrity(_route_auth_output_files(schema, custom=custom)) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("custom", [False, True])
+@pytest.mark.parametrize("valid", [False, True])
+async def test_wiring_checks_routeauth_from_exact_module_companion(custom, valid):
+    from factory_app.workflows.AppGenerator.tools.validate_wiring import validate_wiring
+
+    schema = {"type": "object", "required": ["allowed"], "properties": {"allowed": {"type": "boolean"}}}
+    files = _route_auth_output_files(schema if valid else {"type": "object", "properties": {"authorized": {"type": "boolean"}}}, custom=custom)
+    # An identically named action in another module cannot satisfy this reference.
+    other = yaml.safe_load(files[1]["content"])
+    other["module"]["id"] = "other_access"
+    other["actions"][0]["output_schema"] = {"type": "object", "required": ["allowed"], "properties": {"allowed": {"type": "boolean"}}}
+    files.append({"filename": "modules/other_access/module.yaml", "content": yaml.safe_dump(other)})
+    result = await validate_wiring({"generated_files": {item["filename"]: item["content"] for item in files}})
+    assert result["passed"] is valid
+    if not valid:
+        assert any("required boolean 'allowed'" in item["error"] for item in result["failed_tests"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("custom", [False, True])
+async def test_routeauth_missing_companion_defers_partial_but_blocks_complete_snapshot(custom):
+    from factory_app.workflows.AppGenerator.tools.validate_wiring import validate_wiring
+
+    files = [item for item in _route_auth_output_files(None, custom=custom)
+             if not item["filename"].startswith("modules/")]
+    assert audit_app_ui_bundle_integrity(files) == []
+    warnings = audit_app_ui_bundle_integrity(files, require_module_contracts=True)
+    assert any("module 'project_access'" in warning for warning in warnings)
+    result = await validate_wiring({"generated_files": {item["filename"]: item["content"] for item in files}})
+    assert result["passed"] is False
+    assert any("module 'project_access'" in item["error"] for item in result["failed_tests"])
+
+
+@pytest.mark.parametrize("required", [False, True])
+def test_routeauth_checks_materialized_typed_output_contract(required):
+    from mozaiksai.core.workflow.generator_support.code_files import (
+        extract_code_file_map_from_payload,
+    )
+
+    files = _neutral_generated_app_contract_files()
+    module = yaml.safe_load(files[1]["content"])
+    module["actions"][0]["output_schema"] = {
+        "type": "object", "properties": [{
+            "name": "allowed", "type": "boolean", "required": required,
+            "description": "Whether this principal may enter the selected route.",
+        }],
+    }
+    materialized = extract_code_file_map_from_payload({"module_contract": {
+        "module_id": "project_access", "module_yaml": module,
+    }})
+    files[1]["content"] = materialized[files[1]["filename"]]
+    warnings = audit_app_ui_bundle_integrity(files, require_module_contracts=True)
+    assert bool(warnings) is not required
+    if not required:
+        assert any("required boolean 'allowed'" in warning for warning in warnings)
+
+
+@pytest.mark.parametrize("custom", [False, True])
+def test_staged_route_validation_keeps_module_output_contracts(custom):
+    from mozaiksai.control_plane.validation_runner import _route_component_validation
+
+    files = _route_auth_output_files({"type": "object", "properties": {"authorized": {"type": "boolean"}}}, custom=custom)
+    result = _route_component_validation({item["filename"]: item["content"] for item in files})
+    assert result.status == "failed"
+    assert "required boolean 'allowed'" in result.reason
 
 
 def test_route_manifest_component_registered_in_index_passes() -> None:

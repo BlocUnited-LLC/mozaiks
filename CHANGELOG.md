@@ -497,6 +497,9 @@ This project follows a practical pre-1.0 changelog format:
     permissions instead of a nonexistent runtime roles field. Author deletion,
     the action's create permission, app scoping and post soft deletion remain enforced.
 
+- Generated route authorization now requires the referenced module action to
+  declare a required boolean `allowed` response. Page saving, assembled wiring
+  and refinement validation reject mismatched responses before promotion.
 - Saved workflow reviews restored after a server restart now show inactive
   decision controls and explain how to request a fresh review through the chat.
   Pending reviews saved before a committed chat turn receive the same state.
