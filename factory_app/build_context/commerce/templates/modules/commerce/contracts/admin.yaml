@@ -1,68 +1,272 @@
-schema_version: mozaiks.admin.v1
+schema_version: mozaiks.admin.v2
 panels:
-  - id: commerce_catalog_panel
-    title: Commerce Catalog
-    description: Manage products, publication status, prices, categories, SKUs, and inventory policy.
-    module: commerce
-    actions:
-      - id: list_products
-        label: List Products
-        input_overrides:
-          status: active
-          limit: 50
-      - id: create_product
-        label: Create Product
-      - id: update_product
-        label: Update Product
-      - id: archive_product
-        label: Archive Product
-        confirm: true
-        confirm_message: "Archive this product and remove it from storefront browsing?"
-    filters:
-      - field: status
+- id: commerce_catalog_panel
+  label: Commerce Catalog
+  description: Manage products, publication status, prices, categories, SKUs, and
+    inventory policy.
+  page: commerce
+  order: 10
+  renderer: schema
+  layout: full-width
+  sections:
+  - id: list-products
+    primitive: ResourceTable
+    config:
+      api_endpoint: /api/modules/commerce/list_products
+      data_key: products
+      search: true
+      columns:
+      - key: product_id
+        label: Product Id
+      - key: title
+        label: Title
+      - key: status
         label: Status
-        options: [Active, Draft, Archived]
-        map: { Active: active, Draft: draft, Archived: archived }
-      - field: category
+      - key: category
         label: Category
-        options: []
-    permissions: [commerce.catalog.manage, ops.admin]
-
-  - id: commerce_inventory_panel
-    title: Inventory
-    description: Review stock on tracked products and apply manual stock adjustments.
-    module: commerce
-    actions:
-      - id: list_products
-        label: List Tracked Products
-        input_overrides:
-          limit: 50
-      - id: adjust_inventory
-        label: Adjust Inventory
-    permissions: [commerce.inventory.manage, ops.admin]
-
-  - id: commerce_orders_panel
-    title: Orders
-    description: Review orders, payment state, and fulfillment status.
-    module: commerce
-    actions:
-      - id: list_orders
-        label: List Orders
-        input_overrides:
-          limit: 50
-      - id: get_order
-        label: View Order
-      - id: update_order_status
-        label: Update Fulfillment
-    filters:
-      - field: status
+      - key: sku
+        label: Sku
+      - key: price_amount
+        label: Price Amount
+      - key: currency
+        label: Currency
+      - key: inventory_quantity
+        label: Inventory Quantity
+  - id: create-product
+    primitive: Form
+    title: Create Product
+    config:
+      fields:
+      - name: title
+        label: Title
+        type: text
+        required: true
+      - name: slug
+        label: Slug
+        type: text
+      - name: description
+        label: Description
+        type: textarea
+      - name: category
+        label: Category
+        type: text
+      - name: sku
+        label: Sku
+        type: text
+      - name: status
         label: Status
-        options: [Paid, Processing, Fulfilled, Cancelled, Refunded, Payment Failed]
-        map:
-          Paid: paid
-          Processing: processing
-          Fulfilled: fulfilled
-          Cancelled: cancelled
-          Refunded: refunded
-          Payment Failed: payment_failed
-    permissions: [commerce.orders.manage, ops.admin]
+        type: select
+        options:
+        - value: draft
+          label: Draft
+        - value: active
+          label: Active
+        - value: archived
+          label: Archived
+      - name: price_amount
+        label: Price Amount
+        type: number
+        required: true
+      - name: currency
+        label: Currency
+        type: text
+      - name: inventory_quantity
+        label: Inventory Quantity
+        type: number
+      - name: track_inventory
+        label: Track Inventory
+        type: select
+        options:
+        - value: true
+          label: 'Yes'
+        - value: false
+          label: 'No'
+      - name: image_url
+        label: Image Url
+        type: text
+      submit_label: Create Product
+      submit_action:
+        label: Create Product
+        action_type: submit
+        href: /api/modules/commerce/create_product
+  - id: update-product
+    primitive: Form
+    title: Update Product
+    config:
+      fields:
+      - name: product_id
+        label: Product Id
+        type: text
+        required: true
+      - name: title
+        label: Title
+        type: text
+      - name: slug
+        label: Slug
+        type: text
+      - name: description
+        label: Description
+        type: textarea
+      - name: category
+        label: Category
+        type: text
+      - name: sku
+        label: Sku
+        type: text
+      - name: status
+        label: Status
+        type: select
+        options:
+        - value: draft
+          label: Draft
+        - value: active
+          label: Active
+        - value: archived
+          label: Archived
+      - name: price_amount
+        label: Price Amount
+        type: number
+      - name: currency
+        label: Currency
+        type: text
+      - name: inventory_quantity
+        label: Inventory Quantity
+        type: number
+      - name: track_inventory
+        label: Track Inventory
+        type: select
+        options:
+        - value: true
+          label: 'Yes'
+        - value: false
+          label: 'No'
+      - name: image_url
+        label: Image Url
+        type: text
+      submit_label: Update Product
+      submit_action:
+        label: Update Product
+        action_type: submit
+        href: /api/modules/commerce/update_product
+  - id: archive-product
+    primitive: Form
+    title: Archive Product
+    config:
+      fields:
+      - name: product_id
+        label: Product Id
+        type: text
+        required: true
+      submit_label: Archive Product
+      submit_action:
+        label: Archive Product
+        action_type: submit
+        href: /api/modules/commerce/archive_product
+  permissions:
+  - commerce.catalog.manage
+  - ops.admin
+- id: commerce_inventory_panel
+  label: Inventory
+  description: Review stock on tracked products and apply manual stock adjustments.
+  page: commerce
+  order: 20
+  renderer: schema
+  layout: full-width
+  sections:
+  - id: list-products
+    primitive: ResourceTable
+    config:
+      api_endpoint: /api/modules/commerce/list_products
+      data_key: products
+      search: true
+      columns:
+      - key: product_id
+        label: Product Id
+      - key: title
+        label: Title
+      - key: track_inventory
+        label: Track Inventory
+      - key: inventory_quantity
+        label: Inventory Quantity
+  - id: adjust-inventory
+    primitive: Form
+    title: Adjust Inventory
+    config:
+      fields:
+      - name: product_id
+        label: Product Id
+        type: text
+        required: true
+      - name: delta
+        label: Delta
+        type: number
+        required: true
+      - name: reason
+        label: Reason
+        type: textarea
+      submit_label: Adjust Inventory
+      submit_action:
+        label: Adjust Inventory
+        action_type: submit
+        href: /api/modules/commerce/adjust_inventory
+  permissions:
+  - commerce.inventory.manage
+  - ops.admin
+- id: commerce_orders_panel
+  label: Orders
+  description: Review orders, payment state, and fulfillment status.
+  page: commerce
+  order: 30
+  renderer: schema
+  layout: full-width
+  sections:
+  - id: list-orders
+    primitive: ResourceTable
+    config:
+      api_endpoint: /api/modules/commerce/list_orders
+      data_key: orders
+      search: true
+      columns:
+      - key: order_id
+        label: Order Id
+      - key: status
+        label: Status
+      - key: total_amount
+        label: Total Amount
+      - key: currency
+        label: Currency
+      - key: created_at
+        label: Created At
+  - id: update-order-status
+    primitive: Form
+    title: Update Fulfillment
+    config:
+      fields:
+      - name: order_id
+        label: Order Id
+        type: text
+        required: true
+      - name: status
+        label: Status
+        type: select
+        required: true
+        options:
+        - value: processing
+          label: Processing
+        - value: fulfilled
+          label: Fulfilled
+        - value: cancelled
+          label: Cancelled
+        - value: refunded
+          label: Refunded
+      - name: note
+        label: Note
+        type: textarea
+      submit_label: Update Fulfillment
+      submit_action:
+        label: Update Fulfillment
+        action_type: submit
+        href: /api/modules/commerce/update_order_status
+  permissions:
+  - commerce.orders.manage
+  - ops.admin

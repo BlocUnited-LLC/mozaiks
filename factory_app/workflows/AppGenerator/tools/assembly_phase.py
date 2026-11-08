@@ -25,10 +25,12 @@ from factory_app.workflows.AppGenerator.tools.code_file_utils import (
 from factory_app.workflows.AppGenerator.tools.module_api_template import get_module_api_template
 from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import materialize_auth_scaffold
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    resolve_managed_capability_templates,
     verified_pack_data_contracts,
     verified_pack_template_inventory,
     verified_template_module_ids,
 )
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     compile_data_contract,
     materialize_collection_auth,
@@ -356,6 +358,38 @@ def _merge_code_files(
                     assert_generated_action_permissions(path.split("/")[1], yaml.safe_load(content), app_build_plan, final_grants)
         file_map.setdefault("ui/lib/moduleApi.js", get_module_api_template())
     return [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
+
+
+def compiled_pack_module_templates(
+    *, context_variables: Any, data_contract: dict[str, Any] | None,
+    subscription_contract: dict[str, Any] | None,
+) -> dict[str, str]:
+    """Replay assembly on verified pack sources, never on candidate bundle bytes.
+
+    Partial module templates receive canonical reads from approved data, and
+    approved subscription selections compile gates even on complete templates.
+    Integrity checks compare against this same compiler output; provenance or
+    a candidate's own manifests cannot authorize a different implementation.
+    """
+    from .module_entitlement_gates import apply_entitlement_gates
+
+    resolved = resolve_managed_capability_templates(
+        detach(context_variables.get("capability_packs")), context_variables=context_variables,
+    )
+    templates = [
+        file for file in resolved
+        if file["filename"].startswith("modules/")
+    ]
+    files = _merge_code_files(
+        [{"code_files": templates}],
+        app_build_plan=detach(context_variables.get("app_build_plan")),
+        data_contract=data_contract,
+        design_surface_map=detach(context_variables.get("design_surface_map")),
+        subscription_contract=subscription_contract,
+        context_variables=context_variables,
+    )
+    files = apply_entitlement_gates(files, context_variables=context_variables, require_all_modules=False)
+    return {file["filename"]: file["content"] for file in files if file["filename"].startswith("modules/")}
 
 
 async def assemble_features(

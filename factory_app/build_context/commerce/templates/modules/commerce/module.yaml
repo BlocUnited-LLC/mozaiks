@@ -86,7 +86,6 @@ actions:
     api_surface: public
     description: Create a draft or active product with price, currency, SKU, category, and inventory metadata.
     handler_method: create_product
-    entitlement_gate: commerce.products.manage
     input_schema:
       type: object
       additionalProperties: false
@@ -106,6 +105,13 @@ actions:
     output_schema:
       type: object
       required: [success, product]
+      properties:
+        success: { type: boolean }
+        product:
+          type: object
+          required: [product_id]
+          properties:
+            product_id: { type: string }
     permissions: [commerce.catalog.manage]
     emits: [domain.commerce.product.created]
 
@@ -133,6 +139,13 @@ actions:
     output_schema:
       type: object
       required: [success, product]
+      properties:
+        success: { type: boolean }
+        product:
+          type: object
+          required: [product_id]
+          properties:
+            product_id: { type: string }
     permissions: [commerce.catalog.manage]
     emits: [domain.commerce.product.updated]
 
@@ -167,6 +180,13 @@ actions:
     output_schema:
       type: object
       required: [success, product]
+      properties:
+        success: { type: boolean }
+        product:
+          type: object
+          required: [product_id]
+          properties:
+            product_id: { type: string }
     permissions: [commerce.inventory.manage]
     emits: [domain.commerce.inventory.adjusted]
 
@@ -278,7 +298,6 @@ actions:
     api_surface: public
     description: Snapshot the current cart into an order and emit a checkout request for the selected payment facade.
     handler_method: start_checkout
-    entitlement_gate: commerce.checkout.start
     input_schema:
       type: object
       additionalProperties: false
