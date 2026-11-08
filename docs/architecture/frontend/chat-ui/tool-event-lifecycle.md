@@ -74,6 +74,16 @@ response:
 
 This is closer to generated status/artifact rendering than to human-in-the-loop.
 
+An automatic tool response with `success=false` displays a fixed failure notice
+in the conversation even when diagnostic messages are disabled. The notice does
+not expose the tool's content, result payload, or exception details. Repeated
+responses for the same tool invocation do not duplicate the notice; successful
+automatic responses remain hidden. This is presentation only: it does not mark
+the workflow terminal, consume a pending reply, or permit a retry. A workflow
+paused after a blocked tool outcome can still show its normal waiting state
+alongside the failure notice; the declared outcome and retry budget remain
+authoritative.
+
 ### 3. Input requests after normalization
 
 Runtime-generated AG2 input requests now normalize onto the same workflow UI

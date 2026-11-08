@@ -3454,10 +3454,20 @@ const ChatPage = () => {
         return;
       }
       case 'tool_response': {
-        // Suppress intermediate auto-tool responses (already handled by dynamicUIHandler)
-        // Only show failures or non-auto-tool responses
-        if (data.interaction_type === 'auto_tool' && data.success) {
-          return;
+        if (data.interaction_type === 'auto_tool') {
+          // Results may contain exception details or secrets. Show only a fixed
+          // failure notice; run state and retry eligibility stay server-owned.
+          if (data.success === false) {
+            const invocationId = data.call_id || data.tool_call_id || data.corr || Date.now();
+            const messageId = `auto-tool-failure-${data.tool_name || 'tool'}-${invocationId}`;
+            setMessagesWithLogging(prev => prev.some(message => message.id === messageId) ? prev : [...prev, {
+              id: messageId,
+              sender: 'system', agentName: 'System', isStreaming: false,
+              content: '⚠️ An automatic step couldn’t finish.',
+            }]);
+            return;
+          }
+          if (data.success) return;
         }
         if (showSystemMessages) {
           const responseContent = data.success ? `✅ Tool Response: ${data.content || 'Success'}` : `❌ Tool Failed: ${data.content || 'Error'}`;
