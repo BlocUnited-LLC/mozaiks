@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -91,6 +92,7 @@ class UIToolsMixin:
         agent_name: str | None = None,
         require_persistence: bool = False,
         persistence_app_id: str | None = None,
+        persistence_scope_guard: Callable[[], None] | None = None,
     ) -> bool:
         """Persist pending interactions and the latest artifact before delivery."""
         if not chat_id or not isinstance(payload, dict):
@@ -162,6 +164,7 @@ class UIToolsMixin:
                     chat_id=chat_id,
                     app_id=app_id,
                     artifact=artifact_doc,
+                    **({"scope_guard": persistence_scope_guard} if require_persistence else {}),
                 )
         except Exception as persist_err:
             logger.debug("[UI_TOOL] Failed to persist last_artifact for chat %s: %s", chat_id, persist_err)
@@ -184,6 +187,7 @@ class UIToolsMixin:
         *,
         require_persistence: bool = False,
         persistence_app_id: str | None = None,
+        persistence_scope_guard: Callable[[], None] | None = None,
     ) -> bool | None:
         """Emit the canonical ``chat.tool_call`` workflow UI event to the frontend."""
         # Extract agent_name from payload if not explicitly provided
@@ -206,8 +210,10 @@ class UIToolsMixin:
             if (
                 not chat_id or not persistence_app_id or not workflow_name
                 or _display_norm != UIDisplayMode.ARTIFACT or awaiting_response
+                or not callable(persistence_scope_guard)
             ):
                 raise ValueError("Durable UI emission requires a scoped one-way artifact")
+            persistence_scope_guard()
             connection = self.connections.get(chat_id)
             if connection is not None and (
                 connection.get("app_id") != persistence_app_id
@@ -216,6 +222,7 @@ class UIToolsMixin:
                 raise ValueError("Durable UI emission does not match the connected chat scope")
             persistence_options = {
                 "require_persistence": True, "persistence_app_id": persistence_app_id,
+                "persistence_scope_guard": persistence_scope_guard,
             }
 
         event = {
@@ -258,6 +265,9 @@ class UIToolsMixin:
                 raise
             logger.debug("[UI_TOOL] Persist hook raised for chat %s: %s", chat_id, persist_exc)
             persisted = False
+        if require_persistence:
+            assert persistence_scope_guard is not None
+            persistence_scope_guard()
         if require_persistence and persisted is not True:
             raise RuntimeError("Artifact persistence was not confirmed")
 

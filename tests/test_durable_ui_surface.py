@@ -272,3 +272,53 @@ async def test_connection_scope_change_after_save_prevents_cross_scope_delivery(
     assert collection.saved["tool_call_id"] == event_id
     assert collection.order == ["save"]
     assert transport.sent == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("boundary", ["transport", "collection", "write"])
+async def test_expired_child_invocation_cannot_confirm_or_deliver(surface_runtime, monkeypatch, boundary):
+    collection, transport = surface_runtime
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def paused_transport():
+        entered.set()
+        await release.wait()
+        return transport
+
+    async def paused_collection():
+        entered.set()
+        await release.wait()
+        return collection
+
+    original_update = collection.update_one
+
+    async def paused_write(query, update):
+        result = await original_update(query, update)
+        entered.set()
+        await release.wait()
+        return result
+
+    if boundary == "transport":
+        monkeypatch.setattr(SimpleTransport, "get_instance", paused_transport)
+    elif boundary == "collection":
+        monkeypatch.setattr(transport.pm, "_coll", paused_collection)
+    else:
+        monkeypatch.setattr(collection, "update_one", paused_write)
+
+    with active_run():
+        task = asyncio.create_task(emit())
+        await asyncio.wait_for(entered.wait(), timeout=2)
+    # The invocation owner has returned. Its inherited child must lose authority.
+    release.set()
+    with pytest.raises(UIToolError):
+        await asyncio.wait_for(task, timeout=2)
+    assert transport.sent == []
+    if boundary == "write":
+        # A write already issued before revocation cannot be recalled, but must
+        # not be reported ready or delivered by the expired invocation.
+        assert collection.saved is not None
+        assert collection.order == ["save"]
+    else:
+        assert collection.calls == []
+        assert collection.saved is None

@@ -68,7 +68,10 @@ Current implemented workflow-run persistence contract:
 - One-way artifact tools may call `emit_ui_surface(..., require_persistence=True)`
   to require a confirmed save in `workflow_ui_state.last_artifact`. Runtime-owned
   invocation scope binds the app/chat write; only an acknowledged update with one
-  matching chat confirms success. Missing chats are not upserted. Save failures
+  matching chat confirms success. Invocation authority is rechecked before and
+  after the write and before confirming or delivering the artifact. Revocation
+  cannot recall a write already issued, but prevents readiness/delivery.
+  Missing chats are not upserted. Save failures
   prevent delivery/readiness; a saved artifact can be restored after a failed or
   disconnected live delivery. This confirms the latest-artifact projection,
   not browser rendering, human approval, publication, or immutable history.

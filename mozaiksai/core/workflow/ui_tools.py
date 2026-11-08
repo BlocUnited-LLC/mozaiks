@@ -169,18 +169,27 @@ async def _emit_tool_call_core(
         The unique event ID for this interaction.
     """
     persistence_options: dict[str, Any] = {}
+    scope_guard = None
     if require_persistence:
         from mozaiksai.core.workflow.agents.factory import active_workflow_tool_run
 
         try:
-            run_workflow, run_app, run_chat, _ = active_workflow_tool_run()
+            run_identity = active_workflow_tool_run()
+            run_workflow, run_app, run_chat, _ = run_identity
         except PermissionError as exc:
             raise UIToolError("Durable UI emission requires an active workflow tool invocation") from exc
         if (chat_id, workflow_name) != (run_chat, run_workflow):
             raise UIToolError("Durable UI emission does not match the active workflow scope")
         if display != "artifact" or awaiting_response:
             raise UIToolError("Durable UI emission requires a one-way artifact surface")
-        persistence_options = {"require_persistence": True, "persistence_app_id": run_app}
+        def scope_guard() -> None:
+            if active_workflow_tool_run() != run_identity:
+                raise PermissionError("Durable UI invocation scope changed")
+
+        persistence_options = {
+            "require_persistence": True, "persistence_app_id": run_app,
+            "persistence_scope_guard": scope_guard,
+        }
 
     event_id = f"{tool_id}_{str(uuid.uuid4())[:8]}"
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id)
@@ -208,6 +217,8 @@ async def _emit_tool_call_core(
         agent_name = payload_to_send.get("agent_name")
     
     try:
+        if scope_guard is not None:
+            scope_guard()
         persisted = await transport.send_tool_call_event(
             event_id=event_id,
             chat_id=chat_id,
@@ -219,6 +230,8 @@ async def _emit_tool_call_core(
             awaiting_response=awaiting_response,
             **persistence_options,
         )
+        if scope_guard is not None:
+            scope_guard()
         if require_persistence and persisted is not True:
             raise UIToolError("Artifact persistence was not confirmed")
         wf_logger.debug("UI_TOOL_EMIT_OK event=%s", event_id)
