@@ -541,7 +541,8 @@ async def test_selected_pack_contracts_survive_two_refinements_without_request_a
     assert store.records[second.metadata["build_record_id"]].commit_metadata.metadata["capability_packs"] == selected
     assert store.records["parent"].commit_metadata.metadata["capability_packs"] == selected
     assert seen == [selected, selected]
-    assert store.reads == [("app_1", "parent"), ("app_1", first_id)]
+    # Validation/persistence recheck authority, always within these exact parents.
+    assert set(store.reads) == {("app_1", "parent"), ("app_1", first_id)}
     assert store.calls[1]["parent_build_record_id"] == first_id
 
 

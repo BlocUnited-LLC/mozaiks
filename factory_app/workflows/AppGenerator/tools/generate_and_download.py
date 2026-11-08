@@ -744,6 +744,19 @@ async def _register_app_bundle_artifact_version(
         artifact_kinds=("design_docs", "subscription_contract", "workflow_bundle", "theme_capture"),
         artifact_store=artifact_store,
     )
+    if validation_status == ArtifactValidationStatus.PASSED:
+        from mozaiksai.core.validation.compilation_inputs import capture_app_compilation_inputs
+
+        compilation_inputs = await capture_app_compilation_inputs(
+            context_variables, owner_user_id=str(user_id or ""), archive_sha256=sha, artifact_store=artifact_store,
+        )
+        if compilation_inputs is not None:
+            bundle_content_metadata["compilation_inputs"] = compilation_inputs
+            inputs = compilation_inputs["inputs"]
+            for family in ("design_docs", "subscription_contract"):
+                canonical_inputs_version.pop(family, None)
+                if inputs.get(family) is not None:
+                    canonical_inputs_version[family] = inputs[family]["record_id"]
     artifact_version = await artifact_store.create_build_record(
         app_id=str(app_id),
         build_family="app_bundle",
