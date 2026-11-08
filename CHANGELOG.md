@@ -478,6 +478,12 @@ This project follows a practical pre-1.0 changelog format:
     permissions instead of a nonexistent runtime roles field. Author deletion,
     the action's create permission, app scoping and post soft deletion remain enforced.
 
+- Saved workflow reviews restored after a server restart now show inactive
+  decision controls and explain how to request a fresh review through the chat.
+  Pending reviews saved before a committed chat turn receive the same state.
+  Reconnecting to a still-live review keeps its controls available. Failed
+  response submissions no longer make an inline review appear completed.
+
 - The shell no longer offers Profile, Sign in, or Sign out when nobody can sign
   in. A fresh Studio runs with authentication disabled, yet its account menu
   showed Profile, Sign Out, and Sign In, and the mobile bar showed Profile, all
