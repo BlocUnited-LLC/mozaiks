@@ -137,7 +137,7 @@ async def test_readiness_user_reply_materializes_auth_before_real_validation(con
         assert validations[0]["app_runtime_load_result"]["passed"] is True
         assert validations[0]["bundle_scan_result"]["passed"] is True
         generated = admitted_app_file_map(result.context_variables)
-        assert "schema_version: mozaiks.auth.v1" in generated["config/auth.yaml"]
+        assert "schema_version: mozaiks.auth.v2" in generated["config/auth.yaml"]
         assert {page["path"] for page in json.loads(generated["ui/route_manifest.json"])["pages"]} == {
             "/orders", "/login", "/auth/callback",
         }
@@ -217,12 +217,15 @@ async def test_repair_rounds_preserve_execution_and_budgets_across_resume(
                 files = [{"filename": path, "content": "accepted"} for path in task["owned_paths"]]
                 if task_id == "services" and task_calls[task_id] == 1:
                     files.append({"filename": "modules/tasks/backend/schemas.py", "content": "foreign"})
-                typed_files = {
-                    "models": {"model_files": []},
-                    "services": {"python_files": []},
-                }
+                output_files = {"model_files": [], "code_files": files}
+                if task_id == "services":
+                    output_files = {"python_files": [{
+                        "path": item["filename"], "kind": Path(item["filename"]).stem,
+                        "purpose": "Exercise task ownership and recovery.",
+                        "contract_refs": [], "content": item["content"],
+                    } for item in files]}
                 return SimpleNamespace(body=json.dumps({
-                    **typed_files[task_id], "code_files": files, "agent_message": None,
+                    **output_files, "agent_message": None,
                 }))
 
             agent_calls[self.name] += 1
@@ -306,6 +309,7 @@ async def test_repair_rounds_preserve_execution_and_budgets_across_resume(
         assert triggers[:2] == ["AppPlanAgent", "AppValidationAgent"]
         initial_evidence = snapshots[0]["app_task_batch_results"]
         assert initial_evidence["_failed"]["services"]["failure_kind"] == "output_rejected"
+        assert "modules/tasks/backend/schemas.py" in initial_evidence["_failed"]["services"]["error"]
         assert initial_evidence["_failed"]["page"]["failure_kind"] == "dependency_blocked"
         assert snapshots[1]["app_task_recovery_status"] == "completed"
         assert task_calls == {"models": 1, "services": 2, "page": 1}

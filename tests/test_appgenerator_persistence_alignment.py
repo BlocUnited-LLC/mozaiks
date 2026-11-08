@@ -148,7 +148,8 @@ def test_service_agent_distinguishes_final_inventory_from_model_source() -> None
     block = _agent_block("ServiceAgent")
     assert "final backend artifact inventory, including code-rendered files" in block
     assert "authoritative list of backend stub files to implement" not in block
-    assert "Omit policy.py and schemas.py from python_files and code_files" in block
+    assert "Omit policy.py and schemas.py from python_files" in block
+    assert "ServiceOutput has no `code_files` field" in block
     planner = _agent_block("AppPlanAgent")
     assert "In task initial_message, distinguish final artifact ownership from model implementation" in planner
     assert "Keep their owned_paths, but never ask a worker to generate their source or placeholder stubs" in planner

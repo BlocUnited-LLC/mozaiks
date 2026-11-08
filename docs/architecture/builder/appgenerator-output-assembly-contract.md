@@ -1,5 +1,60 @@
 # AppGenerator Output Assembly Contract
 
+## Runtime Smoke Fixture Ownership
+
+`ModuleContractBundle.fixtures_yaml` is the optional typed source for
+`modules/{module}/contracts/fixtures.yaml`. The module contract task reserves
+that companion path when domain prerequisites need explicit inputs; ordinary
+schema-driven CRUD does not require it. The file catalog, layout registry,
+carry-forward readers and preservation inventory use the same path. Raw
+companion files cannot substitute for typed output.
+
+The manifest guard derives companion names from the same typed output registry
+as materialization. An omitted optional fixture path stays available to its
+contract task unless another task explicitly owns it. Read admission requires
+exact bindings when the ordinary observer defaults cannot fit the action's
+declared inputs; it does not infer business prerequisites from action names.
+
+Canonical design, action and permission validation precedes this observational
+input proof. For list actions, the fixed default `{}` is checked by the same
+native JSON Schema validator as runtime; an open object alone does not require a
+fixture. Reference-bearing schemas remain conservative and require an explicit
+fixture, without remote schema resolution during this proof. Get actions still
+require compatibility with arbitrary string IDs, including a missing-record
+probe. These checks never rewrite the admitted schema or its assertions.
+
+Fixtures name exact actions and roles and supply bounded prerequisite calls
+and parameter bindings. They do not grant permissions, change approved domain
+requirements, define success criteria or introduce runtime services. Accepted
+module request/response schemas and compiled auth grants remain authoritative.
+Cross-module setup requires the relevant contract dependencies; full reference
+closure occurs against the assembled bundle before any observer action runs.
+The existing contained runtime observer consumes the file as declarative input
+and retains independent CRUD, role and storage checks. Canonical
+update/delete setup may bind declared fields of the observer's same
+existing row for a required lifecycle transition; get/create/list/custom
+setup cannot. Target identity remains fixed and preparation never counts
+as the target's storage mutation. See
+[stateful action inputs](../app/generated-app-functional-acceptance.md#runtime-smoke-gate)
+for the supported bindings and evidence limits.
+
+## Service Source Ownership
+
+ServiceAgent emits each Python file once in `ServiceOutput.python_files`.
+`ServiceOutput` has no model-authored `code_files` mirror. The canonical extractor
+serializes the typed files into the internal `code_files` representation used by
+task admission, assembly, repair persistence and export. File ownership, Python
+validation and contained runtime acceptance still apply to those exact files.
+
+The injected write-ownership inventory uses the same compiler decision as
+materialization. It names code-owned CRUD methods to omit and protected app-wide
+writes whose accepted input contracts require authored handler, service and repo
+implementations. Approved role permissions remain compiler-owned for both.
+An authored submission can therefore derive requester identity from `ctx.user_id`
+without exposing that field as required form input. The service must enforce
+ownership and allowed state transitions before persistence; role grants alone do
+not enforce those business rules.
+
 ## Typed Intake Readiness
 
 Guided intake returns `AppInterviewResult`: a short `agent_message` and an
@@ -185,8 +240,16 @@ contract is required. There is no `subscription_config` task type and no
 ConfigMiddleware mode for it; plan review and the plan cache release the path
 from any task that lists it (`release_subscriptions_config`) and drop a task left
 empty. `AppBuildPlan.monetization_provider` is validated against the approved
-contract's `contract_required`, not against a planned task. The file's
-`assignment_store` is constructed by code (`subscription_assignment_store`): the
+contract's `contract_required`, not against a planned task. The
+provider selection is `mozaiks_pay` or `entitlement_dispatch` when required,
+and JSON `null` otherwise. Both the plan and its nested monetization decision
+use this nullable enum; strings such as `"null"`, `"none"`, and `"free"` are
+invalid provider selections. Optional page-layout/page-type hints, image
+variants, and asset aspects likewise use JSON `null` for absence while keeping
+their declared non-null choices. JSON-schema type discriminators retain the
+literal `"null"` type name.
+
+The file's `assignment_store` is constructed by code (`subscription_assignment_store`): the
 runtime `SubscriptionAssignmentStoreDef` defaults, including `active_statuses`
 `[active, pending, trialing]`, with `data_alias: billing.subscriptions` and
 `user_id_field: user_id`, which both assignment writers key on. The designer does
@@ -363,8 +426,12 @@ path; they do not introduce a new runtime dispatcher or authorization policy.
 
 ### Server Table Query Acceptance
 
-Opt-in server-paged DataTable sections must close against the actual generated
-module action contract during the existing `validate_wiring` acceptance gate.
+Table queries close against the actual generated module action contract during
+producer admission, pack-template validation, and the existing `validate_wiring`
+acceptance gate. An action that declares integer `page`/`page_size`, a selected
+row array, and a required integer `total` envelope cannot bind a client-paged
+table or ResourceTable: those controls can only operate on fully loaded rows.
+This check reads typed contracts, not action names or descriptions.
 Action names in a plan alone are insufficient. The action declares integer
 `page` and `page_size`, string `search`, and accepts the table's initial and
 next-page query, including empty search and a representative nonempty query when
@@ -375,10 +442,26 @@ by this fixed query contract. Internal-only actions are not browser endpoints.
 an array of explicitly typed objects and an integer respectively. Schema references are not supported in this
 bounded binding contract and are never fetched. Missing or incompatible bindings
 fail the existing wiring check; they do not create another routing or retry
-system. Client-paged tables retain their current input contract and also check
-declared output fields. At runtime,
+system. Client-paged tables bound to fully loaded responses retain their input
+contract and also check declared output fields. All query errors are reported
+before dependent page artifacts are accepted. At runtime,
 the data-fetch owner separately validates actual rows and counts; declaration
 closure does not prove that generated backend behavior implements the query.
+
+A `ui.datatable.refresh` action names a bound same-page table in
+`payload.component_id`. It reloads the existing query; other payload fields do
+not configure filters or sorting and fail generated-page admission. The same
+checks run for nested sections and final wiring.
+
+The fixed declarative server query sends `page`, `page_size`, and `search`.
+Arbitrary category/status controls and differently named query fields require
+an approved `custom_react_page` when shipped declarative controls cannot express
+them. The existing `custom_route_bundle` keeps the exact route/component binding;
+its React component owns local query state and calls declared actions through
+`moduleAction`. It must preserve paging, totals, errors, and backend authority.
+An approved declarative surface is revised through the existing design/plan
+review path before changing realization. No filter aliases, hidden refresh
+query interpretation, or new routing subsystem is introduced.
 
 **Status:** Canonical contract
 **Purpose:** Define exactly how AppGenerator turns persistent UI intent into bundle artifacts.
@@ -739,9 +822,41 @@ omits it when no properties are required. The retired typed required-name list
 is rejected, including when it agrees with the flags; there is no precedence
 rule or compatibility normalization. Runtime JSON Schema maps retain their
 standard `required` lists, including schemas shipped in pack templates.
-Action/capability requests use the existing closed-contract importer: unknown
-keys are rejected, and
-unrepresentable nested/open request objects fail instead of being weakened.
+An object property declares a nonempty `properties` list; an object-array
+property declares a nonempty `items_properties` list. Each list contains
+`JsonSchemaLeafProperty` members: scalars or arrays of scalars, with no further
+object nesting. The root contract's array form uses the same terminal member
+list, while collection actions keep an object envelope. Member names are exact
+response keys, including fields produced by custom joins. Descriptions cannot
+substitute for declarations. Empty object rows, duplicate names, wrong-kind
+member lists and unsupported nesting fail module contract admission before
+pages or services consume the contract. Action schema diagnostics name all
+invalid actions in that module's candidate; the input candidate remains unchanged.
+
+`nullable: true` on an output property or terminal member admits JSON null;
+`required` independently controls whether the key must be present. String
+enums retain their declared values and admit null only when explicitly nullable.
+Action/capability requests retain the existing exact-type closed-contract
+profile: nullable unions are rejected, every object level has
+`additionalProperties: false`, and unknown keys fail validation. Event and
+policy-hook schemas use the same finite renderer with their existing validation
+boundaries. Native runtime JSON Schema and page binding validation are unchanged.
+
+Custom/joined service responses must return those declared fields and wire
+types. Their source remains `ServiceOutput.python_files`; optional local typing
+does not become another response authority. The code-owned `schemas.py` remains
+derived from storage records and write inputs, so custom responses must not
+invent imports from it. Page columns and fixture response paths resolve against
+the admitted native schema, never service source or descriptive text.
+
+The canonical read compiler also projects ServiceAgent's read implementation
+ownership from the admitted module contract and approved data contract. Service
+prompts list exact code-owned and authored read actions; canonical list/get names
+and empty permissions do not imply a generated implementation. Shared app-wide
+collections with protected actions retain their explicitly declared read
+implementation, while ordinary scoped reads remain rendered. The static file
+contract defers read/write implementation ownership to these projections; final
+module implementation validation still rejects missing authored handlers.
 
 Workflow/module/page contracts use `.yaml`. Browser manifests, app identity,
 data contracts, migrations, and tooling manifests retain their canonical `.json`
@@ -1418,6 +1533,24 @@ module when the contract cannot be registered. Account-data load failures and
 repository API quality failures join the existing bounded `ServiceAgent`
 repair path; they do not become successful loads with warnings.
 
+Service workers receive the reviewed role-to-operation policy through the existing
+`[APP ROLE ACCESS]` prompt projection and permission IDs through admitted module
+actions. `ModuleContext.permissions` carries resolved permission IDs. The context
+does not expose `role`, `roles`, or `principal`; persistence principal metadata
+provides ownership identity, not role grants. The runtime quality gate rejects
+direct and literal `getattr`/`hasattr` probes of those nonexistent attributes on
+`ctx` or `context`, routing them through the existing bounded service repair.
+This check does not infer business policy or prove every authorization branch;
+authenticated role and ownership acceptance remains required.
+
+The same policy hook projects the compiler's exact role-to-permission mapping
+for contract and service workers. Protected reads can reference existing
+approved permissions without generating new grants or changing `auth.yaml`.
+An action requires every listed permission. Its declared permissions must
+express the approved audience; an unexpressible policy requires contract repair.
+Fixture actors must hold the action's exact declared permissions, rather than
+relying on a hidden service-only role check or a previous setup caller.
+
 File-contract prompt hooks preserve all hard constraints. Service workers see
 the callable signatures from the runtime's `PersistenceCollection` protocol,
 not a Motor collection API. The repository quality gate rejects unsupported
@@ -1575,6 +1708,41 @@ Do not:
 
 Without this split, AppGenerator either under-specifies visual/media control or mixes styling, shell behavior, and asset inventory.
 The contract above keeps bundle generation deterministic, keeps ThemeCapture reusable, and gives the runtime a stable set of artifacts to consume.
+
+### Service dependencies and mutation order
+
+DesignDocs chooses module boundaries around business invariants. One module may
+own multiple collections whose lifecycle requires synchronous conditional claims,
+linked writes and recovery. Separate record types do not require separate
+modules, and one module does not imply a multi-document transaction. AppGenerator
+preserves the approved ownership; changing an already approved decomposition
+requires design review without dropping business rules, roles or pages.
+
+An approved cross-module service dependency uses the existing
+`modules.<module_id>.backend.service` import path and its admitted function
+signature. The runtime loader binds `modules` to the active workspace and any
+explicitly composed defaults. Dispatched handlers have separate synthetic
+package roots, so deriving a sibling path from `__package__` is not a supported
+import convention. Calling an internal service function preserves the original
+context; it does not grant permissions, create another action dispatch, or change
+the action's declared event authority.
+
+Each event's producer must match its declaring module. Importing another
+module's service cannot publish that module's events under the caller's context;
+copying foreign event declarations or retagging their producer is not a repair.
+Declared events/reactions are the existing loose-coupling contract when they fit
+the approved lifecycle. A design requiring synchronous foreign action authority
+without an exposed dispatcher must be reported for review, not implemented with
+an invented context method or a silent lifecycle reorder.
+
+Generation preserves the approved order of conditional claims and dependent
+writes, including the authoritative record values, stable operation identity and
+permitted recovery states. A result's unique index does not by itself prevent a
+concurrent edit or cancellation of the source record. Exception cleanup also
+does not establish recovery after process interruption. Missing dependency or
+persistence contracts must be reported to their owner. These are generation
+instructions: source review and runtime concurrency/recovery checks still need
+to establish that the emitted implementation follows them.
 
 ### Interactive page materialization
 

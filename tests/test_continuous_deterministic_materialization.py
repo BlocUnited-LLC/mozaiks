@@ -342,7 +342,6 @@ def _typed_task_outputs(models: dict[str, type]) -> dict[str, dict[str, Any]]:
                     ),
                 },
             ],
-            "code_files": [],
             "deleted_files": None,
             "agent_message": "Materialized report runtime code.",
         }

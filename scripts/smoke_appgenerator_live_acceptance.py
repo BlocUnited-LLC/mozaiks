@@ -268,6 +268,10 @@ sections:
           label: Ticket
       api_endpoint: /api/modules/support_tickets/list_tickets
       data_key: items
+      total_key: total
+      pagination: true
+      pagination_mode: server
+      page_size: 20
   - id: ticket-create
     primitive: Form
     config:

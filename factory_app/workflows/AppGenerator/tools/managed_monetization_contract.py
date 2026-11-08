@@ -36,15 +36,14 @@ def is_managed_pack(pack: dict[str, Any]) -> bool:
 
 
 def normalize_monetization_provider(value: Any) -> str | None:
-    provider = str(value or "").strip()
-    if provider in {"", "none", "free", "null"}:
+    if value is None:
         return None
-    if provider not in MANAGED_MONETIZATION_PROVIDER_IDS:
+    if not isinstance(value, str) or value not in MANAGED_MONETIZATION_PROVIDER_IDS:
         allowed = ", ".join(sorted(MANAGED_MONETIZATION_PROVIDER_IDS))
         raise ValueError(
-            f"AppBuildPlan.monetization_provider must be one of [{allowed}] when set; got {provider!r}."
+            f"AppBuildPlan.monetization_provider must be one of [{allowed}] or JSON null; got {value!r}."
         )
-    return provider
+    return value
 
 
 __all__ = [

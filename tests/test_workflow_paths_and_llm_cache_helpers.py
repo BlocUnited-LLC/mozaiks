@@ -14,8 +14,8 @@ Covers sync pure helpers (no IO/async):
   _build_llm_cache_key (llm_config.py):
     - no response_format, no extra_config → "base"
     - response_format only → includes model name and schema hash in key
-    - extra_config with scalar values only → appended sorted
-    - extra_config with non-scalar values → non-scalars excluded
+    - extra_config values → hashed without exposing credentials
+    - nested extra_config changes → different keys
     - both response_format and extra_config → both present
     - extra_config empty dict → only "base" prefix
     - extra_config None → only "base" prefix
@@ -92,29 +92,37 @@ class TestBuildLlmCacheKey:
         assert key1 == key2
 
     def test_extra_config_scalar_values_included(self):
+        config = {"temperature": 0.7, "max_tokens": 256, "api_key": "private-config-sentinel"}
         result = _build_llm_cache_key(
             response_format=None,
-            extra_config={"temperature": 0.7, "max_tokens": 256},
+            extra_config=config,
         )
-        assert "temperature=0.7" in result
-        assert "max_tokens=256" in result
+        assert "private-config-sentinel" not in result
+        for field, value in (("temperature", 0.5), ("max_tokens", 512), ("api_key", "other-config-sentinel")):
+            assert result != _build_llm_cache_key(
+                response_format=None, extra_config={**config, field: value},
+            )
 
-    def test_extra_config_non_scalar_values_excluded(self):
+    def test_extra_config_nested_values_affect_key_without_exposing_credentials(self):
+        config = {"temperature": 0.5, "provider": {"api_key": "nested-config-sentinel", "timeout": 30}}
         result = _build_llm_cache_key(
             response_format=None,
-            extra_config={"temperature": 0.5, "tools": ["tool1", "tool2"]},
+            extra_config=config,
         )
-        assert "tools" not in result
-        assert "temperature=0.5" in result
+        assert "nested-config-sentinel" not in result
+        assert result != _build_llm_cache_key(
+            response_format=None,
+            extra_config={**config, "provider": {**config["provider"], "timeout": 60}},
+        )
 
     def test_extra_config_key_order_irrelevant(self):
         key1 = _build_llm_cache_key(
             response_format=None,
-            extra_config={"b": 2, "a": 1},
+            extra_config={"b": 2, "a": {"first": 1, "second": 2}},
         )
         key2 = _build_llm_cache_key(
             response_format=None,
-            extra_config={"a": 1, "b": 2},
+            extra_config={"a": {"second": 2, "first": 1}, "b": 2},
         )
         assert key1 == key2
 
@@ -122,12 +130,20 @@ class TestBuildLlmCacheKey:
         result = _build_llm_cache_key(response_format=None, extra_config={})
         assert result == "base"
 
-    def test_extra_config_all_non_scalar_returns_base(self):
+    def test_extra_config_all_non_scalar_values_affect_key(self):
         result = _build_llm_cache_key(
             response_format=None,
             extra_config={"tools": [1, 2], "schema": {"type": "object"}},
         )
-        assert result == "base"
+        assert result != "base"
+        assert result != _build_llm_cache_key(
+            response_format=None,
+            extra_config={"tools": [2, 1], "schema": {"type": "object"}},
+        )
+        assert result != _build_llm_cache_key(
+            response_format=None,
+            extra_config={"tools": [1, 2], "schema": {"type": "string"}},
+        )
 
     def test_both_format_and_extra_config(self):
         result = _build_llm_cache_key(
@@ -138,4 +154,5 @@ class TestBuildLlmCacheKey:
         assert len(parts) == 3
         assert parts[0] == "base"
         assert "rf:_ModelA" in parts[1]
-        assert "temperature=0.0" in parts[2]
+        assert result != _build_llm_cache_key(response_format=_ModelA, extra_config=None)
+        assert result != _build_llm_cache_key(response_format=_ModelB, extra_config={"temperature": 0.0})

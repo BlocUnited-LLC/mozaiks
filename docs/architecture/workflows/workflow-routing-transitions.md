@@ -90,6 +90,16 @@ invalid persisted values fail before launch. Other failed-run state is not
 copied. Approved concept, design, theme and subscription inputs continue to
 resolve through the workflow's existing artifact references.
 
+ThemeCapture's existing `before_chat` preloader also restores a missing concept
+for a bound greenfield genesis run. It reads only the newest CURRENT concept
+build record and requires an approved summary equal to the completed ValueEngine
+source session's manifest. The source must match the execution app, owner, and
+entire current build binding. A pending, cancelled, or mismatched current record
+cannot fall back to an older approval. Only concept inputs are projected; failed
+outputs and attempt counters are never copied. Existing concept inputs,
+brownfield inputs, and refinement theme inputs remain unchanged. This restores
+retry context; it does not correct or relax structured-output validation.
+
 A refinement retry uses the saved typed change
 request, selected baseline record, and journey through
 `TriggerRoutingContribution`; it does not reclassify the request or allocate a

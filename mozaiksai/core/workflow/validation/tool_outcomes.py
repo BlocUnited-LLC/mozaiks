@@ -80,6 +80,13 @@ def wrap_tool_outcome(func: Callable, contract: ToolOutcomeSpec) -> Callable:
                     func.__name__, value, attempts, contract.max_attempts,
                     "(tool reported none)",
                 )
+        if value in contract.retry_without_attempt:
+            attempts -= 1
+        elif value in contract.retry_on and attempts >= contract.max_attempts and result.get("error"):
+            # A rejected final attempt cannot reach another repair turn. Healthy
+            # results may permit follow-up calls too; they retain their outcome.
+            result = {**result, **failure("attempts_exhausted")}
+            value = contract.error_value
         context.set(contract.attempts_key, attempts)
         context.set(contract.context_key, value)
         return cast(Mapping, result)

@@ -9,7 +9,9 @@ actions as synthetic signed-in principals.
 Every check is derived from the bundle's own contracts: ``data/contract.json``
 collections and their canonical action ids, ``module.yaml`` schemas, gates and
 surfaces, ``config/subscriptions.yaml`` plans and assignment store, and the
-token scopes ``config/auth.yaml`` grants. Nothing is configured per app.
+token scopes and role permissions ``config/auth.yaml`` grants. Optional module
+``contracts/fixtures.yaml`` files supply bounded inputs and prerequisite calls;
+the observer, never a fixture, owns required coverage and pass/fail criteria.
 
 The trusted-fixture child path starts this module with a restricted environment,
 uses a disposable host database and enforces a hard time limit. Production
@@ -41,8 +43,8 @@ import threading
 import time
 import traceback
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass, field, replace
+from datetime import UTC, date, datetime
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from typing import Any
@@ -273,16 +275,22 @@ def _copy_imported_app(
         raise ValueError("imported app has no app.json")
 
 
-def _copy_probe_plan(staged_root: Path, plan_root: Path) -> None:
-    """Give the observer declarative contracts only; app Python stays in the other container."""
+def _probe_plan_paths(staged_root: Path) -> list[Path]:
+    """The declarative input allowlist shared by staging and fixture validation."""
     paths = [Path("app.json"), Path("data/contract.json"), Path("config/auth.yaml"),
              Path("config/subscriptions.yaml")]
     modules_root = staged_root / "modules"
     if modules_root.is_dir():
-        paths.extend(Path("modules") / module.name / "module.yaml"
-                     for module in modules_root.iterdir() if module.is_dir())
+        paths.extend(Path("modules") / module.name / relative
+                     for module in sorted(modules_root.iterdir()) if module.is_dir()
+                     for relative in ("module.yaml", "contracts/fixtures.yaml"))
+    return paths
+
+
+def _copy_probe_plan(staged_root: Path, plan_root: Path) -> None:
+    """Give the observer declarative contracts only; app Python stays in the other container."""
     plan_root.mkdir()
-    for relative in paths:
+    for relative in _probe_plan_paths(staged_root):
         source = staged_root / relative
         if source.is_file():
             target = plan_root / relative
@@ -936,6 +944,8 @@ class _Principal:
     token: str
     workspace_id: str | None
     extra_scopes: tuple[str, ...] = ()
+    roles: tuple[str, ...] = ()
+    exact_roles: bool = False
 
 
 @dataclass
@@ -1025,6 +1035,10 @@ class _SmokeRun:
         self.workspace_claims = False
         self.last_exception_path: str | None = None
         self.permission_denials: set[tuple[str, str]] = set()
+        self.role_denials_checked: set[tuple[str, str]] = set()
+        self.role_successes: set[tuple[str, str]] = set()
+        self.role_responses: dict[tuple[str, str], str] = {}
+        self.fixtures: dict[tuple[str, str], Any] = {}
         # (module, action, rejection) for every emitted event the runtime rejected.
         self.rejected_events: list[tuple[str, str, Any]] = []
         self.reported_rejections: set[tuple[str, str, str, str, str]] = set()
@@ -1041,6 +1055,27 @@ class _SmokeRun:
         self.outcomes.append(outcome)
         self.emit("outcome", **outcome.to_dict())
         return passed
+
+    def record_positive_failure(
+        self, check: str, message: str, *, module: str, action: str, status: int | None, path: str,
+    ) -> None:
+        """Resolve unproven inputs before asking implementation repair to alter behavior."""
+        declared = (module, action) in self.fixtures
+        needs_inputs = not declared and status in {400, 403, 404}
+        fixture_path = f"modules/{module}/contracts/fixtures.yaml"
+        if needs_inputs:
+            message += (
+                f" No declared fixture supplied this positive probe's inputs or actor for {module}.{action}. "
+                f"Add that action's valid inputs, exact roles and any prerequisite calls in {fixture_path}; "
+                "preserve the admitted action schema, authorization and business rules. "
+                "This rejection does not establish an implementation defect."
+            )
+        self.record(
+            check, False, message, path=fixture_path if needs_inputs else path,
+            input_provenance={"source": "declared_fixture" if declared else "observer_default",
+                              "module": module, "action": action, "http_status": status,
+                              "fixture_input_required": needs_inputs},
+        )
 
     def not_run(self, check: str, reason: str) -> None:
         outcome = _Outcome(check, None, f"Not run: {reason}")
@@ -1089,33 +1124,107 @@ class _SmokeRun:
         if label not in self.principals:
             self.principals[label] = _Principal(
                 label=label, user_id=principal.user_id, token=f"{principal.token}-{uuid4().hex[:8]}",
-                workspace_id=principal.workspace_id, extra_scopes=tuple(scopes),
+                workspace_id=principal.workspace_id, extra_scopes=tuple(scopes), roles=principal.roles,
             )
         return self.principals[label]
+
+    def role_grants(self) -> dict[str, set[str]]:
+        contract = getattr(self.load, "auth_contract", None)
+        return {role.id: set(role.permissions) for role in contract.authorization.roles} if contract else {}
+
+    def _with_action_roles(self, principal: _Principal, required: list[str]) -> _Principal:
+        if principal.exact_roles:
+            return principal
+        missing = set(required) - set(self.scopes) - set(principal.extra_scopes)
+        held = set(principal.roles)
+        for role, grants in sorted(self.role_grants().items()):
+            if missing & grants:
+                held.add(role)
+                missing -= grants
+        if not held or held == set(principal.roles):
+            return principal
+        roles = tuple(sorted(held))
+        label = f"{principal.label} roles={','.join(roles)}"
+        if label not in self.principals:
+            self.principals[label] = replace(principal, label=label, roles=roles,
+                                             token=f"{principal.token}-{uuid4().hex[:8]}")
+        return self.principals[label]
+
+    async def _data_snapshot(self) -> dict[str, list[dict[str, Any]]]:
+        """Declared app records only; audit records and request metrics are not app mutations."""
+        from mozaiksai.core.runtime.persistence import MongoPersistenceContext
+        from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
+
+        names = MongoPersistenceContext(app_id=self.app_id, database_name=self.database_name,
+                                        client=self.client, data_contract=self.load.data_contract)
+        collections = {
+            names.collection_name(owner, str(collection["name"]))
+            for owner, _kind, collection in iter_data_contract_collections(
+                self.load.data_contract, require_complete_ownership=False,
+            )
+        }
+        return {name: await self.database[name].find({}).sort("_id", 1).to_list(length=None)
+                for name in sorted(collections)}
+
+    async def _deny_roleless(
+        self, method: str, module: str, action: str, principal: _Principal, params: dict[str, Any],
+    ) -> None:
+        key = (module, action)
+        self.role_denials_checked.add(key)
+        label = f"{principal.label} without roles for {module}.{action}"
+        ordinary = replace(principal, label=label, roles=(), extra_scopes=(),
+                           token=f"smoke-roleless-{uuid4().hex}")
+        self.principals[label] = ordinary
+        before = await self._data_snapshot()
+        status, body, summary = await self._request(method, module, action, ordinary, params)
+        after = await self._data_snapshot()
+        detail = body.get("detail") if isinstance(body, dict) else None
+        denied = status == 403 and isinstance(detail, dict) and detail.get("error_code") == "PERMISSION_DENIED"
+        unchanged = before == after
+        self.record(
+            f"role.{module}.{action}.non_holder_denied", denied and unchanged,
+            f"Same user and workspace without roles: {summary}; declared app records "
+            f"{'unchanged' if unchanged else 'CHANGED'}.",
+            path=None if denied and unchanged else f"modules/{module}/module.yaml",
+            user_id=ordinary.user_id, roles=[], records_unchanged=unchanged, method=method,
+        )
 
     async def call(
         self, method: str, module: str, action: str, principal: _Principal, params: dict[str, Any],
     ) -> tuple[int, Any, str]:
         """Call one module action as ``principal``; return status, JSON body and a one-line summary.
 
-        A permission module.yaml requires but config/auth.yaml never grants
-        denies every signed-in user. That is recorded once per action as its
+        Declared role grants produce explicit role-bearing callers, with a
+        role-less denial checked against unchanged storage. A permission that
+        config/auth.yaml never grants is recorded once per action as its
         own failure, and the call is repeated for the same user with exactly
         the missing permissions granted, so the defects behind the permission
         wall are reported in the same pass.
         """
         loaded = next((item for item in self.load.modules if item.name == module), None)
         required = list((loaded.action_permissions_map.get(action) or []) if loaded is not None else [])
-        missing = [item for item in required if item not in self.scopes]
-        if missing and (module, action) in self.permission_denials:
+        role_permissions = set().union(*self.role_grants().values())
+        missing = [item for item in required if item not in set(self.scopes) | role_permissions]
+        principal = self._with_action_roles(principal, required)
+        role_protected = bool((set(required) - set(self.scopes)) & role_permissions)
+        if role_protected and (module, action) not in self.role_denials_checked:
+            await self._deny_roleless(method, module, action, principal, params)
+        if missing and not principal.exact_roles and (module, action) in self.permission_denials:
             principal = self._with_scopes(principal, missing)
         status, body, summary = await self._request(method, module, action, principal, params)
-        if missing and status == 403 and (module, action) not in self.permission_denials:
+        if role_protected and not principal.extra_scopes:
+            self.role_responses[(module, action)] = summary
+            if 200 <= status < 300 and (module, action) not in self.role_successes:
+                self.role_successes.add((module, action))
+                self.record(f"role.{module}.{action}.holder_allowed", True,
+                            f"Role-bearing principal executed {module}.{action}: {summary}.",
+                            user_id=principal.user_id, roles=list(principal.roles), method=method)
+        if missing and not principal.exact_roles and status == 403 and (module, action) not in self.permission_denials:
             self.permission_denials.add((module, action))
             self.record(
                 f"permission.{module}.{action}", False,
                 f"{module}.{action} requires permissions {missing} that no signed-in user holds: config/auth.yaml "
-                f"grants token scopes {self.scopes} and declares no roles, so every call is denied ({summary}). "
+                f"grants token scopes {self.scopes} and no declared role grants the missing permissions ({summary}). "
                 "The remaining checks repeat such calls with those permissions granted to test the action itself.",
                 path=f"modules/{module}/module.yaml",
             )
@@ -1156,7 +1265,7 @@ class _SmokeRun:
     ) -> tuple[int, Any, str]:
         since = len(self.capture.records)
         rejected_since = len(self.rejected_events)
-        self.emit("calling", module=module, action=action, principal=principal.label)
+        self.emit("calling", module=module, action=action, principal=principal.label, method=method)
         url = f"/api/modules/{module}/{action}"
         headers = {"Authorization": f"Bearer {principal.token}"}
         if self.external_probe:
@@ -1164,6 +1273,7 @@ class _SmokeRun:
                 "nonce": self.probe_nonce, "user_id": principal.user_id,
                 "workspace_id": principal.workspace_id, "label": principal.label,
                 "extra_scopes": list(principal.extra_scopes),
+                "roles": list(principal.roles),
             }
             headers["X-Mozaiks-Smoke-Principal"] = base64.urlsafe_b64encode(
                 json.dumps(assertion, separators=(",", ":")).encode("utf-8")
@@ -1225,6 +1335,16 @@ def _alias_collection_name(alias: str, contract: Mapping[str, Any] | None) -> st
     return collection_name_for_alias(alias, contract=contract or {})
 
 
+def _load_fixtures(run: _SmokeRun) -> None:
+    from mozaiksai.core.workflow.generator_support.module_smoke_fixtures import (
+        load_module_smoke_fixtures,
+    )
+
+    files = {relative.as_posix(): (run.app_root / relative).read_bytes()
+             for relative in _probe_plan_paths(run.app_root) if (run.app_root / relative).is_file()}
+    run.fixtures = load_module_smoke_fixtures(files)
+
+
 async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
     """Compose the generated app the way the platform host does. False when nothing can be called."""
     from httpx import ASGITransport, AsyncClient
@@ -1265,6 +1385,11 @@ async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
         return False
     run.load = load
     run.app_id = _app_id(load)
+    try:
+        _load_fixtures(run)
+    except ValueError as exc:
+        run.record("fixtures.contract", False, f"Runtime fixture contract is invalid: {exc}")
+        return False
     if load.failed_module_names:
         for name in sorted(load.failed_module_names):
             error = (load.module_load_errors.get(name) or "module failed to load").replace(str(run.app_root), "app")
@@ -1364,10 +1489,13 @@ async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
     app.state.module_action_surfaces = {module.name: module.action_api_surface_map for module in load.modules}
     app.state.failed_module_names = sorted(load.failed_module_names)
     app.state.data_contract = contract
+    app.state.auth_contract = load.auth_contract
+    app.state.app_admin_emails = tuple(load.definition.config.get("admins") or ())
     app.include_router(module_router.router)
     auth_yaml = run.app_root / "config" / "auth.yaml"
     run.scopes = sorted(auth_contract_scopes(
-        {"config/auth.yaml": auth_yaml.read_text(encoding="utf-8")} if auth_yaml.is_file() else {}
+        {"config/auth.yaml": auth_yaml.read_text(encoding="utf-8")} if auth_yaml.is_file() else {},
+        include_role_grants=False,
     ))
 
     async def resolve_principal(request: Request) -> UserPrincipal | None:
@@ -1383,11 +1511,13 @@ async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
                         or not isinstance(data.get("label"), str)
                         or not isinstance(data.get("extra_scopes"), list)
                         or not all(isinstance(scope, str) for scope in data["extra_scopes"])
+                        or not isinstance(data.get("roles"), list)
+                        or not all(isinstance(role, str) and role in run.role_grants() for role in data["roles"])
                         or data.get("workspace_id") is not None
                         and not isinstance(data["workspace_id"], str)):
                     return None
                 principal = _Principal(data["label"], data["user_id"], "",
-                                       data.get("workspace_id"), tuple(data["extra_scopes"]))
+                                       data.get("workspace_id"), tuple(data["extra_scopes"]), tuple(data["roles"]))
             except (ValueError, UnicodeError):
                 return None
         else:
@@ -1397,7 +1527,7 @@ async def _boot(run: _SmokeRun, initial_environment: set[str]) -> bool:
         if principal is None:
             return None
         return UserPrincipal(
-            user_id=principal.user_id, email=None, name=principal.label, roles=[],
+            user_id=principal.user_id, email=None, name=principal.label, roles=list(principal.roles),
             scopes=[*run.scopes, *principal.extra_scopes],
             raw_claims={"sub": principal.user_id, "app_id": run.app_id}, provider="runtime_smoke",
             app_id=run.app_id, workspace_id=principal.workspace_id, auth_provenance="token_validated",
@@ -1516,6 +1646,109 @@ def _required_params(schema: Mapping[str, Any], fields: Mapping[str, Mapping[str
         str(name): _synthetic_value(str(name), properties.get(str(name), {}), fields.get(str(name)))
         for name in schema.get("required") or []
     }
+
+
+def _fixture_principal(run: _SmokeRun, principal: _Principal, roles: list[str], label: str) -> _Principal:
+    """Use exactly the validated held roles, preserving the observer's actor identity."""
+    name = f"{principal.label} fixture {label} roles={','.join(sorted(roles))}"
+    if name not in run.principals:
+        run.principals[name] = replace(principal, label=name, roles=tuple(sorted(roles)), exact_roles=True,
+                                       token=f"smoke-fixture-{uuid4().hex}")
+    return run.principals[name]
+
+
+def _validate_fixture_input(module: Any, action: str, params: dict[str, Any]) -> None:
+    from jsonschema import Draft7Validator
+
+    errors = list(Draft7Validator(_input_schema(module, action)).iter_errors(params))
+    if errors:
+        locations = sorted({".".join(map(str, error.absolute_path)) or "<request>" for error in errors})
+        raise ValueError(f"{module.name}.{action} fixture inputs violate the declared schema at {locations}")
+
+
+async def _prepare_action_inputs(
+    run: _SmokeRun, module: Any, action: str, principal: _Principal, defaults: dict[str, Any], *,
+    record: Mapping[str, Any] | None = None, identity: Mapping[str, Any] | None = None,
+) -> tuple[_Principal, dict[str, Any]] | None:
+    """Resolve bounded prerequisites; failure never falls back to invented business inputs."""
+    fixture = getattr(run, "fixtures", {}).get((module.name, action))
+    if fixture is None:
+        return principal, defaults
+    from mozaiksai.core.workflow.generator_support.module_smoke_fixtures import (
+        resolve_fixture_params,
+    )
+
+    responses: dict[str, Any] = {}
+    now = datetime.now(UTC)
+    modules = {item.name: item for item in run.load.modules}
+    path = f"modules/{module.name}/contracts/fixtures.yaml"
+    try:
+        record_bindings = [binding for step in fixture.setup for binding in step.params
+                           if binding.source == "record"]
+        if record_bindings and (record is None or not identity
+                                or any(binding.record_field not in record for binding in record_bindings)
+                                or any(record.get(name) != value for name, value in identity.items())):
+            raise ValueError("setup requires the observer's existing canonical update/delete target record")
+        for step in fixture.setup:
+            step_module = modules[step.module]
+            params = resolve_fixture_params(step.params, responses=responses, actor_subject=principal.user_id,
+                                            record=record, now=now)
+            _validate_fixture_input(step_module, step.action, params)
+            actor = _fixture_principal(run, principal, step.roles, f"{module.name}.{action}/{step.id}")
+            # Setup is input preparation, never independent proof that this target action works.
+            status, body, summary = await run._request("POST", step.module, step.action, actor, params)
+            if not 200 <= status < 300:
+                raise ValueError(f"setup {step.id}: {step.module}.{step.action} required 2xx, got {summary}")
+            responses[step.id] = body
+        params = resolve_fixture_params(fixture.params, responses=responses, actor_subject=principal.user_id,
+                                        record=record, now=now)
+        _validate_fixture_input(module, action, params)
+        if identity and any(params.get(name) != value for name, value in identity.items()):
+            raise ValueError("fixture must target the observer's actual record, not a replacement record")
+        actor = _fixture_principal(run, principal, fixture.roles, f"{module.name}.{action}/target")
+        return actor, params
+    except ValueError as exc:
+        run.record(f"fixture.{module.name}.{action}", False, str(exc), path=path)
+        return None
+
+
+def _stored_field_matches_input(
+    stored: Any, supplied: Any, field: Mapping[str, Any], request: Mapping[str, Any],
+) -> bool:
+    """Compare declared temporal values with Mongo's UTC/millisecond representation."""
+    kind = field.get("type")
+    if kind not in {"date", "datetime"}:
+        return bool(stored == supplied)
+    if stored is None or supplied is None:
+        return stored is supplied
+    if not isinstance(supplied, str):
+        return False
+    try:
+        if kind == "date":
+            expected_date = date.fromisoformat(supplied)
+            if isinstance(stored, datetime):
+                moment = stored.replace(tzinfo=UTC) if stored.tzinfo is None else stored.astimezone(UTC)
+                if any((moment.hour, moment.minute, moment.second, moment.microsecond)):
+                    return False
+                return moment.date() == expected_date
+            observed_date = date.fromisoformat(stored) if isinstance(stored, str) else stored
+            return isinstance(observed_date, date) and observed_date == expected_date
+        expected = datetime.fromisoformat(supplied)
+        observed = datetime.fromisoformat(stored) if isinstance(stored, str) else stored
+        if not isinstance(observed, datetime):
+            return False
+        if request.get("format") == "date-time" and (
+            expected.tzinfo is None or (isinstance(stored, str) and observed.tzinfo is None)
+        ):
+            return False
+        expected = expected.replace(tzinfo=UTC) if expected.tzinfo is None else expected.astimezone(UTC)
+        observed = observed.replace(tzinfo=UTC) if observed.tzinfo is None else observed.astimezone(UTC)
+        if isinstance(stored, datetime):
+            # BSON datetime values retain milliseconds, unlike stored ISO strings.
+            expected = expected.replace(microsecond=expected.microsecond // 1000 * 1000)
+        return observed == expected
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 def _changed_value(current: Any, prop: Mapping[str, Any], contract_field: Mapping[str, Any] | None, label: str) -> Any:
@@ -1807,10 +2040,90 @@ def _get_record(entity: _Entity, body: Any, output_schema: Mapping[str, Any]) ->
     return True, body.get(name) if isinstance(body, Mapping) else None
 
 
-def _lookup_value(entity: _Entity, stored: Mapping[str, Any] | None) -> str | None:
+def _lookup_value(entity: _Entity, stored: Mapping[str, Any] | None, *, fixture: Any = None) -> Any:
     """Use the stored canonical get key; it need not be the generated write id."""
     value = stored.get(entity.lookup_field) if stored is not None else None
-    return str(value) if value is not None else None
+    if value is None:
+        return None
+    return value if fixture is not None and entity.lookup_field != "_id" else str(value)
+
+
+async def _prepare_get_inputs(
+    run: _SmokeRun, module: Any, entity: _Entity, principal: _Principal,
+    stored: Mapping[str, Any] | None, lookup_value: Any,
+) -> tuple[_Principal, dict[str, Any]] | None:
+    from mozaiksai.core.workflow.generator_support.module_smoke_fixtures import (
+        fixture_record_identity,
+    )
+
+    action = entity.actions["get"]
+    fixture = getattr(run, "fixtures", {}).get((module.name, action))
+    input_field, record_field = fixture_record_identity(fixture, collection=entity.collection, operation="get")
+    params = {input_field: lookup_value}
+    # The observer owns the lookup for the real row and the missing-row probe.
+    record = {**(stored or {}), record_field: lookup_value}
+    return await _prepare_action_inputs(run, module, action, principal, params, record=record, identity=params)
+
+
+def _read_request_method(module: Any, action: str, params: Mapping[str, Any]) -> str:
+    """Use existing JSON POST for values the canonical GET route cannot decode."""
+    # GET admits strings and bounded declared integers. bool is deliberately
+    # excluded from int; JSON POST retains boolean/number/null values exactly.
+    properties = _properties(_input_schema(module, action))
+    query_scalars = all(
+        type(value) is str or (type(value) is int and len(str(value)) <= 16
+                               and properties.get(key, {}).get("type") == "integer")
+        for key, value in params.items()
+    )
+    return "GET" if query_scalars else "POST"
+
+
+async def _call_get(
+    run: _SmokeRun, module: Any, entity: _Entity, principal: _Principal,
+    stored: Mapping[str, Any] | None, lookup_value: Any,
+) -> tuple[int, Any, str] | None:
+    prepared = await _prepare_get_inputs(run, module, entity, principal, stored, lookup_value)
+    if prepared is None:
+        return None
+    actor, params = prepared
+    return await run.call(_read_request_method(module, entity.actions["get"], params), module.name, entity.actions["get"], actor, params)
+
+
+async def _missing_get_lookup(run: _SmokeRun, module: Any, entity: _Entity) -> Any:
+    """Find a bounded schema-valid absent key, without changing app data."""
+    from jsonschema import Draft7Validator
+
+    from mozaiksai.core.runtime.persistence import MongoPersistenceContext
+    from mozaiksai.core.workflow.generator_support.module_smoke_fixtures import (
+        fixture_record_identity,
+    )
+
+    action = entity.actions["get"]
+    fixture = getattr(run, "fixtures", {}).get((module.name, action))
+    if fixture is None:
+        return f"smoke-missing-{uuid4().hex[:8]}"
+    input_field, record_field = fixture_record_identity(fixture, collection=entity.collection, operation="get")
+    schema = _properties(_input_schema(module, action))[input_field]
+    if schema.get("enum"):
+        candidates = schema["enum"][:32]
+    else:
+        candidates = {
+            "string": [f"smoke-missing-{uuid4().hex}"],
+            "integer": list(range(32)), "number": list(range(32)), "boolean": [False, True],
+        }.get(_schema_type(schema) or "", [])
+    names = MongoPersistenceContext(app_id=run.app_id, database_name=run.database_name,
+                                    client=run.client, data_contract=run.load.data_contract)
+    collection = run.database[names.collection_name(entity.module, str(entity.collection["name"]))]
+    validator = Draft7Validator(schema)
+    for candidate in candidates:
+        if not validator.is_valid(candidate):
+            continue
+        if await collection.find_one({record_field: candidate}, {"_id": 1}) is None:
+            return candidate
+    raise ValueError(
+        f"{module.name}.{action} missing-record proof is incomplete: no schema-valid absent "
+        f"lookup value found within the bounded probe for {input_field!r}"
+    )
 
 
 async def _stored(run: _SmokeRun, entity: _Entity, record_id: Any) -> dict[str, Any] | None:
@@ -1849,12 +2162,15 @@ async def _stored_fields(run: _SmokeRun, entity: _Entity) -> list[str]:
 
 async def _crud(run: _SmokeRun, entity: _Entity) -> None:
     module = next(item for item in run.load.modules if item.name == entity.module)
-    actions = entity.actions
+    actions = dict(entity.actions)
     tag = f"crud.{entity.label}"
     path_repo = f"modules/{entity.module}/backend/repo.py"
-    surface = module.action_api_surface_map.get(actions["create"])
-    if surface in _UNREACHABLE_SURFACES:
-        run.not_run(tag, f"{actions['create']} is on the {surface} surface; signed-in users cannot call it over HTTP.")
+    for operation, action in list(actions.items()):
+        surface = module.action_api_surface_map.get(action)
+        if surface in _UNREACHABLE_SURFACES:
+            run.not_run(f"{tag}.{operation}", f"{action} is on the {surface} surface; signed-in users cannot call it over HTTP.")
+            del actions[operation]
+    if "create" not in actions:
         return
     owned = entity.tenancy in {"per_user", "per_workspace"}
     a, b = run.principal("A"), run.principal("B")
@@ -1879,14 +2195,18 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
     fields = _fields(entity)
     create = actions["create"]
     payload = _required_params(_input_schema(module, create), fields)
-    status, body, summary = await run.call("POST", entity.module, create, a, payload)
+    prepared = await _prepare_action_inputs(run, module, create, a, payload)
+    if prepared is None:
+        return
+    create_actor, payload = prepared
+    status, body, summary = await run.call("POST", entity.module, create, create_actor, payload)
     record_id = _record_id(entity, body, _output_schema(module, create)) if 200 <= status < 300 else None
     stored = await _stored(run, entity, record_id) if record_id is not None else None
     no_record = f"user A's {create} produced no stored record to act on"
     if not 200 <= status < 300:
-        run.record(f"{tag}.a_create", False,
+        run.record_positive_failure(f"{tag}.a_create",
                    f"{describe(create, 'A', payload)}: expected 2xx with the created record, got {summary}.",
-                   path=failure_path())
+                   module=entity.module, action=create, status=status, path=failure_path())
     elif record_id is None:
         keys = sorted(body) if isinstance(body, Mapping) else type(body).__name__
         run.record(f"{tag}.a_create", False,
@@ -1910,20 +2230,23 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
     else:
         run.record(f"{tag}.a_create", True, f"A created {entity.entity} {entity.id_field}={record_id!r}.")
     has_record = stored is not None
-    lookup_value = _lookup_value(entity, stored)
+    get_fixture = getattr(run, "fixtures", {}).get((module.name, actions.get("get")))
+    lookup_value = _lookup_value(entity, stored, fixture=get_fixture)
     no_lookup = f"the stored record has no value for canonical get lookup {entity.lookup_field!r}"
 
     def listed_ids(body: Any) -> list[Any] | None:
         items = _items(body, _output_schema(module, actions["list"]))
         return None if items is None else [item.get(entity.id_field) for item in items if isinstance(item, Mapping)]
 
-    if "list" in actions:
-        status, body, summary = await run.call("GET", entity.module, actions["list"], a, {})
+    if "list" in actions and (prepared := await _prepare_action_inputs(run, module, actions["list"], a, {})) is not None:
+        status, body, summary = await run.call(
+            _read_request_method(module, actions["list"], prepared[1]), entity.module, actions["list"], prepared[0], prepared[1],
+        )
         listed = listed_ids(body)
         if not 200 <= status < 300 or listed is None:
-            run.record(f"{tag}.a_list", False,
+            run.record_positive_failure(f"{tag}.a_list",
                        f"{describe(actions['list'], 'A')}: expected 2xx with the declared record array, got {summary}.",
-                       path=failure_path())
+                       module=entity.module, action=actions["list"], status=status, path=failure_path())
         elif has_record and record_id not in listed:
             run.record(f"{tag}.a_list", False,
                        f"{describe(actions['list'], 'A')} did not list A's own record {record_id!r} "
@@ -1938,46 +2261,55 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
         f"id field {entity.id_field!r} nor one object member such as 'item'"
     )
     if "get" in actions:
-        missing_id = f"smoke-missing-{uuid4().hex[:8]}"
-        status, body, summary = await run.call("GET", entity.module, actions["get"], a, {"id": missing_id})
-        declared, record = _get_record(entity, body, get_schema)
-        if 200 <= status < 300 and not declared:
-            run.record(f"{tag}.get_missing", False,
-                       f"{describe(actions['get'], 'A')} for an id that does not exist returned {status}, but "
-                       f"{undeclared_get}, so the response cannot be read as not found.", path=path_manifest)
+        try:
+            missing_id = await _missing_get_lookup(run, module, entity)
+        except ValueError as error:
+            run.record(f"{tag}.get_missing", False, str(error), path=path_manifest)
+            response = None
         else:
-            found_nothing = status == 404 or (200 <= status < 300 and not record)
-            run.record(f"{tag}.get_missing", found_nothing,
-                       f"{describe(actions['get'], 'A')} for an id that does not exist: "
-                       + ("not found." if found_nothing else f"expected 404, got {summary}."),
-                       path=None if found_nothing else failure_path())
+            response = await _call_get(run, module, entity, a, stored, missing_id)
+        if response is not None:
+            status, body, summary = response
+            declared, record = _get_record(entity, body, get_schema)
+            if 200 <= status < 300 and not declared:
+                run.record(f"{tag}.get_missing", False,
+                           f"{describe(actions['get'], 'A')} for an id that does not exist returned {status}, but "
+                           f"{undeclared_get}, so the response cannot be read as not found.", path=path_manifest)
+            else:
+                found_nothing = status == 404 or (200 <= status < 300 and not record)
+                run.record(f"{tag}.get_missing", found_nothing,
+                           f"{describe(actions['get'], 'A')} for an id that does not exist: "
+                           + ("not found." if found_nothing else f"expected 404, got {summary}."),
+                           path=None if found_nothing else failure_path())
         if not has_record:
             run.not_run(f"{tag}.a_get", no_record)
         elif lookup_value is None:
             run.record(f"{tag}.a_get", False, no_lookup, path=path_repo)
-        else:
-            status, body, summary = await run.call("GET", entity.module, actions["get"], a, {"id": lookup_value})
+        elif (response := await _call_get(run, module, entity, a, stored, lookup_value)) is not None:
+            status, body, summary = response
             declared, record = _get_record(entity, body, get_schema)
             if 200 <= status < 300 and not declared:
                 run.record(f"{tag}.a_get", False,
                            f"{describe(actions['get'], 'A')}(id={lookup_value!r}) returned {status}, but "
                            f"{undeclared_get}, so A's record cannot be read from it.", path=path_manifest)
             elif not 200 <= status < 300 or not isinstance(record, Mapping) or record.get(entity.id_field) != record_id:
-                run.record(f"{tag}.a_get", False,
+                run.record_positive_failure(f"{tag}.a_get",
                            f"{describe(actions['get'], 'A')}(id={lookup_value!r}): expected 2xx with A's record, got {summary}.",
-                           path=failure_path())
+                           module=entity.module, action=actions["get"], status=status, path=failure_path())
             else:
                 run.record(f"{tag}.a_get", True, "A reads its own record by id.")
     if owned and "list" in actions:
         if not has_record:
             run.not_run(f"{tag}.b_list_isolated", no_record)
-        else:
-            status, body, summary = await run.call("GET", entity.module, actions["list"], b, {})
+        elif (prepared := await _prepare_action_inputs(run, module, actions["list"], b, {})) is not None:
+            status, body, summary = await run.call(
+                _read_request_method(module, actions["list"], prepared[1]), entity.module, actions["list"], prepared[0], prepared[1],
+            )
             listed = listed_ids(body)
             if not 200 <= status < 300 or listed is None:
-                run.record(f"{tag}.b_list_isolated", False,
+                run.record_positive_failure(f"{tag}.b_list_isolated",
                            f"{describe(actions['list'], 'B')}: expected 2xx with B's declared record array, got {summary}.",
-                           path=failure_path())
+                           module=entity.module, action=actions["list"], status=status, path=failure_path())
             elif record_id in listed:
                 run.record(f"{tag}.b_list_isolated", False,
                            f"{describe(actions['list'], 'B')} returned user A's record {record_id!r}; "
@@ -1989,8 +2321,8 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
             run.not_run(f"{tag}.b_get_isolated", no_record)
         elif lookup_value is None:
             run.not_run(f"{tag}.b_get_isolated", no_lookup)
-        else:
-            status, body, summary = await run.call("GET", entity.module, actions["get"], b, {"id": lookup_value})
+        elif (response := await _call_get(run, module, entity, b, stored, lookup_value)) is not None:
+            status, body, summary = response
             declared, record = _get_record(entity, body, get_schema)
             if 200 <= status < 300 and not declared:
                 run.record(f"{tag}.b_get_isolated", False,
@@ -2029,7 +2361,19 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
         action = actions[operation]
         before = await _stored(run, entity, record_id) or {}
         params = update_params(before, "B") if operation == "update" else {entity.id_field: record_id}
-        status, _body, summary = await run.call("POST", entity.module, action, b, params)
+        prepared = await _prepare_action_inputs(run, module, action, b, params, record=before,
+                                               identity={entity.id_field: record_id})
+        if prepared is None:
+            continue
+        actor, params = prepared
+        prepared_before = await _stored(run, entity, record_id)
+        if prepared_before is None:
+            run.record(f"fixture.{entity.module}.{action}", False,
+                       "Setup removed the observer's target record before the independent action check.",
+                       path=f"modules/{entity.module}/contracts/fixtures.yaml")
+            continue
+        before = prepared_before
+        status, _body, summary = await run.call("POST", entity.module, action, actor, params)
         after = await _stored(run, entity, record_id)
         if status == 402:
             run.record(check, False,
@@ -2053,16 +2397,40 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
         else:
             before = await _stored(run, entity, record_id) or {}
             params = update_params(before, "A")
-            status, _body, summary = await run.call("POST", entity.module, actions["update"], a, params)
+            prepared = await _prepare_action_inputs(run, module, actions["update"], a, params, record=before,
+                                                   identity={entity.id_field: record_id})
+            if prepared is None:
+                return
+            actor, params = prepared
+            prepared_before = await _stored(run, entity, record_id)
+            if prepared_before is None:
+                run.record(f"fixture.{entity.module}.{actions['update']}", False,
+                           "Setup removed the observer's target record before the independent action check.",
+                           path=f"modules/{entity.module}/contracts/fixtures.yaml")
+                return
+            before = prepared_before
+            changed_fields = [name for name, value in params.items()
+                              if name in fields and name not in {entity.id_field, entity.owner_field}
+                              and not _stored_field_matches_input(before.get(name), value, fields[name], update_props.get(name, {}))]
+            if (getattr(run, "fixtures", {}).get((entity.module, actions["update"])) is not None
+                    and update_field is not None and not changed_fields):
+                run.record(f"fixture.{entity.module}.{actions['update']}", False,
+                           "Update fixture must change an observable declared record field.",
+                           path=f"modules/{entity.module}/contracts/fixtures.yaml")
+                return
+            status, _body, summary = await run.call("POST", entity.module, actions["update"], actor, params)
             after = await _stored(run, entity, record_id) or {}
             if not 200 <= status < 300:
-                run.record(f"{tag}.a_update", False,
+                run.record_positive_failure(f"{tag}.a_update",
                            f"{describe(actions['update'], 'A', params)} on its own record: expected 2xx, got {summary}.",
-                           path=failure_path())
-            elif update_field and after.get(update_field) != params[update_field]:
+                           module=entity.module, action=actions["update"], status=status, path=failure_path())
+            elif changed_fields and any(
+                not _stored_field_matches_input(after.get(name), params[name], fields[name], update_props.get(name, {}))
+                for name in changed_fields
+            ):
                 run.record(f"{tag}.a_update", False,
                            f"{describe(actions['update'], 'A', params)} returned {status} but the stored "
-                           f"{update_field!r} is {after.get(update_field)!r}.", path=path_repo)
+                           f"fields {changed_fields!r} do not match the requested changes.", path=path_repo)
             else:
                 changed = f" ({update_field})" if update_field else ""
                 run.record(f"{tag}.a_update", True, f"A updated its own record{changed}.")
@@ -2070,13 +2438,25 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
         if not has_record:
             run.not_run(f"{tag}.a_delete", no_record)
         else:
+            before = await _stored(run, entity, record_id) or {}
+            prepared = await _prepare_action_inputs(run, module, actions["delete"], a,
+                                                   {entity.id_field: record_id}, record=before,
+                                                   identity={entity.id_field: record_id})
+            if prepared is None:
+                return
+            actor, params = prepared
+            if await _stored(run, entity, record_id) is None:
+                run.record(f"fixture.{entity.module}.{actions['delete']}", False,
+                           "Setup removed the observer's target record before the independent action check.",
+                           path=f"modules/{entity.module}/contracts/fixtures.yaml")
+                return
             status, _body, summary = await run.call(
-                "POST", entity.module, actions["delete"], a, {entity.id_field: record_id},
+                "POST", entity.module, actions["delete"], actor, params,
             )
             if not 200 <= status < 300:
-                run.record(f"{tag}.a_delete", False,
+                run.record_positive_failure(f"{tag}.a_delete",
                            f"{describe(actions['delete'], 'A')} on its own record: expected 2xx, got {summary}.",
-                           path=failure_path())
+                           module=entity.module, action=actions["delete"], status=status, path=failure_path())
             elif await _stored(run, entity, record_id) is not None:
                 run.record(f"{tag}.a_delete", False,
                            f"{describe(actions['delete'], 'A')} returned {status} but record {record_id!r} is still stored.",
@@ -2090,7 +2470,7 @@ async def _crud(run: _SmokeRun, entity: _Entity) -> None:
 
 async def _gated_params(
     run: _SmokeRun, module: Any, action: str, principal: _Principal, entities: list[_Entity],
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, dict[str, Any], _Principal] | None:
     """HTTP method and params for one gated call, creating the caller's own record when the action needs one."""
     for entity in entities:
         if entity.module != module.name or action not in entity.actions.values():
@@ -2098,20 +2478,44 @@ async def _gated_params(
         operation = next(op for op, name in entity.actions.items() if name == action)
         fields = _fields(entity)
         if operation == "list":
-            return "GET", {}
+            prepared = await _prepare_action_inputs(run, module, action, principal, {})
+            return (_read_request_method(module, action, prepared[1]), prepared[1], prepared[0]) if prepared is not None else None
         if operation == "create":
-            return "POST", _required_params(_input_schema(module, action), fields)
+            prepared = await _prepare_action_inputs(
+                run, module, action, principal, _required_params(_input_schema(module, action), fields),
+            )
+            return ("POST", prepared[1], prepared[0]) if prepared is not None else None
         create = entity.actions["create"]
+        prepared = await _prepare_action_inputs(
+            run, module, create, principal, _required_params(_input_schema(module, create), fields),
+        )
+        if prepared is None:
+            return None
         status, body, _summary = await run.call(
-            "POST", module.name, create, principal, _required_params(_input_schema(module, create), fields),
+            "POST", module.name, create, prepared[0], prepared[1],
         )
         record_id = _record_id(entity, body, _output_schema(module, create)) if 200 <= status < 300 else None
         record_id = record_id if record_id is not None else "smoke-missing-record"
+        stored = await _stored(run, entity, record_id)
         if operation == "get":
-            stored = await _stored(run, entity, record_id)
-            return "GET", {"id": _lookup_value(entity, stored) or "smoke-missing-record"}
-        return "POST", {entity.id_field: record_id}
-    return "POST", _required_params(_input_schema(module, action), {})
+            fixture = getattr(run, "fixtures", {}).get((module.name, action))
+            lookup = _lookup_value(entity, stored, fixture=fixture)
+            if lookup is None:
+                try:
+                    lookup = await _missing_get_lookup(run, module, entity)
+                except ValueError as error:
+                    run.record(f"fixture.{module.name}.{action}", False, str(error),
+                               path=f"modules/{module.name}/contracts/fixtures.yaml")
+                    return None
+            prepared = await _prepare_get_inputs(run, module, entity, principal, stored, lookup)
+            return (_read_request_method(module, action, prepared[1]), prepared[1], prepared[0]) if prepared is not None else None
+        params = {entity.id_field: record_id}
+        prepared = await _prepare_action_inputs(run, module, action, principal, params, record=stored, identity=params)
+        return ("POST", prepared[1], prepared[0]) if prepared is not None else None
+    prepared = await _prepare_action_inputs(
+        run, module, action, principal, _required_params(_input_schema(module, action), {}),
+    )
+    return ("POST", prepared[1], prepared[0]) if prepared is not None else None
 
 
 async def _entitlements(run: _SmokeRun, entities: list[_Entity]) -> None:
@@ -2142,17 +2546,19 @@ async def _entitlements(run: _SmokeRun, entities: list[_Entity]) -> None:
                             f"{capability!r} is granted by the default plan, so there is no unentitled user to deny.")
             else:
                 principal = run.principal("default plan")
-                method, params = await _gated_params(run, module, action, principal, entities)
-                status, _body, summary = await run.call(method, module.name, action, principal, params)
-                run.record(
-                    f"{tag}.default_plan_denied", status == 402,
-                    f"{module.name}.{action} as a default-plan user without {capability!r}: "
-                    + ("denied with 402." if status == 402 else f"expected 402 ENTITLEMENT_REQUIRED, got {summary}."),
-                    path=None if status == 402 else (
-                        f"modules/{module.name}/module.yaml" if 200 <= status < 300 or status == 403
-                        else run.last_exception_path or f"modules/{module.name}/backend/service.py"
-                    ),
-                )
+                prepared = await _gated_params(run, module, action, principal, entities)
+                if prepared is not None:
+                    method, params, actor = prepared
+                    status, _body, summary = await run.call(method, module.name, action, actor, params)
+                    run.record(
+                        f"{tag}.default_plan_denied", status == 402,
+                        f"{module.name}.{action} as a default-plan user without {capability!r}: "
+                        + ("denied with 402." if status == 402 else f"expected 402 ENTITLEMENT_REQUIRED, got {summary}."),
+                        path=None if status == 402 else (
+                            f"modules/{module.name}/module.yaml" if 200 <= status < 300 or status == 403
+                            else run.last_exception_path or f"modules/{module.name}/backend/service.py"
+                        ),
+                    )
             label = f"plan {plan.plan_id}"
             if label not in seeded:
                 # A failed seed is recorded; the call below still runs and shows
@@ -2160,8 +2566,11 @@ async def _entitlements(run: _SmokeRun, entities: list[_Entity]) -> None:
                 seeded[label] = run.principal(label)
                 await _seed_assignment(run, seeded[label], item, plan)
             principal = seeded[label]
-            method, params = await _gated_params(run, module, action, principal, entities)
-            status, _body, summary = await run.call(method, module.name, action, principal, params)
+            prepared = await _gated_params(run, module, action, principal, entities)
+            if prepared is None:
+                continue
+            method, params, actor = prepared
+            status, _body, summary = await run.call(method, module.name, action, actor, params)
             allowed = status not in {0, 401, 402, 403} and status < 500
             run.record(
                 f"{tag}.entitled_allowed", allowed,
@@ -2173,6 +2582,41 @@ async def _entitlements(run: _SmokeRun, entities: list[_Entity]) -> None:
                     else run.last_exception_path or f"modules/{module.name}/backend/service.py"
                 ),
             )
+
+
+async def _remaining_role_checks(run: _SmokeRun, entities: list[_Entity]) -> None:
+    """Exercise declared role actions outside CRUD; never claim unobserved success."""
+    granted = set().union(*run.role_grants().values()) - set(run.scopes)
+    for module in run.load.modules:
+        for action, permissions in sorted(module.action_permissions_map.items()):
+            if not granted.intersection(permissions or ()):
+                continue
+            key = (module.name, action)
+            tag = f"role.{module.name}.{action}"
+            if module.action_api_surface_map.get(action) in _UNREACHABLE_SURFACES:
+                run.not_run(tag, "This role action is not on a user-callable HTTP surface.")
+                continue
+            status = None
+            if key not in run.role_denials_checked or key not in run.role_successes:
+                principal = run.principal(f"role check {module.name}.{action}")
+                gate = module.action_entitlement_map.get(action)
+                if gate and run.load.subscriptions_config is not None:
+                    choice = _granting_plan(run.load.subscriptions_config, {gate})
+                    if choice:
+                        await _seed_assignment(run, principal, choice[0], choice[1])
+                prepared = await _gated_params(run, module, action, principal, entities)
+                if prepared is not None:
+                    method, params, actor = prepared
+                    status, _body, _summary = await run.call(method, module.name, action, actor, params)
+            if key not in run.role_successes:
+                run.record_positive_failure(
+                    f"{tag}.holder_allowed",
+                    f"No successful role-bearing execution was observed for {module.name}.{action}; "
+                    f"last response: {run.role_responses.get(key, 'not run')}. "
+                    "A denied non-holder alone does not prove that the authorized action works.",
+                    module=module.name, action=action, status=status,
+                    path=run.last_exception_path or f"modules/{module.name}/backend/service.py",
+                )
 
 
 # --------------------------------------------------------------------------- entry point
@@ -2218,6 +2662,8 @@ def _summary(outcomes: list[dict[str, Any]], meta: Mapping[str, Any], *, started
                 **({"path": outcome["path"]} if outcome.get("path") else {}),
                 "error": outcome.get("message"),
                 "fix_suggestion": _FIX_SUGGESTION,
+                **({"input_provenance": outcome["details"]["input_provenance"]}
+                   if "input_provenance" in outcome.get("details", {}) else {}),
             }
             for outcome in failures
         ],
@@ -2251,6 +2697,7 @@ async def _child_run(request: Mapping[str, Any], emit: Callable[..., None], init
             for entity in entities:
                 await _crud(run, entity)
             await _entitlements(run, entities)
+            await _remaining_role_checks(run, entities)
     except Exception as exc:  # report the gate's own failure as a check, never a silent pass
         run.record("smoke.error", False, f"The runtime smoke could not complete: {type(exc).__name__}: {exc}")
     finally:
@@ -2263,7 +2710,7 @@ async def _child_run(request: Mapping[str, Any], emit: Callable[..., None], init
         app_id=run.app_id,
         principals={
             label: {"user_id": principal.user_id, "workspace_id": principal.workspace_id,
-                    "scopes": [*run.scopes, *principal.extra_scopes]}
+                    "scopes": [*run.scopes, *principal.extra_scopes], "roles": list(principal.roles)}
             for label, principal in run.principals.items()
         },
         events_emitted=sorted(set(run.events)),
@@ -2316,6 +2763,7 @@ def _probe_contracts(run: _SmokeRun) -> None:
     """Load only copied declarative files; B has no imported Python mount."""
     import yaml
 
+    from mozaiksai.core.runtime.app.auth_contract import load_app_auth_contract
     from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
     from mozaiksai.core.runtime.app.subscriptions_loader import load_subscriptions_config
     from mozaiksai.core.runtime.persistence.intent_loader import (
@@ -2338,17 +2786,20 @@ def _probe_contracts(run: _SmokeRun) -> None:
     run.load = SimpleNamespace(
         modules=modules, data_contract=contract,
         subscriptions_config=load_subscriptions_config(root),
+        auth_contract=load_app_auth_contract(root, auth_required=app_config.get("authRequired", False)),
         definition=SimpleNamespace(config=app_config),
     )
     run.app_id = _app_id(run.load)
     auth_yaml = root / "config" / "auth.yaml"
     run.scopes = sorted(auth_contract_scopes(
-        {"config/auth.yaml": auth_yaml.read_text(encoding="utf-8")} if auth_yaml.is_file() else {}
+        {"config/auth.yaml": auth_yaml.read_text(encoding="utf-8")} if auth_yaml.is_file() else {},
+        include_role_grants=False,
     ))
     run.workspace_claims = any(
         collection.get("tenancy") == "per_workspace"
         for _owner, _kind, collection in iter_data_contract_collections(contract, require_complete_ownership=False)
     )
+    _load_fixtures(run)
 
 
 async def _probe_imported_app(database_name: str, observer_nonce: str,
@@ -2393,6 +2844,7 @@ async def _probe_imported_app(database_name: str, observer_nonce: str,
             for entity in entities:
                 await _crud(run, entity)
             await _entitlements(run, entities)
+            await _remaining_role_checks(run, entities)
     except Exception as exc:
         run.record("smoke.error", False,
                    f"The external observer could not complete: {type(exc).__name__}: {exc}")
@@ -2403,7 +2855,7 @@ async def _probe_imported_app(database_name: str, observer_nonce: str,
         "done", app_id=run.app_id,
         principals={
             label: {"user_id": principal.user_id, "workspace_id": principal.workspace_id,
-                    "scopes": [*run.scopes, *principal.extra_scopes]}
+                    "scopes": [*run.scopes, *principal.extra_scopes], "roles": list(principal.roles)}
             for label, principal in run.principals.items()
         },
         events_emitted=[],

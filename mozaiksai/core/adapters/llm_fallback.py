@@ -1,18 +1,16 @@
 # ==============================================================================
 # FILE: mozaiksai/core/adapters/llm_fallback.py
-# DESCRIPTION: LLM provider fallback config builder for AG2-based workflows.
+# DESCRIPTION: Ordered LLM provider configuration for AG2-based workflows.
 #
-# Purpose: build an AG2-compatible ``config_list`` that tries a primary model
-# and a prioritized list of fallback models when the primary is unavailable.
-# AG2 natively iterates config_list entries on failure, so the Mozaiks adapter
-# only needs to construct the ordered list correctly.
+# Purpose: build an ordered ``config_list`` with a primary model and any
+# configured additional models. The typed AG2 adapter selects the first entry;
+# this configuration does not implement automatic provider failover.
 #
 # Also provides ``llm_config_to_ag2_config`` which converts a config_list dict
 # to the typed AG2 ModelConfig subclass for the selected provider.
 #
-# Integration points:
-#   ag2_runner.build_llm_config()  — accepts fallback_models kwarg
-#   ag2_network_runner             — callers pass llm_config built here
+# Integration: workflow.llm_config builds the provider list; workflow agent
+# creation passes it to llm_config_to_ag2_config.
 #
 # Env vars (all optional; defaults keep existing behavior):
 #   LLM_PRIMARY_API_TYPE         provider type: openai | google | anthropic | ollama (openai)
@@ -24,7 +22,7 @@
 #   LLM_FALLBACK_BASE_URLS       comma-separated base URLs, parallel to models
 #   LLM_TEMPERATURE              shared temperature (0.0)
 #   LLM_TIMEOUT_SECONDS          shared request timeout (120)
-#   LLM_FALLBACK_ENABLED         set to "false" to disable fallback (true)
+#   LLM_FALLBACK_ENABLED         set to "false" to omit additional entries (true)
 #
 # Provider-specific API key env vars (resolved when LLM_PRIMARY_API_KEY is unset):
 #   GEMINI_API_KEY / GOOGLE_API_KEY   — used when LLM_PRIMARY_API_TYPE=google
@@ -34,11 +32,31 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from typing import Any
 
 from logs.logging_config import get_core_logger
 
 logger = get_core_logger("llm_fallback")
+
+
+def resolve_structured_output_mode(llm_config: Mapping[str, Any] | None = None) -> str:
+    """Resolve the explicit AG2 schema transport; native remains the default."""
+    mode = (llm_config or {}).get(
+        "structured_output_mode", os.getenv("LLM_STRUCTURED_OUTPUT_MODE", "native"),
+    )
+    if not isinstance(mode, str) or mode not in ("native", "prompted"):
+        raise ValueError("structured_output_mode must be 'native' or 'prompted'")
+    return mode
+
+
+def response_schema_to_ag2(response_schema: Any, llm_config: Mapping[str, Any] | None) -> Any:
+    """Select AG2's transport without changing the model or its local validation."""
+    if resolve_structured_output_mode(llm_config) == "prompted":
+        from ag2.response import PromptedSchema
+
+        return PromptedSchema(response_schema)
+    return response_schema
 
 # ---------------------------------------------------------------------------
 # Config reader helpers
@@ -107,8 +125,8 @@ def build_fallback_config_list(
 ) -> list[dict[str, Any]]:
     """Build an AG2-compatible ``config_list`` with a primary model and fallbacks.
 
-    AG2 iterates entries in ``config_list`` in order when a model returns a
-    rate-limit or availability error, so ordering here controls failover priority.
+    The typed AG2 configuration path selects the first entry. Additional entries
+    preserve configured order but do not enable automatic provider failover.
 
     Each entry includes an ``api_type`` field so downstream routing (via
     ``llm_config_to_ag2_config``) can select the right AG2 config class without
@@ -129,6 +147,8 @@ def build_fallback_config_list(
 
     # ---- Primary ----
     resolved_api_type = (primary_api_type or _env("LLM_PRIMARY_API_TYPE", "openai")).lower()
+    if resolved_api_type not in MODEL_API_KEY_ENV_NAMES:
+        raise ValueError("Unsupported LLM provider api_type")
     resolved_primary = primary_model or _env("LLM_PRIMARY_MODEL", "gpt-4o")
     resolved_api_key = resolve_model_api_key(resolved_api_type, primary_api_key or None)
     resolved_base_url = primary_base_url or _env("LLM_PRIMARY_BASE_URL") or None
@@ -146,6 +166,8 @@ def build_fallback_config_list(
 
     # ---- Fallbacks ----
     resolved_fallback_models = fallback_models if fallback_models is not None else _env_list("LLM_FALLBACK_MODELS")
+    if not resolved_fallback_models:
+        return config_list
     resolved_fallback_keys = (
         fallback_api_keys if fallback_api_keys is not None
         else [key.strip() for key in _optional_secret("LLM_FALLBACK_API_KEYS").split(",") if key.strip()]
@@ -153,7 +175,7 @@ def build_fallback_config_list(
     resolved_fallback_urls = fallback_base_urls if fallback_base_urls is not None else _env_list("LLM_FALLBACK_BASE_URLS")
 
     for idx, model in enumerate(resolved_fallback_models):
-        entry: dict[str, Any] = {"model": model}
+        entry: dict[str, Any] = {"model": model, "api_type": resolved_api_type}
         if idx < len(resolved_fallback_keys) and resolved_fallback_keys[idx]:
             entry["api_key"] = resolved_fallback_keys[idx]
         elif resolved_api_key:
@@ -190,7 +212,7 @@ def build_fallback_llm_config(
 ) -> dict[str, Any]:
     """Build a complete AG2 ``llm_config`` dict with fallback config_list.
 
-    Build an AG2 ``llm_config`` with fallback model support via env-driven
+    Build an AG2 ``llm_config`` with ordered provider entries via env-driven
     config_list construction.
 
     Usage in workflow tool code::
@@ -300,6 +322,7 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
         kwargs = {
             "model": model,
             "api_key": api_key,
+            "base_url": base_url,
             "streaming": streaming,
             **_model_call_limits(llm_config, entry, ("max_tokens", "max_retries")),
         }
@@ -392,4 +415,6 @@ __all__ = [
     "build_fallback_llm_config",
     "get_healthy_config_list",
     "llm_config_to_ag2_config",
+    "resolve_structured_output_mode",
+    "response_schema_to_ag2",
 ]

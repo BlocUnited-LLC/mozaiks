@@ -679,6 +679,52 @@ definitions:
       fields:
       - experience_spec
       default: null
+  design_docs_artifact:
+    type: object
+    authority_class: immutable_runtime_authority
+    authorization: true
+    model_visible: false
+    description: Persisted DesignDocs summary for this app. Role grants require its explicit owner review receipt, not merely CURRENT lifecycle status.
+    source:
+      type: data_reference
+      database_name: mozaiksai
+      collection: ArtifactVersions
+      query_template:
+        app_id: '{{run_build_binding.target_app_id}}'
+        build_family: design_docs
+        build_key: design_docs
+        source_workflow: DesignDocs
+        lifecycle_status: current
+      sort: [{field: version_number, direction: desc}, {field: created_at, direction: desc}]
+      fields: [app_id, build_family, build_key, source_workflow, lifecycle_status, commit_metadata]
+      default: null
+  design_docs_build_artifact:
+    type: object
+    authority_class: immutable_runtime_authority
+    authorization: true
+    model_visible: false
+    description: Reviewed design summary for this exact build, including a refinement draft awaiting overall build acceptance. Takes precedence over the previously accepted design.
+    source:
+      type: data_reference
+      database_name: mozaiksai
+      collection: ArtifactVersions
+      query_template:
+        app_id: '{{run_build_binding.target_app_id}}'
+        build_family: design_docs
+        build_key: design_docs
+        source_workflow: DesignDocs
+        lifecycle_status: {$in: [current, draft]}
+        commit_metadata.metadata.summary_payload.access_policy_review.build_id: '{{run_build_binding.build_id}}'
+      sort: [{field: version_number, direction: desc}, {field: created_at, direction: desc}]
+      fields: [app_id, build_family, build_key, source_workflow, lifecycle_status, commit_metadata]
+      default: null
+  access_policy:
+    type: object
+    authority_class: tool_only_information
+    authorization: true
+    writer_ids: [lifecycle_tool]
+    description: Validated projection of the bound, reviewed DesignDocs artifact. Model task output cannot grant role permissions.
+    source: {type: computed, default: null}
   design_surface_map:
     type: object
     description: >

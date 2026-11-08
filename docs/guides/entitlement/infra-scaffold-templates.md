@@ -34,7 +34,7 @@ Auth contract and adapter templates live in `webapp_builder/templates/`:
 
 | File | Purpose |
 |------|---------|
-| `config/auth.yaml` | Provider-neutral `mozaiks.auth.v1` behavior/env-handle contract |
+| `config/auth.yaml` | Provider-neutral `mozaiks.auth.v2` behavior/env-handle contract |
 | `ui/auth/authAdapter.js` | Constant facade over the shared `@mozaiks/chat-ui/auth` browser adapter |
 
 The backend supplies the validated auth contract and effective auth mode through

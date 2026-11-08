@@ -1595,7 +1595,7 @@ def _scan_auth_app_contract(
         if required:
             return [
                 f"Authenticated apps must include {APP_AUTH_CONFIG_PATH} "
-                "with schema_version mozaiks.auth.v1."
+                "with schema_version mozaiks.auth.v2."
             ]
         return []
 

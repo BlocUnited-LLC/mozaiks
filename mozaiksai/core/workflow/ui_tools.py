@@ -311,48 +311,6 @@ async def use_ui_tool(
         component_name=component_name,
     )
 
-    # Persist UI tool metadata to enable restoration after reconnect/resume.
-    if chat_id:
-        try:
-            pm = None
-            app_id = None
-            try:
-                from mozaiksai.core.transport.simple_transport import SimpleTransport
-
-                transport = await SimpleTransport.get_instance()
-                if transport is not None and hasattr(transport, "_get_or_create_persistence_manager"):
-                    pm = transport._get_or_create_persistence_manager()  # type: ignore[attr-defined]
-                    if hasattr(transport, "connections"):
-                        conn = transport.connections.get(chat_id) or {}  # type: ignore[attr-defined]
-                        app_id = conn.get("app_id")
-            except Exception:
-                pm = None
-                app_id = None
-
-            if pm and app_id:
-                await _await_on_transport_loop(
-                    transport,
-                    pm.attach_tool_call_metadata(
-                        chat_id=chat_id,
-                        app_id=str(app_id),
-                        event_id=event_id,
-                        metadata={
-                            "tool_name": tool_id,
-                            "tool_call_id": event_id,
-                            "component_type": component_name,
-                            "display": resolved_display,
-                            "tool_call_completed": False,
-                            "tool_call_status": "pending",
-                            "awaiting_response": True,
-                            "payload": enriched_payload,
-                            "timestamp": _dt.datetime.now(_dt.UTC).isoformat(),
-                        },
-                    ),
-                )
-                wf_logger.debug("UI_TOOL_META_ATTACHED tool=%s event=%s", tool_id, event_id)
-        except Exception as meta_err:
-            wf_logger.warning("UI_TOOL_META_FAILED: %s", meta_err)
-
     try:
         # Try to log via tools logger (optional import)
         from logs.tools_logs import get_tool_logger as _get_tool_logger  # type: ignore

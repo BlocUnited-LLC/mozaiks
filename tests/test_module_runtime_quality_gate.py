@@ -343,3 +343,50 @@ class TestWorkflowWiring:
         assert data["registry"]["ModuleRuntimeQualityAgent"] == "ModuleRuntimeQualityReviewRequest"
 
 
+
+
+@pytest.mark.parametrize("body", [
+    "return ctx.roles", "return context.role", "return ctx.principal",
+    "return getattr(ctx, 'roles', ())", "return getattr(context, 'principal', None)",
+    "return hasattr(ctx, 'role')",
+])
+def test_quality_gate_repairs_unsupported_context_authority(body):
+    from factory_app.workflows.AppGenerator.tools.module_runtime_quality import (
+        review_module_runtime_quality,
+    )
+
+    context = {"code_files": _code_files((
+        "modules/records/backend/service.py", f"def allowed(ctx, context):\n    {body}\n",
+    ))}
+    result = review_module_runtime_quality(context_variables=context)
+    assert result["status"] == "needs_revision"
+    assert "ModuleContext has no" in result["revision_request"]
+    assert "admitted action permission IDs" in result["revision_request"]
+    assert "Preserve permission and ownership checks" in result["revision_request"]
+    repeated = review_module_runtime_quality(context_variables=context)
+    assert repeated["status"] == "blocked"
+
+
+def test_quality_gate_allows_real_permissions_and_domain_role_records():
+    from dataclasses import fields
+
+    from factory_app.workflows.AppGenerator.tools.module_runtime_quality import (
+        audit_module_runtime_quality,
+    )
+    from mozaiksai.core.runtime.composition.module_context import ModuleContext
+
+    assert {"role", "roles", "principal"}.isdisjoint({field.name for field in fields(ModuleContext)})
+    source = "def allowed(ctx, membership):\n    return 'records.approve' in (ctx.permissions or ()) and membership.roles == ['reviewer']\n"
+    assert audit_module_runtime_quality(_code_files(("modules/records/backend/service.py", source))) == []
+
+
+def test_service_authority_prompt_receives_reviewed_policy_without_phantom_fields():
+    agents = yaml.safe_load((_APPGEN_DIR / "agents.yaml").read_text(encoding="utf-8"))
+    service = next(agent for agent in agents["agents"] if agent["name"] == "ServiceAgent")
+    prompt = "\n".join(section["content"] for section in service["prompt_sections"])
+    assert "roles/principal metadata" not in prompt
+    assert "ModuleContext has no `role`, `roles`, or `principal` attributes" in prompt
+    assert "resolved permission IDs, not role names" in prompt
+    middleware = yaml.safe_load(_HOOKS_YAML.read_text(encoding="utf-8"))
+    assert {"agent": "ServiceAgent", "filename": "../_shared/design_access_policy.py",
+            "function": "inject_design_access_policy"} in middleware["prompt_middleware"]

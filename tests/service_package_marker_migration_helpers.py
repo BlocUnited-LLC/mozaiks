@@ -23,6 +23,8 @@ POST_BASELINE_FAMILY_PATHS = SERVICE_PACKAGE_MARKER_PATHS | frozenset({
     # platform's profile-layout endpoint reads app/config/profile.yaml and the
     # scanner was rejecting it as noncanonical.
     "config/profile.yaml",
+    # Build-time smoke fixtures were registered after these historical captures.
+    "modules/{module_id}/contracts/fixtures.yaml",
 })
 
 

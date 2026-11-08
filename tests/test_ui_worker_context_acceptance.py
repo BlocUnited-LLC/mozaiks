@@ -259,7 +259,7 @@ async def test_page_worker_next_authorized_context_replaces_prior_request(monkey
 @pytest.mark.parametrize(("workflow", "name", "output", "required"), [
     ("AppGenerator", "AppPlanAgent", {"AppBuildPlan": {
         "agent_message": "Scripted planning context witness.", "app_kind": "workspace",
-        "agent_backend_required": False, "build_tasks": [], "readiness_profile": "none", "monetization_provider": "null",
+        "agent_backend_required": False, "build_tasks": [], "readiness_profile": "none", "monetization_provider": None,
     }}, ["APPROVED_FRONTEND_DESIGN", "design-v1", "custom_react_page", SOURCE, REQUEST, "accepted-revision-v1"]),
     ("DesignDocs", "DesignDocsAgent", {
         "agent_message": "Scripted design context witness.", "frontend_markdown": "Synthetic frontend.",
