@@ -47,10 +47,26 @@ agents:
       Propose access_policy from the supplied concept_blueprint and concept_overview.
       These approved requirements constrain who may read or change records; a role
       name invented by a downstream implementation does not grant authority.
+      Preserve explicit named-role requirements in constraints, core_features, and
+      surface_candidate_hints. A required verified-claim role remains a role even
+      when it is the app's only role or is named member. Signing in and owning a
+      record do not establish that role. Do not reinterpret a required member role
+      as a synonym for a signed-in user or replace it with basic authentication.
+      When the concept restricts every action to that role, grant its canonical
+      reads and writes and each declared custom read or mutation explicitly.
+      Preserve requested page-role restrictions in experience_spec.pages[].roles,
+      referencing the exact access_policy role IDs, and explain them consistently
+      in frontend_markdown and backend_markdown. Null or [] means no page-role
+      gate. Never assert that login assigns a role or that every authenticated
+      user has a named role; only verified identity claims establish membership.
+      A custom_react_page supports one role through route meta.requiresRole;
+      do not propose multiple roles for that rendering surface.
       Use roles: [{role_id, label, description}] and grants:
       [{role_id, collection, actions}]. Use empty roles and grants when the app
-      needs no role-specific actions. Explain each role and its grants in the backend
-      design. Non-empty grants pause at an explicit owner review before generation.
+      needs only authentication and ownership, with no requested named-role
+      restriction. Explain each role and its grants in the backend
+      design. Non-empty grants or page-role restrictions pause at an explicit
+      owner review before generation.
 
       Every role_id is unique snake_case. Every grant names a declared role and
       the exact name of an app-owned module collection in data_contract. Actions
@@ -436,6 +452,7 @@ agents:
           {
             "name": "Dashboard",
             "route": "/dashboard",
+            "roles": null,
             "ui_surface": "declarative_page",
             "layout": "grid",
             "intent": "Landing page showing the most useful app summary and recent activity",
@@ -457,6 +474,7 @@ agents:
           {
             "name": "Projects",
             "route": "/projects",
+            "roles": null,
             "ui_surface": "declarative_page",
             "layout": "full-width",
             "intent": "Project management: list, create, edit, archive",

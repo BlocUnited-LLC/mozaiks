@@ -57,6 +57,9 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     safe_relpath,
     validate_custom_page_files,
 )
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    validate_page_role_preservation,
+)
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_owned_output_paths,
 )
@@ -1571,6 +1574,10 @@ def save_app_schema(
         _validate_custom_route_bundle(custom_route_bundle)
         shipped_names = {page["name"] for page in page_list}
         shipped_pages = [*page_list, *(page for page in pack_pages if page.get("name") not in shipped_names)]
+        validate_page_role_preservation(
+            shipped_pages, context_variables,
+            custom_routes=list((custom_route_bundle or {}).get("route_manifest") or []),
+        )
         _canonicalize_manifest_routes(manifest_dict, shipped_pages, custom_route_bundle)
         _validate_manifest_against_pages(manifest_dict, shipped_pages, custom_route_bundle)
         _validate_shell_header_actions(shell_config)

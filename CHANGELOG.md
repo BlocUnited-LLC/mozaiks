@@ -366,6 +366,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Factory generation preserves explicitly required roles, including a sole
+  `member` role. Typed page roles join the existing owner review and survive
+  planning, generation and artifact-bound refinement validation; changed gates
+  and unreviewed route aliases are rejected.
+
 - Saved Factory compilation inputs retain verified settled task evidence, so
   refinement checks can validate nonempty plans without losing completed work.
   Version 2 snapshots are size-bounded; version 1 requires a fresh build.

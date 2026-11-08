@@ -361,6 +361,15 @@ models:
       route:
         type: str
         description: Primary route path for the page.
+      roles:
+        type: optional_list
+        items: str
+        description: >
+          Required verified claim roles for this page, referencing access_policy.roles.
+          Null or an empty list means no page-role gate; authentication and record
+          ownership remain independent. Preserve an explicitly required named role,
+          including a sole member role. Login never assigns a role. Custom React
+          pages support at most one role through canonical route requiresRole.
       ui_surface:
         type: literal
         values:
@@ -383,7 +392,7 @@ models:
         description: Page layout mode.
       intent:
         type: str
-        description: What the page exists to let the user do.
+        description: What the page exists to let the user do, preserving any approved named-role restriction for downstream page/route guards. Authentication or record ownership alone does not establish role membership.
       sections:
         type: list
         items: UIPageSection
@@ -408,7 +417,7 @@ models:
     fields:
       role_id:
         type: str
-        description: Stable snake_case app role id held in verified identity claims. The reserved admin role also honors the app admin allowlist.
+        description: Stable snake_case app role id held in verified identity claims, including an explicitly required sole member role. Sign-in and record ownership do not assign this role. The reserved admin role also honors the app admin allowlist.
       label:
         type: str
         description: Human-readable role name shown during access review.
@@ -464,5 +473,5 @@ models:
         type: union
         variants: [DesignAccessPolicy, 'null']
         default: null
-        description: Proposed app roles and explicit collection action grants, including reads. Non-empty grants require an explicit owner review before downstream compilation; empty lists grant no role authority. Read grants never follow implicitly from write grants and never bypass record ownership.
+        description: Proposed app roles and explicit collection action grants, including reads. Preserve explicit named-role requirements even when member is the only role; authentication and ownership do not replace those grants. Empty lists are for concepts without named-role restrictions. Non-empty grants require an explicit owner review before downstream compilation. Read grants never follow implicitly from write grants and never bypass record ownership.
 

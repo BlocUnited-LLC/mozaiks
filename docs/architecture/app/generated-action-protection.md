@@ -61,6 +61,38 @@ when a custom-action inventory repeats that canonical id.
 Candidate tasks cannot edit auth or use
 their own role declarations as authorization.
 
+An approved concept that explicitly requires a named role must keep that role
+in the design, even when `member` is the only role. Authentication and ownership
+do not establish membership. DesignDocs proposes the required action grants for
+owner review and preserves page-role restrictions in typed
+`experience_spec.pages[].roles`, referencing `access_policy.roles[].role_id`.
+Login never assigns a named role. Empty policies remain valid for concepts that require only sign-in
+and ownership. The compiler consumes the reviewed policy; it does not infer
+missing authority from concept prose or silently add grants.
+
+The same owner review displays each page's route and required roles, and its
+digest binds the typed route-to-role map alongside the action policy. Page-only
+restrictions also require this review. Reviews from the earlier policy-only
+shape require a fresh DesignDocs review; they cannot authorize page gates.
+`AppBuildPage.roles` and declarative `AppPageSchema.roles` preserve that exact
+reviewed value. Null and an empty list both mean no page-role gate and retain
+their existing representation. A custom React route projects one reviewed role
+to `meta.requiresRole`; multiple roles for that surface are rejected because its
+existing typed contract admits only one. The planner and saver reject drift
+before staging, and full-bundle validation reuses the same bound DesignDocs
+summary through `ApprovedAppCompilation`, including for page-only apps without
+packs. The canonical auth scaffold requires sign-in for reviewed roles even
+without action grants; it emits empty permission lists and never assigns a role
+to a user. Validation rejects disabling authentication on a reviewed restricted
+page bundle. An independently authored bundle without claimed Factory approval still
+uses the existing static validation contract.
+
+Bound bundle validation also rejects app routes absent from the reviewed page
+inventory and raw role metadata aliases. An unrestricted alias cannot expose a
+reviewed page. Only canonical shared auth entries from the existing auth contract
+may extend that inventory; putting an app component at the login path is not an
+auth-route exception.
+
 Generation admission can inspect the union of declared grants. Runtime smoke
 keeps that union out of ordinary users' token scopes and checks role-holder
 success and role-less denial through authenticated dispatch.

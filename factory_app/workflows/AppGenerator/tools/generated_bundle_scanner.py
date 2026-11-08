@@ -54,6 +54,7 @@ from mozaiksai.core.runtime.app.asset_manifest import asset_manifest_index
 from mozaiksai.core.runtime.app.auth_contract import (
     APP_AUTH_COMPONENTS,
     AppAuthContractError,
+    app_auth_route_entries,
     validate_app_auth_contract,
     validate_app_auth_route_bindings,
 )
@@ -89,6 +90,9 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     compile_data_contract,
     data_contract_requires_auth,
+)
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    validate_page_role_preservation,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     SHARED_PACK_OUTPUT_PATHS,
@@ -1684,6 +1688,44 @@ def _scan_route_manifest_consistency(files_map: dict[str, str]) -> list[str]:
     return errors
 
 
+def _scan_reviewed_page_roles(files_map: dict[str, str], context: Any) -> list[str]:
+    """Use the same bound DesignDocs review as assembly for full-bundle admission."""
+    try:
+        pages = [
+            yaml.safe_load(content) for path, content in files_map.items()
+            if path.startswith("ui/pages/") and path.endswith(".yaml") and "/custom/" not in path
+        ]
+        manifest = json.loads(files_map.get("ui/route_manifest.json", "{}"))
+        routes = manifest.get("pages") or []
+        if APP_AUTH_CONFIG_PATH in files_map:
+            contract = validate_app_auth_contract(yaml.safe_load(files_map[APP_AUTH_CONFIG_PATH]))
+            # Only the exact shared auth page identities may extend the reviewed
+            # app inventory. An arbitrary component at /login is still an app page.
+            canonical_auth = {entry["path"]: entry for entry in app_auth_route_entries(contract)}
+            app_routes = []
+            for entry in routes:
+                expected = canonical_auth.get(entry.get("path"))
+                meta = entry.get("meta") or {}
+                shared_auth_page = (
+                    expected is not None and entry.get("component") == expected["component"]
+                    and meta.get("requiresAuth") is False
+                    and not {"roles", "requiredRole", "requiresRole"} & entry.keys()
+                    and not {"roles", "requiredRole"} & meta.keys()
+                    and meta.get("requiresRole") is None and meta.get("routeAuth") is None
+                )
+                if not shared_auth_page:
+                    app_routes.append(entry)
+            routes = app_routes
+        reviewed = validate_page_role_preservation(
+            pages, context, custom_routes=routes, require_complete=True,
+        )
+        if reviewed and any(reviewed.values()) and not _app_manifest_auth_required(files_map):
+            raise ValueError("Reviewed page roles require app.json.authRequired=true")
+    except (AttributeError, TypeError, ValueError, yaml.YAMLError) as exc:
+        return [f"Reviewed page role restrictions: {exc}"]
+    return []
+
+
 def _scan_page_schema_structure(files_map: dict[str, str]) -> list[str]:
     """Validate declarative page YAML with the runtime page-schema contract."""
     errors: list[str] = []
@@ -2626,6 +2668,7 @@ def scan_generated_bundle(
         )
     )
     errors.extend(error for error in scan_app_contracts(scannable_files_map) if error not in errors)
+    errors.extend(_scan_reviewed_page_roles(scannable_files_map, persistence_context))
     errors.extend(_scan_planned_user_data_scope(scannable_files_map, capability_packs))
     errors.extend(_scan_subscription_assignment_storage(scannable_files_map))
     errors.extend(_scan_planned_data_fields(

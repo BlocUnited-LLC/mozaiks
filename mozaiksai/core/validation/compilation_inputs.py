@@ -130,9 +130,20 @@ async def capture_app_compilation_inputs(
         return None
     plan = detach(context.get("app_build_plan"))
     contract = resolve_subscription_contract(context)
-    if not isinstance(plan, dict) or not plan.get("capability_packs") or (
-        context.get("data_contract") is None and contract is None
-    ):
+    if not isinstance(plan, dict):
+        return None
+    projected = detach(context.get("design_docs_build_artifact")) or detach(context.get("design_docs_artifact"))
+    summary = extract_summary_payload(projected) if isinstance(projected, dict) else None
+    experience = summary.get("experience_spec") if isinstance(summary, dict) else None
+    # A page-only app still needs its reviewed route gates replayed on refinement.
+    # This only selects validation: the exact stored record and review are verified below.
+    page_review = isinstance(summary, dict) and isinstance(summary.get("access_policy_review"), dict) and bool(
+        isinstance(experience, dict) and experience.get("pages")
+    )
+    pack_inputs = bool(plan.get("capability_packs")) and (
+        context.get("data_contract") is not None or contract is not None
+    )
+    if not pack_inputs and not page_review:
         return None
     if context.get("app_plan_outcome") != "ready":
         raise ValueError("Approved compilation requires the validated ready AppBuildPlan")
@@ -140,7 +151,6 @@ async def capture_app_compilation_inputs(
 
     task_items, task_results = settled_task_snapshot(context)
     binding = RunBuildBinding.model_validate(detach(context.get("run_build_binding")))
-    projected = detach(context.get("design_docs_build_artifact")) or detach(context.get("design_docs_artifact"))
     if not isinstance(projected, dict) or not projected.get("_id"):
         raise ValueError("Approved compilation requires the exact bound DesignDocs record")
     design, payload, digest = await _summary(
