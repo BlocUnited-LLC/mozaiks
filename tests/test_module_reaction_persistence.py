@@ -123,6 +123,69 @@ async def test_unconfigured_router_has_explicit_absent_persistence():
     assert seen == [(None, MODULE, "workspace-a")]
 
 
+@pytest.mark.parametrize("active_principal,valid_emission", [(True, True), (True, False), (False, True)])
+async def test_scoped_persistence_and_declared_emission_share_one_reaction(
+    mongo, active_principal, valid_emission,
+):
+    from mozaiksai.core.events.unified_event_dispatcher import UnifiedEventDispatcher
+    from mozaiksai.core.runtime.composition.module_event_provenance import ModuleEventRejection
+    from tests.test_module_reaction_emission import OUTPUT, SOURCE, module, source
+
+    data_contract = {
+        "version": "1", "surfaces": [{
+            "surface_id": "feed", "surface_kind": "module", "collections": [{
+                "name": "records", "entity": "Record", "tenancy": "per_user",
+                "owner_field": "user_id",
+            }],
+        }], "shared_collections": [],
+    }
+    emitted, replies = [], []
+
+    async def on_order(ctx):
+        await ctx.persistence.collection("feed", "records").insert_one({"record_id": "owned-effect"})
+        ctx.app_id, ctx.user_id = "forged-app", "mallory"
+        ctx.permissions.append("root")
+        replies.append(await ctx.emit(OUTPUT, {"record_id": "owned-effect" if valid_emission else 123}))
+
+    async def observe(envelope):
+        emitted.append(envelope)
+
+    dispatcher = UnifiedEventDispatcher()
+    dispatcher.register_handler(OUTPUT, observe)
+    runtime = ModuleEventRouter(
+        [module(SimpleNamespace(on_order=on_order))], event_emitter=dispatcher.emit,
+        data_contract=data_contract, persistence_client=mongo.client,
+        persistence_database=mongo.database,
+    )
+    principal = PersistencePrincipal("alice", "workspace-a", tenant_id="tenant-a")
+    scope = bind_persistence_principal("app-a", principal)
+    with scope if active_principal else nullcontext():
+        result = await runtime.handle_event(SOURCE, source())
+    assert result.success is (active_principal and valid_emission)
+    alice = MongoPersistenceContext(
+        app_id="app-a", client=mongo.client, database_name=mongo.database,
+        data_contract=data_contract, principal=principal,
+    )
+    saved = await alice.collection("feed", "records").find_one({"record_id": "owned-effect"})
+    assert (saved is not None) is active_principal
+    if saved:
+        assert saved["app_id"] == "app-a" and saved["user_id"] == "alice"
+    if active_principal and valid_emission:
+        [envelope] = emitted
+        assert envelope["source"]["module_id"] == "feed"
+        assert envelope["source"]["action_id"] == "process_order"
+        assert envelope["tenant"]["app_id"] == "app-a"
+        assert envelope["actor"]["id"] == "alice"
+        assert envelope["authority"]["permissions"] == ["orders.read"]
+        assert envelope["correlation"]["causation_id"] == "source-event"
+    else:
+        assert emitted == []
+        if active_principal:
+            assert isinstance(replies[0], ModuleEventRejection)
+        else:
+            assert replies == []
+
+
 @pytest.mark.parametrize("active_principal", [False, True])
 async def test_app_wide_preferences_keep_recipient_and_app_scope(mongo, active_principal):
     await seed(mongo)
