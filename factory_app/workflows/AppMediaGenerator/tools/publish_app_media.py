@@ -283,7 +283,7 @@ async def publish_app_media(context_variables: Any = None) -> dict[str, Any]:
             app_id=parent.app_id,
             validation_strategy=parent.app_validation_strategy,
             capability_packs=parent.commit_metadata.metadata.get("capability_packs") or [],
-            **({"approved_compilation": approved_compilation} if approved_compilation is not None else {}),
+            approved_compilation=approved_compilation,
         )
         acceptance = validation.get("app_bundle_acceptance_result") or {}
         build_validation = validation.get("app_validation_result") or {}

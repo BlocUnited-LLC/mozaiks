@@ -350,6 +350,25 @@ async def test_media_child_carries_exact_input_lineage(saved, monkeypatch):
     assert (await resolve(saved, build_record_id=child.id)).context_for("target") == approval.context_for("target")
 
 
+@pytest.mark.asyncio
+async def test_refinement_requires_parent_before_staging(saved, tmp_path):
+    from mozaiksai.control_plane.contracts import CodingWorkerRequest
+    from mozaiksai.control_plane.implementations.coding_worker import ScopedRefinementCodingWorker
+
+    store, _, _ = saved
+    output = tmp_path / "unbound"
+    worker = ScopedRefinementCodingWorker(artifact_store=store, output_root=output)
+    request = CodingWorkerRequest(
+        app_id="factory", target_app_id="target", user_id="owner", change_class="patch", build_family="app_bundle",
+    )
+    with pytest.raises(ValueError, match="requires its parent"):
+        await worker._persist_refinement_artifact(
+            request=request, resolved_artifact_kind="app_bundle", applied_files={}, merged_files={},
+            plan=None, validation_result={}, capability_packs=[],
+        )
+    assert not output.exists()
+
+
 def test_subscription_record_id_relay_uses_runtime_router_authority(monkeypatch):
     from mozaiksai.core.workflow.context.authority import build_context_authority_policy
     from mozaiksai.core.workflow.pack.journey_orchestrator import _project_launch_context

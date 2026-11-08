@@ -5,7 +5,7 @@ import hashlib
 import json
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -182,7 +182,7 @@ class ApprovedAppCompilation:
     def context_for(self, app_id: str) -> dict[str, Any]:
         if app_id != self._app_id:
             raise ValueError("Approved compilation belongs to a different app")
-        return json.loads(self._context_json)
+        return cast(dict[str, Any], json.loads(self._context_json))
 
     def for_child(self, archive_sha256: str) -> dict[str, Any]:
         binding = _CompilationBinding.model_validate_json(self._binding_json)
@@ -203,9 +203,11 @@ async def resolve_app_compilation_inputs(
     from factory_app.workflows._shared.artifact_bundle import APP_BUNDLE_MAX_TOTAL_BYTES
 
     store = artifact_store or get_artifact_store()
-    record = await store.get_build_record(app_id=app_id, build_record_id=build_record_id)
+    record: BuildRecord | None = await store.get_build_record(app_id=app_id, build_record_id=build_record_id)
+    if record is None:
+        raise ValueError("Approved compilation bundle or parent is missing")
     selected = record
-    if selected is not None and selected.id != build_record_id:
+    if selected.id != build_record_id:
         raise ValueError("Approved compilation returned a different build record")
     first: _CompilationBinding | None = None
     seen: set[str] = set()

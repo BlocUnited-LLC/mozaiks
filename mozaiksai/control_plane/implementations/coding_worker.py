@@ -1575,6 +1575,8 @@ class ScopedRefinementCodingWorker:
         provider_execution: dict[str, Any] | None = None,
         refinement_scope: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if not request.build_record_id:
+            raise ValueError("Refinement persistence requires its parent build record")
         build_key = str(request.build_key or resolved_artifact_kind or "artifact").strip() or "artifact"
         bundle_token = uuid.uuid4().hex[:12]
         # Use the resolved (aliased) kind for file system layout so theme patches
