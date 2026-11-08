@@ -466,6 +466,13 @@ definitions:
       fields:
       - commit_metadata
       default: null
+  subscription_contract_artifact_version_id:
+    type: string
+    authority_class: tool_only_information
+    writer_ids: [lifecycle_tool, transition_router]
+    model_visible: false
+    description: Exact saved subscription input relayed to AppGenerator.
+    source: {type: state, default: null}
   monetization_enabled:
     type: boolean
     description: Flag indicating if monetization features are enabled
