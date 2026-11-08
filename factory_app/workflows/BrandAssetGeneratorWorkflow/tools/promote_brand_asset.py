@@ -1,10 +1,14 @@
-"""promote_brand_asset — promote a generated brand asset to asset_manifest.json."""
+"""promote_brand_asset — promote an owned generated brand asset to its manifest."""
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
 from typing import Annotated, Any
+
+from mozaiksai.core.media import MediaPromotionTarget
+from mozaiksai.core.media.store import get_media_asset_store
+from mozaiksai.core.workflow.agents.factory import active_workflow_tool_run
 
 
 async def promote_brand_asset(
@@ -13,118 +17,73 @@ async def promote_brand_asset(
     context_variables: Annotated[Any | None, "Runtime context"] = None,
     alt_text: Annotated[str | None, "Optional alt text for the asset"] = None,
 ) -> dict[str, Any]:
-    """Promote a generated brand asset to asset_manifest.json.
+    """Publish an asset from the active workflow chat, then save its role entry.
 
-    Writes a role-keyed entry to {workspace}/config/asset_manifest.json and
-    marks the asset as promoted in MediaAssetStore.
-
-    The content_url stored in the manifest is:
-    - The CDN URL (from AzureBlobMediaContentStore with AZURE_STORAGE_CDN_BASE_URL)
-      when the asset's content_ref is a full https:// URL — publicly accessible.
-    - Otherwise /api/media/assets/{app_id}/{asset_id}/content — requires auth.
+    Scope comes from the immutable runtime invocation, never tool arguments or
+    mutable context identifiers. The existing role-keyed manifest layout is kept.
     """
+    try:
+        run_identity = active_workflow_tool_run()
+    except PermissionError:
+        return {"ok": False, "error": "An active brand workflow is required"}
+    workflow, app_id, chat_id, user_id = run_identity
+    if workflow != "BrandAssetGeneratorWorkflow" or not all((app_id, chat_id, user_id)):
+        return {"ok": False, "error": "An active brand workflow is required"}
     workspace = os.getenv("MOZAIKS_APP_WORKSPACE_PATH", "").strip()
     if not workspace:
         return {"ok": False, "error": "MOZAIKS_APP_WORKSPACE_PATH not set"}
 
-    app_id = ""
-    if context_variables is not None:
-        if isinstance(context_variables, dict):
-            app_id = context_variables.get("app_id", "") or ""
-        else:
-            app_id = getattr(context_variables, "app_id", "") or ""
+    store = get_media_asset_store()
+    try:
+        asset = await store.get_asset(app_id=app_id, asset_id=asset_id)
+    except Exception:
+        return {"ok": False, "error": "Media asset could not be read"}
+    if asset is None or asset.source_chat_id != chat_id:
+        return {"ok": False, "error": "Media asset is not available in this workflow chat"}
 
-    # idempotency guard
-    if context_variables is not None:
-        promoted: list = []
-        if isinstance(context_variables, dict):
-            promoted = context_variables.get("promoted_brand_assets", []) or []
-        else:
-            promoted = getattr(context_variables, "promoted_brand_assets", []) or []
-        if any(e.get("asset_id") == asset_id and e.get("role") == role for e in promoted):
-            content_url = (
-                f"/api/media/assets/{app_id}/{asset_id}/content"
-                if app_id
-                else f"/api/media/assets/{asset_id}/content"
-            )
-            return {
-                "ok": True,
-                "already_promoted": True,
-                "asset_id": asset_id,
-                "role": role,
-                "content_url": content_url,
-            }
-
-    # Resolve content_url — use CDN URL when the asset was stored with one
     content_url = (
-        f"/api/media/assets/{app_id}/{asset_id}/content"
-        if app_id
-        else f"/api/media/assets/{asset_id}/content"
+        asset.content_ref if str(asset.content_ref or "").startswith("https://")
+        else f"/api/media/assets/{app_id}/{asset_id}/content"
     )
+    manifest_path = Path(workspace) / "config" / "asset_manifest.json"
     try:
-        from mozaiksai.core.media.store import get_media_asset_store
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+        manifest.setdefault("assets", {})[role] = {
+            "asset_id": asset_id, "content_url": content_url,
+            "alt_text": alt_text or "", "promoted": True,
+        }
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {"ok": False, "error": "Brand asset manifest could not be prepared"}
 
-        store = get_media_asset_store()
-        asset_record = await store.get_asset(app_id=app_id, asset_id=asset_id)
-        if asset_record and str(asset_record.content_ref or "").startswith("https://"):
-            # AzureBlobMediaContentStore returned a CDN/public URL — use it directly.
-            # This makes the content_url publicly accessible without going through the API.
-            content_url = asset_record.content_ref
-    except Exception:
-        pass
-
-    # write asset_manifest.json
-    config_dir = Path(workspace) / "config"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = config_dir / "asset_manifest.json"
-
-    manifest: dict = {}
-    if manifest_path.exists():
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except Exception:
-            manifest = {}
-
-    manifest.setdefault("assets", {})
-    manifest["assets"][role] = {
-        "asset_id": asset_id,
-        "content_url": content_url,
-        "alt_text": alt_text or "",
-        "promoted": True,
-    }
-    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-
-    # mark asset promoted in MediaAssetStore
     try:
-        from mozaiksai.core.media import MediaPromotionTarget
-        from mozaiksai.core.media.store import get_media_asset_store
-
-        store = get_media_asset_store()
-        await store.mark_asset_promoted(
-            app_id=app_id,
-            asset_id=asset_id,
+        if active_workflow_tool_run() != run_identity:
+            raise PermissionError("Workflow scope changed")
+        promoted = await store.mark_asset_promoted(
+            app_id=app_id, asset_id=asset_id,
             promotion_target=MediaPromotionTarget.BRAND_ASSET,
+            promoted_by=user_id, expected_source_chat_id=chat_id,
         )
+        if promoted is None:
+            return {"ok": False, "error": "Media asset is no longer available in this workflow chat"}
     except Exception:
-        pass
+        return {"ok": False, "error": "Media promotion failed"}
 
-    # update context_variables
+    try:
+        if active_workflow_tool_run() != run_identity:
+            raise PermissionError("Workflow scope changed")
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    except OSError:
+        return {"ok": False, "error": "Asset was published, but its brand manifest could not be saved"}
+
     if context_variables is not None:
+        entries = list(context_variables.get("promoted_brand_assets", []) or [])
         entry = {"asset_id": asset_id, "role": role, "content_url": content_url}
-        if isinstance(context_variables, dict):
-            context_variables.setdefault("promoted_brand_assets", []).append(entry)
-        else:
-            lst = getattr(context_variables, "promoted_brand_assets", None) or []
-            lst.append(entry)
-            try:
-                context_variables.promoted_brand_assets = lst
-            except AttributeError:
-                pass
+        if not any(item.get("asset_id") == asset_id and item.get("role") == role for item in entries):
+            entries.append(entry)
+            context_variables.set("promoted_brand_assets", entries)
 
     return {
-        "ok": True,
-        "asset_id": asset_id,
-        "role": role,
-        "content_url": content_url,
+        "ok": True, "asset_id": asset_id, "role": role, "content_url": content_url,
         "manifest_path": str(manifest_path),
     }

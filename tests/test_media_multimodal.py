@@ -370,7 +370,10 @@ async def test_harvest_generated_media_response_persists_context_and_emits_ui(tm
         ModelMessage("Generated a hero image."),
         model="gpt-image-1",
         provider="openai",
-        files=[BinaryResult(b"image-bytes", metadata={"media_type": "image/png", "filename": "hero.png"})],
+        files=[BinaryResult(b"image-bytes", metadata={
+            "media_type": "image/png", "filename": "hero.png",
+            "app_id": "foreign-app", "source_chat_id": "foreign-chat", "user_id": "foreign-user",
+        })],
     )
 
     assets = await harvest_generated_media_response(
@@ -385,6 +388,10 @@ async def test_harvest_generated_media_response_persists_context_and_emits_ui(tm
     )
 
     assert len(assets) == 1
+    assert assets[0].app_id == "app_1"
+    assert assets[0].source_chat_id == "chat_1"
+    assert collection.docs[0]["app_id"] == "app_1"
+    assert collection.docs[0]["source_chat_id"] == "chat_1"
     assert context["generated_media_assets"][0]["asset_id"] == assets[0].asset_id
     assert context["last_generated_media_assets"][0]["filename"] == "hero.png"
     assert transport.events[0]["tool_name"] == "core.media.generated_asset"

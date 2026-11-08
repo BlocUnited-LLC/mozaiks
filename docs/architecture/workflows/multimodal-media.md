@@ -58,6 +58,7 @@ agents:
     structured_outputs_required: false
     system_message: "Create exactly one image from the message."
     image_generation:
+      emit_ui: true        # false when the workflow/app provides its own review UI
       quality: medium
       size: "1536x1024"
       background: opaque   # transparent requires gpt-image-1
@@ -68,6 +69,15 @@ agents:
 ```
 
 `image_generation` implies `image_generation_enabled`.
+`emit_ui` is a strict boolean, defaulting to `true`. Setting it to `false`
+suppresses only the shared generated-media review card. Harvest still stores the
+bytes and asset metadata and updates `generated_media_assets` and
+`last_generated_media_assets`, so a workflow or app can display its own draft
+review. It does not hide agent text, change workflow progress, publish an asset,
+or pass a parameter to the image provider. AgentGenerator receives this option
+from the runtime `ImageGenerationSpec` schema; generated YAML passes the same
+validation before export and at runtime loading.
+
 `promotion_targets` sits inside the `image_generation` block and declares which
 promotion slots this agent's output may fill; the harvest middleware uses it to
 tag `GeneratedMediaAsset.promotion_targets`. When the agent runs as a task-batch
@@ -110,6 +120,50 @@ assets = await harvest_generated_media_response(
     transport=transport,           # emits ui.media.generated events
 )
 ```
+
+## Private draft previews
+
+Generated assets default to `private`. The authenticated content endpoint,
+`GET /api/media/assets/{app_id}/{asset_id}/content`, allows the authenticated
+owner of the asset's source chat to review it, as well as operators and admins.
+Owner access requires a persisted `ChatSessions` record matching the asset's
+`source_chat_id`, its `app_id`, and the authenticated user's ID. Optional token
+app/chat bindings must also match. Missing or foreign source chats do not grant
+access; media metadata and request parameters cannot nominate an owner.
+
+The harvest records app/chat provenance from immutable runtime context as
+top-level asset fields, separately from provider metadata. Previewing or
+downloading an asset changes neither its visibility nor its promotion state.
+Private and investor-preview assets remain inaccessible through the public
+endpoint, including records with historical promotion metadata.
+This is source-chat owner access, not a hosted team-membership grant. Reading
+an asset does not resume or route the source session, and historical media does
+not require its source build to remain current. Hosted shared-review surfaces
+remain responsible for their own current membership and grant policy.
+
+## Public publication authority
+
+`asset_visibility` is the public content endpoint's sole access-control field.
+Provider metadata cannot grant publication: ingestion removes reserved
+visibility and promotion-history keys while retaining ordinary provider details.
+An authorized `MediaAssetStore.mark_asset_promoted` call atomically sets public
+visibility and records its promotion history. Changing visibility back to
+`private` or `investor_preview` closes the public endpoint even if that history
+remains. Legacy records marked promoted only in metadata must be explicitly
+republished or assigned public visibility by an authorized caller.
+
+The generic `media.promote` WebSocket action passes the authenticated connection's
+chat ID as `expected_source_chat_id`. The store compares it with persisted asset
+provenance in the update query, together with app and asset identity. Missing or
+foreign source chats fail without publication; action parameters and provider
+metadata cannot select another source. Trusted server/operator callers may omit
+this optional source constraint and remain responsible for their own authorization.
+The model-invoked brand tool uses `active_workflow_tool_run()` for immutable
+workflow/app/chat/actor scope, verifies stored source provenance, and supplies
+the same atomic source constraint before writing its existing manifest. Missing
+or failed promotion never reports success or writes a manifest. Publication and
+the filesystem manifest are separate writes: a later manifest failure explicitly
+reports that publication completed, and does not claim a successful brand update.
 
 ## Byte Storage — MediaContentStore
 

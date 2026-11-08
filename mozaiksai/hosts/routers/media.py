@@ -8,9 +8,33 @@ from fastapi.responses import RedirectResponse
 from mozaiksai.core.auth import UserPrincipal, optional_user, require_any_auth
 from mozaiksai.core.auth.dependencies import validate_path_id
 from mozaiksai.core.media.store import MediaContentNotFoundError, get_media_asset_store
-from mozaiksai.core.media.types import AssetVisibility
+from mozaiksai.core.media.types import AssetVisibility, GeneratedMediaAsset
+from mozaiksai.core.multitenant import build_app_scope_filter
 
 router = APIRouter(tags=["media"])
+
+
+async def _owns_source_chat(principal: UserPrincipal, asset: GeneratedMediaAsset) -> bool:
+    """Authorize draft reads against the persisted runtime chat, never media metadata."""
+    if not principal.is_authenticated or not str(principal.user_id or "").strip():
+        return False
+    if not asset.source_chat_id or not asset.app_id:
+        return False
+    if not principal.validate_app_id(asset.app_id) or not principal.validate_chat_id(asset.source_chat_id):
+        return False
+
+    from mozaiksai.hosts import runtime as runtime_app
+
+    coll = await runtime_app._chat_coll()
+    owned = await coll.find_one(
+        {
+            "_id": asset.source_chat_id,
+            "user_id": principal.user_id,
+            **build_app_scope_filter(asset.app_id),
+        },
+        {"_id": 1},
+    )
+    return bool(owned)
 
 
 def _has_backer_access(principal: UserPrincipal, app_id: str, asset_id: str) -> bool:
@@ -50,7 +74,7 @@ async def get_media_asset_content(
 
     Access is gated on ``asset_visibility``:
 
-    - ``private`` — operator/admin only
+    - ``private`` — authenticated source-chat owner or operator/admin
     - ``investor_preview`` — verified campaign backers + operators/admins
     - ``public`` — any authenticated user (unauthenticated use the public endpoint)
 
@@ -70,7 +94,8 @@ async def get_media_asset_content(
     is_privileged = "admin" in roles or "operator" in roles
 
     if visibility == AssetVisibility.PRIVATE and not is_privileged:
-        raise HTTPException(status_code=403, detail="Asset is private")
+        if not await _owns_source_chat(principal, asset):
+            raise HTTPException(status_code=403, detail="Asset is private")
 
     if visibility == AssetVisibility.INVESTOR_PREVIEW:
         if not _has_backer_access(principal, clean_app_id, clean_asset_id):
@@ -108,11 +133,10 @@ async def get_public_media_asset_content(
     download: bool = Query(default=False),
     principal: UserPrincipal | None = Depends(optional_user),
 ) -> Response:
-    """Serve promoted media assets without requiring authentication.
+    """Serve media with server-authorized public visibility without authentication.
 
-    Only assets that have been explicitly promoted (metadata.promotion_status
-    == "promoted") are served through this public endpoint. Unpromoted assets
-    return 403 regardless of auth state.
+    Promotion publishes through the store's visibility decision. Provider or
+    historical promotion metadata cannot override private/backer-only visibility.
 
     This endpoint exists for publicly visible surfaces — marketplace listing
     logos, campaign hero images on public pages — where requiring a session
@@ -128,13 +152,10 @@ async def get_public_media_asset_content(
     if asset is None:
         raise HTTPException(status_code=404, detail="Media asset not found")
 
-    # Gate: asset must be promoted OR have public visibility
-    promotion_status = (asset.metadata or {}).get("promotion_status", "")
-    is_public_visibility = asset.asset_visibility == AssetVisibility.PUBLIC
-    if promotion_status != "promoted" and not is_public_visibility:
+    if asset.asset_visibility != AssetVisibility.PUBLIC:
         raise HTTPException(
             status_code=403,
-            detail="Asset is not promoted and cannot be served publicly",
+            detail="Asset is not public",
         )
 
     # CDN fast-path
