@@ -780,6 +780,39 @@ def test_save_app_schema_preserves_declarative_page_routeauth_metadata(
     assert context.data["app_pages"][0]["meta"]["routeAuth"]["params"] == {"project_id": "$route.projectId"}
 
 
+@pytest.mark.parametrize("custom", [False, True])
+@pytest.mark.parametrize("allowed", [False, True])
+def test_save_app_schema_checks_routeauth_companion_before_publishing(monkeypatch, tmp_path, custom, allowed):
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    field = "allowed" if allowed else "authorized"
+    module = yaml.safe_dump({"module": {"id": "route_access"}, "actions": [{
+        "id": "authorize_route", "output_schema": {
+            "type": "object", "required": [field], "properties": {field: {"type": "boolean"}},
+        },
+    }]})
+    original = {"modules/route_access/module.yaml": module}
+    context = _Context({"generated_files": original})
+    route_auth = {"module": "route_access", "action": "authorize_route", "params": {}}
+    manifest = _base_manifest()
+    if custom:
+        bundle = _custom_route_bundle()
+        bundle["route_manifest"][0]["meta"]["routeAuth"] = route_auth
+        manifest.update(default_route="/deal-room", pages=[], custom_routes=["deal-room"])
+        pages = []
+    else:
+        bundle = None
+        pages = [{**_base_page(), "meta": {"routeAuth": route_auth}}]
+    if allowed:
+        save_app_schema_module.save_app_schema(manifest=manifest, pages=pages, custom_route_bundle=bundle, context_variables=context)
+        assert context.get("app_schema_ready") is True
+    else:
+        with pytest.raises(ValueError, match="required boolean 'allowed'"):
+            save_app_schema_module.save_app_schema(manifest=manifest, pages=pages, custom_route_bundle=bundle, context_variables=context)
+        assert not list(tmp_path.iterdir())
+        assert context.get("generated_files") == original
+        assert context.get("app_schema_ready") is not True
+
+
 def test_save_app_schema_rejects_invalid_custom_route_routeauth(
     monkeypatch, tmp_path: Path
 ) -> None:

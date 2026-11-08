@@ -442,6 +442,9 @@ This project follows a practical pre-1.0 changelog format:
   an execution lease, and no newer saved artifact; its successor preserves cleanup
   provenance for retry. Media and Security dependencies remain unchanged.
 
+- Generated route authorization now requires the referenced module action to
+  declare a required boolean `allowed` response. Page saving, assembled wiring
+  and refinement validation reject mismatched responses before promotion.
 - The shell no longer offers Profile, Sign in, or Sign out when nobody can sign
   in. A fresh Studio runs with authentication disabled, yet its account menu
   showed Profile, Sign Out, and Sign In, and the mobile bar showed Profile, all
