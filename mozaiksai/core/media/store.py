@@ -5,7 +5,7 @@ import hashlib
 import io
 import os
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, cast, runtime_checkable
@@ -649,11 +649,13 @@ class MediaAssetStore:
         promotion_target: MediaPromotionTarget | str,
         promoted_by: str | None = None,
         expected_source_chat_id: str | None = None,
+        scope_guard: Callable[[], None] | None = None,
     ) -> GeneratedMediaAsset | None:
         """Publish through an authorized caller, optionally bound to its source chat.
 
         WebSocket actions supply the authenticated connection's chat ID. Trusted
         server/operator callers remain responsible for their own authorization.
+        Model tools supply a guard that rechecks their invocation across awaits.
         """
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
@@ -668,7 +670,11 @@ class MediaAssetStore:
             if not source_chat_id:
                 raise ValueError("expected_source_chat_id must not be empty")
             query["source_chat_id"] = source_chat_id
+        if scope_guard is not None:
+            scope_guard()
         coll = await self._coll()
+        if scope_guard is not None:
+            scope_guard()
         now = datetime.now(UTC)
         result = await coll.update_one(
             query,
@@ -683,9 +689,14 @@ class MediaAssetStore:
                 "$addToSet": {"metadata.promoted_targets": target.value},
             },
         )
+        if scope_guard is not None:
+            scope_guard()
         if result.matched_count == 0:
             return None
-        return await self.get_asset(app_id=resolved_app_id, asset_id=resolved_asset_id)
+        asset = await self.get_asset(app_id=resolved_app_id, asset_id=resolved_asset_id)
+        if scope_guard is not None:
+            scope_guard()
+        return asset
 
     async def update_asset_visibility(
         self,

@@ -165,6 +165,14 @@ or failed promotion never reports success or writes a manifest. Publication and
 the filesystem manifest are separate writes: a later manifest failure explicitly
 reports that publication completed, and does not claim a successful brand update.
 
+The model tool also supplies an invocation scope guard to the store. It rechecks
+that guard after collection initialization and immediately before publication,
+then after the write and asset readback. A child task whose invocation ended
+cannot initiate publication after waiting for a collection, confirm publication,
+or write a brand manifest. Revocation cannot undo a database write already issued
+while the invocation was active; it prevents that expired caller from reporting
+success or updating its manifest.
+
 ## Byte Storage — MediaContentStore
 
 `MediaContentStore` is a `typing.Protocol`. The framework ships three built-in

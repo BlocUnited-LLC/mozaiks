@@ -55,13 +55,17 @@ async def promote_brand_asset(
     except (OSError, ValueError, TypeError, AttributeError):
         return {"ok": False, "error": "Brand asset manifest could not be prepared"}
 
-    try:
+    def require_active_run() -> None:
         if active_workflow_tool_run() != run_identity:
             raise PermissionError("Workflow scope changed")
+
+    try:
+        require_active_run()
         promoted = await store.mark_asset_promoted(
             app_id=app_id, asset_id=asset_id,
             promotion_target=MediaPromotionTarget.BRAND_ASSET,
             promoted_by=user_id, expected_source_chat_id=chat_id,
+            scope_guard=require_active_run,
         )
         if promoted is None:
             return {"ok": False, "error": "Media asset is no longer available in this workflow chat"}

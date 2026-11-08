@@ -1,6 +1,7 @@
 """The model-invoked brand tool uses immutable runtime scope before publication."""
 from __future__ import annotations
 
+import asyncio
 import json
 from copy import deepcopy
 from pathlib import Path
@@ -58,7 +59,9 @@ async def test_brand_tool_promotes_its_stored_source_with_runtime_actor(monkeypa
     monkeypatch.setattr(case.store, "mark_asset_promoted", promote)
     result = await invoke(case.asset.asset_id, "logo", alt_text="Our logo")
     assert result["ok"] is True, result
-    assert promote.await_args.kwargs == {
+    promotion_arguments = dict(promote.await_args.kwargs)
+    assert callable(promotion_arguments.pop("scope_guard"))
+    assert promotion_arguments == {
         "app_id": "app-1", "asset_id": case.asset.asset_id, "promotion_target": "brand_asset",
         "promoted_by": "owner", "expected_source_chat_id": "source-chat",
     }
@@ -141,3 +144,53 @@ async def test_manifest_failure_reports_the_completed_publication(monkeypatch, p
     assert not (workspace / "config/asset_manifest.json").exists()
     assert list(context.get("promoted_brand_assets")) == []
     assert case.collection.docs[0]["asset_visibility"] == AssetVisibility.PUBLIC
+
+
+@pytest.mark.parametrize("boundary", ["collection", "write", "readback"])
+@pytest.mark.asyncio
+async def test_revoked_child_cannot_confirm_publication(monkeypatch, publication_case, brand_call, boundary):
+    case = publication_case
+    _, context, workspace = brand_call
+    entered, resume = asyncio.Event(), asyncio.Event()
+    collection = case.store._coll
+    calls = 0
+
+    async def paused_collection():
+        nonlocal calls
+        calls += 1
+        if (boundary == "collection" and calls == 2) or (boundary == "readback" and calls == 3):
+            entered.set()
+            await resume.wait()
+        return await collection()
+
+    monkeypatch.setattr(case.store, "_coll", paused_collection)
+    original_update = case.collection.update_one
+
+    async def paused_update(*args, **kwargs):
+        result = await original_update(*args, **kwargs)
+        if boundary == "write":
+            entered.set()
+            await resume.wait()
+        return result
+
+    update = AsyncMock(wraps=paused_update)
+    monkeypatch.setattr(case.collection, "update_one", update)
+
+    async def launch(context_variables=None):
+        child = asyncio.create_task(promote_brand_asset(case.asset.asset_id, "logo", context_variables))
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        return child
+
+    child = await _wrap_tool_with_context(launch, context)()
+    resume.set()
+    result = await asyncio.wait_for(child, timeout=2)
+    assert result["ok"] is False
+    if boundary == "collection":
+        update.assert_not_awaited()
+        assert case.collection.docs[0]["asset_visibility"] == AssetVisibility.PRIVATE
+    else:
+        # An already-issued write cannot be recalled; the expired caller cannot confirm it.
+        update.assert_awaited_once()
+        assert case.collection.docs[0]["asset_visibility"] == AssetVisibility.PUBLIC
+    assert not workspace.exists()
+    assert list(context.get("promoted_brand_assets")) == []
