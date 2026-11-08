@@ -1,148 +1,415 @@
 {
+  "schema_version": "mozaiks.data_migration.v1",
   "migration_id": "social_001_collections",
-  "description": "Declare social platform collections: friendships, friend requests, activity feed events, posts, post reactions, and post comments.",
-  "surfaces": [
+  "version": "1",
+  "description": "Ensure social platform collections and indexes (friendships, friend requests, activity feed events, posts, post reactions, and post comments) without rewriting records.",
+  "operations": [
     {
-      "surface_id": "friends",
-      "collections": [
-        {
-          "mongo_collection": "social_friendships",
-          "data_alias": "friends.friendships",
-          "indexes": [
-            {
-              "name": "friendships_by_id",
-              "keys": [{"field": "friendship_id", "order": 1}],
-              "unique": true
-            },
-            {
-              "name": "friendships_by_user",
-              "keys": [{"field": "user_id", "order": 1}, {"field": "created_at", "order": -1}]
-            },
-            {
-              "name": "friendships_by_user_friend",
-              "keys": [{"field": "user_id", "order": 1}, {"field": "friend_user_id", "order": 1}],
-              "unique": true
-            }
-          ]
-        },
-        {
-          "mongo_collection": "social_friend_requests",
-          "data_alias": "friends.requests",
-          "indexes": [
-            {
-              "name": "requests_by_id",
-              "keys": [{"field": "request_id", "order": 1}],
-              "unique": true
-            },
-            {
-              "name": "requests_by_requester",
-              "keys": [{"field": "requester_id", "order": 1}, {"field": "status", "order": 1}, {"field": "created_at", "order": -1}]
-            },
-            {
-              "name": "requests_by_recipient",
-              "keys": [{"field": "recipient_id", "order": 1}, {"field": "status", "order": 1}, {"field": "created_at", "order": -1}]
-            },
-            {
-              "name": "requests_unique_pending",
-              "keys": [{"field": "requester_id", "order": 1}, {"field": "recipient_id", "order": 1}, {"field": "status", "order": 1}]
-            }
-          ]
-        }
-      ]
+      "type": "ensure_collection",
+      "module_id": "friends",
+      "entity_name": "friendships"
     },
     {
-      "surface_id": "activity_feed",
-      "collections": [
-        {
-          "mongo_collection": "social_activity_events",
-          "data_alias": "activity_feed.events",
-          "indexes": [
-            {
-              "name": "events_by_id",
-              "keys": [{"field": "event_id", "order": 1}],
-              "unique": true
-            },
-            {
-              "name": "events_by_actor_created",
-              "keys": [{"field": "actor_id", "order": 1}, {"field": "created_at", "order": -1}]
-            },
-            {
-              "name": "events_by_feed_user_created",
-              "keys": [{"field": "feed_user_ids", "order": 1}, {"field": "created_at", "order": -1}]
-            },
-            {
-              "name": "events_by_about_user",
-              "keys": [{"field": "about_user_id", "order": 1}, {"field": "created_at", "order": -1}]
-            },
-            {
-              "name": "events_by_type_created",
-              "keys": [{"field": "activity_type", "order": 1}, {"field": "created_at", "order": -1}]
-            }
+      "type": "ensure_index",
+      "module_id": "friends",
+      "entity_name": "friendships",
+      "index": {
+        "name": "friendships_by_id",
+        "keys": [
+          [
+            "friendship_id",
+            1
           ]
-        }
-      ]
+        ],
+        "unique": true
+      }
     },
     {
-      "surface_id": "user_posts",
-      "collections": [
-        {
-          "mongo_collection": "social_posts",
-          "data_alias": "user_posts.posts",
-          "indexes": [
-            {
-              "name": "posts_by_id",
-              "keys": [{"field": "post_id", "order": 1}],
-              "unique": true
-            },
-            {
-              "name": "posts_by_author_created",
-              "keys": [{"field": "author_id", "order": 1}, {"field": "created_at", "order": -1}]
-            },
-            {
-              "name": "posts_by_status_created",
-              "keys": [{"field": "status", "order": 1}, {"field": "created_at", "order": -1}]
-            }
+      "type": "ensure_index",
+      "module_id": "friends",
+      "entity_name": "friendships",
+      "index": {
+        "name": "friendships_by_user",
+        "keys": [
+          [
+            "user_id",
+            1
+          ],
+          [
+            "created_at",
+            -1
           ]
-        },
-        {
-          "mongo_collection": "social_post_reactions",
-          "data_alias": "user_posts.reactions",
-          "indexes": [
-            {
-              "name": "reactions_by_post_user",
-              "keys": [{"field": "post_id", "order": 1}, {"field": "user_id", "order": 1}],
-              "unique": true
-            },
-            {
-              "name": "reactions_by_user",
-              "keys": [{"field": "user_id", "order": 1}, {"field": "created_at", "order": -1}]
-            },
-            {
-              "name": "reactions_by_post_type",
-              "keys": [{"field": "post_id", "order": 1}, {"field": "reaction_type", "order": 1}]
-            }
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "friends",
+      "entity_name": "friendships",
+      "index": {
+        "name": "friendships_by_user_friend",
+        "keys": [
+          [
+            "user_id",
+            1
+          ],
+          [
+            "friend_user_id",
+            1
           ]
-        },
-        {
-          "mongo_collection": "social_post_comments",
-          "data_alias": "user_posts.comments",
-          "indexes": [
-            {
-              "name": "comments_by_id",
-              "keys": [{"field": "comment_id", "order": 1}],
-              "unique": true
-            },
-            {
-              "name": "comments_by_post_created",
-              "keys": [{"field": "post_id", "order": 1}, {"field": "created_at", "order": 1}]
-            },
-            {
-              "name": "comments_by_author",
-              "keys": [{"field": "author_id", "order": 1}, {"field": "created_at", "order": -1}]
-            }
+        ],
+        "unique": true
+      }
+    },
+    {
+      "type": "ensure_collection",
+      "module_id": "friends",
+      "entity_name": "requests"
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "friends",
+      "entity_name": "requests",
+      "index": {
+        "name": "requests_by_id",
+        "keys": [
+          [
+            "request_id",
+            1
           ]
-        }
-      ]
+        ],
+        "unique": true
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "friends",
+      "entity_name": "requests",
+      "index": {
+        "name": "requests_by_requester",
+        "keys": [
+          [
+            "requester_id",
+            1
+          ],
+          [
+            "status",
+            1
+          ],
+          [
+            "created_at",
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "friends",
+      "entity_name": "requests",
+      "index": {
+        "name": "requests_by_recipient",
+        "keys": [
+          [
+            "recipient_id",
+            1
+          ],
+          [
+            "status",
+            1
+          ],
+          [
+            "created_at",
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "friends",
+      "entity_name": "requests",
+      "index": {
+        "name": "requests_unique_pending",
+        "keys": [
+          [
+            "requester_id",
+            1
+          ],
+          [
+            "recipient_id",
+            1
+          ],
+          [
+            "status",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_collection",
+      "module_id": "activity_feed",
+      "entity_name": "events"
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "activity_feed",
+      "entity_name": "events",
+      "index": {
+        "name": "events_by_id",
+        "keys": [
+          [
+            "event_id",
+            1
+          ]
+        ],
+        "unique": true
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "activity_feed",
+      "entity_name": "events",
+      "index": {
+        "name": "events_by_actor_created",
+        "keys": [
+          [
+            "actor_id",
+            1
+          ],
+          [
+            "created_at",
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "activity_feed",
+      "entity_name": "events",
+      "index": {
+        "name": "events_by_feed_user_created",
+        "keys": [
+          [
+            "feed_user_ids",
+            1
+          ],
+          [
+            "created_at",
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "activity_feed",
+      "entity_name": "events",
+      "index": {
+        "name": "events_by_about_user",
+        "keys": [
+          [
+            "about_user_id",
+            1
+          ],
+          [
+            "created_at",
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "activity_feed",
+      "entity_name": "events",
+      "index": {
+        "name": "events_by_type_created",
+        "keys": [
+          [
+            "activity_type",
+            1
+          ],
+          [
+            "created_at",
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_collection",
+      "module_id": "user_posts",
+      "entity_name": "posts"
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "user_posts",
+      "entity_name": "posts",
+      "index": {
+        "name": "posts_by_id",
+        "keys": [
+          [
+            "post_id",
+            1
+          ]
+        ],
+        "unique": true
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "user_posts",
+      "entity_name": "posts",
+      "index": {
+        "name": "posts_by_author_created",
+        "keys": [
+          [
+            "author_id",
+            1
+          ],
+          [
+            "created_at",
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "user_posts",
+      "entity_name": "posts",
+      "index": {
+        "name": "posts_by_status_created",
+        "keys": [
+          [
+            "status",
+            1
+          ],
+          [
+            "created_at",
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_collection",
+      "module_id": "user_posts",
+      "entity_name": "reactions"
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "user_posts",
+      "entity_name": "reactions",
+      "index": {
+        "name": "reactions_by_post_user",
+        "keys": [
+          [
+            "post_id",
+            1
+          ],
+          [
+            "user_id",
+            1
+          ]
+        ],
+        "unique": true
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "user_posts",
+      "entity_name": "reactions",
+      "index": {
+        "name": "reactions_by_user",
+        "keys": [
+          [
+            "user_id",
+            1
+          ],
+          [
+            "created_at",
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "user_posts",
+      "entity_name": "reactions",
+      "index": {
+        "name": "reactions_by_post_type",
+        "keys": [
+          [
+            "post_id",
+            1
+          ],
+          [
+            "reaction_type",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_collection",
+      "module_id": "user_posts",
+      "entity_name": "comments"
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "user_posts",
+      "entity_name": "comments",
+      "index": {
+        "name": "comments_by_id",
+        "keys": [
+          [
+            "comment_id",
+            1
+          ]
+        ],
+        "unique": true
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "user_posts",
+      "entity_name": "comments",
+      "index": {
+        "name": "comments_by_post_created",
+        "keys": [
+          [
+            "post_id",
+            1
+          ],
+          [
+            "created_at",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "user_posts",
+      "entity_name": "comments",
+      "index": {
+        "name": "comments_by_author",
+        "keys": [
+          [
+            "author_id",
+            1
+          ],
+          [
+            "created_at",
+            -1
+          ]
+        ]
+      }
     }
   ]
 }

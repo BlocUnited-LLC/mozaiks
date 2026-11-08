@@ -1,4 +1,11 @@
 definitions:
+  subscription_contract_artifact_version_id:
+    type: string
+    authority_class: tool_only_information
+    writer_ids: [lifecycle_tool]
+    model_visible: false
+    description: Exact record created by save_subscription_contract for downstream compiler binding.
+    source: {type: state, default: null}
   run_build_binding:
     type: object
     description: Server-verified target and build lineage. Execution app_id remains the host identity.

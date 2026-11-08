@@ -185,6 +185,79 @@ def _params(action):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("action,collection,identifier", [
+    ("delete_post", "posts", "post_id"),
+    ("delete_comment", "comments", "comment_id"),
+])
+@pytest.mark.parametrize("user,permissions,allowed", [
+    ("alice", SCOPES, True),
+    ("bob", SCOPES, False),
+    ("bob", (*SCOPES, "user_posts.moderate"), True),
+    ("bob", (*SCOPES, "user_posts.admin"), True),
+    ("bob", (*SCOPES, "moderator"), False),
+    ("bob", (*SCOPES, "admin"), False),
+    ("bob", ("user_posts.moderate",), False),
+])
+async def test_delete_uses_admitted_module_permissions(
+    dispatch, action, collection, identifier, user, permissions, allowed,
+):
+    dispatch.records[collection].append({
+        "app_id": APP_ID, "post_id": "post", identifier: "record",
+        "author_id": "alice", "status": "published",
+    })
+    result = await dispatch.executor.execute(ModuleRequest(
+        module="user_posts", action=action, params={identifier: "record"},
+        app_id=APP_ID, user_id=user, authority=enforce_authority(*permissions, actor_id=user),
+    ))
+    if "user_posts.create" not in permissions:
+        assert not result.success and result.error_code == "PERMISSION_DENIED"
+        assert all(raw.mock_calls == [] for raw in dispatch.collections.values())
+    else:
+        assert result.success, result.error
+        assert result.data["success"] is allowed
+    if not allowed:
+        for raw in dispatch.collections.values():
+            raw.update_one.assert_not_called()
+            raw.delete_one.assert_not_called()
+        dispatch.emitter.assert_not_called()
+        return
+
+    raw = dispatch.collections[collection]
+    mutation = raw.update_one if action == "delete_post" else raw.delete_one
+    mutation.assert_awaited_once()
+    assert mutation.await_args.args[0] == {"app_id": APP_ID, identifier: "record"}
+    if action == "delete_post":
+        assert mutation.await_args.args[1]["$set"]["status"] == "deleted"
+        raw.delete_one.assert_not_called()
+    else:
+        assert dispatch.collections["posts"].update_one.await_args.args == (
+            {"app_id": APP_ID, "post_id": "post"}, {"$inc": {"comment_count": -1}},
+        )
+    dispatch.emitter.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action,collection,identifier", [
+    ("delete_post", "posts", "post_id"),
+    ("delete_comment", "comments", "comment_id"),
+])
+async def test_moderation_permissions_cannot_delete_another_apps_record(dispatch, action, collection, identifier):
+    dispatch.records[collection].append({
+        "app_id": "another-app", "post_id": "post", identifier: "record", "author_id": "alice",
+    })
+    result = await dispatch.executor.execute(ModuleRequest(
+        module="user_posts", action=action, params={identifier: "record"}, app_id=APP_ID, user_id="bob",
+        authority=enforce_authority(*SCOPES, "user_posts.moderate", actor_id="bob"),
+    ))
+    assert result.success and result.data["success"] is False
+    assert "not found" in result.data["error"]
+    for raw in dispatch.collections.values():
+        raw.update_one.assert_not_called()
+        raw.delete_one.assert_not_called()
+    dispatch.emitter.assert_not_called()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("visibility", ["private", "friends", "unknown", None, "deleted", "missing", "foreign-app"])
 @pytest.mark.parametrize("action", POST_ACTIONS)
 async def test_unreadable_parent_denies_all_post_actions_before_secondary_access(dispatch, visibility, action):

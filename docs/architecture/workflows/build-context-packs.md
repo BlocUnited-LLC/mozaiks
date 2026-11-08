@@ -849,7 +849,17 @@ is a same-host identity), and that every template-owned output the pack ships
 template, any template that needs no build-time context (every file but
 `.j2`), must equal the verified template text with line endings normalized; a
 template-owned migration is compared after the migration compilation assembly
-applies. These output checks never render a template: a `.j2` template renders
+applies. When the caller supplies approved build context and a data or
+subscription contract, module templates are compared after replaying the same
+assembly and entitlement compilers on freshly verified pack sources. This
+admits canonical reads on partial templates and approved pricing gates while
+still rejecting changed handler logic, unauthorized actions, removed gates,
+and altered permissions. Candidate files and provenance never supply the
+expected implementation. Without those approved inputs, the static template
+comparison remains strict; the public validation facade cannot approve a
+transformed module from bundle contents alone.
+
+A `.j2` template renders
 from the build's template variables, which no validation caller has, so its
 output is verified through the pack's declared outputs (present, inside the
 declared output lanes, not forbidden) and its pinned identity. Its content is
@@ -858,13 +868,15 @@ and a PowerShell script) is the only shipped pack with `.j2` templates. The
 validation facade returns the resolved identities as
 `GeneratedAppValidationResult.resolved_capability_packs`.
 
-One check still renders templates, for data rather than output bytes: when
+The planned-data check also renders templates: when
 the caller passes the build's planned data contract (only AppGenerator's own
 acceptance gate does, from its full build context), the planned-data check
 recomposes it with the packs' data contributions through
 `verified_pack_template_inventory`, which renders every selected pack's
 templates with that context. The validation facade and Studio refinement
-candidates pass no planned data contract, so they render nothing.
+candidates pass no planned data contract, so they render nothing. Commerce
+templates have no fixed pricing gates: an approved subscription selection
+owns any paid feature mapping, independently of the action's permissions.
 
 A pack version bump changes what the current pack ships. After an upgrade of
 the installed `mozaiks` package (or any shipped pack version bump), an
