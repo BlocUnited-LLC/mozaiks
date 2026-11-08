@@ -364,7 +364,8 @@ This project follows a practical pre-1.0 changelog format:
 
 - Pack integrity checks accept canonical reads and pricing gates compiled from
   approved build inputs while rejecting changes to verified implementations.
-  Commerce no longer requires fixed pricing gates and uses current schema admin panels.
+  Commerce no longer requires fixed pricing gates, uses current schema admin panels,
+  and declares the product response envelopes used by its mutation actions.
 
 - Account export and deletion in files `0.1.13`, notifications `0.1.13`,
   commerce `0.1.14`, social `0.1.14`, and support `0.1.14` use the same

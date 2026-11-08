@@ -105,6 +105,13 @@ actions:
     output_schema:
       type: object
       required: [success, product]
+      properties:
+        success: { type: boolean }
+        product:
+          type: object
+          required: [product_id]
+          properties:
+            product_id: { type: string }
     permissions: [commerce.catalog.manage]
     emits: [domain.commerce.product.created]
 
@@ -132,6 +139,13 @@ actions:
     output_schema:
       type: object
       required: [success, product]
+      properties:
+        success: { type: boolean }
+        product:
+          type: object
+          required: [product_id]
+          properties:
+            product_id: { type: string }
     permissions: [commerce.catalog.manage]
     emits: [domain.commerce.product.updated]
 
@@ -166,6 +180,13 @@ actions:
     output_schema:
       type: object
       required: [success, product]
+      properties:
+        success: { type: boolean }
+        product:
+          type: object
+          required: [product_id]
+          properties:
+            product_id: { type: string }
     permissions: [commerce.inventory.manage]
     emits: [domain.commerce.inventory.adjusted]
 
