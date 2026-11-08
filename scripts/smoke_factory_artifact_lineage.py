@@ -23,14 +23,14 @@ from factory_app.workflows._shared.workflow_integration import (
     hydrate_workflow_integration_context_from_latest_artifact,
     normalize_workflow_integration_metadata,
 )
-from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
+from factory_app.workflows.AppGenerator.tools.app_plan_review import review_app_build_plan
 from factory_app.workflows.AppGenerator.tools.app_validation import validate_app_bundle_from_request
 from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from mozaiksai.core.artifacts import (
     ArtifactLifecycleStatus,
     ArtifactStore,
-    ArtifactValidationStatus,
     ArtifactVersionDoc,
+    extract_summary_payload,
     persist_summary_artifact,
 )
 from mozaiksai.core.runtime.app.loader import AppLoader
@@ -58,35 +58,6 @@ class MemoryArtifactStore:
         self._versions: dict[tuple[str, str], list[ArtifactVersionDoc]] = {}
         self.create_calls: list[dict[str, Any]] = []
         self._counter = 0
-
-    def seed(
-        self,
-        *,
-        app_id: str,
-        build_family: str,
-        build_key: str | None = None,
-        summary_payload: dict[str, Any] | None = None,
-    ) -> ArtifactVersionDoc:
-        build_key = build_key or build_family
-        self._counter += 1
-        artifact = ArtifactVersionDoc(
-            _id=f"av_{build_family}_{self._counter}",
-            app_id=app_id,
-            build_family=build_family,
-            build_key=build_key,
-            version_number=1,
-            lineage_root_id=f"av_{build_family}_{self._counter}",
-            lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-            validation_status=ArtifactValidationStatus.SKIPPED,
-            commit_metadata={
-                "metadata": {
-                    "summary_payload": summary_payload or {"seeded": build_family},
-                    "summary_format": "json",
-                }
-            },
-        )
-        self._versions.setdefault((build_family, build_key), []).insert(0, artifact)
-        return artifact
 
     async def list_build_records(
         self,
@@ -263,11 +234,20 @@ async def _seed_summary_artifacts(
     app_id: str,
     artifact_store: Any,
 ) -> tuple[ArtifactVersionDoc, ArtifactVersionDoc, ArtifactVersionDoc]:
+    files = build_appgenerator_acceptance_files(app_id=app_id)
     design_docs = await persist_summary_artifact(
         app_id=app_id,
         artifact_kind="design_docs",
         artifact_key="design_docs",
-        summary_payload={"surface_map": {"surfaces": [{"surface_id": "support_tickets"}]}},
+        summary_payload={
+            "data_contract": json.loads(files["data/contract.json"]),
+            "surface_map": {"surfaces": [{
+                "surface_id": "support_tickets", "surface_kind": "module", "owner": "app",
+                "primary_entities": ["Ticket"],
+                "owned_mutations": ["create_ticket", "request_batch_triage"],
+                "custom_reads": ["list_tickets"],
+            }]},
+        },
         source_workflow="DesignDocs",
         source_chat_id="chat_designdocs",
         author_user_id="user_1",
@@ -382,7 +362,7 @@ async def _run_lineage_smoke_with_store(
         "build_registry_id": f"registry_{app_id}", "target_app_id": app_id,
         "build_id": "build_lineage_smoke", "phase": "genesis",
     }
-    fixture_files = build_appgenerator_acceptance_files(_primary_workflow_integration(metadata))
+    fixture_files = build_appgenerator_acceptance_files(_primary_workflow_integration(metadata), app_id=app_id)
     app_dir = REPO_ROOT / ".local" / "smoke-artifacts" / app_id / "app"
     app_dir.mkdir(parents=True, exist_ok=True)
     archive = app_dir.parent / "bundle.zip"
@@ -439,11 +419,19 @@ async def _run_lineage_smoke_with_store(
     if fixture_workflow_integration is None:
         fixture_workflow_integration = default_workflow_integration()
         integration_errors.append("Hydrated workflow integration metadata did not include a primary workflow.")
-    files = build_appgenerator_acceptance_files(fixture_workflow_integration)
+    files = build_appgenerator_acceptance_files(fixture_workflow_integration, app_id=app_id)
     context.set("generated_files", files)
     task_state = build_appgenerator_acceptance_task_state(files)
-    context.set("data_contract", task_state["data_contract"])
-    app_build_plan(AppBuildPlan=task_state["app_build_plan"], context_variables=context)
+    design = extract_summary_payload(design_docs)
+    context.set("design_docs_artifact", design_docs.model_dump(mode="json", by_alias=True))
+    context.set("data_contract", design["data_contract"])
+    context.set("design_surface_map", design["surface_map"])
+    context.set("subscription_contract_artifact", subscription_contract.model_dump(mode="json", by_alias=True))
+    context.set("subscription_contract_artifact_version_id", subscription_contract.id)
+    context.set("subscription_contract", extract_summary_payload(subscription_contract))
+    plan_review = review_app_build_plan(AppBuildPlan=task_state["app_build_plan"], context_variables=context)
+    if plan_review["outcome"] != "ready":
+        raise RuntimeError(f"Lineage fixture plan review failed: {plan_review}")
     task_outputs = task_state["app_task_batch_results"]
     for entry in task_outputs["support_pages"]["code_files"]:
         if entry["filename"] == "ui/pages/support_tickets.yaml":
@@ -599,6 +587,7 @@ async def _run_lineage_smoke_with_store(
                 "workflow_bundle_id": workflow_bundle.id,
                 "app_bundle_id": app_bundle.id,
                 "app_bundle_lifecycle_status": ArtifactLifecycleStatus(app_bundle.lifecycle_status).value,
+                "approved_compilation_bound": bool(app_bundle.commit_metadata.metadata.get("compilation_inputs")),
                 "workflow_bundle_inputs": workflow_call["canonical_inputs_version"],
                 "app_bundle_inputs": app_call["canonical_inputs_version"],
                 "current_refs": current_refs,
@@ -611,6 +600,7 @@ async def _run_lineage_smoke_with_store(
                 "workflow_integration": acceptance.get("workflow_integration"),
                 "fixture_workflow_integration": fixture_workflow_integration,
                 "task_batch_status": context.get("app_task_batch_status"),
+                "app_plan_outcome": context.get("app_plan_outcome"),
                 "accepted_task_ids": sorted(task_id for task_id in accepted if not task_id.startswith("_")),
                 "failed_tasks": accepted.get("_failed", {}),
             },
@@ -627,24 +617,8 @@ async def run_offline_factory_artifact_lineage_smoke(
 ) -> dict[str, Any]:
     app_id = "offline-factory-artifact-lineage"
     store = MemoryArtifactStore()
-    design_docs = store.seed(
-        app_id=app_id,
-        build_family="design_docs",
-        summary_payload={"surface_map": {"surfaces": [{"surface_id": "support_tickets"}]}},
-    )
-    subscription_contract = store.seed(
-        app_id=app_id,
-        build_family="subscription_contract",
-        summary_payload={
-            "contract_required": False,
-            "rationale": "No generated-app SaaS subscription contract required.",
-            "code_files": [],
-        },
-    )
-    theme_capture = store.seed(
-        app_id=app_id,
-        build_family="theme_capture",
-        summary_payload={"theme": {"name": "Support Operations"}},
+    design_docs, subscription_contract, theme_capture = await _seed_summary_artifacts(
+        app_id=app_id, artifact_store=store,
     )
     return await _run_lineage_smoke_with_store(
         app_id=app_id,

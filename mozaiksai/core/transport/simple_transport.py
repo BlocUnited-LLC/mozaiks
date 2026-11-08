@@ -1310,7 +1310,10 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     asset_id=asset_id,
                     promotion_target=promotion_target,
                     promoted_by=str(user_id),
+                    expected_source_chat_id=chat_id,
                 )
+                if updated is None:
+                    raise ValueError("Media asset is not available for promotion in this chat")
                 await send_event_envelope(websocket, {
                     "schema_version": "mozaiks.ui.event.v1",
                     "type": "artifact.action.completed",
@@ -1488,9 +1491,14 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
 
             # Use the AG2-aligned replayer so visibility filtering and UI tool replay
             # semantics stay consistent with live events (no leaking hidden agents).
-            from mozaiksai.core.transport.run_replay import WorkflowRunReplayer
+            from functools import partial
 
-            replayer = WorkflowRunReplayer()
+            from mozaiksai.core.transport.run_replay import WorkflowRunReplayer
+            from mozaiksai.core.transport.ui_tools import project_ui_tool_response_state
+
+            replayer = WorkflowRunReplayer(
+                project_ui_tool_response_state=partial(project_ui_tool_response_state, transport=self),
+            )
             summary = await replayer.handle_resume_request(
                 chat_id=str(chat_id),
                 app_id=str(app_id),

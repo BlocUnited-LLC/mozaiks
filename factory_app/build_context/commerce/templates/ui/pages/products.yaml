@@ -78,6 +78,15 @@ sections:
           payload:
             product_id: "{product_id}"
             quantity: 1
+        - id: edit-product
+          label: Edit Product
+          variant: secondary
+          action_type: event
+          event_type: ui.modal.open
+          requires_selection: true
+          closes_modal: false
+          payload:
+            modal_id: update-product-modal
       empty:
         title: No products yet
         message: Publish products from the commerce admin panel.
@@ -151,4 +160,67 @@ sections:
               closes_modal: true
               payload:
                 modal_id: create-product-modal
+
+  # Edits catalog text and status. Price and stock stay out of this form: list rows
+  # carry price_amount in minor units while update_product takes a major-unit
+  # amount, and stock changes go through adjust_inventory.
+  - id: update-product-modal
+    primitive: Modal
+    title: Edit Product
+    config:
+      title: Edit Product
+      description: Update the selected product's catalog details and status.
+      size: medium
+      children:
+        - id: update-product-form
+          primitive: Form
+          title: Edit Product
+          config:
+            initial_values_key: selected_row
+            layout: vertical
+            columns: 1
+            fields:
+              - name: title
+                label: Title
+                type: text
+                required: true
+              - name: description
+                label: Description
+                type: textarea
+              - name: category
+                label: Category
+                type: text
+              - name: status
+                label: Status
+                type: select
+                options:
+                  - value: draft
+                    label: Draft
+                  - value: active
+                    label: Active
+                  - value: archived
+                    label: Archived
+            submit_label: Save
+            submit_action:
+              id: submit-update-product
+              label: Save
+              variant: primary
+              action_type: submit
+              href: /api/modules/commerce/update_product
+              closes_modal: true
+              payload:
+                product_id: "{selected_row.product_id}"
+                title: "{form.title}"
+                description: "{form.description}"
+                category: "{form.category}"
+                status: "{form.status}"
+            cancel_label: Cancel
+            cancel_action:
+              id: cancel-update-product
+              label: Cancel
+              action_type: event
+              event_type: ui.modal.close
+              closes_modal: true
+              payload:
+                modal_id: update-product-modal
 roles: null

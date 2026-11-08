@@ -78,12 +78,11 @@ class UserPostsService:
 
     async def delete_post(self, ctx, *, post_id: str) -> dict:
         user_id = actor_id(ctx)
-        roles = list(getattr(ctx, "roles", None) or [])
         post = await self._posts.get(ctx, post_id=post_id)
 
         if not post:
             return {"success": False, "error": "Post not found."}
-        if not can_delete_post(post, user_id, roles):
+        if not can_delete_post(post, user_id, ctx.permissions or []):
             return {"success": False, "error": "You do not have permission to delete this post."}
 
         now = timestamp_now()
@@ -164,13 +163,12 @@ class UserPostsService:
     async def get_reaction_summary(self, ctx, *, post_id: str) -> dict:
         user_id = actor_id(ctx)
         post = await self._posts.get(ctx, post_id=post_id)
-        if not can_read_post(post, user_id):
-            return {"total": 0, "by_type": {}, "viewer_reaction": None}
-        by_type = await self._reactions.count_by_type(ctx, post_id=post_id)
-        total = sum(by_type.values())
-        viewer = await self._reactions.get(ctx, post_id=post_id, user_id=user_id)
+        readable = can_read_post(post, user_id)
+        # An unreadable post summarizes no reactions; its reaction rows are never read.
+        by_type = await self._reactions.count_by_type(ctx, post_id=post_id) if readable else {}
+        viewer = await self._reactions.get(ctx, post_id=post_id, user_id=user_id) if readable else None
         return {
-            "total": total,
+            "total": sum(by_type.values()),
             "by_type": by_type,
             "viewer_reaction": viewer.get("reaction_type") if viewer else None,
         }
@@ -217,12 +215,11 @@ class UserPostsService:
 
     async def delete_comment(self, ctx, *, comment_id: str) -> dict:
         user_id = actor_id(ctx)
-        roles = list(getattr(ctx, "roles", None) or [])
         comment = await self._comments.get(ctx, comment_id=comment_id)
 
         if not comment:
             return {"success": False, "error": "Comment not found."}
-        if not can_delete_comment(comment, user_id, roles):
+        if not can_delete_comment(comment, user_id, ctx.permissions or []):
             return {"success": False, "error": "You do not have permission to delete this comment."}
 
         now = timestamp_now()

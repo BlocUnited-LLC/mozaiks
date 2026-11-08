@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import os
 from datetime import UTC, datetime, timedelta
+from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -30,6 +31,51 @@ MODULES = {
     "notification_settings": ("notifications", ("preferences",)),
     "support": ("support", ("requests",)),
 }
+
+
+@pytest.mark.parametrize("module,service_name,action,collection,key,identifier", [
+    ("friends", "FriendsService", "list_friends", "friendships", "friends", "friendship_id"),
+    ("friends", "FriendsService", "list_friends_of", "friendships", "friends", "friendship_id"),
+    ("activity_feed", "ActivityFeedService", "get_feed", "events", "events", "event_id"),
+    ("activity_feed", "ActivityFeedService", "get_profile_activity", "events", "events", "event_id"),
+])
+@pytest.mark.parametrize("requested_limit", [100, 1000])
+async def test_social_maximum_page_keeps_cursor_and_all_rows(
+    host, module, service_name, action, collection, key, identifier, requested_limit,
+):
+    """Exercise the shipped service against the real persistence row ceiling."""
+    service_module = import_module(
+        f"factory_app.build_context.social.templates.modules.{module}.backend.service"
+    )
+    service = getattr(service_module, service_name)()
+    persistence = host.persistence()
+    rows = [
+        {**row(module, index), identifier: f"record-{index:03d}",
+         "created_at": (datetime(2026, 1, 1, tzinfo=UTC) + timedelta(seconds=index)).isoformat()}
+        for index in range(105)
+    ]
+    for record in rows:
+        await persistence.collection(module, collection).insert_one(record)
+    await host.persistence(app_id="app-two").collection(module, collection).insert_one(
+        {**rows[-1], identifier: "foreign-app"}
+    )
+    await host.persistence(user_id="bob").collection(module, collection).insert_one(
+        {**rows[-1], "user_id": "bob", "actor_id": "bob", "feed_user_ids": ["bob"],
+         identifier: "other-user"}
+    )
+    params = {"limit": requested_limit}
+    if action in {"list_friends_of", "get_profile_activity"}:
+        params["user_id"] = "alice"
+    ctx = SimpleNamespace(user_id="alice", persistence=persistence)
+    call = getattr(service, action)
+    first = await call(ctx, **params)
+    assert first["count"] == 99
+    assert first["next_cursor"] == first[key][-1]["created_at"]
+    second = await call(ctx, **params, before=first["next_cursor"])
+    assert second["count"] == 6 and second["next_cursor"] is None
+    assert [record[identifier] for page in (first, second) for record in page[key]] == [
+        record[identifier] for record in reversed(rows)
+    ]
 
 
 def handler_class(module):

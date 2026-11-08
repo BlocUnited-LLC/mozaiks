@@ -14,6 +14,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Generated bundle validation can resolve approved compiler inputs from the exact
+  owned build record. Factory saves actual design/subscription input identities,
+  and coding/media children preserve those inputs while validating fresh bytes.
+
+- Image-generating agents can set `image_generation.emit_ui: false` when an app
+  supplies its own draft review. Assets and workflow context are still saved;
+  the shared media review card remains enabled by default.
 - Reviewed design role grants can protect canonical list/get and declared custom
   reads. Selecting one canonical read requires both read grants explicitly;
   generated permissions survive materialization while ownership remains enforced.
@@ -365,11 +372,38 @@ This project follows a practical pre-1.0 changelog format:
 - App Studio cancels abandoned data loads during navigation and development
   StrictMode replay, preventing duplicate detail requests while keeping refresh available.
 
+- Governance scans now inspect repository files when a checkout lives beneath
+  `.local`, `build`, or another excluded directory name. Exclusions still apply
+  to those directories inside the repository.
+
+- Workflow data references retain MongoDB `_id` when explicitly requested, so
+  generated bundle exports can verify their bound DesignDocs compilation inputs.
+  Unrequested identities remain omitted.
+
+- Pack integrity checks accept canonical reads and pricing gates compiled from
+  approved build inputs while rejecting changes to verified implementations.
+  Commerce no longer requires fixed pricing gates, uses current schema admin panels,
+  and declares the product response envelopes used by its mutation actions.
+- Failed automatic workflow steps now show a safe conversation notice without
+  enabling debug messages, exposing result details, or changing retry eligibility.
+
+- Module handler reactions receive contract-bounded persistence from the
+  platform host. Owned collections require the active authenticated dispatch;
+  event actors and notification recipients cannot supply storage authority.
+
+- Reaction handlers now validate emitted events against their own declared internal
+  action and event schema, preserve source identity and causation, and report
+  rejected emissions as failed delivery without rolling back earlier writes.
+  Social activity reactions declare their internal emission contracts.
+
 - Account export and deletion in files `0.1.13`, notifications `0.1.13`,
   commerce `0.1.14`, social `0.1.14`, and support `0.1.14` use the same
   authenticated persistence bindings as module actions. Multi-page records are
   handled without skipping rows during metadata updates, exports encode BSON
   safely, and each module keeps its existing deletion or anonymization policy.
+- Authenticated users can preview and download private generated media from
+  their own persisted chat. App/chat scope and ownership are checked before
+  serving bytes or redirects; a preview does not publish or promote the asset.
 - ThemeCapture retries recover a missing approved concept from its current
   artifact and matching completed owner/build session, without copying failed
   execution state or replacing existing refinement inputs.
@@ -444,6 +478,46 @@ This project follows a practical pre-1.0 changelog format:
   incorrectly routed into generation can recover only with exact saved lineage,
   an execution lease, and no newer saved artifact; its successor preserves cleanup
   provenance for retry. Media and Security dependencies remain unchanged.
+- Several shipped capability packs failed during assembly or runtime loading.
+  A per-pack wiring suite (`tests/test_capability_pack_proof.py`) uses the real
+  assembler and deterministic acceptance checks, then exercises HTTP actions
+  against a real MongoDB with explicit test-app role grants. Missing grants remain
+  failures. Docker containment, real sign-in and successful business execution
+  require separate acceptance evidence; synthetic business errors and internal
+  actions are not counted as that evidence. The suite exposed these fixes:
+  - files, commerce, social, support and notifications shipped data migrations
+    in the retired surfaces format, so assembly refused them. Each now declares
+    its collections in `data/contract.json` and migrates with additive operations.
+  - files, notifications, and the social `friends` and `activity_feed` modules
+    sent `app_id` in their own queries, which persistence rejects, so their reads
+    and updates failed with a server error. Persistence owns app scoping.
+  - files saves `created_at`, so file lists sort by upload time.
+  - private files are readable only by their owner, listings show the caller's
+    files, and deletion requires ownership. Public reads still require
+    `files.read`; malformed owner/public arrays cannot grant access.
+  - friend and activity pages reserve one row within persistence's 100-row cap
+    for cursor detection, allowing maximum-size requests to traverse later pages.
+  - notification settings handlers could not be called at all; they now take the
+    declared inputs and always act for the signed-in user.
+  - the files module would not load (its notification rule used a retired
+    audience shape), and its public-upload alert also fired for private files.
+  - the support pack had no `ui/index.js`, so its page never registered.
+  - mozaiks_cloud modules declared no handler, and their read actions answer 400
+    instead of 500 when a required id is missing.
+  - commerce stores carts, products, orders and checkout requests through
+    `ctx.persistence`, and its cart upsert no longer conflicts on `cart_id`.
+  - social moderation uses admitted `user_posts.moderate` or `user_posts.admin`
+    permissions instead of a nonexistent runtime roles field. Author deletion,
+    the action's create permission, app scoping and post soft deletion remain enforced.
+
+- Generated route authorization now requires the referenced module action to
+  declare a required boolean `allowed` response. Page saving, assembled wiring
+  and refinement validation reject mismatched responses before promotion.
+- Saved workflow reviews restored after a server restart now show inactive
+  decision controls and explain how to request a fresh review through the chat.
+  Pending reviews saved before a committed chat turn receive the same state.
+  Reconnecting to a still-live review keeps its controls available. Failed
+  response submissions no longer make an inline review appear completed.
 
 - The shell no longer offers Profile, Sign in, or Sign out when nobody can sign
   in. A fresh Studio runs with authentication disabled, yet its account menu
@@ -603,6 +677,15 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Generated media ignores provider-supplied publication authority. Public reads
+  require server-owned public visibility, and explicit promotion records that
+  visibility. Private/backer-only visibility overrides old promotion metadata;
+  metadata-only publication records require authorized republication. Chat
+  promotion actions now atomically require the asset's persisted source chat to
+  match the authenticated connection.
+- The model-invoked brand promotion tool uses immutable active workflow scope,
+  verifies source ownership before any manifest write, and reports failed
+  publication instead of silently returning success.
 - Workspace handler extensions are checked so that annotations and defaults
   cannot run code at import, and service arguments must come from the
   override's own parameters. These checks are targeted guards, not

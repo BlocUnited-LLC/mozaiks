@@ -248,6 +248,8 @@ async def test_offline_factory_artifact_lineage_smoke_hydrates_workflow_metadata
     assert result["artifact_lineage"]["app_bundle_inputs"]["theme_capture"] == result["artifact_lineage"]["theme_capture_id"]
     assert result["artifact_lineage"]["app_bundle_inputs"]["workflow_bundle"] == result["artifact_lineage"]["workflow_bundle_id"]
     assert result["artifact_lineage"]["app_bundle_lifecycle_status"] == "draft"
+    assert result["artifact_lineage"]["approved_compilation_bound"] is True
+    assert result["appgenerator_acceptance"]["app_plan_outcome"] == "ready"
     assert "app_bundle" not in result["artifact_lineage"]["current_refs"]
     assert result["hydration"]["status"] == "hydrated"
     assert result["hydration"]["source"] == "workflow_bundle_artifact"
@@ -309,6 +311,19 @@ async def test_offline_factory_artifact_lineage_smoke_uses_hydrated_primary_work
     smoke, build = completed_validation_boundaries
     smoke.assert_awaited_once()
     build.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_offline_lineage_cannot_register_app_when_plan_review_is_not_ready(monkeypatch):
+    from factory_app.workflows.AppGenerator.tools import generate_and_download
+    from scripts import smoke_factory_artifact_lineage as lineage
+
+    register = AsyncMock()
+    monkeypatch.setattr(generate_and_download, "_register_app_bundle_artifact_version", register)
+    monkeypatch.setattr(lineage, "review_app_build_plan", lambda **_: {"outcome": "needs_revision"})
+    with pytest.raises(RuntimeError, match="Lineage fixture plan review failed"):
+        await lineage.run_offline_factory_artifact_lineage_smoke()
+    register.assert_not_awaited()
 
 
 @pytest.mark.asyncio

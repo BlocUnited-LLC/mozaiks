@@ -29,14 +29,12 @@ class FriendRequestRepo:
     async def get(self, ctx, *, request_id: str) -> Document | None:
         return _norm(await _collection(ctx, "requests").find_one({"request_id": request_id}))
 
-    async def find_pending(self, ctx, *, requester_id: str, recipient_id: str, app_id: str | None) -> Document | None:
+    async def find_pending(self, ctx, *, requester_id: str, recipient_id: str) -> Document | None:
         q: dict[str, Any] = {
             "requester_id": requester_id,
             "recipient_id": recipient_id,
             "status": "pending",
         }
-        if app_id:
-            q["app_id"] = app_id
         return _norm(await _collection(ctx, "requests").find_one(q))
 
     async def update_status(self, ctx, *, request_id: str, status: str, updated_at: str) -> bool:
@@ -74,21 +72,17 @@ class FriendshipRepo:
         await col.insert_one({**doc_a})
         await col.insert_one({**doc_b})
 
-    async def find(self, ctx, *, user_id: str, friend_user_id: str, app_id: str | None) -> Document | None:
+    async def find(self, ctx, *, user_id: str, friend_user_id: str) -> Document | None:
         q: dict[str, Any] = {"user_id": user_id, "friend_user_id": friend_user_id}
-        if app_id:
-            q["app_id"] = app_id
         return _norm(await _collection(ctx, "friendships").find_one(q))
 
-    async def delete_pair(self, ctx, *, user_id: str, friend_user_id: str, app_id: str | None) -> int:
+    async def delete_pair(self, ctx, *, user_id: str, friend_user_id: str) -> int:
         q: dict[str, Any] = {
             "$or": [
                 {"user_id": user_id, "friend_user_id": friend_user_id},
                 {"user_id": friend_user_id, "friend_user_id": user_id},
             ]
         }
-        if app_id:
-            q["app_id"] = app_id
         result = await _collection(ctx, "friendships").delete_many(q)
         return int(getattr(result, "deleted_count", 0))
 
@@ -97,13 +91,10 @@ class FriendshipRepo:
         ctx,
         *,
         user_id: str,
-        app_id: str | None,
         limit: int,
         before: str | None = None,
     ) -> list[Document]:
         q: dict[str, Any] = {"user_id": user_id}
-        if app_id:
-            q["app_id"] = app_id
         if before:
             q["created_at"] = {"$lt": before}
         return _norms(
@@ -114,8 +105,5 @@ class FriendshipRepo:
             )
         )
 
-    async def count(self, ctx, *, user_id: str, app_id: str | None) -> int:
-        q: dict[str, Any] = {"user_id": user_id}
-        if app_id:
-            q["app_id"] = app_id
-        return int(await _collection(ctx, "friendships").count(q))
+    async def count(self, ctx, *, user_id: str) -> int:
+        return int(await _collection(ctx, "friendships").count({"user_id": user_id}))

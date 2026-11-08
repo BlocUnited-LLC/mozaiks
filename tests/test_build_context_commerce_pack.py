@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -132,21 +134,20 @@ def test_commerce_module_capabilities_target_existing_actions() -> None:
     } <= capability_ids
 
 
-def test_commerce_data_migration_declares_stable_aliases_and_indexes() -> None:
-    migration = _read_yaml(TEMPLATES / "data" / "migrations" / "001_commerce_collections.json")
-    collections = migration["surfaces"][0]["collections"]
-
-    aliases = {collection["data_alias"] for collection in collections}
-    assert aliases == {
-        "commerce.products",
-        "commerce.carts",
-        "commerce.orders",
-        "commerce.checkout_requests",
-    }
+def test_commerce_data_contract_declares_collections_and_migration_ensures_them() -> None:
+    contract = json.loads(_read_text(TEMPLATES / "data" / "contract.json"))
+    assert contract["shared_collections"] == []
+    [surface] = contract["surfaces"]
+    assert (surface["surface_id"], surface["surface_kind"]) == ("commerce", "module")
+    collections = {collection["name"]: collection for collection in surface["collections"]}
+    assert set(collections) == {"products", "carts", "orders", "checkout_requests"}
+    for collection in collections.values():
+        assert (collection["tenancy"], collection["owner_field"]) == ("app_wide", None)
+        assert collection["lifecycle"] == {"write_mode": "module_action"}
 
     index_names = {
         index["name"]
-        for collection in collections
+        for collection in collections.values()
         for index in collection.get("indexes", [])
     }
     assert {
@@ -156,6 +157,22 @@ def test_commerce_data_migration_declares_stable_aliases_and_indexes() -> None:
         "checkout_requests_by_status_created",
     } <= index_names
 
+    migration = json.loads(_read_text(TEMPLATES / "data" / "migrations" / "001_commerce_collections.json"))
+    assert {"surfaces", "aliases", "shared_collections"}.isdisjoint(migration)
+    operations = migration["operations"]
+    assert {
+        (operation["module_id"], operation["entity_name"])
+        for operation in operations if operation["type"] == "ensure_collection"
+    } == {("commerce", name) for name in collections}
+    assert {
+        (operation["entity_name"], operation["index"]["name"])
+        for operation in operations if operation["type"] == "ensure_index"
+    } == {
+        (name, index["name"])
+        for name, collection in collections.items()
+        for index in collection.get("indexes", [])
+    }
+
 
 def test_commerce_backend_templates_compile_and_use_runtime_persistence() -> None:
     backend_root = TEMPLATES / "modules" / "commerce" / "backend"
@@ -164,9 +181,13 @@ def test_commerce_backend_templates_compile_and_use_runtime_persistence() -> Non
         compile(path.read_text(encoding="utf-8"), str(path), "exec")
 
     repo_text = _read_text(backend_root / "repo.py")
-    assert "app_data_from_context" in repo_text
+    assert 'persistence.collection("commerce", entity_name)' in repo_text
+    assert "app_data_from_context" not in repo_text
     assert "get_mongo_client" not in repo_text
     assert "ctx.db" not in repo_text
+    contract = json.loads(_read_text(TEMPLATES / "data" / "contract.json"))
+    declared = {collection["name"] for collection in contract["surfaces"][0]["collections"]}
+    assert set(re.findall(r'_collection\(ctx, "([a-z_]+)"\)', repo_text)) == declared
 
     service_text = _read_text(backend_root / "service.py")
     assert "domain.commerce.checkout.requested" in service_text
