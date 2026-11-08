@@ -103,6 +103,7 @@ actions:
     handler_method: on_friendship_created
     input_schema:
       type: object
+      additionalProperties: false
       required: [friendship_id, user_a_id, user_b_id, requester_id, request_id]
       properties:
         friendship_id: { type: string }
@@ -121,6 +122,7 @@ actions:
     handler_method: on_post_published
     input_schema:
       type: object
+      additionalProperties: false
       required: [post_id, author_id]
       properties:
         post_id: { type: string }
@@ -138,6 +140,7 @@ actions:
     handler_method: on_post_commented
     input_schema:
       type: object
+      additionalProperties: false
       required: [post_id, post_author_id, comment_id, author_id]
       properties:
         post_id: { type: string }
