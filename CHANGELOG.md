@@ -369,6 +369,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Governance scans now inspect repository files when a checkout lives beneath
+  `.local`, `build`, or another excluded directory name. Exclusions still apply
+  to those directories inside the repository.
+
 - Workflow data references retain MongoDB `_id` when explicitly requested, so
   generated bundle exports can verify their bound DesignDocs compilation inputs.
   Unrequested identities remain omitted.
