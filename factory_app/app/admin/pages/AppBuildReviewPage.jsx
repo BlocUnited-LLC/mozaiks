@@ -110,10 +110,18 @@ export default function AppBuildReviewPage() {
   const latestArtifact = buildHistory[0] || null
   const selectedArtifact = buildHistory.find(artifact => artifactId(artifact) === selectedArtifactId) || latestArtifact
   const activeArtifactId = artifactId(selectedArtifact)
-  const currentArtifactId = snapshot.app?.current_build_run?.artifact_version_id
+  const currentBuild = snapshot.app?.current_build_run
+  const currentArtifactId = currentBuild?.artifact_version_id
+  // This only offers a request; the server verifies interrupted-review lineage,
+  // execution ownership and current selection before recovering anything.
+  const canRequestRecovery = snapshot.lifecycleState === 'building'
+    && currentBuild?.phase === 'refinement' && snapshot.app?.active_workflow_id === 'AppGenerator'
+    && selectedArtifact?.lifecycle_status === 'current' && selectedArtifact?.validation_status === 'passed'
+    && Boolean(selectedArtifact?.parent_build_record_id && currentBuild?.build_id)
+    && selectedArtifact?.commit_metadata?.metadata?.build_id === currentBuild.build_id
   const canContinueInChat = dataMode === 'live' && Boolean(data?.buildRegistryId && currentArtifactId)
     && activeArtifactId === currentArtifactId
-    && ['review', 'needs_revision', 'active'].includes(snapshot.lifecycleState)
+    && (['review', 'needs_revision', 'active'].includes(snapshot.lifecycleState) || canRequestRecovery)
 
   async function continueInChat() {
     if (!canContinueInChat || starting) return

@@ -1,5 +1,6 @@
 from asyncio import CancelledError
 from copy import deepcopy
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -209,6 +210,197 @@ async def test_partial_saved_successor_marker_cannot_fall_through_to_another_cha
         await _recover(fixture)
     fixture.persistence.create_chat_session.assert_not_awaited()
     fixture.registry.update_build_status.assert_not_awaited()
+
+
+def _interrupted_review(fixture, monkeypatch):
+    from mozaiksai.core.runtime.persistence.distributed_lock import assert_chat_mutable
+
+    _saved_refinement(fixture)
+    monkeypatch.setenv("MOZAIKS_CHAT_LOCK_MODE", "local")
+    monkeypatch.setenv("DISTRIBUTED_LOCK_MAX_RETRIES", "0")
+    bad = {"workflow_name": "AppGenerator", "status": 0, "created_at": datetime.now(UTC) - timedelta(minutes=5),
+           "run_build_binding": fixture.binding.model_dump(), "artifact_version_id": "child",
+           "trigger_meta": {"trigger_source": "manual", "requested_workflow_id": "AppReview",
+                            "resolved_workflow_id": "AppGenerator", "rerouted_by_dependency": True}}
+    sessions = {"review-parent": fixture.source, "misrouted": bad}
+    fixture.record.update(lifecycle_state="building", active_chat_id="misrouted", active_workflow_id="AppGenerator")
+    fixture.record["current_build_run"].update(status="building", active_chat_id="misrouted", active_workflow_id="AppGenerator")
+    fixture.request["artifact_store"].list_build_records = AsyncMock(return_value=[])
+    def read(query, projection):
+        assert query["user_id"] == "owner"
+        assert query["app_id"] == "factory"
+        return sessions.get(query["_id"])
+    fixture.collection.find_one.side_effect = read
+    async def create(**kwargs):
+        sessions[kwargs["chat_id"]] = {**kwargs["extra_fields"], "workflow_name": kwargs["workflow_name"], "status": 0}
+    async def fields(**kwargs):
+        sessions[kwargs["chat_id"]].update(kwargs["fields"])
+    async def select(**kwargs):
+        assert kwargs["expected_lifecycle_state"] == fixture.record["lifecycle_state"]
+        assert kwargs["expected_active_chat_id"] == fixture.record["active_chat_id"]
+        assert kwargs["expected_build_id"] == "refinement" and kwargs["expected_artifact_version_id"] == "child"
+        fixture.record.update(lifecycle_state=kwargs["status"], active_chat_id=kwargs["active_chat_id"], active_workflow_id="AppReview")
+        fixture.record["current_build_run"].update(status=kwargs["status"], active_chat_id=kwargs["active_chat_id"], active_workflow_id="AppReview")
+        return {"success": True}
+    async def context(**kwargs):
+        assert_chat_mutable(app_id=kwargs["app_id"], chat_id=kwargs["chat_id"])
+        sessions[kwargs["chat_id"]].update(kwargs["variables"])
+    async def failed(chat_id, *, app_id):
+        assert_chat_mutable(app_id=app_id, chat_id=chat_id)
+        sessions[chat_id]["status"] = 2
+        return True
+    fixture.persistence.create_chat_session.side_effect = create
+    fixture.persistence.persist_server_owned_session_fields.side_effect = fields
+    fixture.registry.update_build_status.side_effect = select
+    fixture.persistence.persist_context_variables = AsyncMock(side_effect=context)
+    fixture.persistence.mark_chat_failed.side_effect = failed
+    return sessions, bad
+
+
+@pytest.mark.asyncio
+async def test_interrupted_saved_review_selects_once_before_closing_misroute(continuation, monkeypatch):
+    fixture = continuation
+    sessions, bad = _interrupted_review(fixture, monkeypatch)
+    source_before = deepcopy(fixture.source)
+    result = await _recover(fixture)
+    assert result["lifecycle_state"] == fixture.record["lifecycle_state"] == "review"
+    assert result["artifact_version_id"] == "child"
+    assert sessions[result["chat_id"]]["trigger_meta"]["source_misrouted_chat_id"] == "misrouted"
+    assert sessions[result["chat_id"]]["run_build_binding"] == fixture.binding.model_dump()
+    assert fixture.source == source_before
+    assert bad["status"] == 2 and bad["app_bundle_export_outcome"] == "superseded"
+    assert bad["app_download_ready"] is False
+    fixture.registry.update_build_status.assert_awaited_once()
+    fixture.settle.assert_awaited_once()
+    fixture.request["artifact_store"].list_build_records.assert_awaited_once_with(
+        app_id="target", updated_since=bad["created_at"], limit=1,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("damage", [
+    "ordinary_generation", "missing_marker", "foreign_owner", "foreign_binding", "foreign_artifact",
+    "wrong_workflow", "completed", "unrelated_failure", "missing_time", "string_time", "future_time",
+    "new_artifact", "lookup_failed", "current_changed", "draft", "active_mismatch",
+])
+async def test_building_reconciliation_rejects_unproven_misroute(continuation, monkeypatch, damage):
+    fixture = continuation
+    sessions, bad = _interrupted_review(fixture, monkeypatch)
+    if damage == "ordinary_generation":
+        bad["trigger_meta"]["requested_workflow_id"] = "AppGenerator"
+    elif damage == "missing_marker":
+        bad["trigger_meta"].pop("rerouted_by_dependency")
+    elif damage == "foreign_owner":
+        sessions.pop("misrouted")  # Scoped owner query cannot read that session.
+    elif damage == "foreign_binding":
+        bad["run_build_binding"]["build_id"] = "other"
+    elif damage == "foreign_artifact":
+        bad["artifact_version_id"] = "other"
+    elif damage == "wrong_workflow":
+        bad["workflow_name"] = "Other"
+    elif damage in {"completed", "unrelated_failure"}:
+        bad["status"] = 1 if damage == "completed" else 2
+    elif damage in {"missing_time", "string_time", "future_time"}:
+        bad["created_at"] = {"missing_time": None, "string_time": "2026-11-08", "future_time": datetime.now(UTC) + timedelta(days=1)}[damage]
+    elif damage == "new_artifact":
+        fixture.request["artifact_store"].list_build_records.return_value = [object()]
+    elif damage == "lookup_failed":
+        fixture.request["artifact_store"].list_build_records.side_effect = RuntimeError("lookup unavailable")
+    elif damage == "current_changed":
+        admitted = deepcopy(fixture.record)
+        fixture.record["current_build_run"]["artifact_version_id"] = "parent"
+        fixture.registry.get_app_record.side_effect = [{"app": admitted}, {"app": fixture.record}]
+    elif damage == "draft":
+        fixture.versions["child"].lifecycle_status = ArtifactLifecycleStatus.DRAFT
+    else:
+        fixture.record["current_build_run"]["active_chat_id"] = "other"
+    before = deepcopy(bad)
+    with pytest.raises((ValueError, RuntimeError)):
+        await _recover(fixture)
+    assert bad == before
+    fixture.persistence.create_chat_session.assert_not_awaited()
+    fixture.registry.update_build_status.assert_not_awaited()
+    fixture.persistence.mark_chat_failed.assert_not_awaited()
+    fixture.settle.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_misrouted_execution_lease_blocks_reconciliation_before_selection(continuation, monkeypatch):
+    from mozaiksai.core.runtime.persistence.distributed_lock import (
+        LockAcquisitionError,
+        chat_execution_lease,
+    )
+
+    fixture = continuation
+    _interrupted_review(fixture, monkeypatch)
+    async with chat_execution_lease(app_id="factory", chat_id="misrouted"):
+        with pytest.raises(LockAcquisitionError):
+            await _recover(fixture)
+    fixture.persistence.create_chat_session.assert_not_awaited()
+    fixture.registry.update_build_status.assert_not_awaited()
+    fixture.persistence.mark_chat_failed.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_step", ["bind", "context", "failed", "settle", "lease_lost"])
+async def test_misroute_cleanup_failure_reuses_selected_successor(continuation, monkeypatch, failed_step):
+    from mozaiksai.core.runtime.persistence import distributed_lock as locks
+
+    fixture = continuation
+    sessions, bad = _interrupted_review(fixture, monkeypatch)
+    target = {"bind": fixture.router.bind_workflow_session, "context": fixture.persistence.persist_context_variables,
+              "failed": fixture.persistence.mark_chat_failed, "settle": fixture.settle,
+              "lease_lost": fixture.router.bind_workflow_session}[failed_step]
+    original = target.side_effect
+    if failed_step == "lease_lost":
+        async def lose(**kwargs):
+            locks._process_leases[locks.chat_lock_resource("factory", "misrouted")]._mark_lost("test renewal loss")
+        target.side_effect = lose
+    else:
+        target.side_effect = RuntimeError("cleanup interrupted")
+    with pytest.raises((RuntimeError, locks.ChatLeaseLostError)):
+        await _recover(fixture)
+    selected = fixture.record["active_chat_id"]
+    assert selected not in {"misrouted", "review-parent"}
+    assert sessions[selected]["trigger_meta"]["source_misrouted_chat_id"] == "misrouted"
+    if failed_step == "lease_lost":
+        assert bad["status"] == 0 and "app_bundle_export_outcome" not in bad
+        fixture.persistence.mark_chat_failed.assert_not_awaited()
+    target.side_effect = original
+    result = await _recover(fixture)
+    assert result["chat_id"] == selected
+    assert bad["status"] == 2 and bad["app_bundle_export_outcome"] == "superseded"
+    fixture.persistence.create_chat_session.assert_awaited_once()
+    assert fixture.settle.await_args.kwargs["source_chat_id"] == "review-parent"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replacement", [None, "another"])
+async def test_reloaded_successor_cannot_lose_misroute_cleanup_provenance(continuation, monkeypatch, replacement):
+    fixture = continuation
+    sessions, _ = _interrupted_review(fixture, monkeypatch)
+    fixture.router.bind_workflow_session.side_effect = RuntimeError("interrupted")
+    with pytest.raises(RuntimeError):
+        await _recover(fixture)
+    selected = fixture.record["active_chat_id"]
+    original_read = fixture.collection.find_one.side_effect
+    reads = 0
+    def changed_read(query, projection):
+        nonlocal reads
+        value = original_read(query, projection)
+        if query["_id"] == selected:
+            reads += 1
+            if reads == 2:
+                value = deepcopy(value)
+                value["trigger_meta"]["source_misrouted_chat_id"] = replacement
+        return value
+    fixture.collection.find_one.side_effect = changed_read
+    fixture.router.bind_workflow_session.side_effect = None
+    with pytest.raises(ValueError, match="Another review"):
+        await _recover(fixture)
+    assert sessions[selected]["trigger_meta"]["source_misrouted_chat_id"] == "misrouted"
+    fixture.registry.update_build_status.assert_awaited_once()
+    fixture.persistence.mark_chat_failed.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -431,6 +431,11 @@ This project follows a practical pre-1.0 changelog format:
   and verified archive. Saved builds' Continue in chat recovers an interrupted
   handoff using its owned persisted lineage, reuses a selected successor, and
   retries source settlement without repeating the edit or creating another chat.
+  Review admission uses the owned saved app bundle rather than requiring its
+  original generation to have completed. An interrupted manual review that was
+  incorrectly routed into generation can recover only with exact saved lineage,
+  an execution lease, and no newer saved artifact; its successor preserves cleanup
+  provenance for retry. Media and Security dependencies remain unchanged.
 
 - The shell no longer offers Profile, Sign in, or Sign out when nobody can sign
   in. A fresh Studio runs with authentication disabled, yet its account menu

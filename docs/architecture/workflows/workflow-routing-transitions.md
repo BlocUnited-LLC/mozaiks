@@ -697,6 +697,31 @@ superseded handoff, caller overrides, or failed settlement returns an error rath
 than creating a second review. A held source execution lease can be retried through
 the same control after its holder exits.
 
+AppReview has no completed-AppGenerator dependency: its admission requires the
+owned current saved app bundle through `load_registered_review_context`. A
+generation may still be waiting on the workbench whose refined child is ready
+for review. Media and Security keep their generation dependencies. Removing the
+review dependency neither completes generation nor bypasses artifact ownership,
+current-build selection, platform prerequisites, or caller-context validation.
+
+An interrupted manual AppReview launch that the former dependency redirected to
+AppGenerator can leave that same refinement build marked `building`. Recovery
+requires the exact server-persisted manual/requested-AppReview/resolved-AppGenerator
+marker, owner, immutable binding, current accepted child, and saved inline-result
+lineage. Under the interrupted chat's execution lease, it also requires a valid
+creation timestamp and no app artifact updated at or after that timestamp. This
+is a check for newer saved artifacts, not a claim that no model work occurred.
+The existing registry compare-and-set selects the new review directly from that
+exact active chat and building state. Only then is the misrouted chat marked
+failed with a superseded diagnostic, followed by settlement of the original
+workbench. Server-owned successor provenance retains that interrupted chat ID so
+the same manual control can retry cleanup after selection without creating a
+second successor. A live lease, missing marker, newer saved artifact, or ordinary
+generation does not authorize this reconciliation.
+The saved-build control may offer this request for a current accepted refinement
+child while building; that offer is not proof of recoverability, and every server
+admission check above still applies.
+
 For an older inline result with no saved successor, this entrypoint may recover
 the pending AppGenerator workbench only through the exact owned current child,
 parent, unique validated/accepted refinement session, saved request, and persisted

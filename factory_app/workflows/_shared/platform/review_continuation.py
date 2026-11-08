@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import AsyncExitStack
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -13,7 +15,10 @@ from mozaiksai.core.artifacts import ArtifactLifecycleStatus, ArtifactValidation
 from mozaiksai.core.data.models import WorkflowStatus
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
-from mozaiksai.core.runtime.persistence.distributed_lock import chat_execution_lease
+from mozaiksai.core.runtime.persistence.distributed_lock import (
+    assert_chat_mutable,
+    chat_execution_lease,
+)
 from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.session.launcher import (
     create_routed_chat_session,
@@ -118,6 +123,40 @@ async def continue_inline_app_review(
     )
 
 
+async def _verify_misrouted_review(
+    *, app_id: str, user_id: str, chat_id: str, binding: RunBuildBinding,
+    artifact_id: str, persistence: Any, artifact_store: Any,
+) -> None:
+    """Admit only the saved-review launch that was redirected into generation."""
+    session = await (await persistence._coll()).find_one(
+        {"_id": chat_id, "user_id": user_id, **build_app_scope_filter(app_id)},
+        {"workflow_name": 1, "status": 1, "created_at": 1, "run_build_binding": 1,
+         "artifact_version_id": 1, "trigger_meta": 1, "app_bundle_export_outcome": 1},
+    )
+    trigger = (session or {}).get("trigger_meta") or {}
+    if (not session or session.get("workflow_name") != "AppGenerator"
+            or session.get("run_build_binding") != binding.model_dump()
+            or session.get("artifact_version_id") != artifact_id
+            or trigger.get("trigger_source") != "manual"
+            or trigger.get("requested_workflow_id") != "AppReview"
+            or trigger.get("resolved_workflow_id") != "AppGenerator"
+            or trigger.get("rerouted_by_dependency") is not True
+            or not (session.get("status") == WorkflowStatus.IN_PROGRESS
+                    or (session.get("status") == WorkflowStatus.FAILED
+                        and session.get("app_bundle_export_outcome") == "superseded"))):
+        raise ValueError("The active generation is not an interrupted saved-review launch")
+    created_at = session.get("created_at")
+    if not isinstance(created_at, datetime):
+        raise ValueError("The interrupted review has no valid creation timestamp")
+    created_at = created_at.replace(tzinfo=UTC) if created_at.tzinfo is None else created_at.astimezone(UTC)
+    if created_at > datetime.now(UTC):
+        raise ValueError("The interrupted review creation timestamp is in the future")
+    # A newer saved artifact can reflect work outside this interrupted launch.
+    # Refuse reconciliation rather than guessing whether it may be discarded.
+    if await artifact_store.list_build_records(app_id=binding.target_app_id, updated_since=created_at, limit=1):
+        raise ValueError("Saved artifacts changed after the interrupted review launch")
+
+
 async def recover_saved_app_review(
     *, app_id: str, user_id: str, binding: RunBuildBinding, registry: Any,
     artifact_store: Any, persistence: Any, session_router: Any,
@@ -146,6 +185,7 @@ async def recover_saved_app_review(
         raise ValueError("The saved review artifact is unavailable")
     source_chat_id = None
     baseline_id = None
+    misrouted_chat_id = None
     successor_id = record.get("active_chat_id") if record.get("active_workflow_id") == "AppReview" else None
     if successor_id:
         successor = await (await persistence._coll()).find_one(
@@ -155,11 +195,12 @@ async def recover_saved_app_review(
         if not successor:
             raise ValueError("The selected review session is unavailable")
         trigger = successor.get("trigger_meta") or {}
-        marker_keys = {"source_chat_id", "source_artifact_version_id", "source_tool_call_id"}
+        marker_keys = {"source_chat_id", "source_artifact_version_id", "source_tool_call_id", "source_misrouted_chat_id"}
         if not marker_keys.intersection(trigger):
             return None
         source_chat_id = trigger.get("source_chat_id")
         baseline_id = trigger.get("source_artifact_version_id")
+        misrouted_chat_id = trigger.get("source_misrouted_chat_id")
     else:
         if not version.parent_build_record_id:
             return None
@@ -214,18 +255,38 @@ async def recover_saved_app_review(
                 or version.lifecycle_status not in {ArtifactLifecycleStatus.DRAFT, ArtifactLifecycleStatus.CURRENT}):
             raise ValueError("The saved refinement artifact has not passed validation")
         source_chat_id, baseline_id = parent.source_chat_id, parent.id
+        if record.get("lifecycle_state") == "building":
+            if record.get("active_workflow_id") != "AppGenerator":
+                raise ValueError("The building app is not awaiting saved-review recovery")
+            misrouted_chat_id = record.get("active_chat_id")
+            if (not isinstance(misrouted_chat_id, str) or not misrouted_chat_id
+                    or current.get("active_chat_id") != misrouted_chat_id
+                    or current.get("active_workflow_id") != "AppGenerator"):
+                raise ValueError("The building app has no exact interrupted review launch")
     if (not isinstance(source_chat_id, str) or not source_chat_id
             or not isinstance(baseline_id, str) or not baseline_id or source_chat_id == successor_id):
         raise ValueError("The selected review has incomplete handoff lineage")
     if has_launch_overrides:
         raise ValueError("Saved review recovery cannot override its persisted launch intent")
-    recovered = await _continue_app_review(
-        app_id=app_id, user_id=user_id, source_chat_id=source_chat_id, binding=binding,
-        baseline_id=baseline_id, candidate_id=version.id if version.id != baseline_id else None,
-        validated=(version.validation_status == ArtifactValidationStatus.PASSED and version.app_validation_status == "passed"
-                   and record.get("lifecycle_state") == "review"),
-        registry=registry, artifact_store=artifact_store, persistence=persistence, session_router=session_router,
-    )
+    async with AsyncExitStack() as leases:
+        if misrouted_chat_id is not None:
+            if (not isinstance(misrouted_chat_id, str) or not misrouted_chat_id
+                    or misrouted_chat_id in {source_chat_id, successor_id}
+                    or version.lifecycle_status != ArtifactLifecycleStatus.CURRENT):
+                raise ValueError("The saved review has invalid interrupted-launch provenance")
+            await leases.enter_async_context(chat_execution_lease(app_id=app_id, chat_id=misrouted_chat_id))
+            await _verify_misrouted_review(
+                app_id=app_id, user_id=user_id, chat_id=misrouted_chat_id, binding=binding,
+                artifact_id=version.id, persistence=persistence, artifact_store=artifact_store,
+            )
+        recovered = await _continue_app_review(
+            app_id=app_id, user_id=user_id, source_chat_id=source_chat_id, binding=binding,
+            baseline_id=baseline_id, candidate_id=version.id if version.id != baseline_id else None,
+            validated=(version.validation_status == ArtifactValidationStatus.PASSED and version.app_validation_status == "passed"
+                       and (record.get("lifecycle_state") == "review" or misrouted_chat_id is not None)),
+            registry=registry, artifact_store=artifact_store, persistence=persistence, session_router=session_router,
+            misrouted_chat_id=misrouted_chat_id,
+        )
     if recovered is None:
         raise ValueError("The saved review has no eligible source session")
     return recovered
@@ -235,6 +296,7 @@ async def _continue_app_review(
     *, app_id: str, user_id: str, source_chat_id: str | None, binding: RunBuildBinding,
     baseline_id: str, candidate_id: str | None, validated: bool,
     registry: Any, artifact_store: Any, persistence: Any, session_router: Any,
+    misrouted_chat_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Prepare one new review run; its websocket remains the only launch owner.
 
@@ -278,11 +340,16 @@ async def _continue_app_review(
         owner_user_id=user_id, build_registry_id=binding.build_registry_id,
     )).get("app")
     current = (record or {}).get("current_build_run") or {}
+    correcting_route = bool(misrouted_chat_id and record and record.get("lifecycle_state") == "building"
+                            and record.get("active_chat_id") == misrouted_chat_id
+                            and record.get("active_workflow_id") == "AppGenerator"
+                            and current.get("active_chat_id") == misrouted_chat_id
+                            and current.get("active_workflow_id") == "AppGenerator")
     if (not record or record.get("chat_app_id") != app_id
             or record.get("app_id") != binding.target_app_id
             or current.get("build_id") != binding.build_id
             or current.get("phase") != binding.phase
-            or record.get("lifecycle_state") not in {"review", "needs_revision"}):
+            or (record.get("lifecycle_state") not in {"review", "needs_revision"} and not correcting_route)):
         raise ValueError("The completed refinement has been superseded")
 
     version = await artifact_store.get_build_record(
@@ -304,7 +371,7 @@ async def _continue_app_review(
     ):
         raise ValueError("The saved candidate does not belong to the settled refinement")
     if validated and (
-        not candidate_id or record["lifecycle_state"] != "review"
+        not candidate_id or (record["lifecycle_state"] != "review" and not correcting_route)
         or version.lifecycle_status not in {ArtifactLifecycleStatus.DRAFT, ArtifactLifecycleStatus.CURRENT}
         or version.validation_status != ArtifactValidationStatus.PASSED
         or version.app_validation_status != "passed"
@@ -325,7 +392,8 @@ async def _continue_app_review(
                 or successor.get("run_build_binding") != binding.model_dump()
                 or successor.get("artifact_version_id") != version.id
                 or trigger.get("source_chat_id") != source_chat_id
-                or trigger.get("source_artifact_version_id") != baseline_id):
+                or trigger.get("source_artifact_version_id") != baseline_id
+                or trigger.get("source_misrouted_chat_id") != misrouted_chat_id):
             raise ValueError("Another review has already opened for this refinement")
         if source["workflow_name"] == "AppGenerator":
             source_event_id = trigger.get("source_tool_call_id")
@@ -341,8 +409,9 @@ async def _continue_app_review(
         if candidate_id else
         "The last edit did not produce a saved draft. Your previous draft is still selected; describe a narrower change to retry."
     )
+    review_state = "review" if correcting_route else record["lifecycle_state"]
     context = validate_context_for_workflow("AppReview", {
-        **saved_review_context(version, lifecycle_state=record["lifecycle_state"]),
+        **saved_review_context(version, lifecycle_state=review_state),
         # A parent's advisory report does not certify its child.
         "security_readiness_summary": {}, "review_notice": notice,
     })
@@ -371,17 +440,20 @@ async def _continue_app_review(
                 trigger_meta={"trigger_source": "transition", "transition_id": "app_review",
                               "requested_workflow_id": "AppReview", "resolved_workflow_id": "AppReview",
                               "source_chat_id": source_chat_id, "source_artifact_version_id": baseline_id,
+                              **({"source_misrouted_chat_id": misrouted_chat_id} if misrouted_chat_id else {}),
                               **({"source_tool_call_id": source_event_id} if source_event_id else {})},
             )
         # Once the successor wins, cancellation must not strand its old live
         # waiter. No response is submitted before durable selection succeeds.
         with CancelScope(shield=True):
+            if misrouted_chat_id:
+                assert_chat_mutable(app_id=app_id, chat_id=misrouted_chat_id)
             saved = await registry.update_build_status(
                 owner_user_id=user_id, build_registry_id=binding.build_registry_id,
                 expected_build_id=binding.build_id, expected_lifecycle_state=record["lifecycle_state"],
                 expected_artifact_version_id=current.get("artifact_version_id"),
                 expected_active_chat_id=record.get("active_chat_id"),
-                status=record["lifecycle_state"], active_chat_id=chat_id, active_workflow_id="AppReview",
+                status=review_state, active_chat_id=chat_id, active_workflow_id="AppReview",
             )
             if not saved["success"]:
                 raise ValueError("The refinement changed before its review could open")
@@ -390,6 +462,14 @@ async def _continue_app_review(
                 app_id=app_id, user_id=user_id, workflow_id="AppReview", chat_id=chat_id,
                 journey_id=decision.journey_id,
             )
+            if misrouted_chat_id:
+                await persistence.persist_context_variables(
+                    chat_id=misrouted_chat_id, app_id=app_id, workflow_name="AppGenerator",
+                    variables={"app_bundle_export_outcome": "superseded", "app_download_ready": False,
+                               "app_build_failure_message": "This interrupted generation was a saved-review routing error; its saved app review resumed."},
+                )
+                if not await persistence.mark_chat_failed(misrouted_chat_id, app_id=app_id):
+                    raise ValueError("The interrupted review launch could not be closed")
             if source_event_id:
                 await _settle_superseded_workbench(
                     app_id=app_id, user_id=user_id, source_chat_id=source_chat_id, event_id=source_event_id,
@@ -409,5 +489,5 @@ async def _continue_app_review(
         "build_registry_id": binding.build_registry_id, "artifact_version_id": version.id,
         "artifact_kind": version.build_family, "artifact_key": version.build_key,
         "source_chat_id": source_chat_id, "notice": notice,
-        "lifecycle_state": record["lifecycle_state"],
+        "lifecycle_state": review_state,
     }

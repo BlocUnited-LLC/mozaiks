@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import json
 import zipfile
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -697,7 +697,7 @@ def test_studio_trigger_endpoint_rejects_refinement_when_control_plane_disabled(
 
 @pytest.mark.parametrize("continuation_case", [
     "none", "ready", "unavailable", "generator_ready",
-    "generator_recover_bind", "generator_recover_settle", "generator_recover_missing",
+    "generator_recover_bind", "generator_recover_settle", "generator_recover_missing", "generator_recover_misroute",
 ])
 def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch, _owned_build_target, continuation_case):
     from mozaiksai.core.auth import reset_auth_adapter
@@ -731,8 +731,9 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch,
     if continuation_case.startswith("generator_"):
         from factory_app.workflows._shared.platform import review_continuation as review
         from mozaiksai.core.session import launcher
-        from mozaiksai.core.session.model import RoutingDecision
+        from mozaiksai.core.session import router as router_module
         from mozaiksai.core.transport.simple_transport import SimpleTransport
+        from mozaiksai.core.workflow.pack.schema import parse_global_pack_graph
 
         source_binding = _BINDING.model_copy(update={"build_id": "genesis", "phase": "genesis"})
         source = {"workflow_name": "AppGenerator", "status": 0, "run_build_binding": source_binding.model_dump(),
@@ -753,7 +754,7 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch,
         persistence.persist_server_owned_session_fields = AsyncMock(side_effect=persist_fields)
         monkeypatch.setattr(launcher, "_PERSISTENCE_MANAGER", persistence)
         prerequisites = AsyncMock(return_value=(True, None))
-        if continuation_case == "generator_recover_missing":
+        if continuation_case in {"generator_recover_missing", "generator_recover_misroute"}:
             prerequisites.side_effect = [(False, "Interrupted before successor creation"), (True, None)]
         monkeypatch.setattr(review, "get_platform_hooks", lambda: SimpleNamespace(call_chat_prereqs=prerequisites))
         record = _owned_build_target.get_app_record.return_value["app"]
@@ -774,15 +775,27 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch,
                 record["current_build_run"]["artifact_version_id"] = kwargs["artifact_version_id"]
                 return {"success": True, "app": record}
             assert kwargs["expected_artifact_version_id"] == "av_child_code_1"
-            record.update(active_chat_id=kwargs["active_chat_id"], active_workflow_id="AppReview")
+            assert kwargs["expected_lifecycle_state"] == record["lifecycle_state"]
+            assert kwargs["expected_active_chat_id"] == record.get("active_chat_id")
+            record.update(lifecycle_state=kwargs["status"], active_chat_id=kwargs["active_chat_id"], active_workflow_id="AppReview")
+            record["current_build_run"].update(status=kwargs["status"], active_chat_id=kwargs["active_chat_id"], active_workflow_id="AppReview")
             handoff_order.append("select")
             return {"success": True, "app": record}
         _owned_build_target.update_build_status.side_effect = select_review
-        router = studio_app.get_session_router()
-        monkeypatch.setattr(router, "for_target", lambda target: router)
-        monkeypatch.setattr(router, "route_trigger", AsyncMock(return_value=RoutingDecision(
-            workflow_id="AppReview", requested_workflow_id="AppReview",
-        )))
+        # Exercise the shipped dependency graph and router. The generation is
+        # still waiting on its workbench when its validated child needs review.
+        pack = parse_global_pack_graph(json.loads((Path(__file__).resolve().parents[1]
+            / "factory_app/workflows/extended_orchestration/extension_registry.json").read_text(encoding="utf-8")))
+        monkeypatch.setattr(router_module, "load_global_pack_graph", lambda: pack)
+        router = studio_app.get_session_router().for_target("app_1")
+        monkeypatch.setattr(studio_app, "get_session_router", lambda: router)
+        for workflow in ("ValueEngine", "ThemeCapture", "DesignDocs", "SubscriptionContractDesigner", "AgentGenerator"):
+            router._persistence._default._docs[workflow] = {
+                "_id": workflow, "app_id": "factory", "user_id": "demo-user", "workflow_name": workflow,
+                "status": 1, "run_build_binding": source_binding.model_dump(),
+            }
+        router._persistence._default._docs["review-parent"] = {"_id": "review-parent", "app_id": "factory",
+            "user_id": "demo-user", **source}
         async def bind_review(**kwargs):
             handoff_order.append("bind")
             if continuation_case == "generator_recover_bind" and handoff_order.count("bind") == 1:
@@ -835,6 +848,10 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch,
         async def get_change_request(self, **kwargs):
             assert kwargs == {"app_id": "app_1", "change_request_id": "cr_code_1"}
             return ChangeRequestDoc.model_validate({"id": "cr_code_1", **persisted_changes[0]})
+
+        async def list_build_records(self, **kwargs):
+            assert kwargs == {"app_id": "app_1", "updated_since": sessions["misrouted"]["created_at"], "limit": 1}
+            return []
 
     monkeypatch.setattr(studio_app, "prepare_routed_workflow_launch", fail_prepare)
     monkeypatch.setattr(studio_app, "launch_prepared_workflow", fail_launch)
@@ -1028,7 +1045,7 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch,
         from factory_app.workflows.AppReview.tools import review_context
 
         selected = record.get("active_chat_id")
-        expected_before = 0 if continuation_case == "generator_recover_missing" else 1
+        expected_before = 0 if continuation_case in {"generator_recover_missing", "generator_recover_misroute"} else 1
         assert persistence.create_chat_session.await_count == expected_before
         assert source["run_build_binding"] == source_binding.model_dump()
         # Manual Build Review uses the real launcher and Factory admission hook.
@@ -1050,6 +1067,27 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch,
         child = _BaselineStore.versions["av_child_code_1"]
         child.source_chat_id = None  # Actual inline children have no source chat.
         child.lifecycle_status = ArtifactLifecycleStatus.CURRENT
+        if continuation_case == "generator_recover_misroute":
+            # The old pack redirected this exact manual review into generation.
+            # Its accepted child and immutable refinement binding never changed.
+            monkeypatch.setenv("MOZAIKS_CHAT_LOCK_MODE", "local")
+            record.update(lifecycle_state="building", active_chat_id="misrouted", active_workflow_id="AppGenerator")
+            record["current_build_run"].update(status="building", active_chat_id="misrouted", active_workflow_id="AppGenerator")
+            sessions["misrouted"] = {
+                "workflow_name": "AppGenerator", "status": 0, "created_at": datetime.now(UTC) - timedelta(minutes=5),
+                "run_build_binding": _BINDING.model_dump(), "artifact_version_id": child.id,
+                "trigger_meta": {"trigger_source": "manual", "requested_workflow_id": "AppReview",
+                                 "resolved_workflow_id": "AppGenerator", "rerouted_by_dependency": True},
+            }
+            async def persist_context(**kwargs):
+                assert record["active_workflow_id"] == "AppReview"
+                sessions[kwargs["chat_id"]].update(kwargs["variables"])
+            async def mark_failed(chat_id, **kwargs):
+                assert record["active_chat_id"] != chat_id
+                sessions[chat_id]["status"] = 2
+                return True
+            persistence.persist_context_variables = AsyncMock(side_effect=persist_context)
+            persistence.mark_chat_failed.side_effect = mark_failed
         manual_request = {
             "workflow_id": "AppReview", "trigger_source": "manual", "build_registry_id": "appreg_1",
         }
@@ -1087,7 +1125,14 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch,
             "workbench", {"status": "superseded", "approved": False, "data": {"artifact_version_id": "av_456"}},
         )
         worker.execute.assert_not_awaited()
-        persistence.mark_chat_failed.assert_not_awaited()
+        if continuation_case == "generator_recover_misroute":
+            persistence.mark_chat_failed.assert_awaited_once_with("misrouted", app_id="factory")
+            assert sessions["misrouted"]["status"] == 2
+            assert sessions["misrouted"]["app_bundle_export_outcome"] == "superseded"
+            assert sessions[reopened["chat_id"]]["trigger_meta"]["source_misrouted_chat_id"] == "misrouted"
+            assert record["lifecycle_state"] == "review"
+        else:
+            persistence.mark_chat_failed.assert_not_awaited()
 
 
 def test_studio_trigger_endpoint_can_auto_scope_before_coding_worker(monkeypatch):

@@ -72,6 +72,14 @@ test('saved build review continues only its current build through the authentica
   });
   const data=()=>({buildRegistryId:'registry-a',summary:{app:{lifecycle_state:'review',current_build_run:{artifact_version_id:'current'}}},
     buildHistory:{artifact_versions:[{id:'current',version_number:2,created_at:'today'},{id:'older',version_number:1,created_at:'yesterday'}]}});
+  const interrupted=()=>{
+    const value=data();
+    Object.assign(value.summary.app,{lifecycle_state:'building',active_workflow_id:'AppGenerator'});
+    Object.assign(value.summary.app.current_build_run,{phase:'refinement',build_id:'refined'});
+    Object.assign(value.buildHistory.artifact_versions[0],{parent_build_record_id:'older',lifecycle_status:'current',
+      validation_status:'passed',commit_metadata:{metadata:{build_id:'refined'}}});
+    return value;
+  };
   let fixture={data:data(),loading:false,error:null,dataMode:'live'};
   let reject=false;
   const requests=[];
@@ -124,6 +132,51 @@ test('saved build review continues only its current build through the authentica
       assert.equal(requests.length,1);
     }finally{reject=false;await page.close();}
   });
+  for(const denied of [false,true]){
+    await t.test(`current accepted refinement in building can request review; server denial=${denied}`,async()=>{
+      fixture={data:interrupted(),loading:false,error:null,dataMode:'live'};
+      reject=denied;requests.length=0;
+      const page=await browser.newPage();
+      try{
+        await page.goto(origin+'/apps/target-app/activity');
+        const button=page.getByRole('button',{name:'Continue in chat',exact:true});
+        await expect(button).toBeEnabled({timeout:1500});
+        await button.click();
+        await expect.poll(()=>requests.length).toBe(1);
+        assert.equal(requests[0].headers.authorization,'Bearer fixture-token');
+        assert.deepEqual(requests[0].body,{trigger_source:'manual',context_variables:{},app_id:'studio-host',user_id:'owner',
+          build_registry_id:'registry-a',workflow_id:'AppReview'});
+        if(denied){
+          await expect(page.getByRole('alert')).toContainText('The current build changed. Refresh its review.');
+          await expect(button).toBeEnabled();
+          assert.equal(new URL(page.url()).pathname,'/apps/target-app/activity');
+        }else{
+          await expect(page.getByRole('heading',{name:'Review conversation'})).toBeVisible();
+          assert.equal(new URL(page.url()).searchParams.get('chat_id'),'new-review');
+        }
+      }finally{reject=false;await page.close();}
+    });
+  }
+  for(const damage of ['genesis','draft','failed','foreign-build','missing-parent','other-workflow']){
+    await t.test(`building review remains unavailable for ${damage}`,async()=>{
+      fixture={data:interrupted(),loading:false,error:null,dataMode:'live'};
+      const app=fixture.data.summary.app;
+      const artifact=fixture.data.buildHistory.artifact_versions[0];
+      if(damage==='genesis')app.current_build_run.phase='genesis';
+      if(damage==='draft')artifact.lifecycle_status='draft';
+      if(damage==='failed')artifact.validation_status='failed';
+      if(damage==='foreign-build')artifact.commit_metadata.metadata.build_id='other';
+      if(damage==='missing-parent')delete artifact.parent_build_record_id;
+      if(damage==='other-workflow')app.active_workflow_id='Other';
+      requests.length=0;
+      const page=await browser.newPage();
+      try{
+        await page.goto(origin+'/apps/target-app/activity');
+        await expect(page.getByRole('button',{name:'Continue in chat',exact:true})).toBeDisabled();
+        assert.equal(requests.length,0);
+      }finally{await page.close();}
+    });
+  }
   for(const mode of ['demo','missing-current','building']){
     await t.test(`recovery stays unavailable for ${mode}`,async()=>{
       fixture={data:data(),loading:false,error:null,dataMode:mode==='demo'?'demo':'live'};
