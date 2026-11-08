@@ -1130,6 +1130,29 @@ LLM coding checkpoint
     → emit tool event to Studio panel
 ```
 
+### Saved compilation task evidence
+
+Factory registration writes compilation binding version 2 with the exact approved
+plan, task execution inventory, settled task results and original `_meta` evidence.
+The existing task owner verifies completion, task/worker/path identity, inventory
+and plan digests, and every accepted output digest. Failed, pending, in-flight,
+missing or extra tasks cannot be captured. Historical failure diagnostics remain
+unchanged within the settled snapshot.
+
+The scoped artifact resolver repeats these checks and verifies the owned
+app/build/registry, design and subscription references, archive and parent lineage.
+Coding and media children retain this immutable snapshot. Fresh candidate
+acceptance checks their current files against the original plan and execution
+evidence; it does not reuse parent acceptance or require edited files to equal
+historical worker output. Missing required files and invalid current contracts
+still fail. No current-session or latest-record lookup supplies missing evidence.
+
+Capture and resolution share an 8 MiB limit over the canonical serialized compiler
+inputs. This bounds inline evidence; it is not a guarantee that the complete
+MongoDB record fits its document limit. Oversize inputs fail before capture.
+Version 1 bindings lack this immutable evidence and require a new Factory build;
+existing records are never backfilled or rewritten.
+
 ### What the coding worker does NOT do
 
 - It does not modify the live workspace. All writes go to a staging area.

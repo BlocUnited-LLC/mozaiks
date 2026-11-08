@@ -22,6 +22,8 @@ from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
 )
 
+_MAX_COMPILATION_INPUT_BYTES = 8 * 1024 * 1024
+
 
 class _InputReference(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -33,13 +35,15 @@ class _CompilerInputs(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     binding: RunBuildBinding
     app_build_plan: dict[str, Any]
+    app_task_batch_items: list[dict[str, Any]]
+    app_task_batch_results: dict[str, Any]
     design_docs: _InputReference
     subscription_contract: _InputReference | None = None
 
 
 class _CompilationBinding(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    version: Literal[1] = 1
+    version: Literal[2] = 2
     archive_sha256: str
     parent_record_id: str | None = None
     inputs: _CompilerInputs
@@ -47,7 +51,10 @@ class _CompilationBinding(BaseModel):
 
 
 def _digest(value: Any) -> str:
-    return hashlib.sha256(_summary_bytes(value)).hexdigest()
+    encoded = _summary_bytes(value)
+    if len(encoded) > _MAX_COMPILATION_INPUT_BYTES:
+        raise ValueError("Approved compilation inputs exceed the 8 MiB inline evidence limit")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _record_binding(record: BuildRecord) -> RunBuildBinding:
@@ -79,6 +86,8 @@ async def _summary(store: Any, *, app_id: str, owner_user_id: str, family: str, 
 
 
 async def _context_from_inputs(inputs: _CompilerInputs, *, store: Any, owner_user_id: str) -> dict[str, Any]:
+    from factory_app.workflows.AppGenerator.tools.task_integrity import settled_task_snapshot
+
     design, payload, digest = await _summary(
         store, app_id=inputs.binding.target_app_id, owner_user_id=owner_user_id,
         family="design_docs", record_id=inputs.design_docs.record_id,
@@ -88,10 +97,14 @@ async def _context_from_inputs(inputs: _CompilerInputs, *, store: Any, owner_use
     context = {
         "run_build_binding": inputs.binding.model_dump(),
         "app_build_plan": deepcopy(inputs.app_build_plan),
+        "app_task_batch_items": deepcopy(inputs.app_task_batch_items),
+        "app_task_batch_results": deepcopy(inputs.app_task_batch_results),
+        "app_task_batch_status": "completed",
         "data_contract": deepcopy(payload.get("data_contract")),
         "design_surface_map": deepcopy(payload.get("surface_map")),
         "design_docs_artifact": design.model_dump(mode="json", by_alias=True),
     }
+    settled_task_snapshot(context)
     # The existing owner verifies policy review and exact design/data identity.
     resolve_design_access_policy(context)
     if inputs.subscription_contract is not None:
@@ -123,6 +136,9 @@ async def capture_app_compilation_inputs(
         return None
     if context.get("app_plan_outcome") != "ready":
         raise ValueError("Approved compilation requires the validated ready AppBuildPlan")
+    from factory_app.workflows.AppGenerator.tools.task_integrity import settled_task_snapshot
+
+    task_items, task_results = settled_task_snapshot(context)
     binding = RunBuildBinding.model_validate(detach(context.get("run_build_binding")))
     projected = detach(context.get("design_docs_build_artifact")) or detach(context.get("design_docs_artifact"))
     if not isinstance(projected, dict) or not projected.get("_id"):
@@ -151,6 +167,7 @@ async def capture_app_compilation_inputs(
         subscription = _InputReference(record_id=record_id, sha256=contract_digest)
     inputs = _CompilerInputs(
         binding=binding, app_build_plan=plan,
+        app_task_batch_items=task_items, app_task_batch_results=task_results,
         design_docs=_InputReference(record_id=design.id, sha256=digest), subscription_contract=subscription,
     )
     await _context_from_inputs(inputs, store=artifact_store, owner_user_id=owner_user_id)
@@ -218,6 +235,8 @@ async def resolve_app_compilation_inputs(
         raw = record.commit_metadata.metadata.get("compilation_inputs")
         if raw is None and first is None:
             return None
+        if isinstance(raw, dict) and raw.get("version") == 1:
+            raise ValueError("Approved compilation version 1 lacks immutable task evidence; a new Factory build is required")
         binding = _record_binding(record)
         if (
             record.app_id != app_id or record.build_family != "app_bundle" or record.build_key != "app_bundle"

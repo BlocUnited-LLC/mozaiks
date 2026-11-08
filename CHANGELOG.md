@@ -366,6 +366,14 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Saved Factory compilation inputs retain verified settled task evidence, so
+  refinement checks can validate nonempty plans without losing completed work.
+  Version 2 snapshots are size-bounded; version 1 requires a fresh build.
+  Candidate contract, file completeness and runtime checks still run afresh.
+- Scoped auth-file refinements receive the runtime auth model schema through
+  existing selected-file context, including canonical role permission fields.
+  Edit scope, authorization and validation remain enforced.
+
 - Workflow data references retain MongoDB `_id` when explicitly requested, so
   generated bundle exports can verify their bound DesignDocs compilation inputs.
   Unrequested identities remain omitted.

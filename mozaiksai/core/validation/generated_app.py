@@ -269,8 +269,8 @@ async def validate_generated_app_candidate(
         result["app_validation_result"]["validation_status"] = "skipped"
         return result
 
-    # Fresh context deliberately carries no Genesis task evidence or parent
-    # validation. Copies prevent a helper's context write-back changing bytes.
+    # Only the artifact resolver can supply original settled task evidence.
+    # Parent validation is never reused; candidate bytes receive fresh checks.
     text_files = {path: content for path, content in snapshot.items() if isinstance(content, str)}
     binary_assets = {path: content for path, content in snapshot.items() if isinstance(content, bytes)}
     binary_kwargs: dict[str, Any] = {"runtime_binary_assets": dict(binary_assets)} if binary_assets else {}
