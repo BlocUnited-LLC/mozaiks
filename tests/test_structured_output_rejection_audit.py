@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections import Counter
 from types import SimpleNamespace
 from typing import Any
 
@@ -21,10 +20,7 @@ from mozaiksai.core.adapters.ag2_task_batch_runner import (
 from mozaiksai.core.audit.audit_logger import AuditEventKind, AuditLogger
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.outputs import rejection_audit
-from mozaiksai.core.workflow.outputs.rejection_audit import (
-    audit_structured_output_rejection,
-    packet_turn_key,
-)
+from mozaiksai.core.workflow.outputs.rejection_audit import audit_structured_output_rejection
 from mozaiksai.core.workflow.outputs.runtime_validation import validate_agent_structured_output
 
 SECRET = "sk-super-secret-value"
@@ -42,11 +38,6 @@ class _RecordingAudit:
 
     async def log_agent_output_rejected(self, **kwargs: Any) -> None:
         self.calls.append(kwargs)
-
-
-@pytest.fixture(autouse=True)
-def _fresh_dedupe_state() -> None:
-    rejection_audit._recorded_turns.clear()
 
 
 @pytest.fixture
@@ -179,7 +170,6 @@ async def test_secret_key_is_absent_from_the_audit_call_and_serialized_document(
     assert key not in json.dumps(audit_docs[0], default=str)
     # ``audit`` is registered after ``audit_docs``; repoint to prove the call args too.
     monkeypatch.setattr(rejection_audit, "get_audit_logger", lambda: audit)
-    rejection_audit._recorded_turns.clear()
     await audit_structured_output_rejection(validation, **_context())
     assert key not in repr(audit.calls)
 
@@ -378,9 +368,7 @@ def test_network_wal_validation_collects_rejections_and_keeps_failing_closed() -
 
     assert outputs == []
     assert error is not None and error.startswith("structured output validation failed")
-    assert [(r.failure_category, channel, causation) for r, channel, causation in rejections] == [
-        ("schema_violation", "", "")
-    ]
+    assert [r.failure_category for r in rejections] == ["schema_violation"]
 
 
 def test_network_wal_validation_collects_nothing_for_valid_output() -> None:
@@ -464,49 +452,13 @@ async def test_network_wal_rejection_is_audited_once_for_the_initiating_user(
     assert audit_docs[0]["action"] == "PlannerAgent"
 
 
-async def test_packet_and_wal_validation_of_one_reply_write_exactly_one_record(
+async def test_orchestration_packet_rejection_is_audited_once_and_never_committed(
     audit_docs: list[dict[str, Any]],
 ) -> None:
-    """The packet hook audits and lets the packet through; the WAL check rejects it again."""
+    """The production packet hook raises before commit: one record, no packet in the WAL."""
 
-    from mozaiksai.core.workflow.outputs.runtime_events import emit_validated_agent_output
+    from ag2.network import EV_PACKET
 
-    packet_hook_calls: list[Any] = []
-
-    async def packet_hook(agent_name: str, packet: Any) -> None:
-        packet_hook_calls.append(packet)
-        await emit_validated_agent_output(
-            current_agent_name=agent_name,
-            last_reply=(packet.event_data or {}).get("body"),
-            workflow_name="AuditSmoke",
-            chat_id="chat-1",
-            app_id="app-1",
-            user_id="u-net",
-            turn_sequence=0,
-            turn_idempotency_key=packet_turn_key(
-                "chat-1", packet.channel_id, agent_name, packet.causation_id
-            ),
-            context_vars_dict={},
-            context_bridge=None,
-            structured_registry={"PlannerAgent": _PlannerOutput},
-            auto_tool_agents=set(),
-            wf_logger=_quiet_logger(),
-        )
-
-    result = await AG2NetworkRunner().run(_network_request(agent_output_handler=packet_hook))
-
-    # Both validation sites saw the reply...
-    assert len(packet_hook_calls) == 1
-    assert result.status is RunStatus.FAILED
-    assert result.error is not None and "structured output validation failed" in result.error
-    # ...and the append-only log still holds a single record for it.
-    assert _kinds_and_sources(audit_docs) == [("agent.output.rejected", "runtime_turn")]
-    assert audit_docs[0]["actor_id"] == "u-net"
-
-
-async def test_orchestration_packet_rejection_is_audited_once_for_the_initiating_user(
-    audit_docs: list[dict[str, Any]],
-) -> None:
     from mozaiksai.core.workflow.orchestration_patterns import _dispatch_agent_packet_output
 
     async def packet_hook(agent_name: str, packet: Any) -> None:
@@ -526,57 +478,18 @@ async def test_orchestration_packet_rejection_is_audited_once_for_the_initiating
     result = await AG2NetworkRunner().run(_network_request(agent_output_handler=packet_hook))
 
     assert result.status is RunStatus.FAILED
+    # The rejected reply was never committed, so the WAL check has nothing to reject again.
+    committed = [
+        entry
+        for entry in result.wal
+        if entry["event_type"] == EV_PACKET
+        and result.agent_name_by_id.get(entry["sender_id"]) == "PlannerAgent"
+    ]
+    assert committed == []
     assert len(audit_docs) == 1
     assert audit_docs[0]["kind"] == "agent.output.rejected"
     assert audit_docs[0]["extra"]["source"] == "runtime_turn"
     assert audit_docs[0]["actor_id"] == "u-net"
-
-
-async def test_one_packet_is_recorded_once_but_a_retried_turn_is_recorded_again(
-    audit: _RecordingAudit,
-) -> None:
-    validation = _validate({"status": 5})
-    first = packet_turn_key("chat-1", "chan", "StrictAgent", "cause-1")
-    retry = packet_turn_key("chat-1", "chan", "StrictAgent", "cause-2")
-
-    await audit_structured_output_rejection(validation, **_context(turn_key=first))
-    await audit_structured_output_rejection(validation, **_context(turn_key=first))
-    assert len(audit.calls) == 1
-
-    await audit_structured_output_rejection(validation, **_context(turn_key=retry))
-    assert len(audit.calls) == 2
-
-
-async def test_rejections_without_a_turn_key_are_never_deduplicated(
-    audit: _RecordingAudit,
-) -> None:
-    validation = _validate({"status": 5})
-
-    await audit_structured_output_rejection(validation, **_context())
-    await audit_structured_output_rejection(validation, **_context())
-
-    assert len(audit.calls) == 2
-
-
-async def test_failed_audit_write_does_not_suppress_a_later_attempt(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    attempts: Counter[str] = Counter()
-
-    class _Flaky:
-        async def log_agent_output_rejected(self, **_kwargs: Any) -> None:
-            attempts["n"] += 1
-            if attempts["n"] == 1:
-                raise RuntimeError("mongo down")
-
-    monkeypatch.setattr(rejection_audit, "get_audit_logger", lambda: _Flaky())
-    validation = _validate({"status": 5})
-    key = packet_turn_key("chat-1", "chan", "StrictAgent", "cause-1")
-
-    await audit_structured_output_rejection(validation, **_context(turn_key=key))
-    await audit_structured_output_rejection(validation, **_context(turn_key=key))
-
-    assert attempts["n"] == 2
 
 
 async def test_task_batch_rejection_is_audited_for_the_initiating_user(

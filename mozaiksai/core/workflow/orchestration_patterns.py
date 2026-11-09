@@ -367,7 +367,6 @@ async def _dispatch_agent_packet_output(
     wf_logger: Any,
 ) -> None:
     """Validate and dispatch this turn's output before AG2 folds its packet."""
-    from .outputs.rejection_audit import packet_turn_key
     from .outputs.runtime_events import emit_validated_agent_output
 
     model_cls = _structured_model_for_agent(structured_registry, agent_name)
@@ -387,7 +386,7 @@ async def _dispatch_agent_packet_output(
         app_id=app_id,
         user_id=user_id,
         turn_sequence=0,
-        turn_idempotency_key=packet_turn_key(chat_id, channel_id, agent_name, causation_id),
+        turn_idempotency_key=f"{chat_id}:{channel_id}:{agent_name}:{causation_id}",
         context_vars_dict=snapshot,
         context_bridge=context_bridge,
         structured_registry={agent_name: model_cls},

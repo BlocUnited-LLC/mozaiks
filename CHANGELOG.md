@@ -15,17 +15,18 @@ This project follows a practical pre-1.0 changelog format:
 ### Added
 
 - Agent replies rejected by structured-output validation now write an
-  `agent.output.rejected` audit record from the runtime turn, network WAL, and
-  task-batch paths, attributed to the initiating user. The record carries the
-  agent, workflow, chat, trace id, failure category, error types with the
-  field paths they apply to, and a SHA-256 digest of the reply. A path keeps
-  only what the schema proves (declared fields and list or tuple indexes);
-  mapping keys and any component the schema cannot prove become
-  `<redacted-field>`. The reply and Pydantic's input-quoting message are never
-  stored. A packet checked by both the turn and the WAL is deduplicated on a
-  best-effort basis: the cache is per process and holds 4,096 entries, so an
-  eviction or a restart can record the same rejection twice. This is not a
-  durable or cross-process exactly-once guarantee. Validation still fails
+  `agent.output.rejected` record to the existing Mozaiks audit logger from the
+  live packet gate, the direct or resumed WAL check, and standalone task
+  batches, attributed to the initiating user. It adds an application-level
+  record next to AG2's native turn-failure audit: agent, workflow, chat, trace
+  id, failure category, error types with the field paths they apply to, and a
+  SHA-256 digest of the reply. A path keeps only what the schema proves
+  (declared fields and list or tuple indexes); mapping keys and any component
+  the schema cannot prove become `<redacted-field>`. The reply and Pydantic's
+  input-quoting message are never stored. Each boundary writes its own record;
+  in the normal fail-closed path a rejected packet is never committed, so only
+  one boundary sees it. Whether a record persists depends on the configured
+  audit store; without one it falls back to a log line. Validation still fails
   closed, and an audit failure cannot change that.
 - Generated bundle validation can resolve approved compiler inputs from the exact
   owned build record. Factory saves actual design/subscription input identities,
