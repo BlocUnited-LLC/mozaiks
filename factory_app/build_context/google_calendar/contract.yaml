@@ -57,9 +57,10 @@ runtime_boundaries:
       accountConnectionPath(err) from ui/lib/moduleApi.js and do not retry.
   - id: app_oauth_client
     rule: >
-      The app's Google OAuth client is configured by the app's operators as
-      GOOGLE_ACCOUNTS_CLIENT_ID and GOOGLE_ACCOUNTS_CLIENT_SECRET (environment or
-      the app's declared Key Vault references), separate from sign-in with Google.
-      Never generate their values.
+      Each app uses its own Google OAuth client, configured by the app's
+      operators as GOOGLE_ACCOUNTS_CLIENT_ID and GOOGLE_ACCOUNTS_CLIENT_SECRET
+      (environment or the app's declared Key Vault references), separate from
+      sign-in with Google. Never generate their values, and never reuse a
+      client secret that other apps hold.
 
 facades: []

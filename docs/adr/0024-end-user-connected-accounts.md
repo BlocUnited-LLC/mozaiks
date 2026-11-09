@@ -25,6 +25,9 @@ any time.
 
 ## Alternatives Considered
 
+- **One client shared by every app, with its secret in each app's settings.**
+  Rejected: see "Each app uses its own OAuth client" under Consequences.
+
 - **Let each plugin implement OAuth.** Rejected: it multiplies the most
   security-sensitive code in every app, and gives no consistent place for
   users to see and revoke grants.
@@ -60,9 +63,16 @@ any time.
   restrictive: the Gmail plugin sends only on the user's own request.
 - Google is a provider definition. Adding a provider means adding its
   endpoints and client settings, without changing plugins or routes.
-- Providers that share one OAuth client across apps share one grant per user
-  at the provider. Disconnecting in one app revokes that grant for the others
-  too. Each app should use its own OAuth client.
+- **Each app uses its own OAuth client.** A client secret shared by several
+  apps must never be given to app code. Anyone who can run code in one of
+  those apps could act as the shared client: start flows under its name,
+  exchange codes for other apps' users, or get the client suspended for every
+  app. A host that wants one client for many apps must keep the secret, the
+  code exchange and token refresh in host-run infrastructure (a broker) with
+  its own per-app consent records, and hand apps access tokens. Apps that
+  share one client also share one grant per user at the provider: consent
+  given in one can reach another, and disconnecting in one revokes it for
+  all.
 
 ## Reversibility
 

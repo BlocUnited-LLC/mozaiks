@@ -282,3 +282,73 @@ async def test_server_owned_and_workflow_dispatches_cannot_send_mail(host: Simpl
         await gmail_handler.send_email(context("event_reaction", "trusted_bypass"), **params)
     assert host.google.sent_messages == []
     assert (await gmail_handler.send_email(context("authenticated_user"), **params))["success"] is True
+
+
+@pytest.mark.parametrize("pack_id", ["google_calendar", "gmail"])
+async def test_a_generated_app_with_a_google_plugin_asks_for_its_own_google_client(
+    pack_id: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Selecting either pack declares the app's own Google OAuth client as runtime setup, deterministically."""
+    import yaml
+
+    from factory_app.workflows.AppGenerator.tools import (
+        save_integration_manifest as manifest_module,
+    )
+    from factory_app.workflows.AppGenerator.tools.deployment_contract import (
+        generate_deployment_artifacts,
+    )
+    from factory_app.workflows.AppGenerator.tools.generate_and_download import (
+        _deployment_env_for_capability_packs,
+    )
+    from factory_app.workflows.AppGenerator.tools.integration_readiness import (
+        check_integration_readiness,
+    )
+    from mozaiksai.core.session.build_context import normalize_pack_descriptor
+    from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+    from mozaiksai.core.workflow.generator_support import connector_request
+    from tests.factory_context import factory_context
+
+    pack_dir = PACKS / pack_id
+    descriptor = normalize_pack_descriptor(
+        yaml.safe_load((pack_dir / "context.yaml").read_text(encoding="utf-8")), context_root=pack_dir,
+    )
+    context = ContextVariablesBridge(factory_context({
+        "app_build_plan": {"capability_packs": [descriptor]},
+        "capability_packs": [descriptor],
+    }))
+    monkeypatch.setattr(connector_request, "get_connector_inventory", AsyncMock(return_value={
+        "required_services": [], "ready_services": [], "missing_required_services": [], "connectors": [],
+    }))
+    request = AsyncMock()
+    monkeypatch.setattr(connector_request, "request_connector_bundle", request)
+    declarations = AsyncMock()
+    declarations.declare_app_integration_needs.return_value = {"saved": 1}
+    monkeypatch.setattr(manifest_module, "WorkspaceIntegrationsService", lambda: declarations)
+
+    readiness = await check_integration_readiness(context_variables=context)
+    await manifest_module.save_integration_manifest(context_variables=context)
+
+    # Runtime setup: generation is never blocked, and the app lists what to configure.
+    assert readiness["status"] == "ready"
+    request.assert_not_awaited()
+    [need] = declarations.declare_app_integration_needs.await_args.kwargs["needs"]
+    assert (need["service"], need["required_at"], need["connector_status"]) == (
+        "google_account_connections", "runtime", "not_configured",
+    )
+    assert [field["name"] for field in need["required_fields"]] == ["client_id", "client_secret"]
+
+    env = _deployment_env_for_capability_packs(context.snapshot()["capability_packs"])
+    deployment = generate_deployment_artifacts(
+        app_id="generated-app", deployment_profile="generic_container", include_dockerfiles=True,
+        include_workflow=False, include_compose=False,
+        extra_required_variables=env["required"], extra_optional_variables=env["optional"],
+        extra_secret_variables=env["secret"], extra_public_variables=env["public"],
+    )
+    manifest = deployment["deployment_manifest"]
+    assert "GOOGLE_ACCOUNTS_CLIENT_SECRET" in manifest["secret_env"]
+    assert "GOOGLE_ACCOUNTS_CLIENT_SECRET" not in manifest["public_env"]
+    # Optional, so an app without the client still deploys; its users see the plugin as not available.
+    assert "GOOGLE_ACCOUNTS_CLIENT_ID" not in manifest["required_env"]
+    example = deployment["artifacts"][".env.example"]
+    for name in ("GOOGLE_ACCOUNTS_CLIENT_ID", "GOOGLE_ACCOUNTS_CLIENT_SECRET", "MOZAIKS_CONNECTED_ACCOUNTS_REDIRECT_URI"):
+        assert f"{name}=" in example

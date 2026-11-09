@@ -61,5 +61,12 @@ runtime_boundaries:
       This is personal email from the user's own address, at most 20 recipients
       per message. It is not a newsletter, marketing or notification channel;
       use the notifications pack for app-sent email.
+  - id: app_oauth_client
+    rule: >
+      Each app uses its own Google OAuth client, configured by the app's
+      operators as GOOGLE_ACCOUNTS_CLIENT_ID and GOOGLE_ACCOUNTS_CLIENT_SECRET
+      (environment or the app's declared Key Vault references), separate from
+      sign-in with Google. Never generate their values, and never reuse a
+      client secret that other apps hold.
 
 facades: []

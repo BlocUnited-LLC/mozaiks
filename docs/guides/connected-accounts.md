@@ -106,7 +106,10 @@ environment, or from the app's declared Key Vault references
 | `MOZAIKS_CONNECTED_ACCOUNTS_REDIRECT_URI` | Optional. The exact redirect URI registered with Google. Set it behind any proxy. |
 
 These are deliberately separate from `GOOGLE_CLIENT_ID`, which signs users in
-with Google.
+with Google. Create a separate client for each app. Apps that share a client
+share each user's Google grant, so consent given in one reaches the others and
+disconnecting in one disconnects all. Never put a client secret that other
+apps use into an app's settings.
 
 1. In Google Cloud Console, enable the APIs your plugins use: Google Calendar
    API, Gmail API.
@@ -120,8 +123,10 @@ with Google.
 
 Google treats Calendar and `gmail.send` as **sensitive** scopes. Until Google
 verifies your app, only the test users listed on the consent screen can
-connect. Gmail read and modify scopes are **restricted**: they need a security
-assessment, so the Gmail plugin is send-only.
+connect, and Google ends their connections after seven days, so they see
+**Reconnect needed** each week. Gmail read and modify scopes are
+**restricted**: they need a security assessment, so the Gmail plugin is
+send-only.
 
 ## Plugins
 
