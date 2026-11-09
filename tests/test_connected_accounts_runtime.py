@@ -23,7 +23,6 @@ from mozaiksai.core.connected_accounts.account_data import (
 from mozaiksai.core.connected_accounts.errors import (
     AccountAccessDenied,
     AccountConnectionRequired,
-    AccountProviderUnavailable,
 )
 from mozaiksai.core.connected_accounts.providers import GOOGLE_EMULATOR_ENV
 from mozaiksai.core.connected_accounts.runtime import account_access_token
@@ -111,11 +110,17 @@ async def test_a_dispatch_acting_for_another_user_gets_no_token(connected) -> No
 
 async def test_tokens_are_bound_to_the_loaded_app(connected) -> None:
     await _connect(connected)
-    with pytest.raises(AccountProviderUnavailable):
-        await account_access_token(_context("authenticated_user", app_id="another-app"), "google_calendar")
-    configure_connected_accounts(None)
-    with pytest.raises(AccountProviderUnavailable):
-        await account_access_token(_context("authenticated_user"), "google_calendar")
+    # A dispatch for another app, or a host that never wired connected accounts, gets the
+    # plugin's ordinary "not available" answer (403 ACCOUNT_CONNECTION_REQUIRED), not a 500.
+    for context in (_context("authenticated_user", app_id="another-app"), None):
+        if context is None:
+            configure_connected_accounts(None)
+            context = _context("authenticated_user")
+        with pytest.raises(AccountConnectionRequired) as raised:
+            await account_access_token(context, "google_calendar")
+        assert raised.value.reason == "unavailable"
+        assert str(raised.value) == "This app does not offer Google Calendar right now."
+        assert "connect_route" not in raised.value.to_error_metadata()
 
 
 async def test_the_user_is_asked_to_connect_rather_than_failing(connected) -> None:

@@ -28,10 +28,13 @@ from typing import Any
 
 import httpx
 
+from logs.logging_config import get_core_logger
 from mozaiksai.core.runtime.composition.module_authority import ModuleDispatchAuthority
 
-from .errors import AccountAccessDenied, AccountProviderUnavailable
+from .errors import AccountAccessDenied, AccountConnectionRequired, AccountProviderUnavailable
 from .service import get_connected_accounts_service
+
+logger = get_core_logger("connected_accounts")
 
 # A dispatch made by the end user themselves: their HTTP request, their own live
 # workflow session, or local development. Every other dispatch (anonymous visitors,
@@ -56,7 +59,17 @@ async def account_access_token(ctx: Any, connection_id: str, *, refresh: bool = 
         raise AccountAccessDenied("A connected account is used only for the user who is making the request.")
     service = get_connected_accounts_service()
     if service is None or service.app_id != str(getattr(ctx, "app_id", "") or ""):
-        raise AccountProviderUnavailable("Connected accounts are not available in this app host.")
+        # A host that runs modules without wiring connected accounts (or a dispatch for
+        # another app) cannot offer the connection: that is the plugin's ordinary
+        # "not available" answer, never a server error.
+        logger.warning(
+            "CONNECTED_ACCOUNTS_NOT_CONFIGURED: connection=%s app_id=%s",
+            connection_id, getattr(ctx, "app_id", None),
+        )
+        raise AccountConnectionRequired(
+            connection_id=connection_id, provider="", label=connection_id.replace("_", " ").title(),
+            reason="unavailable",
+        )
     return await service.access_token(user_id=user_id, connection_id=connection_id, refresh=refresh)
 
 
