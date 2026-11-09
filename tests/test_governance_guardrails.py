@@ -48,6 +48,43 @@ def _git(repo: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
 
 
+@pytest.mark.parametrize("ancestor", [".local", "build"])
+def test_exclusions_are_relative_to_the_checkout(tmp_path: Path, ancestor: str) -> None:
+    guardrails = _load_guardrails_module()
+    repo = tmp_path / ancestor / "repo"
+    repo.mkdir(parents=True)
+    _init_git_repo(repo)
+    readme = _write(repo, "README.md", "Fixture repository.\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "init")
+
+    violation = "request = ModuleRequest(granted_permissions=['x'])\n"
+    runtime = _write(repo, "mozaiksai/hosts/runtime.py", violation)
+    excluded = [
+        _write(repo, relative, "def update_dns(record):\n    return record\n")
+        for relative in (
+            ".local/app/services/adapters/dns/cloudflare.py",
+            "build/app/services/adapters/dns/cloudflare.py",
+            "node_modules/app/services/adapters/dns/cloudflare.py",
+            ".claude/worktrees/nested/app/services/adapters/dns/cloudflare.py",
+        )
+    ]
+    _git(repo, "add", ".")
+
+    assert set(guardrails._iter_all_files(repo)) == {readme, runtime}
+    assert set(guardrails._iter_changed_files(repo)) == {runtime}
+    for options in (
+        {"all_files": True},
+        {"all_files": False},
+        {"paths": [path.relative_to(repo).as_posix() for path in [runtime, *excluded]]},
+    ):
+        errors, notices = guardrails.run_scan(repo_root=repo, **options)
+        assert [(error.code, error.path) for error in errors] == [
+            ("authority_bypass_not_reviewed", "mozaiksai/hosts/runtime.py"),
+        ]
+        assert notices == []
+
+
 def test_governance_guardrail_rejects_removed_permission_list_token(tmp_path: Path) -> None:
     """Any reintroduction of the removed permission-list dispatch contract in
     runtime source is an error, regardless of the value assigned."""

@@ -16,6 +16,8 @@ from mozaiksai.control_plane.app_intelligence import (
     index_workspace_app_intelligence,
 )
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
+from mozaiksai.core.app_context import indexer as indexer_module
+from mozaiksai.core.artifacts.content_store import LocalArtifactContentStore
 from mozaiksai.core.artifacts.models import (
     ArtifactLifecycleStatus,
     ArtifactValidationStatus,
@@ -135,9 +137,14 @@ async def test_active_workspace_app_intelligence_feeds_refinement_and_chat_ui(
     app_root: Path,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
     workspace_root = _workspace_root(app_root)
     store = _MemoryArtifactStore()
+    # Sidecar identifiers include their SHA-256; keep the Windows temp prefix short.
+    content_root = tmp_path_factory.mktemp("content")
+    content = LocalArtifactContentStore(content_root)
+    monkeypatch.setattr(indexer_module, "get_artifact_content_store", lambda: content)
 
     registration = await index_workspace_app_intelligence(
         app_id="workspace_app_intelligence_acceptance",
@@ -158,6 +165,12 @@ async def test_active_workspace_app_intelligence_feeds_refinement_and_chat_ui(
         "app_context_version",
     ]
     assert store.created[-1].lifecycle_status == ArtifactLifecycleStatus.CURRENT
+    for artifact in store.created:
+        metadata = artifact.commit_metadata.metadata
+        if metadata.get("externalized"):
+            content_path = Path(metadata["content_ref"])
+            assert content_path.is_relative_to(content_root)
+            assert content_path.is_file()
 
     tool_context = ControlPlaneToolContext(
         checkpoint="coding_requested",

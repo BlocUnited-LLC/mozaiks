@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from mozaiksai.control_plane import dry_run
 from mozaiksai.control_plane import validation_runner as validation_runner_module
 from mozaiksai.control_plane.promotion import promote_refinement_staging
@@ -94,6 +96,34 @@ def _item(result, name: str):  # noqa: ANN001
         if item.name == name:
             return item
     raise AssertionError(f"Validation item not found: {name}")
+
+
+@pytest.mark.parametrize("response_field", ["allowed", "authorized"])
+def test_app_bundle_validation_checks_custom_route_response_contract(tmp_path, response_field):
+    files = _route_bundle_files()
+    manifest = json.loads(files["ui/route_manifest.json"])
+    manifest["pages"][0]["meta"] = {"routeAuth": {
+        "module": "route_access", "action": "authorize_route", "params": {},
+    }}
+    files["ui/route_manifest.json"] = _json(manifest)
+    files["modules/route_access/module.yaml"] = _json({
+        "module": {"id": "route_access"}, "actions": [{
+            "id": "authorize_route", "output_schema": {
+                "type": "object", "required": [response_field],
+                "properties": {response_field: {"type": "boolean"}},
+            },
+        }],
+    })
+    plan = _build_plan(
+        tmp_path, request="Validate the route guard response contract.",
+        change_class="patch", workflow_sequence="app_revision",
+        affected_bundle_paths=["ui/route_manifest.json"],
+    )
+    result = validation_runner_module._app_bundle_validation(files, plan=plan)
+    assert result.status == ("passed" if response_field == "allowed" else "failed")
+    if response_field != "allowed":
+        assert "route_access/authorize_route" in result.reason
+        assert "required boolean 'allowed'" in result.reason
 
 
 def _route_bundle_files(*, register_component: bool = True, clean_react: bool = True) -> dict[str, str]:

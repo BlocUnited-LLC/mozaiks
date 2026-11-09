@@ -43,6 +43,9 @@ async def test_connect_replay_queues_versioned_envelopes(monkeypatch: pytest.Mon
     from mozaiksai.core.transport.event_contract import MozaiksEventEnvelope
 
     class Replayer:
+        def __init__(self, *, project_ui_tool_response_state):
+            assert callable(project_ui_tool_response_state)
+
         async def replay_on_connect_if_needed(self, *, send_event, **kwargs):
             for kind in ("text", "resume_boundary", "awaiting_reply"):
                 await send_event({"kind": kind, "content": "Replay"}, "chat-1")

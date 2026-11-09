@@ -16,6 +16,7 @@ from factory_app.workflows._shared.generated_ui_contract import (
     audit_custom_route_bundle_integrity,
     audit_generated_react_files,
     audit_page_schemas,
+    audit_route_auth_action_contracts,
     custom_route_bundle_page_files,
     dedupe,
 )
@@ -55,6 +56,9 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     data_contract_requires_auth,
     safe_relpath,
     validate_custom_page_files,
+)
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    validate_page_role_preservation,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_owned_output_paths,
@@ -1570,6 +1574,10 @@ def save_app_schema(
         _validate_custom_route_bundle(custom_route_bundle)
         shipped_names = {page["name"] for page in page_list}
         shipped_pages = [*page_list, *(page for page in pack_pages if page.get("name") not in shipped_names)]
+        validate_page_role_preservation(
+            shipped_pages, context_variables,
+            custom_routes=list((custom_route_bundle or {}).get("route_manifest") or []),
+        )
         _canonicalize_manifest_routes(manifest_dict, shipped_pages, custom_route_bundle)
         _validate_manifest_against_pages(manifest_dict, shipped_pages, custom_route_bundle)
         _validate_shell_header_actions(shell_config)
@@ -1650,6 +1658,15 @@ def save_app_schema(
             )
             for page in page_list:
                 validate_page_schema(page, asset_ids=asset_index.keys())
+            route_auth_errors = audit_route_auth_action_contracts(
+                [
+                    {"filename": path, "content": content}
+                    for path, content in {**baseline_files, **rendered_files}.items()
+                ],
+                require_module_contracts=False,
+            )
+            if route_auth_errors:
+                raise ValueError("; ".join(route_auth_errors))
         except (ValueError, PageSchemaValidationError) as exc:
             message = str(exc)
             if isinstance(exc, PageSchemaValidationError):

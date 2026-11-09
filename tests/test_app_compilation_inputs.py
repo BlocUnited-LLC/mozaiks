@@ -137,7 +137,7 @@ async def test_resolver_preserves_shared_app_bundle_archive_limit(saved, asset_c
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["owner", "registry", "app", "summary", "stale", "plan", "archive", "reference", "missing"])
+@pytest.mark.parametrize("kind", ["owner", "registry", "app", "build", "summary", "stale", "plan", "archive", "reference", "missing"])
 async def test_resolver_refuses_identity_and_authority_drift(saved, kind):
     store, _, bundle = saved
     overrides = {}
@@ -147,6 +147,8 @@ async def test_resolver_refuses_identity_and_authority_drift(saved, kind):
         overrides["build_registry_id"] = "foreign"
     elif kind == "app":
         overrides["app_id"] = "foreign"
+    elif kind == "build":
+        bundle.commit_metadata.metadata["build_id"] = "foreign"
     elif kind == "summary":
         store.records["design"].commit_metadata.metadata["summary_payload"]["data_contract"]["version"] = "tampered"
     elif kind == "stale":
@@ -217,6 +219,53 @@ async def test_factory_save_pins_used_design_instead_of_later_current(saved, mon
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("reference", ["design_docs_artifact", "design_docs_build_artifact"])
+async def test_factory_save_pins_data_reference_loaded_design(saved, monkeypatch, reference):
+    from factory_app.workflows.AppGenerator.tools import generate_and_download as download
+    from mozaiksai.core.workflow.context import variables
+    from mozaiksai.core.workflow.context.schema import ContextVariableDefinition
+    from mozaiksai.core.workflow.generator_support.design_access_policy import access_policy_sha256
+    from tests.test_context_data_reference_ordering import _Collection, _install_collection
+
+    store, context, parent = saved
+    design = store.records["design"]
+    payload = design.commit_metadata.metadata["summary_payload"]
+    payload["access_policy"] = {"roles": [], "grants": []}
+    payload["access_policy_review"] = {
+        "status": "not_required", "build_id": "genesis", "target_app_id": "target",
+        "policy_sha256": access_policy_sha256(payload["access_policy"]),
+    }
+    raw = _summary_bytes(payload)
+    design.files_manifest[0].sha256 = hashlib.sha256(raw).hexdigest()
+    design.files_manifest[0].size_bytes = len(raw)
+    row = design.model_dump(mode="json", by_alias=True)
+    collection = _Collection([row])
+    _install_collection(monkeypatch, collection)
+    path = Path(__file__).resolve().parents[1] / "factory_app/workflows/AppGenerator/context_variables.yaml"
+    definition = ContextVariableDefinition.model_validate(
+        yaml.safe_load(path.read_text(encoding="utf-8"))["definitions"][reference]
+    )
+    context.pop("design_docs_artifact")
+    context[reference] = await variables._load_data_reference_value(
+        reference, definition, default_database_name=None, app_id="mozaiks-factory", context=context,
+    )
+    assert collection.query["app_id"] == "target"
+    if reference == "design_docs_build_artifact":
+        assert collection.query["commit_metadata.metadata.summary_payload.access_policy_review.build_id"] == "genesis"
+    context["app_bundle_acceptance_status"] = "passed"
+    monkeypatch.setattr(import_module("mozaiksai.core.artifacts"), "resolve_latest_artifact_version_refs",
+                        AsyncMock(return_value={"design_docs": "later-design"}))
+    child = await download._register_app_bundle_artifact_version(
+        app_id="target", user_id="owner", workflow_name="AppGenerator", chat_id="chat", bundle_name="bundle",
+        zip_path=Path(parent.commit_metadata.metadata["artifact_path"]), context_variables=context, artifact_store=store,
+    )
+    assert child.canonical_inputs_version == {"design_docs": "design"}
+    assert child.commit_metadata.metadata["compilation_inputs"]["inputs"]["design_docs"] == {
+        "record_id": "design", "sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
+@pytest.mark.asyncio
 async def test_capture_uses_saved_subscription_id_and_rejects_contract_substitution(saved):
     from tests.appgenerator_subscription_fixture import subscription_contract
 
@@ -283,6 +332,172 @@ async def test_fresh_candidate_checks_receive_approved_inputs_without_old_eviden
     assert build.await_args.kwargs["context_variables"] == {"app_id": "target"}
 
 
+async def _settle_five_tasks(context, monkeypatch):
+    """Let the canonical batch owner create evidence; substitute only model execution."""
+    from mozaiksai.core.adapters.ag2_task_batch_runner import AG2TaskBatchRunnerResult
+    from mozaiksai.core.ports.orchestration import RunStatus
+    from mozaiksai.core.workflow import task_batches as batches
+
+    tasks = [
+        {"task_id": f"task-{index}", "task_type": "business_services", "initial_agent": "EvidenceAgent",
+         "initial_message": "Write the owned fixture file", "owned_paths": [f"modules/records/backend/part{index}.py"],
+         "depends_on": [f"task-{index - 1}"] if index else []}
+        for index in range(5)
+    ]
+    context["app_build_plan"]["build_tasks"] = deepcopy(tasks)
+    context["app_task_batch_items"] = deepcopy(tasks)
+    root = Path(__file__).resolve().parents[1]
+    config = batches.parse_task_batches_config(yaml.safe_load(
+        (root / "factory_app/workflows/AppGenerator/extended_orchestration/task_batches.yaml").read_text(encoding="utf-8"),
+    ))
+    calls, checkpoints = [], []
+
+    async def run(self, request):
+        calls.append(request.task_id)
+        task = request.context_variables["current_task"]
+        return AG2TaskBatchRunnerResult(status=RunStatus.COMPLETED, output={
+            "task_id": request.task_id,
+            "code_files": [{"filename": path, "content": "# café — 星\n"} for path in task["owned_paths"]],
+        })
+
+    async def checkpoint(updates):
+        checkpoints.append(deepcopy(updates))
+
+    monkeypatch.setattr(batches.AG2TaskBatchRunner, "run", run)
+    await batches.execute_task_batches_for_trigger(
+        workflow_name="CompilationEvidenceTest", trigger_agent="AppPlanAgent", batches_config=config,
+        agents={"EvidenceAgent": object()}, context_variables=context, fresh_agents_per_task=False,
+        checkpoint=checkpoint, parent_channel_id="evidence-channel",
+    )
+    assert calls == [task["task_id"] for task in tasks]
+    assert context["app_task_batch_status"] == "completed"
+    assert checkpoints[-1]["app_task_batch_results"] == context["app_task_batch_results"]
+    return {path: "# café — 星\n" for task in tasks for path in task["owned_paths"]}
+
+
+@pytest.mark.asyncio
+async def test_compilation_roundtrip_preserves_five_settled_tasks_and_non_ascii_digest(saved, monkeypatch):
+    from factory_app.workflows.AppGenerator.tools.task_integrity import planned_artifact_diagnostics
+
+    store, context, bundle = saved
+    files = {**await _settle_five_tasks(context, monkeypatch), "app.json": "{}"}
+    original = deepcopy(context["app_task_batch_results"])
+    bundle.commit_metadata.metadata["compilation_inputs"] = await capture_app_compilation_inputs(
+        context, owner_user_id="owner", archive_sha256=bundle.files_manifest[0].sha256, artifact_store=store,
+    )
+    approved = await resolve(saved)
+    projected = approved.context_for("target")
+    assert projected["app_task_batch_results"] == original
+    assert projected["app_task_batch_items"] == context["app_task_batch_items"]
+    assert planned_artifact_diagnostics(projected, files) == []
+    context["app_task_batch_results"]["task-0"]["code_files"][0]["content"] = "later mutable session edit"
+    assert approved.context_for("target")["app_task_batch_results"] == original
+    projected["app_task_batch_results"]["task-0"]["code_files"][0]["content"] = "caller edit"
+    assert approved.context_for("target")["app_task_batch_results"] == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["capture", "resolve"])
+@pytest.mark.parametrize("damage", [
+    "missing", "meta", "version", "status", "failed", "pending", "in_flight", "extra",
+    "completed", "count", "inventory", "plan", "output_digest", "task_id", "worker", "paths",
+])
+async def test_compilation_refuses_unsettled_or_mismatched_task_evidence(saved, monkeypatch, stage, damage):
+    from mozaiksai.core.validation import compilation_inputs as owner
+    from mozaiksai.core.workflow.task_batches import task_evidence_digest
+
+    store, context, bundle = saved
+    await _settle_five_tasks(context, monkeypatch)
+    if stage == "resolve":
+        snapshot = await capture_app_compilation_inputs(
+            context, owner_user_id="owner", archive_sha256=bundle.files_manifest[0].sha256, artifact_store=store,
+        )
+        bundle.commit_metadata.metadata["compilation_inputs"] = snapshot
+        target = snapshot["inputs"]
+    else:
+        target = context
+    results = target["app_task_batch_results"]
+    meta = results["_meta"]
+    if damage == "missing":
+        results.pop("task-0")
+    elif damage == "meta":
+        results["_meta"] = "invalid"
+    elif damage == "version":
+        meta["evidence_version"] = 0
+    elif damage == "status":
+        meta["status"] = "partial"
+    elif damage in {"failed", "pending", "in_flight"}:
+        meta[{"failed": "failed_tasks", "pending": "pending_tasks", "in_flight": "in_flight"}[damage]] = ["task-0"]
+    elif damage == "extra":
+        results["unplanned"] = deepcopy(results["task-0"])
+    elif damage == "completed":
+        meta["completed_tasks"].pop()
+    elif damage == "count":
+        meta["task_count"] = 4
+    elif damage == "inventory":
+        meta["task_inventory_digest"] = "0" * 64
+    elif damage == "plan":
+        meta["input_digests"]["app_build_plan"] = "0" * 64
+    elif damage == "output_digest":
+        results["task-0"]["code_files"][0]["content"] = "changed"
+    else:
+        key = {"task_id": "_task_id", "worker": "_worker_agent", "paths": "_owned_paths"}[damage]
+        results["task-0"][key] = ["other.py"] if damage == "paths" else "other"
+        meta["accepted_output_digests"]["task-0"] = task_evidence_digest(results["task-0"])
+    if stage == "resolve":
+        # The outer checksum alone must not confer canonical task identity.
+        snapshot["inputs_sha256"] = owner._digest(target)
+        operation = resolve(saved)
+    else:
+        operation = capture_app_compilation_inputs(
+            target, owner_user_id="owner", archive_sha256=bundle.files_manifest[0].sha256, artifact_store=store,
+        )
+    with pytest.raises(ValueError):
+        await operation
+
+
+@pytest.mark.asyncio
+async def test_compilation_version_one_is_not_backfilled_from_current_session(saved):
+    _, _, bundle = saved
+    snapshot = bundle.commit_metadata.metadata["compilation_inputs"]
+    snapshot["version"] = 1
+    snapshot["inputs"].pop("app_task_batch_items")
+    snapshot["inputs"].pop("app_task_batch_results")
+    before = deepcopy(snapshot)
+    with pytest.raises(ValueError, match="version 1.*new Factory build"):
+        await resolve(saved)
+    assert snapshot == before
+
+
+@pytest.mark.asyncio
+async def test_compilation_input_size_boundary_is_identical_at_capture_and_resolve(saved):
+    from mozaiksai.core.validation.compilation_inputs import _MAX_COMPILATION_INPUT_BYTES
+
+    store, context, bundle = saved
+    assert _MAX_COMPILATION_INPUT_BYTES == 8 * 1024 * 1024
+    context["app_build_plan"]["description"] = ""
+    snapshot = await capture_app_compilation_inputs(
+        context, owner_user_id="owner", archive_sha256=bundle.files_manifest[0].sha256, artifact_store=store,
+    )
+    context["app_build_plan"]["description"] = "x" * (
+        _MAX_COMPILATION_INPUT_BYTES - len(_summary_bytes(snapshot["inputs"]))
+    )
+    snapshot = await capture_app_compilation_inputs(
+        context, owner_user_id="owner", archive_sha256=bundle.files_manifest[0].sha256, artifact_store=store,
+    )
+    assert len(_summary_bytes(snapshot["inputs"])) == _MAX_COMPILATION_INPUT_BYTES
+    bundle.commit_metadata.metadata["compilation_inputs"] = snapshot
+    assert (await resolve(saved)).context_for("target")["app_build_plan"] == context["app_build_plan"]
+    context["app_build_plan"]["description"] += "x"
+    with pytest.raises(ValueError, match="8 MiB"):
+        await capture_app_compilation_inputs(
+            context, owner_user_id="owner", archive_sha256=bundle.files_manifest[0].sha256, artifact_store=store,
+        )
+    snapshot["inputs"]["app_build_plan"]["description"] += "x"
+    with pytest.raises(ValueError, match="8 MiB"):
+        await resolve(saved)
+
+
 @pytest.mark.asyncio
 async def test_public_facade_rejects_candidate_supplied_authority_and_selection(saved):
     for authority in ({"app_build_plan": {}}, await resolve(saved)):
@@ -318,6 +533,8 @@ async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_
         "data_contract": payload["data_contract"], "design_surface_map": None,
         "design_docs_artifact": design.model_dump(mode="json", by_alias=True),
     }
+    # This fixture assembles deterministic templates without model task execution.
+    approved_context["app_build_plan"]["build_tasks"] = []
     path = tmp_path / "bundle.zip"
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, content in files.items():

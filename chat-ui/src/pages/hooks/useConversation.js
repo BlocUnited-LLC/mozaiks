@@ -28,6 +28,7 @@ const normalizeSnapshotMessage = (msg, index) => {
           display: toolCallMeta.display || 'inline',
           workflow_name: msg.workflow_name || toolCallMeta.workflow_name,
           component_type: toolCallMeta.component_type || toolCallMeta.tool_name,
+          response_available: toolCallMeta.response_available,
         }
       : null;
 

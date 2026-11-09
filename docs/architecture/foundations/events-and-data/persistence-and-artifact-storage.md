@@ -65,6 +65,17 @@ Current implemented workflow-run persistence contract:
   - `last_artifact`
   - `pending_input_request`
   - `tool_calls`
+- One-way artifact tools may call `emit_ui_surface(..., require_persistence=True)`
+  to require a confirmed save in `workflow_ui_state.last_artifact`. Runtime-owned
+  invocation scope binds the app/chat write; only an acknowledged update with one
+  matching chat confirms success. Invocation authority is rechecked before and
+  after the write and before confirming or delivering the artifact. Revocation
+  cannot recall a write already issued, but prevents readiness/delivery.
+  Missing chats are not upserted. Save failures
+  prevent delivery/readiness; a saved artifact can be restored after a failed or
+  disconnected live delivery. This confirms the latest-artifact projection,
+  not browser rendering, human approval, publication, or immutable history.
+  Default emission and interactive response behavior remain unchanged.
 - The transport persists response-bearing UI calls in `workflow_ui_state.tool_calls`
   before delivery, even before an assistant message exists. Their optional `message_index` links a
   committed transcript turn; it is not a prerequisite for storing the pending

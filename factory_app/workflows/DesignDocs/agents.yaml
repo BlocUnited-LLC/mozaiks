@@ -47,10 +47,26 @@ agents:
       Propose access_policy from the supplied concept_blueprint and concept_overview.
       These approved requirements constrain who may read or change records; a role
       name invented by a downstream implementation does not grant authority.
+      Preserve explicit named-role requirements in constraints, core_features, and
+      surface_candidate_hints. A required verified-claim role remains a role even
+      when it is the app's only role or is named member. Signing in and owning a
+      record do not establish that role. Do not reinterpret a required member role
+      as a synonym for a signed-in user or replace it with basic authentication.
+      When the concept restricts every action to that role, grant its canonical
+      reads and writes and each declared custom read or mutation explicitly.
+      Preserve requested page-role restrictions in experience_spec.pages[].roles,
+      referencing the exact access_policy role IDs, and explain them consistently
+      in frontend_markdown and backend_markdown. Null or [] means no page-role
+      gate. Never assert that login assigns a role or that every authenticated
+      user has a named role; only verified identity claims establish membership.
+      A custom_react_page supports one role through route meta.requiresRole;
+      do not propose multiple roles for that rendering surface.
       Use roles: [{role_id, label, description}] and grants:
       [{role_id, collection, actions}]. Use empty roles and grants when the app
-      needs no role-specific actions. Explain each role and its grants in the backend
-      design. Non-empty grants pause at an explicit owner review before generation.
+      needs only authentication and ownership, with no requested named-role
+      restriction. Explain each role and its grants in the backend
+      design. Non-empty grants or page-role restrictions pause at an explicit
+      owner review before generation.
 
       Every role_id is unique snake_case. Every grant names a declared role and
       the exact name of an app-owned module collection in data_contract. Actions
@@ -58,6 +74,12 @@ agents:
       explicit surface_map owned_mutations or custom_reads. If either canonical
       read is role-granted, cover both list_<collection> and get_<collection>
       across the declared roles; the collection name keeps its exact spelling.
+      Canonical writes use create_<entity>, update_<entity>, and delete_<entity>,
+      converting the declared entity to snake_case. For collection project_updates
+      with entity ProjectUpdate, the reads are list_project_updates and
+      get_project_updates; the writes are create_project_update,
+      update_project_update, and delete_project_update. Do not singularize a
+      collection read or use the collection name in place of the write entity.
       A custom read grant does not grant either canonical read. If a collection uses module_action writes and
       any role grant, cover all three canonical writes across the declared roles;
       omission cannot make an update or delete public. No wildcards, invented
@@ -88,6 +110,9 @@ agents:
       another user's identity into a persistence context.
       If design_docs_save_feedback requests access changes, revise this typed
       policy and its explanation together. Every changed grant requires review.
+      An unknown-action rejection lists the approved action ids for that
+      collection. Use those exact ids to repair the rejected grant; do not add
+      an alternate spelling to custom_reads or owned_mutations to evade it.
       An owner's Request changes response returns review_changes without consuming
       a structural repair attempt. Structural validation failures still consume
       the fixed repair budget; never reset or edit its protected counter.
@@ -413,6 +438,7 @@ agents:
       - Choose every page's required `ui_surface` explicitly using the existing declarative_page/custom_react_page vocabulary. Prefer declarative_page when shipped primitives and supported shell configuration faithfully express the approved composition, visual hierarchy, responsive behavior, and interaction. A real primitive gap in any of these may require custom_react_page; do not narrow away an approved requirement. Do not embed raw JSX, Tailwind, or untyped callback logic in the ui_schema.
       - For a required countdown with start/pause/resume/reset, canvas, or other local state and event handlers that shipped primitives cannot express, set `ui_surface: custom_react_page`. Preserve its behavior and state transitions in page intent; sections may be empty or valid primitive composition hints. A Metric displays a value; it does not run a timer. Never invent primitive config fields to imitate behavior. Downstream generation uses the existing `custom_route_bundle` contract (`ui/route_manifest.json` + `ui/pages/custom/*.jsx` + `ui/index.js`), with persisted actions still owned by declared modules.
       - When a route will include a resource id in the path or query string and access depends on ownership, membership, tenant/workspace scope, or invitation/access state, call out the need for a scoped route authorization check in the owning app module. Downstream AppGenerator should express that as `AppPageSchema.meta.routeAuth` for declarative pages or `custom_route_bundle.route_manifest[*].meta.routeAuth` for bounded custom routes, pointing to an app-owned `authorize_*_route` module action; do not describe shell-owned policy or frontend-only authorization.
+      - A route authorization action must declare an object output with a required, non-null boolean `allowed`: return `allowed: true` to admit the route or `allowed: false` with an optional `reason` to deny it. Do not substitute `authorized` or another field. Preserve normal backend ownership and permission enforcement; a route gate does not replace it.
       - Keep "settings" precise: personal preferences belong to `/api/me/preferences`; module configuration belongs to `contracts/settings.yaml` and app-owned module actions; resource settings belong to scoped resource routes such as `/projects/:projectId/settings`.
   - id: ui_schema_doc_format
     heading: '[UI SCHEMA DOCUMENT FORMAT]'
@@ -435,6 +461,7 @@ agents:
           {
             "name": "Dashboard",
             "route": "/dashboard",
+            "roles": null,
             "ui_surface": "declarative_page",
             "layout": "grid",
             "intent": "Landing page showing the most useful app summary and recent activity",
@@ -456,6 +483,7 @@ agents:
           {
             "name": "Projects",
             "route": "/projects",
+            "roles": null,
             "ui_surface": "declarative_page",
             "layout": "full-width",
             "intent": "Project management: list, create, edit, archive",

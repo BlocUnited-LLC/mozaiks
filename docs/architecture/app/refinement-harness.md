@@ -236,6 +236,14 @@ tools:
 
 Do not copy the default OSS tools file into an app workspace.
 
+For a scoped app-bundle edit that selects an existing `config/auth.yaml`,
+`get_artifact_workspace_scope` includes `selected_file_contracts` derived from
+the runtime `AppAuthContract` model. This supplies the role-entry shape even
+when the saved file has an empty roles list. Other selections receive no auth
+schema. The reference describes structure; it does not authorize grants, assign
+roles, add editable files, or replace candidate validation. Invalid fields such
+as a role entry's `grants` remain rejected; the canonical field is `permissions`.
+
 ---
 
 ## `refinement_harness/config/policies.yaml` — Optional

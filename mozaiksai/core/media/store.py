@@ -5,7 +5,7 @@ import hashlib
 import io
 import os
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, cast, runtime_checkable
@@ -27,6 +27,11 @@ from .types import (
 )
 
 logger = get_core_logger("media_store")
+
+_PUBLICATION_METADATA_KEYS = frozenset({
+    "asset_visibility", "promotion_status", "promoted_at", "promoted_by",
+    "last_promotion_target", "promoted_targets",
+})
 
 
 class MediaContentNotFoundError(Exception):
@@ -547,6 +552,8 @@ class MediaAssetStore:
 
         metadata = getattr(binary_result, "metadata", None)
         metadata = dict(metadata) if isinstance(metadata, dict) else {}
+        # Provider details cannot assert server-owned publication decisions.
+        metadata = {key: value for key, value in metadata.items() if key not in _PUBLICATION_METADATA_KEYS}
         media_type = _media_type_from_metadata(metadata)
         kind = media_kind_from_mime(media_type) or MediaKind.IMAGE
 
@@ -641,7 +648,15 @@ class MediaAssetStore:
         asset_id: str,
         promotion_target: MediaPromotionTarget | str,
         promoted_by: str | None = None,
+        expected_source_chat_id: str | None = None,
+        scope_guard: Callable[[], None] | None = None,
     ) -> GeneratedMediaAsset | None:
+        """Publish through an authorized caller, optionally bound to its source chat.
+
+        WebSocket actions supply the authenticated connection's chat ID. Trusted
+        server/operator callers remain responsible for their own authorization.
+        Model tools supply a guard that rechecks their invocation across awaits.
+        """
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             raise ValueError("app_id is required")
@@ -649,15 +664,23 @@ class MediaAssetStore:
         if not resolved_asset_id:
             raise ValueError("asset_id is required")
         target = promotion_target if isinstance(promotion_target, MediaPromotionTarget) else MediaPromotionTarget(str(promotion_target))
+        query = {"asset_id": resolved_asset_id, **build_app_scope_filter(resolved_app_id)}
+        if expected_source_chat_id is not None:
+            source_chat_id = expected_source_chat_id.strip()
+            if not source_chat_id:
+                raise ValueError("expected_source_chat_id must not be empty")
+            query["source_chat_id"] = source_chat_id
+        if scope_guard is not None:
+            scope_guard()
         coll = await self._coll()
+        if scope_guard is not None:
+            scope_guard()
         now = datetime.now(UTC)
-        await coll.update_one(
-            {
-                "asset_id": resolved_asset_id,
-                **build_app_scope_filter(resolved_app_id),
-            },
+        result = await coll.update_one(
+            query,
             {
                 "$set": {
+                    "asset_visibility": AssetVisibility.PUBLIC.value,
                     "metadata.promotion_status": "promoted",
                     "metadata.promoted_at": now,
                     "metadata.promoted_by": promoted_by,
@@ -666,7 +689,14 @@ class MediaAssetStore:
                 "$addToSet": {"metadata.promoted_targets": target.value},
             },
         )
-        return await self.get_asset(app_id=resolved_app_id, asset_id=resolved_asset_id)
+        if scope_guard is not None:
+            scope_guard()
+        if result.matched_count == 0:
+            return None
+        asset = await self.get_asset(app_id=resolved_app_id, asset_id=resolved_asset_id)
+        if scope_guard is not None:
+            scope_guard()
+        return asset
 
     async def update_asset_visibility(
         self,
@@ -679,7 +709,7 @@ class MediaAssetStore:
 
         Callers use ``AssetVisibility`` values:
 
-        - ``private`` — default; operator/admin only
+        - ``private`` — authenticated source-chat owner plus operators/admins
         - ``investor_preview`` — verified campaign backers + operators/admins
         - ``public`` — anyone with the URL (served via public media endpoint)
 

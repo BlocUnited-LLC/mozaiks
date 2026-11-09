@@ -171,6 +171,12 @@ Behavior expectations:
 - usage
 - support
 
+App Studio data loads belong to the mounted app selection. Changing apps,
+refreshing, or leaving a page aborts its pending registry and detail requests;
+an abandoned registry response cannot start another detail batch. Development
+StrictMode replay follows the same cancellation path. Explicit refresh still
+loads fresh data, and the runtime rate limits remain in effect.
+
 ## Non-Canonical Terms
 
 Replace these in customer-facing UX:

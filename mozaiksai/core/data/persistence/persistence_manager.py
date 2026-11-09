@@ -22,6 +22,7 @@ import asyncio
 import hashlib
 import json
 import os
+from collections.abc import Callable
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
@@ -1069,8 +1070,12 @@ class AG2PersistenceManager:
         chat_id: str,
         app_id: str,
         artifact: dict[str, Any],
-    ) -> None:
+        scope_guard: Callable[[], None] | None = None,
+    ) -> bool:
         """Persist latest artifact/tool panel context for multi-user resume.
+
+        Returns True only for an acknowledged write matching this app/chat.
+        Missing sessions and write failures return False; no session is upserted.
 
         Expected artifact dict keys (best-effort, flexible):
             tool_name: str
@@ -1104,16 +1109,25 @@ class AG2PersistenceManager:
                 "payload": artifact.get("payload"),
                 "updated_at": now.isoformat(),
             }
-            await coll.update_one(
+            if scope_guard is not None:
+                scope_guard()
+            result = await coll.update_one(
                 {"_id": chat_id, **build_app_scope_filter(resolved_app_id)},
                 {"$set": {"workflow_ui_state.last_artifact": doc, "last_updated_at": now}, "$inc": {"session_version": 1}},
             )
+            if scope_guard is not None:
+                scope_guard()
+            if result.acknowledged is not True or result.matched_count != 1:
+                logger.warning("[LAST_ARTIFACT] Write not confirmed chat_id=%s app_id=%s", chat_id, resolved_app_id)
+                return False
             logger.debug(
                 "[LAST_ARTIFACT] Updated",
                 extra={"chat_id": chat_id, "app_id": resolved_app_id, "tool_name": doc.get("tool_name")},
             )
+            return True
         except Exception as e:  # pragma: no cover
             logger.debug("[LAST_ARTIFACT] Update failed chat_id=%s: %s", chat_id, e)
+            return False
 
     async def get_session_version(self, chat_id: str, app_id: str | None = None) -> int | None:
         """Return the current session_version for a chat session, or None if not found.

@@ -139,6 +139,15 @@ models:
       route:
         type: str
         description: Primary route path for the page.
+      roles:
+        type: optional_list
+        items: str
+        description: >
+          Copy the reviewed ExperienceSpec page.roles exactly, including null or
+          an empty list for no page-role gate. Referenced roles must belong to the
+          reviewed access_policy; login and record ownership do not assign roles.
+          Declarative pages preserve this value as page.roles; a custom React page
+          projects its sole role to route meta.requiresRole.
       purpose:
         type: str
         description: What the page exists to let the user do.
