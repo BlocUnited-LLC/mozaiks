@@ -214,7 +214,8 @@ def app_bundle_workspace_path(path: str) -> str:
         pass
     try:
         match = validate_registered_path(path, None, PathScope.APP_BUNDLE_ROOT)
-        if match.family.kind == ArtifactKind.APP_ROOT_SUPPORT:
+        # The Refinement Engine reads an app's harness beside app/, not inside it.
+        if match.family.kind in {ArtifactKind.APP_ROOT_SUPPORT, ArtifactKind.APP_REFINEMENT_HARNESS}:
             return path
     except ValueError:
         pass
