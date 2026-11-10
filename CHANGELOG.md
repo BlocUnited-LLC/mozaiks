@@ -811,6 +811,18 @@ This project follows a practical pre-1.0 changelog format:
   and handler-grammar checks as a shipped pack. If the parent's selection
   cannot be resolved or verified, every candidate is refused with
   `PACK_OWNERSHIP_UNRESOLVED` instead of being admitted unchecked.
+
+### Fixed
+
+- Clarified public quickstart instructions for writable workspace paths,
+  quoted PowerShell API keys, a running MongoDB server, and diagnosing backend
+  startup failures without recreating the workspace. Local Setup now describes
+  the published package and how to distinguish it from an older editable install
+  with the same version, repair older empty secret contracts and missing app IDs,
+  restore a missing refinement regeneration profile, and configure local-only
+  Studio access.
+
+
 ## 0.2.0 - 2026-10-17
 
 ### Added
