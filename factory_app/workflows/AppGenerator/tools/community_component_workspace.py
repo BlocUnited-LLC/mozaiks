@@ -836,7 +836,7 @@ def _data_conflicts(document: Mapping[str, Any], pack_surfaces: dict[str, Any], 
                     aliases[str(collection["data_alias"])] = str(collection["mongo_collection"])
     for shared in document.get("shared_collections") or []:
         if isinstance(shared, dict) and shared.get("mongo_collection"):
-            owner = shared.get("owner_module")
+            owner = str(shared.get("owner_module") or "")
             surface = pack_surfaces.get(owner) or {}
             if surface.get("surface_kind") == "module" and any(
                 collection.get("mongo_collection") == shared["mongo_collection"]
@@ -1042,7 +1042,9 @@ def _updated_provenance(manifest: Mapping[str, Any], outcome: _Outcome, rendered
     return updated
 
 
-def _validate_provenance(manifest: dict[str, Any], roots: WorkspaceRoots, writes: Mapping[Path, str | None]) -> str:
+def _validate_provenance(
+    manifest: dict[str, Any], roots: WorkspaceRoots, writes: Mapping[Path, str | bytes | None],
+) -> str:
     text = json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     files_map = {_PROVENANCE_PATH: text}
     for root in KEYED_ROOTS:
