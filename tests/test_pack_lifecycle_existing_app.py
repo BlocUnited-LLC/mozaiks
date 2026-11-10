@@ -826,6 +826,8 @@ def test_a_git_revision_installs_the_exact_committed_bytes(tmp_path: Path) -> No
     sidecar = json.loads((roots.build_context_root / ".mozaiks" / "installed_component_sources.json").read_text(encoding="utf-8"))
     cached = Path(sidecar["sources"][0]["local_source_path"])
     assert cached.parent == roots.build_context_root / ".mozaiks/source-cache"
+    # Short enough for Windows path limits; the full digest stays in the pin.
+    assert cached.name == plan.to_digest.split(":", 1)[1][:16]
     assert compute_pack_digest(cached, PACK_ID) == plan.to_digest
     assert (cached / "templates/modules/stock_ledger/backend/service.py").read_bytes() == subprocess.check_output(
         ["git", "-C", str(repo), "show", f"{commit}:packs/stock_ledger/templates/modules/stock_ledger/backend/service.py"],
