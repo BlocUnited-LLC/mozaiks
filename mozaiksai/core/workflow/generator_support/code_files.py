@@ -465,7 +465,9 @@ def _schema_property(prop: dict[str, Any], *, closed_request: bool, leaf: bool) 
     allowed = {"name", "type", "description", "required", "enum_values", "items_type", "nullable"}
     if not leaf:
         allowed.update({"properties", "items_properties"})
-    unexpected = set(prop) - allowed
+    # The generator's typed output always carries these list fields; an empty list
+    # declares nothing (mozaiks#1005 run 8 resubmitted [] after being told to clear it).
+    unexpected = {key for key in set(prop) - allowed if prop[key] not in (None, [])}
     if unexpected:
         raise ValueError(f"Unsupported {'terminal ' if leaf else ''}schema property fields: {sorted(unexpected)!r}")
     kind = prop.get("type")
@@ -487,12 +489,12 @@ def _schema_property(prop: dict[str, Any], *, closed_request: bool, leaf: bool) 
     properties = prop.get("properties")
     items_properties = prop.get("items_properties")
     items_type = prop.get("items_type")
-    if kind != "object" and properties is not None:
+    if kind != "object" and properties:
         raise ValueError(
             f"type {kind!r} cannot declare properties; use type 'object' for nested fields "
             "(or type 'array' with items_type 'object' and items_properties for rows), or remove properties"
         )
-    if kind != "array" and (items_type is not None or items_properties is not None):
+    if kind != "array" and (items_type is not None or items_properties):
         raise ValueError(
             f"type {kind!r} cannot declare items_type or items_properties; set both to null, "
             "or use type 'array' for a list"
@@ -508,7 +510,7 @@ def _schema_property(prop: dict[str, Any], *, closed_request: bool, leaf: bool) 
                 raise ValueError("Object-array items require nonempty items_properties; declare exact row fields before page generation")
             rendered["items"] = _schema_members(items_properties, closed_request=closed_request, leaf=True)
         elif isinstance(items_type, str) and items_type in scalar_types:
-            if items_properties is not None:
+            if items_properties:
                 raise ValueError("Only object-array items may declare items_properties")
             rendered["items"] = {"type": items_type}
         else:
@@ -567,7 +569,7 @@ def _compile_schema_contract(schema: dict[str, Any], *, closed_request: bool) ->
             "name": "items", "type": "array", "description": schema.get("description"),
             "items_type": schema.get("items_type"), "items_properties": schema.get("items_properties"),
         }, closed_request=closed_request, leaf=False)
-    elif schema.get("items_type") is not None or schema.get("items_properties") is not None:
+    elif schema.get("items_type") is not None or schema.get("items_properties"):
         raise ValueError(
             f"a {schema['type']!r} schema cannot declare items_type or items_properties; set both to "
             "null, or use type 'array' for a list"

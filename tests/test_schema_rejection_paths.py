@@ -71,6 +71,29 @@ def test_self_repairing_agents_receive_their_rejection_as_the_newest_input(workf
     assert feedback in views[agent]["variables"]
 
 
+def _field(name, kind="string", **extra):
+    # The generator's typed output always carries every list field, empty when unused.
+    return {"name": name, "type": kind, "description": name, "required": True, "enum_values": [],
+            "items_type": None, "properties": [], "items_properties": [], "nullable": False, **extra}
+
+
+def test_the_run_8_request_schema_with_empty_list_fields_materializes():
+    """mozaiks#1005 run 8: create_tool was rejected twice for items_properties: [], which declares nothing."""
+    schema = {"type": "object", "description": "Request to create a new tool.",
+              "properties": [_field("name"), _field("category")], "items_type": None, "items_properties": []}
+    result = _materialize_schema_contract(schema, closed_request=True, where="tool_catalogue/create_tool.input_schema")
+    assert result["properties"] == {"name": {"type": "string"}, "category": {"type": "string"}}
+    assert result["required"] == ["name", "category"] and result["additionalProperties"] is False
+
+
+def test_nonempty_list_fields_on_the_wrong_type_stay_rejected():
+    with pytest.raises(ValueError, match=r"^property 'tool_id': type 'string' cannot declare properties"):
+        _materialize_schema_contract(_object(_field("tool_id", properties=[_field("x")])))
+    with pytest.raises(ValueError, match=r"^a 'object' schema cannot declare items_type or items_properties"):
+        _materialize_schema_contract({"type": "object", "properties": [_field("name")],
+                                      "items_type": None, "items_properties": [_field("x")]})
+
+
 def test_top_level_items_on_an_object_schema_name_the_owner_and_the_fix():
     """Run 6 (mozaiks#1005) lost module_contract_tool to this message with no location."""
     schema = {"type": "object", "items_type": "string", "properties": [{"name": "name", "type": "string"}]}
