@@ -751,16 +751,19 @@ operations.
 
 A `--git` source must name a full commit id. Its pack folder is exported blob
 by blob exactly as the repository stores it, so the digest is the same on
-every OS and checkout. The pin records `git+<origin>@<commit>#<folder>`, with
-any credentials in the origin URL removed.
+every OS and checkout. Links, submodules and names that are not portable are
+refused before anything is written: a backslash, a drive prefix, a Windows
+device name, a trailing dot or space, or two names that differ only in case.
+The pin records `git+<origin>@<commit>#<folder>`, with any credentials in the
+origin URL removed.
 
 The installer retains the verified context, contract and declared asset bytes
 under `build_context/.mozaiks/source-cache/<digest prefix>`, named by the first
-16 characters of the digest to stay within Windows path limits. The existing machine-local
-source sidecar points there so Factory can re-verify the portable pin after the
-temporary Git export is gone. Reinstalling the exact same Git source repairs a
-missing snapshot or source binding without changing app files or provenance.
-A changed snapshot or a different portable source is refused.
+16 characters of the digest to stay within Windows path limits. The existing
+machine-local source sidecar points there so Factory can re-verify the portable
+pin after the temporary Git export is gone. Reinstalling the exact same Git
+source repairs a missing snapshot or source binding without changing app files
+or provenance. A changed snapshot or a different portable source is refused.
 
 Mozaiks does not perform remote downloads, registry lookup, marketplace ranking,
 trust scoring, cryptographic signing, or automatic semver range upgrades for
