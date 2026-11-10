@@ -54,9 +54,22 @@ def _canonical_spelling(action: str, name: str, collection: dict[str, Any], cano
         candidate = canonical_write_action_id(collection["entity"], operation)
     else:
         return ""
-    if candidate == action or candidate not in canonical:
+    # Only a singular/plural slip is a misspelling. Live run 7 (mozaiks#1005) put
+    # create_borrow_request under 'tools'; calling that a misspelling of create_tool
+    # sent the repair the wrong way.
+    if candidate == action or candidate not in canonical or candidate.rstrip("s") != action.rstrip("s"):
         return ""
     return f"Use the canonical {candidate!r} instead of {action!r}. "
+
+
+def _other_collection_owner(action: str, name: str, canonical_owners: dict[tuple[str, str], str]) -> str:
+    """Name the collection whose canonical action this is, when it is not this one."""
+    owners = sorted({collection for (_, candidate), collection in canonical_owners.items()
+                     if candidate == action and collection != name})
+    if len(owners) != 1:
+        return ""
+    return (f"{action!r} is the canonical action of collection {owners[0]!r}; "
+            f"grant it in a grant whose collection is {owners[0]!r}, not {name!r}. ")
 
 
 def _custom_action_remedy(action: str, owner: str, collection: dict[str, Any]) -> str:
@@ -130,7 +143,8 @@ def validate_access_policy(
             if action not in allowed:
                 choices = sorted(candidate for candidate in allowed
                                  if canonical_owners.get((owner, candidate), name) == name)
-                remedy = (_canonical_spelling(action, name, collection, canonical | reads)
+                remedy = (_other_collection_owner(action, name, canonical_owners)
+                          or _canonical_spelling(action, name, collection, canonical | reads)
                           or _custom_action_remedy(action, owner, collection))
                 raise ValueError(
                     f"access_policy action {action!r} is not an approved action of {name!r}. {remedy}"

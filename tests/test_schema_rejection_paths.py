@@ -53,6 +53,24 @@ def test_null_type_and_non_boolean_nullable_stay_rejected_with_their_own_reasons
         _materialize_schema_contract(_object({"name": "flag", "type": "string", "nullable": "yes"}))
 
 
+@pytest.mark.parametrize("workflow,agent,feedback", [
+    ("DesignDocs", "DesignDocsAgent", "design_docs_save_feedback"),
+    ("AppGenerator", "AppPlanAgent", "app_plan_feedback"),
+])
+def test_self_repairing_agents_receive_their_rejection_as_the_newest_input(workflow, agent, feedback):
+    """Both self-looping repairs resubmitted identical output while the reason sat in the prompt."""
+    from pathlib import Path
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[1] / "factory_app/workflows" / workflow
+    middleware = yaml.safe_load((root / "middleware.yaml").read_text(encoding="utf-8"))
+    statusbar = {entry["agent"]: entry["variables"] for entry in middleware["statusbar_middleware"]}
+    assert feedback in statusbar[agent]
+    views = yaml.safe_load((root / "context_variables.yaml").read_text(encoding="utf-8"))["agents"]
+    assert feedback in views[agent]["variables"]
+
+
 def test_top_level_items_on_an_object_schema_name_the_owner_and_the_fix():
     """Run 6 (mozaiks#1005) lost module_contract_tool to this message with no location."""
     schema = {"type": "object", "items_type": "string", "properties": [{"name": "name", "type": "string"}]}

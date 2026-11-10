@@ -111,6 +111,21 @@ def test_misspelled_canonical_action_names_the_canonical_id_without_accepting_it
     assert f"Use the canonical {right!r} instead of {wrong!r}." in str(error.value)
 
 
+def test_another_collections_canonical_action_names_that_collection_not_a_misspelling():
+    """Live run 7 (mozaiks#1005) put create_borrow_request under 'tools' and was told to use create_tool."""
+    contract = _contract("app_wide")
+    notes = deepcopy(contract["surfaces"][0]["collections"][0])
+    notes.update(name="notes", entity="Note")
+    contract["surfaces"][0]["collections"].append(notes)
+    policy = _policy()
+    policy["grants"][0]["actions"].append("create_note")
+    with pytest.raises(ValueError, match="'create_note' is not an approved action of 'tasks'") as error:
+        validate_access_policy(policy, data_contract=contract, design_surface_map=_surface())
+    assert ("'create_note' is the canonical action of collection 'notes'; grant it in a grant whose "
+            "collection is 'notes', not 'tasks'.") in str(error.value)
+    assert "Use the canonical" not in str(error.value)
+
+
 def test_unrelated_unknown_action_gets_no_canonical_spelling():
     policy = _policy()
     policy["grants"][0]["actions"].append("archive_everything")
