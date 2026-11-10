@@ -117,6 +117,14 @@ def test_unrelated_unknown_action_gets_no_canonical_spelling():
     with pytest.raises(ValueError, match="'archive_everything' is not an approved action") as error:
         validate_access_policy(policy, data_contract=_contract(), design_surface_map=_surface())
     assert "Use the canonical" not in str(error.value)
+    # Live run 4 granted an undeclared approval three times; the rejection says how to declare it.
+    surface_id = _surface()["surfaces"][0]["surface_id"]
+    assert (f"To grant 'archive_everything', declare it in surface_map surface {surface_id!r} "
+            "owned_mutations (custom_reads for a read) in this same bundle or grant the canonical "
+            "'update_task'.") in str(error.value)
+    surface = _surface()
+    surface["surfaces"][0]["owned_mutations"] = ["archive_everything"]
+    assert validate_access_policy(policy, data_contract=_contract(), design_surface_map=surface) == policy
 
 
 def test_read_pair_coverage_is_across_roles_without_giving_each_role_both():

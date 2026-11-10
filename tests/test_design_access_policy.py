@@ -161,14 +161,18 @@ def test_unknown_read_feedback_reaches_next_declared_prompt_without_authorizing(
     runner._middleware_functions = hooks
     runner._agent_name = "DesignDocsAgent"
     runner._base_system_message = _compose_prompt_sections(agent["prompt_sections"])
+    # The feedback is the repair turn's newest input (statusbar), not a prompt context value.
+    middleware = yaml.safe_load((workflow_dir / "middleware.yaml").read_text(encoding="utf-8"))
+    statusbar = {entry["agent"]: entry["variables"] for entry in middleware["statusbar_middleware"]}
+    assert statusbar["DesignDocsAgent"] == ["design_docs_save_feedback"]
     runner._context_bridge = context
     runner._context_exposures = []
-    runner._context_variables = variables
+    runner._context_variables = [key for key in variables if key not in statusbar["DesignDocsAgent"]]
     prompt = asyncio.run(runner._run_prompt_middleware(SimpleNamespace(variables={})))
-    # The repair turn leads with the rejection; the context data still carries it once.
+    # The system message leads with the rejection, once.
     lead, _, rest = prompt.partition("\n\n")
     assert lead.startswith("[REPAIR REQUIRED]\nYour previous design bundle was not saved. Reason:\n")
-    assert feedback in lead and rest.count(feedback) == 1
+    assert feedback in lead and feedback not in rest
     assert prompt.count("[REPAIR REQUIRED]") == 1
     assert "Approved actions: ['create_report', 'delete_report', 'get_reports', 'list_reports', " \
            "'summarize_reports', 'update_report']" in feedback

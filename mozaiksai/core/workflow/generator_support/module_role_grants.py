@@ -59,6 +59,14 @@ def _canonical_spelling(action: str, name: str, collection: dict[str, Any], cano
     return f"Use the canonical {candidate!r} instead of {action!r}. "
 
 
+def _custom_action_remedy(action: str, owner: str, collection: dict[str, Any]) -> str:
+    """Say how an undeclared domain action, such as an approval, becomes grantable."""
+    generic = (f" or grant the canonical {canonical_write_action_id(collection['entity'], 'update')!r}"
+               if collection_has_canonical_writes(collection) else "")
+    return (f"To grant {action!r}, declare it in surface_map surface {owner!r} owned_mutations "
+            f"(custom_reads for a read) in this same bundle{generic}. ")
+
+
 def validate_access_policy(
     raw: Any, *, data_contract: Any, design_surface_map: Any,
 ) -> dict[str, Any]:
@@ -122,9 +130,10 @@ def validate_access_policy(
             if action not in allowed:
                 choices = sorted(candidate for candidate in allowed
                                  if canonical_owners.get((owner, candidate), name) == name)
+                remedy = (_canonical_spelling(action, name, collection, canonical | reads)
+                          or _custom_action_remedy(action, owner, collection))
                 raise ValueError(
-                    f"access_policy action {action!r} is not an approved action of {name!r}. "
-                    f"{_canonical_spelling(action, name, collection, canonical | reads)}"
+                    f"access_policy action {action!r} is not an approved action of {name!r}. {remedy}"
                     f"Approved actions: {choices}. Canonical reads use the exact collection name; "
                     "canonical writes use the snake_case entity name."
                 )

@@ -11,3 +11,10 @@ prompt_middleware:
 - agent: DesignDocsAgent
   filename: ../_shared/ui_surface_context.py
   function: inject_ui_surface_context
+# The newest input on a repair turn is the save rejection, not the agent's own
+# rejected bundle. AG2 appends this fresh to each model request and never
+# records it in conversation history.
+statusbar_middleware:
+- agent: DesignDocsAgent
+  variables:
+  - design_docs_save_feedback
