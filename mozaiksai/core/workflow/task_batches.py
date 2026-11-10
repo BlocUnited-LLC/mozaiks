@@ -872,7 +872,15 @@ async def _execute_one_batch(
                     await persist()
             raise
         except Exception as exc:
-            if not isinstance(exc, _TaskRejected):
+            if isinstance(exc, _TaskRejected):
+                # Rejected output is evidence, not a crash, but it must reach the log:
+                # a live build lost two module contracts with no line saying why.
+                logger.warning(
+                    "TASK_OUTPUT_REJECTED: batch=%s task=%s chat=%s worker=%s attempts=%s: %s",
+                    batch.id, task_id, chat_id, exc.evidence.get("worker_agent"),
+                    exc.evidence.get("attempts"), exc.evidence.get("error"),
+                )
+            else:
                 logger.error(
                     "TASK_EXECUTION_FAILED: batch=%s task=%s chat=%s: %s",
                     batch.id, task_id, chat_id, exc, exc_info=exc,

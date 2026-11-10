@@ -444,7 +444,16 @@ def _schema_members(properties: Any, *, closed_request: bool, leaf: bool) -> dic
         name = prop.get("name")
         if not isinstance(name, str) or not name or name in rendered["properties"]:
             raise ValueError("Schema contract property names must be nonempty and unique")
-        rendered["properties"][name] = _schema_property(prop, closed_request=closed_request, leaf=leaf)
+        try:
+            rendered["properties"][name] = _schema_property(prop, closed_request=closed_request, leaf=leaf)
+        except ValueError as exc:
+            # A rejection without the field's path left the generator nothing to repair:
+            # a live module_contract task resubmitted the same schema until it failed.
+            text = str(exc)
+            if text.startswith("property '"):
+                inner, _, detail = text[len("property '"):].partition("': ")
+                raise ValueError(f"property '{name}.{inner}': {detail}") from exc
+            raise ValueError(f"property {name!r}: {text}") from exc
         if prop.get("required") is True:
             required.append(name)
     if required:
@@ -464,15 +473,25 @@ def _schema_property(prop: dict[str, Any], *, closed_request: bool, leaf: bool) 
     if not isinstance(kind, str) or kind not in scalar_types | {"array", "object"} or (leaf and kind == "object"):
         raise ValueError("Schema property requires a supported finite type; terminal members cannot contain objects")
     nullable = prop.get("nullable", False)
-    if type(nullable) is not bool or (nullable and (closed_request or kind == "null")):
-        raise ValueError("Nullable schema properties are supported only for non-null output types; closed requests require false")
+    if type(nullable) is not bool:
+        raise ValueError("nullable must be a boolean")
+    if nullable and closed_request:
+        raise ValueError(
+            "request schemas (input_schema) cannot be nullable; set nullable to false and use "
+            "required: false for a value the caller may omit"
+        )
+    if nullable and kind == "null":
+        raise ValueError("a 'null' type property cannot also be nullable; set nullable to false")
     if "required" in prop and type(prop["required"]) is not bool:
         raise ValueError("Schema property required must be a boolean")
     properties = prop.get("properties")
     items_properties = prop.get("items_properties")
     items_type = prop.get("items_type")
     if kind != "object" and properties is not None:
-        raise ValueError("Only object properties may declare properties")
+        raise ValueError(
+            f"type {kind!r} cannot declare properties; use type 'object' for nested fields "
+            "(or type 'array' with items_type 'object' and items_properties for rows), or remove properties"
+        )
     if kind != "array" and (items_type is not None or items_properties is not None):
         raise ValueError("Only array properties may declare items_type or items_properties")
     rendered: dict[str, Any] = {"type": kind}
@@ -569,26 +588,46 @@ def _materialize_module_contract_file_map(payload: dict[str, Any]) -> dict[str, 
                                 )
                             except ValueError as exc:
                                 schema_errors.append(f"{module_id}/{action.get('id', '<unnamed>')}.{schema_key}: {exc}")
-                if schema_errors:
-                    raise ValueError("Invalid module action schemas: " + "; ".join(schema_errors))
                 for capability in value.get("capabilities") or []:
                     if isinstance(capability.get("input_schema"), dict):
-                        capability["input_schema"] = _materialize_schema_contract(
-                            capability["input_schema"], closed_request=True,
-                        )
+                        try:
+                            capability["input_schema"] = _materialize_schema_contract(
+                                capability["input_schema"], closed_request=True,
+                            )
+                        except ValueError as exc:
+                            schema_errors.append(
+                                f"{module_id} capability {capability.get('capability_id', '<unnamed>')}"
+                                f".input_schema: {exc}"
+                            )
+                if schema_errors:
+                    raise ValueError("Invalid module action schemas: " + "; ".join(schema_errors))
             elif key == "events_yaml" and isinstance(value, dict):
+                event_errors: list[str] = []
                 for event in value.get("events") or []:
                     if isinstance(event.get("payload_schema"), dict):
-                        event["payload_schema"] = _materialize_schema_contract(event["payload_schema"])
+                        try:
+                            event["payload_schema"] = _materialize_schema_contract(event["payload_schema"])
+                        except ValueError as exc:
+                            event_errors.append(f"{module_id} event {event.get('type', '<unnamed>')}.payload_schema: {exc}")
+                if event_errors:
+                    raise ValueError("Invalid module event schemas: " + "; ".join(event_errors))
             elif key == "fixtures_yaml":
                 from .module_smoke_fixtures import parse_module_smoke_fixtures
 
                 value = parse_module_smoke_fixtures(value).model_dump(exclude_none=True)
             elif key == "policy_hooks_yaml" and isinstance(value, dict):
+                hook_errors: list[str] = []
                 for hook in value.get("hooks") or []:
                     for schema_key in ("input_schema", "output_schema"):
                         if isinstance(hook.get(schema_key), dict):
-                            hook[schema_key] = _materialize_schema_contract(hook[schema_key])
+                            try:
+                                hook[schema_key] = _materialize_schema_contract(hook[schema_key])
+                            except ValueError as exc:
+                                hook_errors.append(
+                                    f"{module_id} policy hook {hook.get('id', '<unnamed>')}.{schema_key}: {exc}"
+                                )
+                if hook_errors:
+                    raise ValueError("Invalid module policy hook schemas: " + "; ".join(hook_errors))
             elif key == "admin_yaml" and isinstance(value, dict):
                 # Admin panels share generated page sections and bind only to
                 # actions in the owning module's closed contract.
