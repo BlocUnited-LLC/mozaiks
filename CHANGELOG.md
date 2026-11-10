@@ -371,6 +371,14 @@ This project follows a practical pre-1.0 changelog format:
 
 - Prompt hooks receive the active task's values for context keys declared by the agent, so AppGenerator uses task-specific file ownership guidance without changing shared workflow state.
 
+- A generated app's refinement harness now reaches the Refinement Engine. Studio
+  restore, sandbox preview and app validation place `refinement_harness/` beside
+  `app/`, where it is read; before, it landed inside `app/` and the Factory
+  default silently applied instead.
+- Workspace `build_context/` is found when `mozaiks serve` or the Studio launcher
+  exports the app bundle root as `MOZAIKS_APP_WORKSPACE_PATH`; it was looked up
+  inside `app/`.
+
 - App Studio cancels abandoned data loads during navigation and development
   StrictMode replay, preventing duplicate detail requests while keeping refresh available.
 
