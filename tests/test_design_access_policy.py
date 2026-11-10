@@ -163,9 +163,45 @@ def test_unknown_read_feedback_reaches_next_declared_prompt_without_authorizing(
     runner._context_exposures = []
     runner._context_variables = variables
     prompt = asyncio.run(runner._run_prompt_middleware(SimpleNamespace(variables={})))
-    assert prompt.count(feedback) == 1
+    # The repair turn leads with the rejection; the context data still carries it once.
+    lead, _, rest = prompt.partition("\n\n")
+    assert lead.startswith("[REPAIR REQUIRED]\nYour previous design bundle was not saved. Reason:\n")
+    assert feedback in lead and rest.count(feedback) == 1
+    assert prompt.count("[REPAIR REQUIRED]") == 1
     assert "Approved actions: ['create_report', 'delete_report', 'get_reports', 'list_reports', " \
            "'summarize_reports', 'update_report']" in feedback
+
+
+@pytest.mark.parametrize("outcome,feedback,leads", [
+    ("revise", "access_policy for 'notes' omits canonical write grants ['delete_note']", True),
+    ("review_changes", "Owner asked to restrict deletes to coordinators", True),
+    ("saved", "stale reason from an earlier attempt", False),
+    ("blocked", "no bound target app", False),
+    ("revise", "", False),
+])
+def test_repair_turn_leads_with_the_save_rejection_only_when_routed_back(outcome, feedback, leads):
+    from factory_app.workflows.DesignDocs.tools.hook_save_feedback_directive import (
+        inject_save_feedback_directive,
+    )
+
+    class Agent:
+        name = "DesignDocsAgent"
+
+        def __init__(self):
+            self.context_variables = {"design_docs_save_outcome": outcome, "design_docs_save_feedback": feedback}
+            self.system_message = "[ROLE]\nDesign the app."
+
+        def update_system_message(self, message):
+            self.system_message = message
+
+    agent = Agent()
+    inject_save_feedback_directive(agent, [])
+    assert agent.system_message.startswith("[REPAIR REQUIRED]") is leads
+    assert agent.system_message.endswith("[ROLE]\nDesign the app.")
+    if leads:
+        assert feedback in agent.system_message
+        inject_save_feedback_directive(agent, [])
+        assert agent.system_message.count("[REPAIR REQUIRED]") == 1
 
 
 def test_owner_approval_persists_exact_policy_and_projects_from_summary(monkeypatch, persistence):

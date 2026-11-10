@@ -385,6 +385,8 @@ This project follows a practical pre-1.0 changelog format:
   design prompt and the rejection message now say to give those actions to the
   role that administers the records, such as an admin or approver. Before, the
   design step repeated the same omission until its repair attempts ran out.
+  When a design save is refused, the retry now opens with the exact reason,
+  instead of leaving it as one value at the end of a long prompt.
 - App Studio cancels abandoned data loads during navigation and development
   StrictMode replay, preventing duplicate detail requests while keeping refresh available.
 
