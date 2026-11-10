@@ -184,8 +184,9 @@ def run(args: Any) -> int:
         PackSourceError,
         InstalledComponentStateError,
     ) as exc:
+        error = "\n".join([str(exc), *getattr(exc, "__notes__", [])])
         if getattr(args, "json", False):
-            print(json.dumps({"status": "invalid", "error": str(exc)}, indent=2))
+            print(json.dumps({"status": "invalid", "error": error}, indent=2))
         else:
-            print(f"Error: {exc}")
+            print(f"Error: {error}")
         return EXIT_INVALID
