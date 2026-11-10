@@ -1269,7 +1269,11 @@ def _source_binding_writes(
                 f"Pack '{rendered.pack_id}' source does not match the installed pin; use the upgrade plan."
             )
         context = _read_pack_context(candidate.pack_dir, rendered.pack_id)
-        cache = _destination(root, f".mozaiks/source-cache/{rendered.entry['digest'].split(':', 1)[1]}")
+        # A short digest prefix names the snapshot: the full 64-character digest pushed
+        # cached template paths past Windows' 260-character limit in ordinary workspaces.
+        # The pin keeps the full digest, the cached bytes are re-verified against it, and
+        # a changed snapshot is refused below.
+        cache = _destination(root, f".mozaiks/source-cache/{rendered.entry['digest'].split(':', 1)[1][:16]}")
         expected = {
             _destination(cache, path.relative_to(candidate.pack_dir).as_posix()): path.read_bytes()
             for path in _safe_asset_files(candidate.pack_dir, context)

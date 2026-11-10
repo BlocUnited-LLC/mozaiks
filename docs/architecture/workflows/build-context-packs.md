@@ -755,7 +755,8 @@ every OS and checkout. The pin records `git+<origin>@<commit>#<folder>`, with
 any credentials in the origin URL removed.
 
 The installer retains the verified context, contract and declared asset bytes
-under `build_context/.mozaiks/source-cache/<digest>`. The existing machine-local
+under `build_context/.mozaiks/source-cache/<digest prefix>`, named by the first
+16 characters of the digest to stay within Windows path limits. The existing machine-local
 source sidecar points there so Factory can re-verify the portable pin after the
 temporary Git export is gone. Reinstalling the exact same Git source repairs a
 missing snapshot or source binding without changing app files or provenance.
