@@ -301,11 +301,10 @@ virtual environment with `source .venv/bin/activate`, copy the env file with
 `cp .env.example .env`, and open Studio with
 `python -m mozaiks studio --dir . --open`.
 
-Until Mozaiks is published on PyPI, the printed step
-`python -m pip install -r requirements.txt` fails, because the generated
-`requirements.txt` pins `mozaiks==0.2.0`. Install Mozaiks into the workspace's
-virtual environment from your checkout first
-(`python -m pip install -e <path-to-mozaiks>`); pip then treats that pin as
+The generated `requirements.txt` pins `mozaiks==0.2.0`; install it normally
+with `python -m pip install -r requirements.txt`. When developing against a
+Mozaiks checkout, install that checkout into the workspace environment first
+with `python -m pip install -e <path-to-mozaiks>`; pip then treats the pin as
 already satisfied.
 
 The `full` preset includes the admin portal, so `init` also asks for an admin
