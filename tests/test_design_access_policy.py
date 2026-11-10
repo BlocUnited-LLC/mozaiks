@@ -94,6 +94,9 @@ def test_design_read_guidance_keeps_explicit_policy_and_canonical_wire_contract(
     assert "cover both list_<collection> and get_<collection>" in policy
     assert "A custom read grant does not grant either canonical read" in policy
     assert "cover all three canonical writes" in policy
+    # A design that keeps members from editing or deleting must still assign those writes.
+    assert "grant the update and delete writes to the role that administers the records" in policy
+    assert "omission cannot make an update or delete public" not in policy
     assert "never inherit read authority from write grants" in policy
     assert "Without explicit canonical read grants" in policy
     all_guidance = " ".join(sections.values())

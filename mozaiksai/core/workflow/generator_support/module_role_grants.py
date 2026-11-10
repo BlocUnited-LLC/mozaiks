@@ -127,6 +127,7 @@ def validate_access_policy(
         "even when its implementation changes several collections"
         for (owner, action), names in sorted(action_collections.items()) if len(names) > 1
     ]
+    write_gaps = False
     for name, actions in sorted(selected.items()):
         _, collection = collections[name]
         required = {
@@ -134,10 +135,21 @@ def validate_access_policy(
             for operation in CANONICAL_WRITE_OPERATIONS
         } if collection_has_canonical_writes(collection) else set()
         if missing := required - actions:
+            write_gaps = True
             errors.append(f"access_policy for {name!r} omits canonical write grants {sorted(missing)}")
         reads = {canonical_read_action_id(name, operation) for operation in ("get", "list")}
         if actions & reads and (missing_reads := reads - actions):
             errors.append(f"access_policy for {name!r} omits canonical read grants {sorted(missing_reads)}")
+    if write_gaps:
+        # The rejection must name the remedy: a design that keeps members from editing
+        # or deleting records repeated the same omission until its repairs ran out.
+        errors.append(
+            "every canonical create, update and delete of a collection in access_policy must be granted "
+            "to at least one role, because an ungranted canonical write would be open to every signed-in "
+            "user; when members should not change or delete these records directly, grant the missing "
+            "canonical writes to the role that administers them (for example an admin or approver role) "
+            "instead of omitting them"
+        )
     if errors:
         raise ValueError("; ".join(errors))
     return policy

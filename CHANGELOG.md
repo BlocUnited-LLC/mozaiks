@@ -379,6 +379,12 @@ This project follows a practical pre-1.0 changelog format:
   exports the app bundle root as `MOZAIKS_APP_WORKSPACE_PATH`; it was looked up
   inside `app/`.
 
+- App design no longer stalls when an app keeps members from editing or deleting
+  some records. Every generated create, update and delete still has to belong to
+  a role, because an unassigned one would be open to any signed-in user. The
+  design prompt and the rejection message now say to give those actions to the
+  role that administers the records, such as an admin or approver. Before, the
+  design step repeated the same omission until its repair attempts ran out.
 - App Studio cancels abandoned data loads during navigation and development
   StrictMode replay, preventing duplicate detail requests while keeping refresh available.
 

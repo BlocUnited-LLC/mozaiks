@@ -81,8 +81,12 @@ agents:
       update_project_update, and delete_project_update. Do not singularize a
       collection read or use the collection name in place of the write entity.
       A custom read grant does not grant either canonical read. If a collection uses module_action writes and
-      any role grant, cover all three canonical writes across the declared roles;
-      omission cannot make an update or delete public. No wildcards, invented
+      any role grant, cover all three canonical writes across the declared roles.
+      Omitting one is rejected, because an ungranted canonical write would
+      otherwise be open to every signed-in user. When the concept keeps members
+      from editing or deleting those records directly (for example, an approver
+      decides), grant the update and delete writes to the role that administers
+      the records instead of omitting them. No wildcards, invented
       permission strings, platform/hosted collections, or implicit role assignment.
       Code derives permission ids and renders auth grants after approval. The
       collection is the action's permission anchor, not a list of records it

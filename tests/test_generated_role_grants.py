@@ -228,6 +228,16 @@ def test_policy_cannot_grant_managed_facade_actions():
         validate_access_policy(_policy(), data_contract=_contract("app_wide"), design_surface_map=surface)
 
 
+# The rejection names the remedy once, so a repair converges instead of repeating the omission.
+WRITE_GRANT_REMEDY = (
+    "every canonical create, update and delete of a collection in access_policy must be granted "
+    "to at least one role, because an ungranted canonical write would be open to every signed-in "
+    "user; when members should not change or delete these records directly, grant the missing "
+    "canonical writes to the role that administers them (for example an admin or approver role) "
+    "instead of omitting them"
+)
+
+
 def test_incomplete_policy_reports_every_collection_for_one_repair():
     contract = _contract("app_wide")
     template = contract["surfaces"][0]["collections"][0]
@@ -244,6 +254,7 @@ def test_incomplete_policy_reports_every_collection_for_one_repair():
         "access_policy for 'archives' omits canonical write grants ['delete_archive', 'update_archive']",
         "access_policy for 'notes' omits canonical write grants ['delete_note', 'update_note']",
         "access_policy for 'tasks' omits canonical write grants ['delete_task', 'update_task']",
+        WRITE_GRANT_REMEDY,
     ])
     for ordered in (grants, list(reversed(grants))):
         with pytest.raises(ValueError) as error:
@@ -274,7 +285,8 @@ def test_cross_role_action_bindings_report_all_conflicts_without_selecting_autho
         "bind this module action to exactly one collection in every role's grants, "
         "even when its implementation changes several collections"
         for action in mutations
-    ] + ["access_policy for 'notes' omits canonical write grants ['create_note', 'delete_note', 'update_note']"])
+    ] + ["access_policy for 'notes' omits canonical write grants ['create_note', 'delete_note', 'update_note']",
+           WRITE_GRANT_REMEDY])
     for grants in (policy["grants"], list(reversed(policy["grants"]))):
         with pytest.raises(ValueError) as error:
             validate_access_policy({**policy, "grants": grants}, data_contract=contract, design_surface_map=surface)
