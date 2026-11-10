@@ -34,6 +34,9 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     release_pack_owned_paths,
     release_subscriptions_config,
 )
+from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
+    revision_baseline_required,
+)
 from factory_app.workflows.AppGenerator.tools.plan_page_data_sources import (
     drop_unapproved_page_data_sources,
 )
@@ -659,7 +662,7 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
     """
     repairs: list[str] = []
     tasks = plan.get("build_tasks") or []
-    if context.get("build_mode") == "revision" or context.get("brownfield_build_path"):
+    if revision_baseline_required(context) or context.get("brownfield_build_path"):
         return repairs
 
     # 1. The approved page inventory is authority.
@@ -2064,7 +2067,7 @@ def validate_plan_coverage(plan: dict[str, Any], context: Any) -> None:
             "Selected packs own these paths (template outputs and facade modules), so no task may own them: "
             + "; ".join(f"{task_id} owns {paths}" for task_id, paths in sorted(pack_owned.items()))
         )
-    if context.get("build_mode") == "revision" or context.get("brownfield_build_path"):
+    if revision_baseline_required(context) or context.get("brownfield_build_path"):
         return
 
     errors: list[str] = []

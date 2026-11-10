@@ -7,6 +7,9 @@ import json
 from collections.abc import Collection, Iterable
 from typing import Any, NoReturn
 
+from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
+    revision_baseline_required,
+)
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import planned_page_path, safe_relpath
 from mozaiksai.core.workflow.task_batches import (
@@ -269,10 +272,7 @@ def artifact_snapshot_digest(
     context: Any, files: dict[str, str], *, binary_assets: dict[str, bytes] | None = None,
 ) -> str:
     """Bind acceptance to its approved inputs and the exact exported contents."""
-    revision = (
-        _get(context, "build_mode") == "revision"
-        and _get(context, "workflow_sequence") not in {"conceptual_replan", "full_rebuild"}
-    )
+    revision = revision_baseline_required(context)
     snapshot = {
         "plan": _get(context, "app_build_plan"),
         "tasks": _get(context, "app_task_batch_items"),
@@ -284,6 +284,8 @@ def artifact_snapshot_digest(
         snapshot["binary_assets"] = {
             path: hashlib.sha256(content).hexdigest() for path, content in binary_assets.items()
         }
+    if _get(context, "revision_first_generation") is True:
+        snapshot["revision_first_generation"] = True
     if revision:
         snapshot["revision_source_artifact_version_id"] = (
             _get(context, "revision_source_artifact_version_id") or _get(context, "artifact_version_id")

@@ -551,6 +551,10 @@ This project follows a practical pre-1.0 changelog format:
   Reconnecting to a still-live review keeps its controls available. Failed
   response submissions no longer make an inline review appear completed.
 
+- Design revisions made before the first app bundle now generate the complete
+  approved app. Existing apps use a verified app-bundle baseline separately from
+  the design artifact, preserving revision ownership and build identity.
+
 - The shell no longer offers Profile, Sign in, or Sign out when nobody can sign
   in. A fresh Studio runs with authentication disabled, yet its account menu
   showed Profile, Sign Out, and Sign In, and the mobile bar showed Profile, all
