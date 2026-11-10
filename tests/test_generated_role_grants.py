@@ -92,9 +92,31 @@ def test_selecting_one_canonical_read_requires_the_other_without_inventing_grant
     policy["grants"][0]["actions"].append(read)
     before = deepcopy(policy)
     missing = "list_tasks" if read == "get_tasks" else "get_tasks"
-    with pytest.raises(ValueError, match=f"omits canonical read grants.*{missing}"):
+    with pytest.raises(ValueError, match=f"omits canonical read grants.*{missing}") as error:
         validate_access_policy(policy, data_contract=_contract(), design_surface_map=_surface())
     assert policy == before
+    assert (f"canonical get and list both use the collection name, so grant ['{missing}'] "
+            f"wherever ['{read}'] is granted") in str(error.value)
+    assert WRITE_GRANT_REMEDY not in str(error.value)
+
+
+@pytest.mark.parametrize("wrong,right", [
+    ("get_task", "get_tasks"), ("list_task", "list_tasks"), ("delete_tasks", "delete_task"),
+])
+def test_misspelled_canonical_action_names_the_canonical_id_without_accepting_it(wrong, right):
+    policy = _policy()
+    policy["grants"][0]["actions"].append(wrong)
+    with pytest.raises(ValueError, match=f"access_policy action '{wrong}' is not an approved action") as error:
+        validate_access_policy(policy, data_contract=_contract(), design_surface_map=_surface())
+    assert f"Use the canonical {right!r} instead of {wrong!r}." in str(error.value)
+
+
+def test_unrelated_unknown_action_gets_no_canonical_spelling():
+    policy = _policy()
+    policy["grants"][0]["actions"].append("archive_everything")
+    with pytest.raises(ValueError, match="'archive_everything' is not an approved action") as error:
+        validate_access_policy(policy, data_contract=_contract(), design_surface_map=_surface())
+    assert "Use the canonical" not in str(error.value)
 
 
 def test_read_pair_coverage_is_across_roles_without_giving_each_role_both():

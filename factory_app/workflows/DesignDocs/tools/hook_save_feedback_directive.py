@@ -24,6 +24,11 @@ from mozaiksai.core.workflow.context.frozen import detach
 logger = logging.getLogger(__name__)
 
 _HEADER = "[REPAIR REQUIRED]"
+_CLOSING = (
+    "The bundle above is the rejected one. Resubmitting it unchanged is rejected again "
+    "and uses up a repair attempt. Change what the reason names, keep the rest of the "
+    "design, and output the complete corrected bundle."
+)
 # The outcomes that route back to this agent for another bundle.
 _REPAIR_OUTCOMES = frozenset({"revise", "review_changes"})
 
@@ -47,14 +52,9 @@ def inject_save_feedback_directive(agent: Any, messages: list[dict[str, Any]]) -
     if outcome not in _REPAIR_OUTCOMES or not feedback:
         return
     current = getattr(agent, "system_message", None) or getattr(agent, "_system_message", "") or ""
-    if current.startswith(_HEADER):
-        return
-    body = (
-        "Your previous design bundle was not saved. Reason:\n"
-        f"{feedback}\n"
-        "The bundle above is the rejected one. Resubmitting it unchanged is rejected again "
-        "and uses up a repair attempt. Change what the reason names, keep the rest of the "
-        "design, and output the complete corrected bundle."
-    )
+    # A message that already leads with an earlier reason gets the newest one instead.
+    if current.startswith(_HEADER) and _CLOSING in current:
+        current = current.split(_CLOSING, 1)[1].lstrip("\n")
+    body = f"Your previous design bundle was not saved. Reason:\n{feedback}\n{_CLOSING}"
     agent.update_system_message(f"{_HEADER}\n{body}\n\n{current}")
     logger.info("[DesignDocsAgent] Led the repair turn with the save rejection (outcome=%s)", outcome)

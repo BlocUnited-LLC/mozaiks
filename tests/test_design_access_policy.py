@@ -136,6 +136,8 @@ def test_unknown_read_feedback_reaches_next_declared_prompt_without_authorizing(
     feedback = context.get("design_docs_save_feedback")
     assert result["error"] == feedback
     assert "action 'get_report' is not an approved action of 'reports'" in feedback
+    # The live repair dropped such a read instead of renaming it; the rejection names the fix.
+    assert "Use the canonical 'get_reports' instead of 'get_report'." in feedback
     assert bundle == original
     assert context.get("design_docs_save_attempts") == 1
     assert context.get("access_policy") is None
@@ -202,6 +204,12 @@ def test_repair_turn_leads_with_the_save_rejection_only_when_routed_back(outcome
         assert feedback in agent.system_message
         inject_save_feedback_directive(agent, [])
         assert agent.system_message.count("[REPAIR REQUIRED]") == 1
+        # A later rejection replaces the earlier reason; the turn never acts on a stale one.
+        agent.context_variables["design_docs_save_feedback"] = "omits canonical read grants ['get_tools']"
+        inject_save_feedback_directive(agent, [])
+        assert agent.system_message.count("[REPAIR REQUIRED]") == 1
+        assert "['get_tools']" in agent.system_message and feedback not in agent.system_message
+        assert agent.system_message.endswith("[ROLE]\nDesign the app.")
 
 
 def test_owner_approval_persists_exact_policy_and_projects_from_summary(monkeypatch, persistence):

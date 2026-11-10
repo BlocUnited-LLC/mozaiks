@@ -40,6 +40,25 @@ class DesignAccessPolicy(BaseModel):
     grants: list[DesignGrant]
 
 
+def _canonical_spelling(action: str, name: str, collection: dict[str, Any], canonical: set[str]) -> str:
+    """Name the canonical id an unknown action misspelled, without accepting the alias.
+
+    Reads take the collection name and writes the entity name, so a design writes
+    get_tool for the canonical get_tools. A live repair that was only told the
+    action was not approved dropped the read instead of renaming it.
+    """
+    operation = action.split("_", 1)[0]
+    if operation in ("get", "list"):
+        candidate = canonical_read_action_id(name, operation)
+    elif operation in CANONICAL_WRITE_OPERATIONS and collection_has_canonical_writes(collection):
+        candidate = canonical_write_action_id(collection["entity"], operation)
+    else:
+        return ""
+    if candidate == action or candidate not in canonical:
+        return ""
+    return f"Use the canonical {candidate!r} instead of {action!r}. "
+
+
 def validate_access_policy(
     raw: Any, *, data_contract: Any, design_surface_map: Any,
 ) -> dict[str, Any]:
@@ -105,6 +124,7 @@ def validate_access_policy(
                                  if canonical_owners.get((owner, candidate), name) == name)
                 raise ValueError(
                     f"access_policy action {action!r} is not an approved action of {name!r}. "
+                    f"{_canonical_spelling(action, name, collection, canonical | reads)}"
                     f"Approved actions: {choices}. Canonical reads use the exact collection name; "
                     "canonical writes use the snake_case entity name."
                 )
@@ -139,7 +159,11 @@ def validate_access_policy(
             errors.append(f"access_policy for {name!r} omits canonical write grants {sorted(missing)}")
         reads = {canonical_read_action_id(name, operation) for operation in ("get", "list")}
         if actions & reads and (missing_reads := reads - actions):
-            errors.append(f"access_policy for {name!r} omits canonical read grants {sorted(missing_reads)}")
+            errors.append(
+                f"access_policy for {name!r} omits canonical read grants {sorted(missing_reads)}; "
+                "canonical get and list both use the collection name, so grant "
+                f"{sorted(missing_reads)} wherever {sorted(actions & reads)} is granted"
+            )
     if write_gaps:
         # The rejection must name the remedy: a design that keeps members from editing
         # or deleting records repeated the same omission until its repairs ran out.
