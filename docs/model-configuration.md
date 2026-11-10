@@ -43,7 +43,7 @@ subscription plans does not make its provider API requests free.
 
 The environment selects the runtime provider and model with
 `LLM_PRIMARY_API_TYPE` and `LLM_PRIMARY_MODEL`. The latter takes precedence over
-the legacy `DEFAULT_LLM_MODEL` model override. App-specific model records in
+the `DEFAULT_LLM_MODEL` model override. App-specific model records in
 MongoDB can override the environment. The `llm.provider` and `llm.model` fields
 written to `app/config/ai.json` by `onboard` are display metadata, not runtime
 model selectors.
