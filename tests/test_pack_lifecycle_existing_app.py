@@ -31,6 +31,7 @@ from factory_app.workflows.AppGenerator.tools.community_component_lifecycle impo
 from factory_app.workflows.AppGenerator.tools.community_component_sources import (
     PackSource,
     PackSourceError,
+    export_git_pack,
     sanitized_remote,
 )
 from factory_app.workflows.AppGenerator.tools.community_component_workspace import (
@@ -970,6 +971,51 @@ def test_a_branch_name_is_not_an_immutable_revision() -> None:
 def test_remote_credentials_never_reach_a_locator() -> None:
     assert sanitized_remote("https://x-access-token:abc@github.com/org/repo.git") == "https://github.com/org/repo.git"
     assert sanitized_remote("git@github.com:org/repo.git") == "git@github.com:org/repo.git"
+
+
+def _commit_pack_files(repo: Path, files: dict[str, bytes]) -> str:
+    """Commit ``pack/<name>`` files as raw git objects, so names this OS cannot create still reach the tree."""
+
+    def run(*args: str, stdin: bytes = b"") -> str:
+        return subprocess.run(["git", "-C", str(repo), *args], input=stdin, check=True, capture_output=True).stdout.decode().strip()
+
+    rows = [f"100644 blob {run('hash-object', '-w', '--stdin', stdin=content)}\t{name}" for name, content in files.items()]
+    pack_tree = run("mktree", "-z", stdin="".join(f"{row}\0" for row in rows).encode())
+    root_tree = run("mktree", "-z", stdin=f"040000 tree {pack_tree}\tpack\0".encode())
+    return run("commit-tree", root_tree, "-m", "pack")
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
+@pytest.mark.parametrize(
+    "files",
+    [
+        {"evil\\..\\..\\escaped.txt": b"outside"},
+        {"C:escaped.txt": b"drive-relative"},
+        {"CON": b"device"},
+        {"notes.": b"trailing dot"},
+        {"Notes.txt": b"one", "notes.txt": b"two"},
+    ],
+    ids=["backslash-traversal", "drive-prefix", "device-name", "trailing-dot", "case-only-duplicate"],
+)
+def test_a_git_tree_with_names_windows_reads_differently_is_refused_before_any_write(
+    tmp_path: Path, files: dict[str, bytes],
+) -> None:
+    # Git on Linux stores these names as ordinary files. Written as-is on Windows they
+    # would leave the export folder, open a device, or silently overwrite each other.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    commit = _commit_pack_files(repo, files)
+    export_root = tmp_path / "export"
+    destination = export_root / "pack"
+    destination.mkdir(parents=True)
+
+    with pytest.raises(PackSourceError, match="not portable"):
+        export_git_pack(PackSource(git_repository=repo, git_revision=commit, git_path="pack"), destination)
+
+    assert list(export_root.rglob("*")) == [destination]
 
 
 # --------------------------------------------------------------------------------------

@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+from mozaiksai.core.semantics.portable_path import PortablePathError, detect_collisions
+
 _FULL_SHA_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 
@@ -99,7 +101,10 @@ def export_git_pack(source: PackSource, destination: Path) -> None:
     """Write the pack folder's blobs at the exact commit into ``destination``.
 
     Links and submodules are refused; every file is written with the bytes the
-    repository stores, without line-ending conversion.
+    repository stores, without line-ending conversion. A tree made on another OS
+    can hold names Windows reads differently: a backslash, a drive prefix, a
+    device name, a trailing dot, or two names that differ only in case. Every
+    name must be a portable relative path before anything is written.
     """
     assert source.git_repository is not None and source.git_revision and source.git_path
     repository = source.git_repository.resolve()
@@ -121,6 +126,10 @@ def export_git_pack(source: PackSource, destination: Path) -> None:
         entries.append((path, oid))
     if not entries:
         raise PackSourceError(f"Pack path {prefix!r} has no files at commit {revision}")
+    try:
+        detect_collisions(path[len(prefix) :].lstrip("/") for path, _oid in entries)
+    except PortablePathError as exc:
+        raise PackSourceError(f"Pack {prefix!r} at {revision} has a file name that is not portable: {exc}") from exc
     batch = _git(repository, "cat-file", "--batch", input_bytes="".join(f"{oid}\n" for _path, oid in entries).encode())
     cursor = 0
     for path, oid in entries:
