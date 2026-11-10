@@ -336,7 +336,10 @@ def materialize_module_read_actions(
         for action in expanded.get("actions") or []:
             for key in ("input_schema", "output_schema"):
                 if isinstance(action.get(key), dict):
-                    action[key] = _materialize_schema_contract(action[key], closed_request=key == "input_schema")
+                    action[key] = _materialize_schema_contract(
+                        action[key], closed_request=key == "input_schema",
+                        where=f"{match[1]}/{action.get('id', '<unnamed>')}.{key}",
+                    )
         if expanded != manifest:
             changed[path] = yaml.safe_dump(expanded, sort_keys=False, allow_unicode=True)
     return changed

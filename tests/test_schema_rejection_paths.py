@@ -53,6 +53,44 @@ def test_null_type_and_non_boolean_nullable_stay_rejected_with_their_own_reasons
         _materialize_schema_contract(_object({"name": "flag", "type": "string", "nullable": "yes"}))
 
 
+def test_top_level_items_on_an_object_schema_name_the_owner_and_the_fix():
+    """Run 6 (mozaiks#1005) lost module_contract_tool to this message with no location."""
+    schema = {"type": "object", "items_type": "string", "properties": [{"name": "name", "type": "string"}]}
+    with pytest.raises(ValueError) as error:
+        _materialize_schema_contract(schema, where="tool/list_tools.output_schema")
+    assert str(error.value) == (
+        "tool/list_tools.output_schema: a 'object' schema cannot declare items_type or items_properties; "
+        "set both to null, or use type 'array' for a list"
+    )
+
+
+def test_every_generator_schema_compile_names_its_owner():
+    """Every caller that compiles a generated schema passes where=, so no rejection is location-less."""
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "mozaiksai/core/workflow/generator_support"
+    unlabeled = []
+    for path in sorted(root.glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", None))
+                    == "_materialize_schema_contract" and not any(k.arg == "where" for k in node.keywords)):
+                unlabeled.append(f"{path.name}:{node.lineno}")
+    # The one exception compiles the platform's own canonical event schema for comparison.
+    assert unlabeled == [f"module_write_actions.py:{_canonical_event_compile_line(root)}"]
+
+
+def _canonical_event_compile_line(root):
+    import ast
+
+    tree = ast.parse((root / "module_write_actions.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "_materialize_schema_contract"
+                and isinstance(node.args[0], ast.Subscript) and ast.unparse(node.args[0]) == "expected['payload_schema']"):
+            return node.lineno
+    raise AssertionError("canonical event comparison compile not found")
+
+
 @pytest.mark.parametrize("key,bundle,location", [
     ("module_yaml", {"actions": [], "capabilities": [{
         "capability_id": "tools.create", "input_schema": _object({"name": "note", "type": "string", "nullable": True}),
