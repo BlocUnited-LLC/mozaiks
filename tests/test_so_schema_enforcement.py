@@ -104,58 +104,38 @@ def test_factory_retry_middleware_imported() -> None:
     )
 
 
-def test_factory_structured_output_agent_gets_retry_middleware() -> None:
-    """factory.py must append RetryMiddleware when beta_response_schema is not None.
+def test_factory_retry_middleware_is_not_gated_on_a_response_schema() -> None:
+    """Every agent gets provider retry, with or without a response schema.
 
-    We verify this by inspecting the AST for the conditional append that mirrors
-    the AG2StructuredAgentRunner pattern.
+    Behaviour is proven in tests/test_workflow_provider_retry.py; this guards
+    against the append moving back under a schema condition.
     """
     source = _read_factory_source()
     tree = ast.parse(source)
 
-    retry_conditional_found = False
-    for node in ast.walk(tree):
-        # Look for: if beta_response_schema is not None: middleware.append(RetryMiddleware(...))
-        if not isinstance(node, ast.If):
-            continue
-        # Check condition: beta_response_schema is not None
-        test = node.test
-        if not (
-            isinstance(test, ast.Compare)
-            and isinstance(test.left, ast.Name)
-            and test.left.id == "beta_response_schema"
-            and len(test.ops) == 1
-            and isinstance(test.ops[0], ast.IsNot)
-            and len(test.comparators) == 1
-            and isinstance(test.comparators[0], ast.Constant)
-            and test.comparators[0].value is None
-        ):
-            continue
-        # Check body contains middleware.append(RetryMiddleware(...))
-        for stmt in ast.walk(node):
-            if not isinstance(stmt, ast.Expr):
-                continue
-            call = stmt.value
-            if not isinstance(call, ast.Call):
-                continue
-            func = call.func
-            if (
-                isinstance(func, ast.Attribute)
-                and func.attr == "append"
-                and isinstance(func.value, ast.Name)
-                and func.value.id == "middleware"
-            ):
-                # Check arg is RetryMiddleware(...)
-                if call.args and isinstance(call.args[0], ast.Call):
-                    inner = call.args[0].func
-                    if isinstance(inner, ast.Name) and inner.id == "RetryMiddleware":
-                        retry_conditional_found = True
-                        break
+    def _appends_retry(node: ast.AST) -> bool:
+        return (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "append"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "middleware"
+            and bool(node.args)
+            and isinstance(node.args[0], ast.Call)
+            and isinstance(node.args[0].func, ast.Name)
+            and node.args[0].func.id == "RetryMiddleware"
+        )
 
-    assert retry_conditional_found, (
-        "factory.py must add RetryMiddleware to middleware when beta_response_schema is not None. "
-        "Pattern: `if beta_response_schema is not None: middleware.append(RetryMiddleware(...))`"
-    )
+    retry_appends = [node for node in ast.walk(tree) if _appends_retry(node)]
+    assert len(retry_appends) == 1
+    schema_gates = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.If) and "beta_response_schema" in ast.unparse(node.test)
+    ]
+    for gate in schema_gates:
+        assert not any(_appends_retry(node) for node in ast.walk(gate)), (
+            "RetryMiddleware must not depend on beta_response_schema"
+        )
 
 
 def test_factory_so_schema_error_is_logged_not_silently_swallowed() -> None:
