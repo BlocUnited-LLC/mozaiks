@@ -983,10 +983,9 @@ async def create_agents(
             )
 
         # RetryMiddleware covers provider/network exceptions raised during the
-        # AG2 LLM call. Schema correction is owned by AG2 AgentReply.content();
-        # this factory only supplies the validated response_schema.
-        if beta_response_schema is not None:
-            middleware.append(RetryMiddleware(max_retries=2))
+        # AG2 LLM call of every agent, with or without a response_schema.
+        # Schema correction is owned by AG2 AgentReply.content().
+        middleware.append(RetryMiddleware(max_retries=2))
 
         if statusbar_variables:
             from ..execution.middleware import build_statusbar_middleware

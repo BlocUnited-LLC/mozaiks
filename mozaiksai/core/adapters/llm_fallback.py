@@ -289,6 +289,10 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
     Explicit output/retry limits use the provider's native AG2 field names.
     Provider-entry values override shared defaults. Unsupported, ambiguous,
     or invalid limit declarations fail before constructing a provider client.
+
+    Provider calls do not stream unless ``streaming`` is set: no Mozaiks
+    consumer reads provider chunks, and AG2's ``RetryMiddleware`` cannot repeat
+    a call that already published one.
     """
     config_list = llm_config.get("config_list") or []
     if not config_list:
@@ -300,7 +304,7 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
     base_url = entry.get("base_url") or None
     temperature = llm_config.get("temperature")
     streaming_raw = llm_config.get("streaming")
-    streaming = True if streaming_raw is None else bool(streaming_raw)
+    streaming = False if streaming_raw is None else bool(streaming_raw)
     timeout = llm_config.get("timeout")
 
     if api_type == "google":

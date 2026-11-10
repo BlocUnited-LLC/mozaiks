@@ -369,6 +369,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- One dropped provider connection no longer ends a workflow stage. Every
+  workflow agent now retries transient provider failures, not only agents with
+  a response schema. Provider calls no longer stream by default (no Mozaiks
+  consumer reads provider chunks, and a call that has streamed cannot be
+  retried); set `streaming: true` in the LLM config to opt back in.
+
 - App Studio cancels abandoned data loads during navigation and development
   StrictMode replay, preventing duplicate detail requests while keeping refresh available.
 
