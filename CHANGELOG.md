@@ -74,6 +74,18 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Fresh OSS installs, generated workspaces, and refinement profiles default to
+  Google `gemini-3.8-flash`. Its Gemini API free tier requires a Google key and
+  remains subject to account quotas and Google's data terms. Explicit runtime
+  configuration and stored provider records remain authoritative.
+- OpenAI runtime configuration can select Responses with
+  `LLM_USE_RESPONSES_API` and reasoning with `LLM_REASONING_EFFORT`; native
+  reasoning settings now reach workflow and refinement model calls. The shared
+  output-token environment limit maps to the selected provider's API field.
+- Single-call capabilities use AG2's native client for Google and other
+  non-OpenAI providers. Responses calls preserve reasoning and output limits,
+  so product-owned defaults can select GPT-6 Luna independently of OSS.
+
 - Design permission repair identifies every conflicting action/collection
   binding together. Factory guidance keeps one permission anchor per action
   and describes cross-user review without bypassing record ownership.

@@ -412,7 +412,7 @@ def _requirements_txt() -> str:
     return f"""\
 # Mozaiks framework — version pin for standalone installs and deploys.
 # If you already have a compatible Mozaiks install available, pip will skip this line.
-mozaiks=={_current_mozaiks_version()}
+mozaiks[gemini]=={_current_mozaiks_version()}
 
 # App-specific dependencies — add packages your modules and integrations need.
 # Examples:
@@ -441,7 +441,14 @@ def _current_mozaiks_version() -> str:
 
 def _env_example() -> str:
     return """# Mozaiks runtime
-OPENAI_API_KEY=
+# Gemini free-tier quotas and data terms apply. Use non-sensitive examples.
+# Get a key: https://aistudio.google.com/api-keys
+GEMINI_API_KEY=
+LLM_PRIMARY_API_TYPE=google
+LLM_PRIMARY_MODEL=gemini-3.8-flash
+# Alternative: set LLM_PRIMARY_API_TYPE=openai, your chosen LLM_PRIMARY_MODEL,
+# and OPENAI_API_KEY. Refinement profiles are configured separately in
+# app/config/refinement_policy.yaml.
 MONGO_URI=mongodb://localhost:27017/mozaiks
 ENV=development
 AUTH_ENABLED=false
@@ -488,7 +495,14 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Set `MONGO_URI` before running Studio. Set `OPENAI_API_KEY` before running real workflows.
+Set `MONGO_URI` before running Studio. Set `GEMINI_API_KEY` before running real workflows.
+The default is Google `gemini-3.8-flash`, with free-tier quotas and data terms.
+Use non-sensitive examples with the free tier; Google may use its inputs and
+outputs to improve its products. See [Google's API terms](https://ai.google.dev/gemini-api/terms).
+
+To use another provider, set `LLM_PRIMARY_API_TYPE`, `LLM_PRIMARY_MODEL`, and its
+API key in `.env`, and install its optional SDK package if needed. Refinement
+models are selected separately in `app/config/refinement_policy.yaml`.
 
 ## Run Studio
 
@@ -1081,8 +1095,8 @@ def _secrets_yaml_placeholder() -> str:
 #
 # Example entries:
 # secrets:
-#   - env: OPENAI_API_KEY
-#     purpose: OpenAI API key for AI workflows
+#   - env: GEMINI_API_KEY
+#     purpose: Gemini API key for AI workflows
 #   - env: MONGO_URI
 #     required: true
 #     purpose: MongoDB connection URI
@@ -1226,7 +1240,7 @@ def _show_next_steps(target_dir: Path, preset: str, starter: bool) -> None:
     print("  2. python -m venv .venv")
     print("  3. .\\.venv\\Scripts\\Activate.ps1")
     print("  4. python -m pip install -r requirements.txt")
-    print("  5. Copy-Item .env.example .env, then set OPENAI_API_KEY and MONGO_URI")
+    print("  5. Copy-Item .env.example .env, then set GEMINI_API_KEY and MONGO_URI")
     print("  6. Open Studio: .\\scripts\\run-studio.ps1 -ForceStop")
     if starter:
         print("  7. Replace workflows/HelloWorkflow only after you confirm the real product behavior")

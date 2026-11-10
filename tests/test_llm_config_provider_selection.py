@@ -13,7 +13,7 @@ def isolated_config(monkeypatch):
         "LLM_PRIMARY_API_TYPE", "LLM_PRIMARY_MODEL", "LLM_PRIMARY_BASE_URL",
         "LLM_FALLBACK_MODELS", "LLM_FALLBACK_BASE_URLS", "LLM_FALLBACK_ENABLED",
         "OPENAI_MODEL_FALLBACK", "DEFAULT_LLM_MODEL", "LLM_MAX_TOKENS",
-        "LLM_STRUCTURED_OUTPUT_MODE",
+        "LLM_STRUCTURED_OUTPUT_MODE", "LLM_USE_RESPONSES_API", "LLM_REASONING_EFFORT",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("MOZAIKS_LLM_CONFIG_SKIP_MONGO", "true")
@@ -38,10 +38,13 @@ async def test_environment_preserves_selected_provider_model_and_key(provider, m
 
 
 @pytest.mark.asyncio
-async def test_historical_openai_default_and_order_remain(monkeypatch):
+async def test_clean_environment_selects_gemini_and_openai_requires_explicit_selection(monkeypatch):
     _, default = await llm_config.get_llm_config()
-    assert default["config_list"][0]["model"] == "gpt-5-nano"
+    assert default["config_list"] == [{
+        "model": "gemini-3.8-flash", "api_type": "google", "api_key": "test-only-google",
+    }]
     llm_config.clear_llm_caches()
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
     monkeypatch.setenv("DEFAULT_LLM_MODEL", "unused-default")
     monkeypatch.setenv("OPENAI_MODEL_FALLBACK", "first, second")
     _, config = await llm_config.get_llm_config()
@@ -50,7 +53,7 @@ async def test_historical_openai_default_and_order_remain(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("provider", ["anthropic", "google", "ollama"])
+@pytest.mark.parametrize("provider", ["anthropic", "ollama"])
 async def test_non_openai_requires_explicit_model(provider, monkeypatch):
     monkeypatch.setenv("LLM_PRIMARY_API_TYPE", provider)
     with pytest.raises(ValueError, match="LLM_PRIMARY_MODEL"):
@@ -217,6 +220,14 @@ def test_fallback_entries_preserve_selected_provider(monkeypatch):
     assert [entry["api_type"] for entry in config] == ["anthropic", "anthropic"]
 
 
+def test_fallback_builder_uses_google_and_provider_temperature_by_default(monkeypatch):
+    monkeypatch.delenv("LLM_TEMPERATURE", raising=False)
+    config = llm_fallback.build_fallback_llm_config()
+    actual = llm_fallback.llm_config_to_ag2_config(config)
+    assert actual.model == "gemini-3.8-flash"
+    assert actual.temperature is None
+
+
 @pytest.mark.asyncio
 async def test_structured_output_mode_env_override_and_cache_are_explicit(monkeypatch):
     _, native = await llm_config.get_llm_config()
@@ -246,3 +257,78 @@ async def test_invalid_environment_structured_output_mode_fails_closed(monkeypat
     monkeypatch.setenv("LLM_STRUCTURED_OUTPUT_MODE", "automatic")
     with pytest.raises(ValueError, match="structured_output_mode"):
         await llm_config.get_llm_config()
+
+
+@pytest.mark.asyncio
+async def test_luna_environment_reaches_responses_and_native_reasoning(monkeypatch):
+    from ag2.config import OpenAIResponsesConfig
+
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
+    monkeypatch.setenv("LLM_PRIMARY_MODEL", "gpt-6-luna")
+    monkeypatch.setenv("LLM_USE_RESPONSES_API", "true")
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "medium")
+    monkeypatch.setenv("LLM_MAX_TOKENS", "1024")
+    _, config = await llm_config.get_llm_config()
+    actual = llm_fallback.llm_config_to_ag2_config(config)
+    assert isinstance(actual, OpenAIResponsesConfig)
+    assert actual.model == "gpt-6-luna"
+    assert actual.reasoning == {"effort": "medium"}
+    assert actual.max_output_tokens == 1024
+    _, override = await llm_config.get_llm_config(extra_config={"reasoning": {"effort": "low"}})
+    assert llm_fallback.llm_config_to_ag2_config(override).reasoning == {"effort": "low"}
+
+
+@pytest.mark.asyncio
+async def test_default_google_uses_native_limit_and_ignores_openai_env(monkeypatch):
+    from ag2.config import GeminiConfig
+
+    monkeypatch.setenv("LLM_USE_RESPONSES_API", "true")
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "medium")
+    monkeypatch.setenv("LLM_MAX_TOKENS", "1024")
+    _, config = await llm_config.get_llm_config()
+    actual = llm_fallback.llm_config_to_ag2_config(config)
+    assert isinstance(actual, GeminiConfig)
+    assert actual.model == "gemini-3.8-flash"
+    assert actual.max_output_tokens == 1024
+    assert "reasoning" not in config["config_list"][0]
+    assert "use_responses_api" not in config["config_list"][0]
+
+
+@pytest.mark.asyncio
+async def test_stored_responses_settings_remain_authoritative_and_refresh(monkeypatch):
+    from ag2.config import OpenAIResponsesConfig
+
+    stored = stored_config(monkeypatch, [{
+        "api_type": "openai", "model": "gpt-6-luna", "use_responses_api": True,
+        "reasoning": {"effort": "low"}, "max_output_tokens": 256,
+    }])
+    monkeypatch.setenv("LLM_USE_RESPONSES_API", "false")
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "high")
+    monkeypatch.setattr(llm_config, "_CACHE_TTL", 0)
+    _, config = await llm_config.get_llm_config()
+    actual = llm_fallback.llm_config_to_ag2_config(config)
+    assert isinstance(actual, OpenAIResponsesConfig)
+    assert actual.reasoning == {"effort": "low"}
+    stored.providers[0]["reasoning"] = {"effort": "medium"}
+    _, updated = await llm_config.get_llm_config()
+    assert llm_fallback.llm_config_to_ag2_config(updated).reasoning == {"effort": "medium"}
+
+
+@pytest.mark.asyncio
+async def test_invalid_responses_environment_fails_closed(monkeypatch):
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
+    monkeypatch.setenv("LLM_USE_RESPONSES_API", "automatic")
+    with pytest.raises(ValueError, match="LLM_USE_RESPONSES_API"):
+        await llm_config.get_llm_config()
+
+
+@pytest.mark.asyncio
+async def test_stored_native_limit_overrides_environment_without_conflict(monkeypatch):
+    stored_config(monkeypatch, [{
+        "api_type": "openai", "model": "test-model", "max_completion_tokens": 256,
+    }])
+    monkeypatch.setenv("LLM_MAX_TOKENS", "1024")
+    _, config = await llm_config.get_llm_config()
+    actual = llm_fallback.llm_config_to_ag2_config(config)
+    assert actual.max_completion_tokens == 256
+    assert "max_tokens" not in config

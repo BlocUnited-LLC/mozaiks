@@ -232,3 +232,53 @@ async def test_disabled_sdk_retries_make_only_one_attempt(responses):
 
     assert len(requests) == 1
     assert requests[0][limit] == 128
+
+
+@pytest.mark.asyncio
+async def test_luna_reasoning_and_function_tools_reach_responses_http():
+    from ag2 import Agent
+
+    requests = []
+
+    def inspect_workspace() -> str:
+        """Return the current workspace status."""
+        return "ready"
+
+    def respond(request):
+        assert request.url.path == "/v1/responses"
+        requests.append(json.loads(request.content))
+        output = [{
+            "type": "function_call", "id": "fc_1", "call_id": "call_1",
+            "name": "inspect_workspace", "arguments": "{}", "status": "completed",
+        }] if len(requests) == 1 else [{
+            "id": "msg_1", "type": "message", "role": "assistant", "status": "completed",
+            "content": [{"type": "output_text", "text": "Ready.", "annotations": []}],
+        }]
+        return httpx.Response(200, json={
+            "id": f"resp_{len(requests)}", "object": "response", "created_at": 1,
+            "status": "completed", "model": "gpt-6-luna", "output": output,
+            "usage": {
+                "input_tokens": 10, "output_tokens": 5, "total_tokens": 15,
+                "input_tokens_details": {"cached_tokens": 0},
+                "output_tokens_details": {"reasoning_tokens": 0},
+            },
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        config = llm_config_to_ag2_config({
+            "config_list": [{
+                "api_type": "openai", "model": "gpt-6-luna", "api_key": "test",
+                "base_url": "https://provider.invalid/v1", "use_responses_api": True,
+                "reasoning": {"effort": "medium"},
+            }],
+            "streaming": False, "max_output_tokens": 128, "max_retries": 0,
+        }).copy(http_client=http)
+        async with Agent("refiner", config=config, tools=[inspect_workspace]).run("Inspect the workspace.") as run:
+            await run.result()
+
+    assert len(requests) == 2
+    assert all(body["reasoning"] == {"effort": "medium"} for body in requests)
+    assert all(body["max_output_tokens"] == 128 for body in requests)
+    assert requests[0]["tools"][0]["name"] == "inspect_workspace"
+    assert any(item.get("type") == "function_call_output" and item.get("output") == "ready" for item in requests[1]["input"])
+    assert all("temperature" not in body for body in requests)

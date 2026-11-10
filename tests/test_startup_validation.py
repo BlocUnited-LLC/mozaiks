@@ -30,6 +30,7 @@ def _clear_llm_provider_env(monkeypatch, tmp_path):
         "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY",
     ):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
     policy = tmp_path / "secrets.yaml"
     policy.write_text("version: 1\nprovider: {type: env}\nsecrets: []\n")
     monkeypatch.setenv("MOZAIKS_SECRETS_CONFIG_PATH", str(policy))
@@ -61,15 +62,23 @@ class _FailingPingClient:
 
 
 class TestCanResolveApiKey:
+    def test_default_provider_needs_only_gemini_key(self, monkeypatch):
+        monkeypatch.delenv("LLM_PRIMARY_API_TYPE")
+        monkeypatch.setenv("GEMINI_API_KEY", "test-google-key")
+        resolvable, key_names = _can_resolve_api_key()
+        assert resolvable is True
+        assert "GEMINI_API_KEY" in key_names
+        assert "OPENAI_API_KEY" not in key_names
+
     def test_returns_true_when_env_set(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test-1234")
-        monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
+        monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
         resolvable, _ = _can_resolve_api_key()
         assert resolvable is True
 
     def test_returns_false_when_env_empty(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "")
-        monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
+        monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
         with patch(
             "mozaiksai.core.secrets.resolve_secret", side_effect=SecretResolutionError("not found", env_name="TEST_KEY")
         ):
@@ -78,7 +87,7 @@ class TestCanResolveApiKey:
 
     def test_returns_false_when_env_missing(self, monkeypatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
+        monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
         with patch(
             "mozaiksai.core.secrets.resolve_secret", side_effect=SecretResolutionError("not found", env_name="TEST_KEY")
         ):
@@ -87,7 +96,7 @@ class TestCanResolveApiKey:
 
     def test_returns_true_when_key_vault_resolves(self, monkeypatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
+        monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
         # Patch the name in validation's namespace (imported by reference at module load)
         with patch(
             "mozaiksai.core.secrets.resolve_secret", return_value="sk-from-kv"
@@ -97,14 +106,14 @@ class TestCanResolveApiKey:
 
     def test_returns_false_when_key_vault_returns_empty(self, monkeypatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
+        monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
         with patch("mozaiksai.core.secrets.resolve_secret", return_value=""):
             resolvable, _ = _can_resolve_api_key()
             assert resolvable is False
 
     def test_env_whitespace_only_treated_as_absent(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "   ")
-        monkeypatch.delenv("LLM_PRIMARY_API_TYPE", raising=False)
+        monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
         with patch(
             "mozaiksai.core.secrets.resolve_secret", side_effect=SecretResolutionError("not found", env_name="TEST_KEY")
         ):

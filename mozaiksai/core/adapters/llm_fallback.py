@@ -12,22 +12,22 @@
 # Integration: workflow.llm_config builds the provider list; workflow agent
 # creation passes it to llm_config_to_ag2_config.
 #
-# Env vars (all optional; defaults keep existing behavior):
-#   LLM_PRIMARY_API_TYPE         provider type: openai | google | anthropic | ollama (openai)
-#   LLM_PRIMARY_MODEL            model id for primary provider (gpt-4o)
+# Env vars (all optional):
+#   LLM_PRIMARY_API_TYPE         provider type: openai | google | anthropic | ollama (google)
+#   LLM_PRIMARY_MODEL            model id for primary provider (gemini-3.8-flash)
 #   LLM_PRIMARY_API_KEY          api key for primary provider (falls back to provider-specific var)
 #   LLM_PRIMARY_BASE_URL         optional base URL override (Azure, Ollama host, etc.)
 #   LLM_FALLBACK_MODELS          comma-separated model ids, in priority order
 #   LLM_FALLBACK_API_KEYS        comma-separated api keys, parallel to models
 #   LLM_FALLBACK_BASE_URLS       comma-separated base URLs, parallel to models
-#   LLM_TEMPERATURE              shared temperature (0.0)
+#   LLM_TEMPERATURE              optional shared temperature (provider default)
 #   LLM_TIMEOUT_SECONDS          shared request timeout (120)
 #   LLM_FALLBACK_ENABLED         set to "false" to omit additional entries (true)
 #
 # Provider-specific API key env vars (resolved when LLM_PRIMARY_API_KEY is unset):
 #   GEMINI_API_KEY / GOOGLE_API_KEY   — used when LLM_PRIMARY_API_TYPE=google
 #   ANTHROPIC_API_KEY                 — used when LLM_PRIMARY_API_TYPE=anthropic
-#   OPENAI_API_KEY                    — used when LLM_PRIMARY_API_TYPE=openai (default)
+#   OPENAI_API_KEY                    — used when LLM_PRIMARY_API_TYPE=openai
 # ==============================================================================
 from __future__ import annotations
 
@@ -75,6 +75,10 @@ def _env_list(key: str) -> list[str]:
 # Fallback config builder
 # ---------------------------------------------------------------------------
 
+DEFAULT_LLM_API_TYPE = "google"
+DEFAULT_LLM_MODEL = "gemini-3.8-flash"
+DEFAULT_MODELS_BY_API_TYPE = {"google": DEFAULT_LLM_MODEL, "openai": "gpt-5-nano"}
+
 MODEL_API_KEY_ENV_NAMES: dict[str, tuple[str, ...]] = {
     "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY", "LLM_PRIMARY_API_KEY"),
     "anthropic": ("ANTHROPIC_API_KEY", "LLM_PRIMARY_API_KEY"),
@@ -94,17 +98,26 @@ def _optional_secret(env_name: str) -> str:
         return ""
 
 
-def resolve_model_api_key(api_type: str, explicit_key: str | None = None) -> str:
+def resolve_model_api_key(
+    api_type: str,
+    explicit_key: str | None = None,
+    *,
+    include_primary_key: bool = True,
+) -> str:
     """Resolve the selected provider's key through the app's secret policy.
 
     Explicit per-call keys take precedence. A missing optional reference permits
     the next supported handle; invalid policy and configured vault failures do
-    not silently fall through to a different credential. Ollama needs no key.
+    not silently fall through to a different credential. Explicit non-primary
+    provider calls exclude the primary provider's generic key handle. Ollama
+    needs no key.
     """
     if explicit_key:
         return explicit_key
     names = MODEL_API_KEY_ENV_NAMES.get(api_type, MODEL_API_KEY_ENV_NAMES["openai"])
     for env_name in names:
+        if env_name == "LLM_PRIMARY_API_KEY" and not include_primary_key:
+            continue
         value = _optional_secret(env_name)
         if value:
             return value
@@ -146,10 +159,15 @@ def build_fallback_config_list(
     fallback_enabled = _env("LLM_FALLBACK_ENABLED", "true").lower() != "false"
 
     # ---- Primary ----
-    resolved_api_type = (primary_api_type or _env("LLM_PRIMARY_API_TYPE", "openai")).lower()
+    resolved_api_type = (primary_api_type or _env("LLM_PRIMARY_API_TYPE", DEFAULT_LLM_API_TYPE)).lower()
     if resolved_api_type not in MODEL_API_KEY_ENV_NAMES:
         raise ValueError("Unsupported LLM provider api_type")
-    resolved_primary = primary_model or _env("LLM_PRIMARY_MODEL", "gpt-4o")
+    resolved_primary = (
+        primary_model or _env("LLM_PRIMARY_MODEL") or _env("DEFAULT_LLM_MODEL")
+        or DEFAULT_MODELS_BY_API_TYPE.get(resolved_api_type)
+    )
+    if not resolved_primary:
+        raise ValueError("LLM_PRIMARY_MODEL is required for the selected provider")
     resolved_api_key = resolve_model_api_key(resolved_api_type, primary_api_key or None)
     resolved_base_url = primary_base_url or _env("LLM_PRIMARY_BASE_URL") or None
 
@@ -221,10 +239,12 @@ def build_fallback_llm_config(
 
         llm_config = build_fallback_llm_config(
             primary_model="gpt-4o",
+            primary_api_type="openai",
             fallback_models=["gpt-4o-mini"],
         )
     """
-    resolved_temp = temperature if temperature is not None else float(_env("LLM_TEMPERATURE", "0.0"))
+    raw_temperature = _env("LLM_TEMPERATURE")
+    resolved_temp = temperature if temperature is not None else (float(raw_temperature) if raw_temperature else None)
     resolved_timeout = timeout if timeout is not None else int(_env("LLM_TIMEOUT_SECONDS", "120"))
 
     config: dict[str, Any] = {
@@ -339,22 +359,28 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
         # AG2 1.2.2 inherits the Files API rejection stub, which mypy treats as abstract.
         return OllamaConfig(**kwargs)  # type: ignore[abstract]
     # openai / azure / default
-    if api_type == "openai" and bool(llm_config.get("use_responses_api") or llm_config.get("responses_api")):
+    use_responses = llm_config.get(
+        "use_responses_api", llm_config.get("responses_api", entry.get("use_responses_api", entry.get("responses_api", False))),
+    )
+    if api_type == "openai" and use_responses:
         from ag2.config import OpenAIResponsesConfig
 
         response_kwargs: dict[str, Any] = {
             "model": model,
             "api_key": api_key,
             "base_url": base_url,
-            "temperature": temperature,
             "streaming": streaming,
             **_model_call_limits(llm_config, entry, ("max_output_tokens", "max_retries")),
         }
         if timeout is not None:
             response_kwargs["timeout"] = timeout
-        for key in ("max_tool_calls", "parallel_tool_calls", "store"):
+        if temperature is not None:
+            response_kwargs["temperature"] = temperature
+        for key in ("max_tool_calls", "parallel_tool_calls", "store", "reasoning"):
             if key in llm_config:
                 response_kwargs[key] = llm_config[key]
+            elif key in entry:
+                response_kwargs[key] = entry[key]
         return OpenAIResponsesConfig(**response_kwargs)
 
     from ag2.config import OpenAICompletionsConfig
@@ -368,6 +394,8 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
     }
     if timeout is not None:
         kwargs["timeout"] = timeout
+    if "reasoning_effort" in llm_config or "reasoning_effort" in entry:
+        kwargs["reasoning_effort"] = llm_config.get("reasoning_effort", entry.get("reasoning_effort"))
     return OpenAICompletionsConfig(**kwargs)
 
 
@@ -409,6 +437,9 @@ def get_healthy_config_list(
 
 
 __all__ = [
+    "DEFAULT_LLM_API_TYPE",
+    "DEFAULT_LLM_MODEL",
+    "DEFAULT_MODELS_BY_API_TYPE",
     "MODEL_API_KEY_ENV_NAMES",
     "resolve_model_api_key",
     "build_fallback_config_list",

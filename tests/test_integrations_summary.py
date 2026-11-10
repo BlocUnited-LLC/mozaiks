@@ -14,7 +14,8 @@ from mozaiksai.core.adapters.llm_fallback import MODEL_API_KEY_ENV_NAMES
 @pytest.fixture(autouse=True)
 def isolate_integration_secrets(monkeypatch, tmp_path):
     names = {name for handles in MODEL_API_KEY_ENV_NAMES.values() for name in handles}
-    names.update({"MONGO_URI", "MONGODB_URI", "MONGO_URL", "LLM_PRIMARY_API_TYPE"})
+    names.update({"MONGO_URI", "MONGODB_URI", "MONGO_URL", "LLM_PRIMARY_API_TYPE",
+                  "LLM_PRIMARY_MODEL", "DEFAULT_LLM_MODEL", "OPENAI_MODEL_FALLBACK", "LLM_FALLBACK_MODELS"})
     for name in tuple(os.environ):
         if name in names or name.endswith("_SECRET_NAME") or name.startswith("AZURE_KEY_VAULT_"):
             monkeypatch.delenv(name)
@@ -111,6 +112,21 @@ def _isolated_runtime_summary(monkeypatch):
     return module
 
 
+def test_model_summary_default_and_explicit_primary_match_runtime(monkeypatch):
+    module = _isolated_runtime_summary(monkeypatch)
+    monkeypatch.setenv("GEMINI_API_KEY", "test-google-key")
+    default = asyncio.run(module.build_integrations_summary())["integrations"]["llm"]
+    assert default["provider"] == "google"
+    assert default["primary_model"] == "gemini-3.8-flash"
+    assert default["configured"]
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
+    monkeypatch.setenv("LLM_PRIMARY_MODEL", "gpt-6-luna")
+    monkeypatch.setenv("DEFAULT_LLM_MODEL", "older-model")
+    selected = asyncio.run(module.build_integrations_summary())["integrations"]["llm"]
+    assert selected["provider"] == "openai"
+    assert selected["primary_model"] == "gpt-6-luna"
+
+
 @pytest.mark.parametrize("provider,handle", [
     ("openai", "OPENAI_API_KEY"), ("openai", "LLM_PRIMARY_API_KEY"),
     ("google", "GEMINI_API_KEY"), ("google", "GOOGLE_API_KEY"),
@@ -136,6 +152,7 @@ def test_vault_status_uses_policy_metadata_without_fetching_secrets(monkeypatch,
     from mozaiksai.core.secrets import app_secrets
 
     module = _isolated_runtime_summary(monkeypatch)
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
     isolate_integration_secrets.write_text(yaml.safe_dump({
         "version": 1,
         "provider": {"type": "azure_key_vault", "azure_key_vault": {"vault_name": "operator-vault"}},
@@ -166,6 +183,7 @@ def test_ollama_needs_no_key_and_retired_mongo_aliases_are_not_configuration(mon
 
 def test_invalid_primary_reference_does_not_fall_through_to_another_key(monkeypatch, isolate_integration_secrets):
     module = _isolated_runtime_summary(monkeypatch)
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
     isolate_integration_secrets.write_text(yaml.safe_dump({
         "version": 1, "secrets": [
             {"env": "LLM_PRIMARY_API_KEY", "azure_key_vault": {"secret_name": "model"}},
