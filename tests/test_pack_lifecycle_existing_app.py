@@ -9,6 +9,8 @@ app looks: its own formatting, comments and entries in every shared file.
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -170,6 +172,263 @@ def _install(tmp_path: Path, **kwargs):
     roots = _ordinary_app(tmp_path / "shop")
     apply_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots, **kwargs)
     return roots
+
+
+@pytest.mark.parametrize("row_key", ["materialized_owned_files", "materialized_workflow_files"])
+@pytest.mark.parametrize("bad_path", ["../../sentinel.txt", "/outside.txt", "C:/outside.txt", "..\\outside.txt"])
+def test_recorded_paths_are_confined_before_read_or_removal(tmp_path: Path, monkeypatch, row_key, bad_path) -> None:
+    roots = _install(tmp_path)
+    provenance = roots.app_root / ".mozaiks/pack_provenance.json"
+    document = json.loads(provenance.read_text(encoding="utf-8"))
+    document["packs"][0][row_key].append({
+        "path": bad_path, "owner": "templates", "sha256": hashlib.sha256(b"sentinel").hexdigest(),
+    })
+    provenance.write_text(json.dumps(document), encoding="utf-8")
+    sentinel = tmp_path / "sentinel.txt"
+    sentinel.write_bytes(b"sentinel")
+    before = _tree(tmp_path / "shop")
+    original_read = workspace_module._read_text
+
+    def confined_read(path):
+        assert path.resolve().is_relative_to(tmp_path / "shop"), "outside destination was read"
+        return original_read(path)
+
+    monkeypatch.setattr(workspace_module, "_read_text", confined_read)
+    with pytest.raises(CommunityComponentLifecycleError, match="Unsafe workspace path"):
+        apply_workspace_upgrade(source=PackSource(directory=_version_two(tmp_path)), roots=roots)
+    with pytest.raises(CommunityComponentLifecycleError, match="Unsafe workspace path"):
+        verify_installed_components(roots=roots)
+    assert _tree(tmp_path / "shop") == before
+    assert sentinel.read_bytes() == b"sentinel"
+
+
+def _directory_redirect(link: Path, target: Path) -> None:
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], check=True, capture_output=True)
+    else:
+        link.symlink_to(target, target_is_directory=True)
+
+
+@pytest.mark.parametrize("root_name, relative", [
+    ("app_root", "modules"), ("app_root", ".mozaiks"),
+    ("workflows_root", "StockReview"), ("build_context_root", ".mozaiks"),
+])
+def test_install_rejects_redirected_destinations(tmp_path: Path, root_name, relative) -> None:
+    roots = _ordinary_app(tmp_path / "shop")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "sentinel.txt").write_bytes(b"sentinel")
+    link = getattr(roots, root_name) / relative
+    _directory_redirect(link, outside)
+    before = _tree(outside)
+    try:
+        with pytest.raises(CommunityComponentLifecycleError, match="Unsafe workspace path"):
+            apply_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots)
+        assert _tree(outside) == before
+    finally:
+        if os.name == "nt":
+            link.rmdir()
+        else:
+            link.unlink()
+
+
+def test_explicit_root_redirect_is_not_resolved_away(tmp_path: Path) -> None:
+    roots = _ordinary_app(tmp_path / "shop")
+    link = tmp_path / "app-link"
+    _directory_redirect(link, roots.app_root)
+    try:
+        with pytest.raises(CommunityComponentLifecycleError, match="Unsafe workspace path"):
+            workspace_roots(tmp_path / "shop", app_root=link)
+    finally:
+        if os.name == "nt":
+            link.rmdir()
+        else:
+            link.unlink()
+
+
+@pytest.mark.parametrize("explicit_roots", [False, True])
+def test_parent_relative_roots_install_and_verify(tmp_path: Path, monkeypatch, explicit_roots) -> None:
+    expected = _ordinary_app(tmp_path / "shop")
+    launch = tmp_path / "launch"
+    launch.mkdir()
+    monkeypatch.chdir(launch)
+    options = {
+        "app_root": "../shop/app", "workflows_root": "../shop/workflows", "build_context_root": "../shop/build_context",
+    } if explicit_roots else {}
+    roots = workspace_roots("../shop", **options)
+    assert roots == expected
+    assert apply_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots).status == "applied"
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+
+
+def test_install_does_not_overwrite_predictable_temporary_path(tmp_path: Path) -> None:
+    roots = _ordinary_app(tmp_path / "shop")
+    existing = roots.app_root / "modules/stock_ledger/.module.yaml.mozaiks-tmp"
+    existing.parent.mkdir(parents=True)
+    existing.write_bytes(b"unrelated app file")
+    apply_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots)
+    assert existing.read_bytes() == b"unrelated app file"
+
+
+def test_commit_rechecks_a_destination_redirected_after_planning(tmp_path: Path, monkeypatch) -> None:
+    roots = _ordinary_app(tmp_path / "shop")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "sentinel.txt").write_bytes(b"sentinel")
+    before = _tree(outside)
+    original_commit = workspace_module._commit
+    link = roots.app_root / "modules"
+
+    def redirected_commit(*args, **kwargs):
+        _directory_redirect(link, outside)
+        return original_commit(*args, **kwargs)
+
+    monkeypatch.setattr(workspace_module, "_commit", redirected_commit)
+    try:
+        with pytest.raises(CommunityComponentLifecycleError, match="Unsafe workspace path"):
+            apply_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots)
+        assert _tree(outside) == before
+    finally:
+        if os.name == "nt":
+            link.rmdir()
+        else:
+            link.unlink()
+
+
+def test_rollback_does_not_follow_a_redirect_introduced_during_commit(tmp_path: Path, monkeypatch) -> None:
+    roots = _ordinary_app(tmp_path / "shop")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    original_replace = workspace_module.os.replace
+    redirected = []
+
+    def redirect_then_fail(source, destination):
+        destination = Path(destination)
+        saved = destination.parent.with_name(destination.parent.name + "_saved")
+        destination.parent.rename(saved)
+        _directory_redirect(destination.parent, outside)
+        (outside / destination.name).write_bytes(b"outside sentinel")
+        redirected.append((destination.parent, saved, destination.name))
+        raise OSError("injected failure after redirect")
+
+    monkeypatch.setattr(workspace_module.os, "replace", redirect_then_fail)
+    try:
+        with pytest.raises(OSError, match="injected failure") as failure:
+            apply_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots)
+        assert (outside / redirected[0][2]).read_bytes() == b"outside sentinel"
+        assert any("Rollback could not restore" in note and "Unsafe workspace path" in note for note in failure.value.__notes__)
+    finally:
+        monkeypatch.setattr(workspace_module.os, "replace", original_replace)
+        for link, saved, _ in redirected:
+            if os.name == "nt":
+                link.rmdir()
+            else:
+                link.unlink()
+            saved.rename(link)
+
+
+def test_lock_cleanup_preserves_original_error_when_redirected(tmp_path: Path, monkeypatch) -> None:
+    roots = _ordinary_app(tmp_path / "shop")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "lifecycle.lock"
+    sentinel.write_bytes(b"outside sentinel")
+    link = roots.build_context_root / ".mozaiks"
+    saved = roots.build_context_root / "saved-state"
+
+    def redirect_then_fail(*args, **kwargs):
+        link.rename(saved)
+        _directory_redirect(link, outside)
+        raise OSError("original commit failure")
+
+    monkeypatch.setattr(workspace_module, "_commit", redirect_then_fail)
+    try:
+        with pytest.raises(OSError, match="original commit failure") as failure:
+            apply_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots)
+        assert sentinel.read_bytes() == b"outside sentinel"
+        assert any("Could not safely remove lifecycle lock" in note for note in failure.value.__notes__)
+    finally:
+        if os.name == "nt":
+            link.rmdir()
+        else:
+            link.unlink()
+        saved.rename(link)
+
+
+@pytest.mark.parametrize("owner, primary_alias, permitted", [
+    ("stock_ledger", "stock.items", True),
+    ("orders", "stock.items", False),
+    ("stock_ledger", "orders.orders", False),
+])
+def test_adoption_preserves_same_owner_shared_collection_grants(tmp_path: Path, owner, primary_alias, permitted) -> None:
+    roots = _pre_placed(tmp_path)
+    contract_path = roots.app_root / "data/contract.json"
+    document = json.loads(contract_path.read_text(encoding="utf-8"))
+    document["shared_collections"] = [{
+        "mongo_collection": "stock_items", "primary_alias": primary_alias, "owner_module": owner,
+        "read_by": [{"module": "orders", "access": "read_only", "purpose": "order correlation"}],
+    }]
+    contract_path.write_text(json.dumps(document, indent=4), encoding="utf-8")
+    before = contract_path.read_bytes()
+    source = PackSource(directory=_pack(tmp_path))
+    if permitted:
+        plan = apply_component_install(source=source, roots=roots, adopt=True)
+        assert plan.status == "applied"
+        assert contract_path.read_bytes() == before
+        assert verify_installed_components(roots=roots)["status"] == "clean"
+        assert apply_workspace_upgrade(source=PackSource(directory=_version_two(tmp_path)), roots=roots).status == "applied"
+        assert contract_path.read_bytes() == before
+    else:
+        plan = plan_component_install(source=source, roots=roots, adopt=True)
+        assert plan.status == "blocked"
+        assert any(row["kind"] == "alias_conflict" for row in plan.conflicts)
+        with pytest.raises(CommunityComponentConflictError):
+            apply_component_install(source=source, roots=roots, adopt=True)
+        assert contract_path.read_bytes() == before
+
+
+def _capability_pack(tmp_path: Path, name: str, *, requires: str | None = None, provides: str | None = None) -> Path:
+    pack = _pack(tmp_path, name)
+    context_path = pack / "context.yaml"
+    context = yaml.safe_load(context_path.read_text(encoding="utf-8"))
+    context["context_id"] = context["pack"]["id"] = f"library.{name}"
+    context["capabilities"] = [{"capability_id": provides}] if provides else []
+    context["assets"] = [row for row in context["assets"] if row["kind"] != "workflows"]
+    context_path.write_text(yaml.safe_dump(context), encoding="utf-8")
+    # All deleted trees are disposable fixture copies, never the original pack or workspace.
+    shutil.rmtree(pack / "templates")
+    shutil.rmtree(pack / "workflows")
+    (pack / "templates/modules" / name).mkdir(parents=True)
+    (pack / "templates/modules" / name / "README.md").write_text(name, encoding="utf-8")
+    contract = {"contract_id": f"library.{name}", "contract_type": "build_pack_instructions"}
+    if requires:
+        contract["requires"] = {"capabilities": [requires]}
+    (pack / "contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
+    return pack
+
+
+@pytest.mark.parametrize("alternative_provider", [False, True])
+def test_upgrade_rechecks_capabilities_of_installed_dependents(tmp_path: Path, alternative_provider) -> None:
+    roots = _install(tmp_path)
+    reports = _capability_pack(tmp_path, "reports", requires="stock.ledger")
+    apply_component_install(source=PackSource(directory=reports), roots=roots)
+    if alternative_provider:
+        other = _capability_pack(tmp_path, "other", provides="stock.ledger")
+        apply_component_install(source=PackSource(directory=other), roots=roots)
+    candidate = _version_two(tmp_path)
+    _edit(candidate / "context.yaml", "  - capability_id: stock.ledger", "  - capability_id: stock.count")
+    before = _tree(tmp_path / "shop")
+    plan = plan_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+    if alternative_provider:
+        assert plan.status == "ready"
+        assert apply_workspace_upgrade(source=PackSource(directory=candidate), roots=roots).status == "applied"
+    else:
+        assert plan.status == "blocked"
+        assert any(row["kind"] == "required_by" and row["owner"] == "library.reports" and "stock.ledger" in row["detail"] for row in plan.conflicts)
+        with pytest.raises(CommunityComponentConflictError):
+            apply_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+        assert _tree(tmp_path / "shop") == before
 
 
 # --------------------------------------------------------------------------------------
@@ -565,7 +824,140 @@ def test_a_git_revision_installs_the_exact_committed_bytes(tmp_path: Path) -> No
     pins = (roots.build_context_root / ".mozaiks" / "installed_components.json").read_text(encoding="utf-8")
     assert "secret-token" not in pins and commit in pins
     sidecar = json.loads((roots.build_context_root / ".mozaiks" / "installed_component_sources.json").read_text(encoding="utf-8"))
-    assert sidecar["sources"] == []
+    cached = Path(sidecar["sources"][0]["local_source_path"])
+    assert cached.parent == roots.build_context_root / ".mozaiks/source-cache"
+    assert compute_pack_digest(cached, PACK_ID) == plan.to_digest
+    assert (cached / "templates/modules/stock_ledger/backend/service.py").read_bytes() == subprocess.check_output(
+        ["git", "-C", str(repo), "show", f"{commit}:packs/stock_ledger/templates/modules/stock_ledger/backend/service.py"],
+    )
+
+
+def _git_pack_source(tmp_path: Path) -> PackSource:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "core.autocrlf", "false")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    shutil.copytree(FIXTURE, repo / "pack")
+    _git(repo, "remote", "add", "origin", "https://example.com/library.git")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "fixture")
+    return PackSource(git_repository=repo, git_revision=_git(repo, "rev-parse", "HEAD"), git_path="pack")
+
+
+def test_git_install_resolves_through_existing_lifecycle(tmp_path: Path) -> None:
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        resolve_installed_component_descriptors,
+    )
+
+    roots = _ordinary_app(tmp_path / "shop")
+    plan = apply_component_install(source=_git_pack_source(tmp_path), roots=roots)
+    [descriptor] = resolve_installed_component_descriptors(build_context_root=roots.build_context_root, selected_pack_ids=[PACK_ID])
+    assert descriptor["source"] == plan.source
+    assert descriptor["digest"] == plan.to_digest
+    assert Path(descriptor["pack_source_path"]).is_dir()
+
+
+@pytest.mark.parametrize("missing", ["sidecar", "snapshot"])
+def test_unchanged_git_install_repairs_missing_source_binding(tmp_path: Path, missing: str) -> None:
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        resolve_installed_component_descriptors,
+    )
+
+    roots = _ordinary_app(tmp_path / "shop")
+    source = _git_pack_source(tmp_path)
+    apply_component_install(source=source, roots=roots)
+    before = _tree(roots.app_root)
+    pin_path = roots.build_context_root / ".mozaiks/installed_components.json"
+    pin_before = pin_path.read_bytes()
+    sidecar = roots.build_context_root / ".mozaiks/installed_component_sources.json"
+    if missing == "sidecar":
+        sidecar.write_text('{"schema_version":"mozaiks.installed_component_sources.v1","sources":[]}')
+    else:
+        [entry] = json.loads(sidecar.read_text())["sources"]
+        shutil.rmtree(Path(entry["local_source_path"]))
+    assert apply_component_install(source=source, roots=roots).status == "unchanged"
+    assert pin_path.read_bytes() == pin_before and _tree(roots.app_root) == before
+    assert resolve_installed_component_descriptors(build_context_root=roots.build_context_root, selected_pack_ids=[PACK_ID])
+
+
+def test_git_source_drift_is_refused_and_not_repaired_over(tmp_path: Path) -> None:
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        resolve_installed_component_descriptors,
+    )
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        PackIntegrityError,
+    )
+
+    roots = _ordinary_app(tmp_path / "shop")
+    source = _git_pack_source(tmp_path)
+    apply_component_install(source=source, roots=roots)
+    [entry] = json.loads((roots.build_context_root / ".mozaiks/installed_component_sources.json").read_text())["sources"]
+    target = Path(entry["local_source_path"]) / "contract.yaml"
+    target.write_bytes(target.read_bytes() + b"\n# changed\n")
+    with pytest.raises(PackIntegrityError, match="no longer matches"):
+        resolve_installed_component_descriptors(build_context_root=roots.build_context_root, selected_pack_ids=[PACK_ID])
+    with pytest.raises(CommunityComponentLifecycleError, match="source cache has changed"):
+        apply_component_install(source=source, roots=roots)
+    assert target.read_bytes().endswith(b"# changed\n")
+
+
+def test_unchanged_git_install_cannot_relabel_portable_source(tmp_path: Path) -> None:
+    roots = _ordinary_app(tmp_path / "shop")
+    source = _git_pack_source(tmp_path)
+    apply_component_install(source=source, roots=roots)
+    before = _tree(roots.build_context_root)
+    _git(source.git_repository, "remote", "set-url", "origin", "https://example.com/another.git")
+    with pytest.raises(CommunityComponentLifecycleError, match="source does not match"):
+        apply_component_install(source=source, roots=roots)
+    assert _tree(roots.build_context_root) == before
+
+
+def test_git_source_cache_keeps_declared_empty_directories(tmp_path: Path) -> None:
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        resolve_installed_component_descriptors,
+    )
+
+    roots = _ordinary_app(tmp_path / "shop")
+    source = _git_pack_source(tmp_path)
+    pack = source.git_repository / "pack"
+    context = yaml.safe_load((pack / "context.yaml").read_text())
+    context["assets"].append({"path": "empty_templates", "kind": "templates"})
+    (pack / "context.yaml").write_text(yaml.safe_dump(context))
+    (pack / "empty_templates").mkdir()
+    (pack / "empty_templates/.keep").write_bytes(b"")
+    _git(source.git_repository, "add", ".")
+    _git(source.git_repository, "commit", "-q", "-m", "empty declared directory")
+    source = PackSource(git_repository=source.git_repository, git_revision=_git(source.git_repository, "rev-parse", "HEAD"), git_path="pack")
+    apply_component_install(source=source, roots=roots)
+    [descriptor] = resolve_installed_component_descriptors(build_context_root=roots.build_context_root, selected_pack_ids=[PACK_ID])
+    assert (Path(descriptor["pack_source_path"]) / "empty_templates").is_dir()
+
+
+def test_git_source_cache_write_failure_rolls_back_the_install(tmp_path: Path, monkeypatch) -> None:
+    roots = _ordinary_app(tmp_path / "shop")
+    source = _git_pack_source(tmp_path)
+    before = {root: _tree(root) for root in (roots.app_root, roots.workflows_root, roots.build_context_root)}
+    replace = workspace_module.os.replace
+
+    def fail_in_cache(src, dst):
+        if "source-cache" in Path(dst).parts:
+            raise OSError("cache write failed")
+        return replace(src, dst)
+
+    monkeypatch.setattr(workspace_module.os, "replace", fail_in_cache)
+    with pytest.raises(OSError, match="cache write failed"):
+        apply_component_install(source=source, roots=roots)
+    assert all(_tree(root) == files for root, files in before.items())
+
+
+def test_transaction_preserves_binary_source_bytes(tmp_path: Path) -> None:
+    roots = _ordinary_app(tmp_path / "shop")
+    destination = roots.build_context_root / ".mozaiks/source-cache/blob"
+    payload = b"\x00\xff\r\n\x80"
+    workspace_module._commit({destination: payload}, roots)
+    assert destination.read_bytes() == payload
 
 
 def test_a_branch_name_is_not_an_immutable_revision() -> None:
@@ -628,6 +1020,33 @@ def _cli(*args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True, text=True, env={**os.environ, "MOZAIKS_LOAD_DOTENV": "0"},
         cwd=Path(__file__).resolve().parents[1], check=False,
     )
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_cli_reports_incomplete_rollback_without_traceback(tmp_path: Path, monkeypatch, capsys, as_json) -> None:
+    from mozaiks_cli.commands import pack as pack_cli
+
+    _ordinary_app(tmp_path / "shop")
+    parser = argparse.ArgumentParser()
+    pack_cli.add_parser(parser.add_subparsers())
+    command = ["pack", "install", str(_pack(tmp_path)), "--workspace", str(tmp_path / "shop")]
+    if as_json:
+        command.append("--json")
+    failure = CommunityComponentLifecycleError("Unsafe workspace path: redirected destination")
+    note = "Rollback could not restore the destination: Unsafe workspace path"
+    failure.add_note(note)
+    cause = OSError("destination changed")
+
+    def fail_install(**kwargs):
+        raise failure from cause
+
+    monkeypatch.setattr(workspace_module, "apply_component_install", fail_install)
+    assert pack_cli.run(parser.parse_args(command)) == pack_cli.EXIT_INVALID
+    output = capsys.readouterr().out
+    rendered = json.loads(output)["error"] if as_json else output
+    assert str(failure) in rendered and note in rendered
+    assert "Traceback" not in rendered
+    assert failure.__cause__ is cause
 
 
 def test_the_cli_reports_plans_and_drift_with_contract_exit_codes(tmp_path: Path) -> None:

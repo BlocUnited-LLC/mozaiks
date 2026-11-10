@@ -754,6 +754,13 @@ by blob exactly as the repository stores it, so the digest is the same on
 every OS and checkout. The pin records `git+<origin>@<commit>#<folder>`, with
 any credentials in the origin URL removed.
 
+The installer retains the verified context, contract and declared asset bytes
+under `build_context/.mozaiks/source-cache/<digest>`. The existing machine-local
+source sidecar points there so Factory can re-verify the portable pin after the
+temporary Git export is gone. Reinstalling the exact same Git source repairs a
+missing snapshot or source binding without changing app files or provenance.
+A changed snapshot or a different portable source is refused.
+
 Mozaiks does not perform remote downloads, registry lookup, marketplace ranking,
 trust scoring, cryptographic signing, or automatic semver range upgrades for
 this local lifecycle layer.
