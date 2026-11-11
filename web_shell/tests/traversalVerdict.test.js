@@ -32,6 +32,21 @@ const loadJudge = async () => {
   return ctx.__judge;
 };
 
+const loadBlockedEntryVerdict = async () => {
+  const source = await fs.readFile(specPath, 'utf8');
+  const start = source.indexOf('const makeBlockedEntryVerdict = ');
+  assert.notEqual(start, -1, 'could not locate makeBlockedEntryVerdict()');
+  const endMarker = '\n});';
+  const end = source.indexOf(endMarker, start);
+  assert.notEqual(end, -1, 'could not locate the end of makeBlockedEntryVerdict()');
+  const ctx = { String };
+  vm.runInNewContext(
+    `${source.slice(start, end + endMarker.length)}\nglobalThis.__blocked = makeBlockedEntryVerdict;`,
+    ctx,
+  );
+  return ctx.__blocked;
+};
+
 const chats = new Set(['chat-a']);
 const bundle = { chat_id: 'chat-a', workflow: 'AppGenerator', file_count: 12 };
 const artifact = (over = {}) => ({
@@ -135,6 +150,24 @@ test('the spec throws on a failing verdict', async () => {
   // The judge is useless if the caller still exits 0.
   const source = await fs.readFile(specPath, 'utf8');
   assert.match(source, /if \(!verdict\.ok\) throw new Error\(verdict\.summary\);/);
+});
+
+test('the factory app-type selector starts Greenfield and missing controls fail', async () => {
+  const source = await fs.readFile(specPath, 'utf8');
+  assert.match(source, /name: \/start build\/i/, 'the factory AppTypeSelector owns the target-registration action');
+  const branchMatch = source.match(/if \(!ready\) \{\s+const genericChooserVisible[\s\S]+?throw new Error\(verdict\.summary\);\s+\}/);
+  assert.ok(branchMatch, 'missing entry controls must have an explicit failing verdict branch');
+  const branch = branchMatch[0];
+  assert.match(branch, /makeBlockedEntryVerdict/);
+  assert.match(branch, /verdict\.json/);
+  assert.match(branch, /throw new Error\(verdict\.summary\)/);
+  assert.doesNotMatch(branch, /\breturn\s*;/, 'a blocked traversal must not exit successfully');
+
+  const makeBlockedEntryVerdict = await loadBlockedEntryVerdict();
+  const verdict = makeBlockedEntryVerdict('no entry control');
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.outcome, 'BLOCKED');
+  assert.match(verdict.summary, /no entry control/);
 });
 
 test('the interpreter path is not hardcoded', async () => {
