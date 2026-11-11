@@ -369,6 +369,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Prompt hooks receive the active task's values for context keys declared by the agent, so AppGenerator uses task-specific file ownership guidance without changing shared workflow state.
+
 - App Studio cancels abandoned data loads during navigation and development
   StrictMode replay, preventing duplicate detail requests while keeping refresh available.
 
