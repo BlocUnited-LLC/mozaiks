@@ -54,6 +54,23 @@ def test_ag2_dependency_declarations_and_installed_runtime_match() -> None:
     assert importlib.metadata.version("ag2") == declared_version
 
 
+def test_default_provider_sdk_is_included_in_both_base_install_paths() -> None:
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    declarations = [
+        item for item in pyproject["project"]["dependencies"] if item.lower().startswith("ag2")
+    ]
+    assert len(declarations) == 1
+    (declaration,) = declarations
+    extras = declaration.partition("[")[2].partition("]")[0].split(",")
+    assert "gemini" in extras, "the default Google provider must work after pip install mozaiks"
+    assert declaration in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
+
+    from ag2.config import GeminiConfig
+
+    config = GeminiConfig(model="gemini-3.8-flash", api_key="test-key")
+    assert config.model == "gemini-3.8-flash"
+
+
 def test_acp_images_use_the_same_ag2_baseline_as_the_host() -> None:
     (declared_version,) = set(_declared_ag2_versions())
     for name in ("Dockerfile.acp-proof", "Dockerfile.acp-adapters"):

@@ -1,6 +1,8 @@
 import json
 from argparse import Namespace
 
+import pytest
+
 from mozaiks_cli.commands import quickstart as quickstart_command
 from mozaiks_cli.main import create_parser
 
@@ -88,7 +90,7 @@ def test_quickstart_bootstraps_workspace_and_launches_studio(monkeypatch, tmp_pa
 
 
 def test_env_warnings_accept_gemini_key_as_default_provider(monkeypatch, capsys) -> None:
-    for key in ("GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "MONGO_URI"):
+    for key in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "LLM_PRIMARY_API_KEY", "LLM_PRIMARY_API_TYPE", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "MONGO_URI"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017/mozaiks")
 
@@ -96,10 +98,34 @@ def test_env_warnings_accept_gemini_key_as_default_provider(monkeypatch, capsys)
 
     monkeypatch.setenv("GEMINI_API_KEY", "AIza-test-1234")
     quickstart_command._print_environment_warnings(args)
-    assert "No provider API key detected" not in capsys.readouterr().out
+    assert "GEMINI_API_KEY is not set" not in capsys.readouterr().out
 
     monkeypatch.delenv("GEMINI_API_KEY")
     quickstart_command._print_environment_warnings(args)
     warning_out = capsys.readouterr().out
-    assert "No provider API key detected" in warning_out
-    assert "GEMINI_API_KEY" in warning_out
+    assert "GEMINI_API_KEY is not set" in warning_out
+
+
+@pytest.mark.parametrize("provider,key", [("google", "GOOGLE_API_KEY"), ("google", "LLM_PRIMARY_API_KEY"), ("openai", "OPENAI_API_KEY")])
+def test_env_warnings_follow_runtime_provider_and_supported_key_names(monkeypatch, capsys, provider, key) -> None:
+    for name in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "LLM_PRIMARY_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017/mozaiks")
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", provider)
+    monkeypatch.setenv(key, "test-key")
+
+    # The display preference is separate from runtime environment selection.
+    quickstart_command._print_environment_warnings(Namespace(provider="anthropic"))
+
+    assert capsys.readouterr().out == ""
+
+
+def test_openai_key_does_not_hide_missing_default_gemini_key(monkeypatch, capsys) -> None:
+    for name in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "LLM_PRIMARY_API_KEY", "LLM_PRIMARY_API_TYPE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017/mozaiks")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    quickstart_command._print_environment_warnings(Namespace(provider=None))
+
+    assert "GEMINI_API_KEY is not set" in capsys.readouterr().out

@@ -12,32 +12,118 @@
 # Integration: workflow.llm_config builds the provider list; workflow agent
 # creation passes it to llm_config_to_ag2_config.
 #
-# Env vars (all optional; defaults keep existing behavior):
-#   LLM_PRIMARY_API_TYPE         provider type: openai | google | anthropic | ollama (openai)
-#   LLM_PRIMARY_MODEL            model id for primary provider (gpt-4o)
+# Env vars (all optional):
+#   LLM_PRIMARY_API_TYPE         provider type: openai | google | anthropic | ollama (google)
+#   LLM_PRIMARY_MODEL            model id for primary provider (gemini-3.8-flash)
 #   LLM_PRIMARY_API_KEY          api key for primary provider (falls back to provider-specific var)
 #   LLM_PRIMARY_BASE_URL         optional base URL override (Azure, Ollama host, etc.)
 #   LLM_FALLBACK_MODELS          comma-separated model ids, in priority order
 #   LLM_FALLBACK_API_KEYS        comma-separated api keys, parallel to models
 #   LLM_FALLBACK_BASE_URLS       comma-separated base URLs, parallel to models
-#   LLM_TEMPERATURE              shared temperature (0.0)
+#   LLM_TEMPERATURE              optional shared temperature (provider default)
 #   LLM_TIMEOUT_SECONDS          shared request timeout (120)
 #   LLM_FALLBACK_ENABLED         set to "false" to omit additional entries (true)
 #
 # Provider-specific API key env vars (resolved when LLM_PRIMARY_API_KEY is unset):
 #   GEMINI_API_KEY / GOOGLE_API_KEY   — used when LLM_PRIMARY_API_TYPE=google
 #   ANTHROPIC_API_KEY                 — used when LLM_PRIMARY_API_TYPE=anthropic
-#   OPENAI_API_KEY                    — used when LLM_PRIMARY_API_TYPE=openai (default)
+#   OPENAI_API_KEY                    — used when LLM_PRIMARY_API_TYPE=openai
 # ==============================================================================
 from __future__ import annotations
 
+import math
 import os
 from collections.abc import Mapping
 from typing import Any
 
+import httpx
+
 from logs.logging_config import get_core_logger
 
 logger = get_core_logger("llm_fallback")
+
+
+class _GeminiTimeoutAsyncClient(httpx.AsyncClient):
+    """Keep the configured HTTPX timeout when google-genai passes timeout=None."""
+
+    _mozaiks_ag2_session_owned: bool
+
+    def build_request(self, *args: Any, **kwargs: Any) -> httpx.Request:
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = self.timeout
+        return super().build_request(*args, **kwargs)
+
+
+class _BorrowedGeminiTransport(httpx.AsyncBaseTransport):
+    """Route Gemini requests through a caller-owned HTTPX client without owning it."""
+
+    def __init__(self, client: httpx.AsyncClient, *, close_client: bool = False) -> None:
+        if client.is_closed:
+            raise ValueError("Gemini http_client is already closed")
+        self._client = client
+        self._close_client = close_client
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        headers = httpx.Headers(self._client.headers)
+        headers.update(request.headers)
+        request.headers = headers
+        return await self._client.send(request, stream=True)
+
+    async def aclose(self) -> None:
+        # The original client belongs to the caller and must remain open.
+        if self._close_client:
+            await self._client.aclose()
+
+
+def create_gemini_http_client(
+    timeout: Any,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+    owned_by_ag2_session: bool = False,
+) -> httpx.AsyncClient:
+    """Create an HTTPX client whose timeout applies to google-genai requests."""
+    if isinstance(timeout, httpx.Timeout):
+        timeout_values = (timeout.connect, timeout.read, timeout.write, timeout.pool)
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value <= 0
+            for value in timeout_values
+        ):
+            raise ValueError("timeout must be a finite positive number of seconds")
+        configured_timeout: float | httpx.Timeout = timeout
+    elif (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or not math.isfinite(timeout)
+        or timeout <= 0
+    ):
+        raise ValueError("timeout must be a finite positive number of seconds")
+    else:
+        configured_timeout = float(timeout)
+    client = _GeminiTimeoutAsyncClient(timeout=configured_timeout, transport=transport)
+    client._mozaiks_ag2_session_owned = owned_by_ag2_session
+    return client
+
+
+async def close_ag2_session_http_client(client: Any) -> None:
+    """Close only clients created by this adapter for an AG2 session."""
+    if getattr(client, "_mozaiks_ag2_session_owned", False):
+        await client.aclose()
+
+
+def _http_timeout_matches(client_timeout: httpx.Timeout, selected_timeout: Any) -> bool:
+    fields = ("connect", "read", "write", "pool")
+    if isinstance(selected_timeout, httpx.Timeout):
+        return all(
+            getattr(client_timeout, name) == getattr(selected_timeout, name)
+            for name in fields
+        )
+    if isinstance(selected_timeout, bool) or not isinstance(selected_timeout, (int, float)):
+        return False
+    selected_seconds = float(selected_timeout)
+    return all(getattr(client_timeout, name) == selected_seconds for name in fields)
 
 
 def resolve_structured_output_mode(llm_config: Mapping[str, Any] | None = None) -> str:
@@ -75,6 +161,10 @@ def _env_list(key: str) -> list[str]:
 # Fallback config builder
 # ---------------------------------------------------------------------------
 
+DEFAULT_LLM_API_TYPE = "google"
+DEFAULT_LLM_MODEL = "gemini-3.8-flash"
+DEFAULT_MODELS_BY_API_TYPE = {"google": DEFAULT_LLM_MODEL, "openai": "gpt-5-nano"}
+
 MODEL_API_KEY_ENV_NAMES: dict[str, tuple[str, ...]] = {
     "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY", "LLM_PRIMARY_API_KEY"),
     "anthropic": ("ANTHROPIC_API_KEY", "LLM_PRIMARY_API_KEY"),
@@ -94,17 +184,26 @@ def _optional_secret(env_name: str) -> str:
         return ""
 
 
-def resolve_model_api_key(api_type: str, explicit_key: str | None = None) -> str:
+def resolve_model_api_key(
+    api_type: str,
+    explicit_key: str | None = None,
+    *,
+    include_primary_key: bool = True,
+) -> str:
     """Resolve the selected provider's key through the app's secret policy.
 
     Explicit per-call keys take precedence. A missing optional reference permits
     the next supported handle; invalid policy and configured vault failures do
-    not silently fall through to a different credential. Ollama needs no key.
+    not silently fall through to a different credential. Explicit non-primary
+    provider calls exclude the primary provider's generic key handle. Ollama
+    needs no key.
     """
     if explicit_key:
         return explicit_key
     names = MODEL_API_KEY_ENV_NAMES.get(api_type, MODEL_API_KEY_ENV_NAMES["openai"])
     for env_name in names:
+        if env_name == "LLM_PRIMARY_API_KEY" and not include_primary_key:
+            continue
         value = _optional_secret(env_name)
         if value:
             return value
@@ -122,6 +221,7 @@ def build_fallback_config_list(
     fallback_base_urls: list[str] | None = None,
     temperature: float | None = None,
     timeout: int | None = None,
+    include_primary_key: bool = True,
 ) -> list[dict[str, Any]]:
     """Build an AG2-compatible ``config_list`` with a primary model and fallbacks.
 
@@ -146,11 +246,20 @@ def build_fallback_config_list(
     fallback_enabled = _env("LLM_FALLBACK_ENABLED", "true").lower() != "false"
 
     # ---- Primary ----
-    resolved_api_type = (primary_api_type or _env("LLM_PRIMARY_API_TYPE", "openai")).lower()
+    resolved_api_type = (primary_api_type or _env("LLM_PRIMARY_API_TYPE", DEFAULT_LLM_API_TYPE)).lower()
     if resolved_api_type not in MODEL_API_KEY_ENV_NAMES:
         raise ValueError("Unsupported LLM provider api_type")
-    resolved_primary = primary_model or _env("LLM_PRIMARY_MODEL", "gpt-4o")
-    resolved_api_key = resolve_model_api_key(resolved_api_type, primary_api_key or None)
+    resolved_primary = (
+        primary_model or _env("LLM_PRIMARY_MODEL") or _env("DEFAULT_LLM_MODEL")
+        or DEFAULT_MODELS_BY_API_TYPE.get(resolved_api_type)
+    )
+    if not resolved_primary:
+        raise ValueError("LLM_PRIMARY_MODEL is required for the selected provider")
+    resolved_api_key = resolve_model_api_key(
+        resolved_api_type,
+        primary_api_key or None,
+        include_primary_key=include_primary_key,
+    )
     resolved_base_url = primary_base_url or _env("LLM_PRIMARY_BASE_URL") or None
 
     primary_entry: dict[str, Any] = {"model": resolved_primary, "api_type": resolved_api_type}
@@ -221,10 +330,12 @@ def build_fallback_llm_config(
 
         llm_config = build_fallback_llm_config(
             primary_model="gpt-4o",
+            primary_api_type="openai",
             fallback_models=["gpt-4o-mini"],
         )
     """
-    resolved_temp = temperature if temperature is not None else float(_env("LLM_TEMPERATURE", "0.0"))
+    raw_temperature = _env("LLM_TEMPERATURE")
+    resolved_temp = temperature if temperature is not None else (float(raw_temperature) if raw_temperature else None)
     resolved_timeout = timeout if timeout is not None else int(_env("LLM_TIMEOUT_SECONDS", "120"))
 
     config: dict[str, Any] = {
@@ -312,6 +423,30 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
             "streaming": streaming,
             **_model_call_limits(llm_config, entry, ("max_output_tokens",)),
         }
+        # AG2 1.3 exposes an httpx client for Gemini rather than a timeout
+        # field. Caller-supplied clients remain caller-owned; workflow configs
+        # get a client using the shared AG2 timeout's seconds unit.
+        http_client = llm_config.get("http_client")
+        if http_client is None and timeout is not None:
+            http_client = create_gemini_http_client(timeout, owned_by_ag2_session=True)
+        elif http_client is not None:
+            selected_timeout = timeout if timeout is not None else http_client.timeout
+            timeout_aware = isinstance(http_client, _GeminiTimeoutAsyncClient)
+            timeout_matches = _http_timeout_matches(http_client.timeout, selected_timeout)
+            if not timeout_aware or not timeout_matches:
+                client_is_adapter_owned = bool(
+                    getattr(http_client, "_mozaiks_ag2_session_owned", False)
+                )
+                http_client = create_gemini_http_client(
+                    selected_timeout,
+                    transport=_BorrowedGeminiTransport(
+                        http_client,
+                        close_client=client_is_adapter_owned,
+                    ),
+                    owned_by_ag2_session=True,
+                )
+        if http_client is not None:
+            kwargs["http_client"] = http_client
         if llm_config.get("response_modalities"):
             kwargs["response_modalities"] = llm_config["response_modalities"]
         if llm_config.get("image_config") is not None:
@@ -339,22 +474,28 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
         # AG2 1.2.2 inherits the Files API rejection stub, which mypy treats as abstract.
         return OllamaConfig(**kwargs)  # type: ignore[abstract]
     # openai / azure / default
-    if api_type == "openai" and bool(llm_config.get("use_responses_api") or llm_config.get("responses_api")):
+    use_responses = llm_config.get(
+        "use_responses_api", llm_config.get("responses_api", entry.get("use_responses_api", entry.get("responses_api", False))),
+    )
+    if api_type == "openai" and use_responses:
         from ag2.config import OpenAIResponsesConfig
 
         response_kwargs: dict[str, Any] = {
             "model": model,
             "api_key": api_key,
             "base_url": base_url,
-            "temperature": temperature,
             "streaming": streaming,
             **_model_call_limits(llm_config, entry, ("max_output_tokens", "max_retries")),
         }
         if timeout is not None:
             response_kwargs["timeout"] = timeout
-        for key in ("max_tool_calls", "parallel_tool_calls", "store"):
+        if temperature is not None:
+            response_kwargs["temperature"] = temperature
+        for key in ("max_tool_calls", "parallel_tool_calls", "store", "reasoning"):
             if key in llm_config:
                 response_kwargs[key] = llm_config[key]
+            elif key in entry:
+                response_kwargs[key] = entry[key]
         return OpenAIResponsesConfig(**response_kwargs)
 
     from ag2.config import OpenAICompletionsConfig
@@ -368,6 +509,8 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
     }
     if timeout is not None:
         kwargs["timeout"] = timeout
+    if "reasoning_effort" in llm_config or "reasoning_effort" in entry:
+        kwargs["reasoning_effort"] = llm_config.get("reasoning_effort", entry.get("reasoning_effort"))
     return OpenAICompletionsConfig(**kwargs)
 
 
@@ -409,6 +552,9 @@ def get_healthy_config_list(
 
 
 __all__ = [
+    "DEFAULT_LLM_API_TYPE",
+    "DEFAULT_LLM_MODEL",
+    "DEFAULT_MODELS_BY_API_TYPE",
     "MODEL_API_KEY_ENV_NAMES",
     "resolve_model_api_key",
     "build_fallback_config_list",

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import asdict
 from typing import Any
 
-import httpx
-
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.adapters.llm_fallback import create_gemini_http_client
 from mozaiksai.core.tokens.guard import TokenUsageGuard
 from mozaiksai.core.workflow.llm_config import get_llm_config
 
@@ -14,7 +14,7 @@ logger = get_workflow_logger("capabilities.simple_llm")
 
 
 class SimpleLLMCapabilityService:
-    """Minimal, product-agnostic LLM bridge for non-AG2 capabilities.
+    """Minimal, product-agnostic LLM bridge for single-call capabilities.
 
     Notes:
     - No hardcoded product prompts or business semantics.
@@ -29,7 +29,7 @@ class SimpleLLMCapabilityService:
         token_usage_guard: TokenUsageGuard | None = None,
     ) -> None:
         self._timeout = float(timeout)
-        self._client = httpx.AsyncClient(timeout=self._timeout)
+        self._client = create_gemini_http_client(self._timeout)
         self._token_usage_guard = token_usage_guard
 
     async def aclose(self) -> None:
@@ -83,7 +83,6 @@ class SimpleLLMCapabilityService:
 
         return await self.generate_chat_completion(
             messages=messages,
-            temperature=0.3,
             app_id=app_id,
             user_id=user_id,
             ui_context=ui_context,
@@ -94,7 +93,7 @@ class SimpleLLMCapabilityService:
         self,
         *,
         messages: list[dict[str, str]],
-        temperature: float | None = 0.3,
+        temperature: float | None = None,
         llm_config: dict[str, Any] | None = None,
         app_id: str | None,
         user_id: str | None,
@@ -102,32 +101,61 @@ class SimpleLLMCapabilityService:
         workflows: list[dict[str, Any]] | None = None,
         extra_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Execute a raw chat completion call and return content + usage."""
+        """Execute one provider call and return content + usage."""
         provider = await self._select_provider(llm_config)
-        api_key = provider["api_key"]
         model = provider["model"]
+        if temperature is None and provider.get("temperature") is not None:
+            try:
+                temperature = float(provider["temperature"])
+            except (TypeError, ValueError):
+                logger.warning(
+                    "LLM_CONFIG_INVALID_TEMPERATURE: %r — ignoring, using API default",
+                    provider["temperature"],
+                )
+                provider.pop("temperature", None)
         await (self._token_usage_guard or TokenUsageGuard()).check_or_raise(
             app_id=app_id,
             user_id=user_id,
             required_tokens=self._estimate_required_tokens(
                 messages=messages,
-                llm_config=llm_config,
+                llm_config=provider,
                 extra_payload=extra_payload,
             ),
         )
 
+        api_type = str(provider.get("api_type") or "openai").lower()
+        if api_type != "openai":
+            logger.debug(
+                "[CAPABILITY_LLM] Request",
+                extra={
+                    "model": model,
+                    "app_id": app_id,
+                    "user_id": user_id,
+                    "workflow_count": len(workflows or []),
+                    "message_count": len(messages),
+                    "api_type": api_type,
+                },
+            )
+            return await self._generate_ag2_completion(
+                provider=provider,
+                messages=messages,
+                temperature=temperature,
+                extra_payload=extra_payload,
+            )
+
         api_base = provider.get("api_base") or provider.get("base_url")
         api_base = (api_base or os.getenv("CAPABILITY_LLM_API_BASE") or "https://api.openai.com/v1").rstrip("/")
 
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {provider['api_key']}", "Content-Type": "application/json"}
 
-        if self._should_use_responses_api(model=model, llm_config=llm_config):
+        if self._should_use_responses_api(model=model, llm_config=provider):
             return await self._generate_responses_completion(
                 api_base=api_base,
                 headers=headers,
                 model=model,
                 messages=messages,
-                llm_config=llm_config,
+                llm_config=provider,
+                extra_payload=extra_payload,
                 app_id=app_id,
                 user_id=user_id,
                 ui_context=ui_context,
@@ -137,6 +165,9 @@ class SimpleLLMCapabilityService:
             "model": model,
             "messages": messages,
         }
+        for key in ("max_tokens", "max_completion_tokens", "reasoning_effort"):
+            if key in provider:
+                payload[key] = provider[key]
         if temperature is not None:
             payload["temperature"] = float(temperature)
         if extra_payload:
@@ -166,6 +197,66 @@ class SimpleLLMCapabilityService:
 
         return {"content": content, "usage": usage}
 
+    async def _generate_ag2_completion(
+        self,
+        *,
+        provider: dict[str, Any],
+        messages: list[dict[str, str]],
+        temperature: float | None,
+        extra_payload: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Use AG2's native provider clients instead of an OpenAI-shaped request."""
+        from ag2.context import ConversationContext
+        from ag2.events import BaseEvent, ModelMessage, ModelRequest, ModelResponse
+        from ag2.stream import MemoryStream
+        from fast_depends.pydantic import PydanticSerializer
+
+        from mozaiksai.core.adapters.llm_fallback import (
+            close_ag2_session_http_client,
+            llm_config_to_ag2_config,
+        )
+
+        config = {**provider, **(extra_payload or {})}
+        config["streaming"] = False
+        if temperature is not None:
+            config["temperature"] = temperature
+        if config.get("api_type") == "google":
+            # This service owns the shared HTTP client and its timeout; keep
+            # that ownership instead of creating an adapter-owned client.
+            config["http_client"] = self._client
+        model_config = llm_config_to_ag2_config({**config, "config_list": [config]})
+        if config.get("api_type") == "ollama":
+            model_config = model_config.copy(http_client=self._client)
+
+        try:
+            context = ConversationContext(stream=MemoryStream())
+            events: list[BaseEvent] = []
+            for message in messages:
+                role = str(message.get("role") or "user").lower()
+                content = str(message.get("content") or "")
+                if role in {"system", "developer"}:
+                    context.prompt.append(content)
+                elif role == "user":
+                    events.append(ModelRequest.ensure_request([content]))
+                elif role == "assistant":
+                    events.append(ModelResponse(ModelMessage(content)))
+                else:
+                    raise ValueError(f"Unsupported capability message role: {role}")
+
+            response = await model_config.create()(
+                events,
+                context,
+                tools=[],
+                response_schema=None,
+                serializer=PydanticSerializer(),
+            )
+            return {
+                "content": (response.content or "").strip(),
+                "usage": {key: value for key, value in asdict(response.usage).items() if value is not None},
+            }
+        finally:
+            await close_ag2_session_http_client(getattr(model_config, "http_client", None))
+
     async def _generate_responses_completion(
         self,
         *,
@@ -174,6 +265,7 @@ class SimpleLLMCapabilityService:
         model: str,
         messages: list[dict[str, str]],
         llm_config: dict[str, Any] | None,
+        extra_payload: dict[str, Any] | None,
         app_id: str | None,
         user_id: str | None,
         ui_context: dict[str, Any] | None = None,
@@ -185,6 +277,14 @@ class SimpleLLMCapabilityService:
         }
         if instructions:
             payload["instructions"] = instructions
+        config = {**(llm_config or {}), **(extra_payload or {})}
+        if any(key in config for key in ("max_tokens", "max_completion_tokens")):
+            raise ValueError("Responses API requires max_output_tokens for its output token limit")
+        for key in ("reasoning", "max_output_tokens", "max_tool_calls", "parallel_tool_calls", "store"):
+            if key in config:
+                payload[key] = config[key]
+        if extra_payload:
+            payload.update(extra_payload)
 
         logger.debug(
             "[CAPABILITY_LLM] Request",
@@ -218,24 +318,12 @@ class SimpleLLMCapabilityService:
         extra_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Execute a chat completion expected to return a JSON object."""
-        resolved_temperature: float | None = None
-        if temperature is not None:
-            resolved_temperature = float(temperature)
-        elif isinstance(llm_config, dict) and llm_config.get("temperature") is not None:
-            try:
-                resolved_temperature = float(llm_config["temperature"])
-            except Exception:
-                logger.warning(
-                    "LLM_CONFIG_INVALID_TEMPERATURE: %r — ignoring, using API default",
-                    llm_config["temperature"],
-                )
-                resolved_temperature = None
         response = await self.generate_chat_completion(
             messages=[
                 {"role": "system", "content": str(system_prompt or "")},
                 {"role": "user", "content": str(user_prompt or "")},
             ],
-            temperature=resolved_temperature,
+            temperature=temperature,
             llm_config=llm_config,
             app_id=app_id,
             user_id=user_id,
@@ -256,8 +344,9 @@ class SimpleLLMCapabilityService:
         normalized_model = str(model or "").strip().lower()
         if normalized_model.endswith("-codex") or "-codex-" in normalized_model:
             return True
-        config_mode = str((llm_config or {}).get("api_mode") or "").strip().lower()
-        return config_mode == "responses"
+        config = llm_config or {}
+        config_mode = str(config.get("api_mode") or "").strip().lower()
+        return bool(config.get("use_responses_api", config.get("responses_api", False))) or config_mode == "responses"
 
     @staticmethod
     def _estimate_required_tokens(
@@ -351,41 +440,69 @@ class SimpleLLMCapabilityService:
 
     async def _select_provider(self, llm_config: dict[str, Any] | None = None) -> dict[str, Any]:
         """Select a provider entry with a usable API key."""
-        default_provider = await self._select_default_provider()
         if not llm_config:
-            return default_provider
+            return await self._select_default_provider()
 
-        candidate = llm_config
-        config_list = candidate.get("config_list")
+        candidate = {key: value for key, value in llm_config.items() if key != "config_list"}
+        config_list = llm_config.get("config_list")
         if isinstance(config_list, list):
             first = next((entry for entry in config_list if isinstance(entry, dict)), None)
             if isinstance(first, dict):
-                candidate = first
+                candidate = {**first, **candidate}
 
-        override = dict(default_provider)
-        for key in ("model", "api_base", "base_url", "api_key"):
-            value = candidate.get(key)
-            if value:
-                override[key] = value
-        return override
+        if candidate.get("api_type") and candidate.get("model"):
+            from mozaiksai.core.adapters.llm_fallback import (
+                DEFAULT_LLM_API_TYPE,
+                resolve_model_api_key,
+            )
+
+            api_type = str(candidate["api_type"]).strip().lower()
+            primary_api_type = os.getenv("LLM_PRIMARY_API_TYPE", DEFAULT_LLM_API_TYPE).strip().lower()
+            api_key = resolve_model_api_key(
+                api_type, candidate.get("api_key"), include_primary_key=api_type == primary_api_type,
+            )
+            if not api_key and api_type != "ollama":
+                raise RuntimeError("No API key available for the selected capability provider")
+            return {**candidate, "api_type": api_type, "api_key": api_key}
+
+        default_provider = await self._select_default_provider()
+        if candidate.get("api_type", default_provider.get("api_type")) != default_provider.get("api_type"):
+            raise ValueError("An explicit provider override requires its model")
+        return {**default_provider, **candidate}
 
     async def _select_default_provider(self) -> dict[str, Any]:
         """Select the default provider entry with a usable API key."""
         _, llm_config = await get_llm_config(cache=True)
         config_list = llm_config.get("config_list", [])
         for entry in config_list:
-            if entry.get("api_key") and entry.get("model"):
-                return entry  # type: ignore[no-any-return]
-        raise RuntimeError("No LLM provider available for non-AG2 capability execution")
+            if entry.get("model") and (entry.get("api_key") or entry.get("api_type") == "ollama"):
+                shared = {key: value for key, value in llm_config.items() if key != "config_list"}
+                return {**entry, **shared}
+        raise RuntimeError("No LLM provider available for capability execution")
 
 
 _service: SimpleLLMCapabilityService | None = None
 
 
 def get_general_capability_service() -> SimpleLLMCapabilityService:
-    """Module-level singleton for the default non-AG2 capability executor."""
+    """Module-level singleton for the default single-call capability executor."""
     global _service
     if _service is None:
         _service = SimpleLLMCapabilityService()
     return _service
+
+
+async def close_general_capability_service() -> None:
+    """Close the runtime-owned singleton HTTP client during host shutdown."""
+    global _service
+    service, _service = _service, None
+    if service is not None:
+        await service.aclose()
+
+
+__all__ = [
+    "SimpleLLMCapabilityService",
+    "close_general_capability_service",
+    "get_general_capability_service",
+]
 
