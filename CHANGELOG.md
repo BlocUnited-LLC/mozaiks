@@ -369,6 +369,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator now tells module-contract generation to keep role-protected
+  narrowed writes complete across create, update, and delete, matching the
+  validator's authored-write contract.
+
 - Prompt hooks receive the active task's values for context keys declared by the agent, so AppGenerator uses task-specific file ownership guidance without changing shared workflow state.
 
 - A generated app's refinement harness now reaches the Refinement Engine. Studio
