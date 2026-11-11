@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
@@ -11,6 +10,8 @@ from types import UnionType
 from typing import Annotated, Any, Union, get_args, get_origin
 
 from pydantic import BaseModel, ValidationError
+
+from .output_digest import output_digest
 
 
 @dataclass(slots=True)
@@ -25,6 +26,8 @@ class StructuredOutputValidation:
     error: str | None = None
     # Audit-safe description of a rejection. Unlike ``error`` (Pydantic's text
     # embeds the offending input values), these never carry output content.
+    # ``output_digest`` is keyed (see ``output_digest.py``), so a low-entropy
+    # reply cannot be recovered from it by hashing candidates.
     failure_category: str | None = None
     failure_fields: tuple[str, ...] = ()
     output_digest: str | None = None
@@ -33,16 +36,6 @@ class StructuredOutputValidation:
 _MAX_FAILURE_FIELDS = 10
 _REDACTED_FIELD = "<redacted-field>"
 _SAFE_ERROR_TYPE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
-
-
-def _output_digest(data: Any) -> str:
-    """SHA-256 of the canonical JSON of ``data``; the content itself is not kept."""
-
-    try:
-        canonical = json.dumps(data, sort_keys=True, default=str, separators=(",", ":"))
-    except (TypeError, ValueError):
-        canonical = repr(data)
-    return hashlib.sha256(canonical.encode("utf-8", "replace")).hexdigest()
 
 
 def _unwrap(annotation: Any) -> Any:
@@ -187,7 +180,7 @@ def validate_agent_structured_output(
             validation_passed=False,
             error="structured output was not a JSON object",
             failure_category="not_json_object",
-            output_digest=_output_digest(raw_data),
+            output_digest=output_digest(raw_data),
         )
 
     try:
@@ -208,7 +201,7 @@ def validate_agent_structured_output(
                 if isinstance(exc, ValidationError)
                 else ()
             ),
-            output_digest=_output_digest(raw_data),
+            output_digest=output_digest(raw_data),
         )
 
     return StructuredOutputValidation(

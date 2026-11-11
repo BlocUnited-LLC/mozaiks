@@ -20,7 +20,12 @@ This project follows a practical pre-1.0 changelog format:
   batches, attributed to the initiating user. It adds an application-level
   record next to AG2's native turn-failure audit: agent, workflow, chat, trace
   id, failure category, error types with the field paths they apply to, and a
-  SHA-256 digest of the reply. A path keeps only what the schema proves
+  keyed digest of the reply (HMAC-SHA256, so a yes/no, enum or score reply
+  cannot be recovered by hashing the possible values). Set
+  `MOZAIKS_AUDIT_DIGEST_KEY` (32+ characters, resolved like other app
+  secrets) to make digests comparable across restarts; without it a random
+  per-process key is used and digests compare only within that process. A
+  path keeps only what the schema proves
   (declared fields and list or tuple indexes); mapping keys and any component
   the schema cannot prove become `<redacted-field>`. The reply and Pydantic's
   input-quoting message are never stored. Each boundary writes its own record;

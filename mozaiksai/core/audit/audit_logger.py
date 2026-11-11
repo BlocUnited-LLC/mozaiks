@@ -219,8 +219,9 @@ class AuditLogger:
     ) -> None:
         """Record that an agent reply failed its structured-output contract.
 
-        ``output_digest`` is a hash of the rejected reply; callers must not put
-        the reply itself, or text that embeds it, in ``error`` or ``extra``.
+        ``output_digest`` is a keyed digest (HMAC) of the rejected reply, never a
+        plain hash: callers must not put the reply itself, or text that embeds it,
+        in ``error`` or ``extra``.
         ``actor_id``, ``tenant_id`` and ``workspace_id`` must come from verified
         runtime identity, never from model output or context variables.
         """

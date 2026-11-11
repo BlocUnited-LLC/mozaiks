@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -20,6 +22,7 @@ from mozaiksai.core.adapters.ag2_task_batch_runner import (
 from mozaiksai.core.audit.audit_logger import AuditEventKind, AuditLogger
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.outputs import rejection_audit
+from mozaiksai.core.workflow.outputs.output_digest import reset_output_digest_key
 from mozaiksai.core.workflow.outputs.rejection_audit import audit_structured_output_rejection
 from mozaiksai.core.workflow.outputs.runtime_validation import validate_agent_structured_output
 
@@ -38,6 +41,13 @@ class _RecordingAudit:
 
     async def log_agent_output_rejected(self, **kwargs: Any) -> None:
         self.calls.append(kwargs)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_digest_key():
+    reset_output_digest_key()
+    yield
+    reset_output_digest_key()
 
 
 @pytest.fixture
@@ -756,3 +766,105 @@ def test_user_id_is_the_last_field_of_both_runner_requests() -> None:
 
     for request_type in (AG2NetworkRunnerRequest, AG2TaskBatchRunnerRequest):
         assert dataclasses.fields(request_type)[-1].name == "user_id"
+
+
+# ---------------------------------------------------------------------------
+# The reply digest is keyed: a low-entropy reply cannot be recovered from it
+# ---------------------------------------------------------------------------
+
+KEY_A = "a" * 40
+KEY_B = "b" * 40
+_DIGEST_DOMAIN = b"mozaiks.audit.output-digest.v1"
+
+
+def _canonical(value):
+    return json.dumps(value, sort_keys=True, default=str, separators=(",", ":"))
+
+
+def _plain_sha256(value) -> str:
+    return hashlib.sha256(_canonical(value).encode()).hexdigest()
+
+
+def _expected_hmac(key: str, value) -> str:
+    subkey = hmac.new(key.encode(), _DIGEST_DOMAIN, hashlib.sha256).digest()
+    return hmac.new(subkey, _canonical(value).encode(), hashlib.sha256).hexdigest()
+
+
+# Everything a yes/no, an enum member or a score level could be, bare or in AG2's
+# {"data": ...} wrapper: the whole domain an attacker would hash.
+_DECISION_CANDIDATES = [
+    True,
+    False,
+    "true",
+    "false",
+    "technical",
+    "billing",
+    0,
+    1,
+    *[{"data": value} for value in (True, False, "technical", "billing", 0, 1)],
+]
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [True, False, {"data": True}, {"data": "technical"}, {"data": 1}],
+    ids=["bare-true", "bare-false", "wrapped-bool", "wrapped-enum", "wrapped-score"],
+)
+def test_digest_of_a_decision_reply_is_not_recoverable_by_enumeration(reply) -> None:
+    validation = _validate(reply)
+
+    plain_candidates = {_plain_sha256(candidate) for candidate in _DECISION_CANDIDATES}
+    assert validation.output_digest is not None and len(validation.output_digest) == 64
+    assert validation.output_digest not in plain_candidates
+    # The same holds for the value that reaches the audit record.
+    assert _plain_sha256(reply) in plain_candidates  # the attack would have worked on a plain hash
+
+
+def test_configured_key_gives_a_stable_hmac_digest(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("mozaiksai.core.secrets.resolve_secret", lambda _name: KEY_A)
+    reply = {"data": True}
+
+    assert _validate(reply).output_digest == _expected_hmac(KEY_A, reply)
+    assert _validate(reply).output_digest == _validate(reply).output_digest
+
+
+def test_a_different_key_gives_a_different_digest(monkeypatch: pytest.MonkeyPatch) -> None:
+    reply = {"data": True}
+    monkeypatch.setattr("mozaiksai.core.secrets.resolve_secret", lambda _name: KEY_A)
+    first = _validate(reply).output_digest
+    reset_output_digest_key()
+    monkeypatch.setattr("mozaiksai.core.secrets.resolve_secret", lambda _name: KEY_B)
+
+    assert _validate(reply).output_digest != first
+
+
+def test_unset_key_falls_back_to_a_random_process_key_never_a_plain_hash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unset(_name: str) -> str:
+        raise RuntimeError("not configured")
+
+    monkeypatch.setattr("mozaiksai.core.secrets.resolve_secret", unset)
+    reply = {"data": True}
+
+    first = _validate(reply).output_digest
+    assert first == _validate(reply).output_digest  # stable within the process
+    assert first != _plain_sha256(reply)
+    reset_output_digest_key()
+    assert _validate(reply).output_digest != first  # a new process key, not a constant
+
+
+def test_too_short_configured_key_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("mozaiksai.core.secrets.resolve_secret", lambda _name: "short")
+    reply = {"data": True}
+
+    assert _validate(reply).output_digest != _expected_hmac("short", reply)
+
+
+def test_keyed_digest_still_ignores_key_order_and_separates_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("mozaiksai.core.secrets.resolve_secret", lambda _name: KEY_A)
+
+    assert _validate({"status": 1, "b": 2}).output_digest == _validate({"b": 2, "status": 1}).output_digest
+    assert _validate({"status": 1, "b": 2}).output_digest != _validate({"status": 1, "b": 3}).output_digest
