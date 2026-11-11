@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## CI And Linux Runner Costs
+
+Before any CI-triggering push, dispatch, rerun, or Linux/build workflow
+change, read [CI Cost Responsibility](docs/ci-cost-responsibility.md).
+It adds the execution-cost checklist to the existing coordination rules;
+it does not waive required checks or authorize paid infrastructure.
+
 ## Shared Engineering Contract
 
 @docs/agent-engineering-contract.md
