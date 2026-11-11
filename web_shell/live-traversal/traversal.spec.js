@@ -19,6 +19,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createNote, finishTraversal, prepareTraversalOutput, requirePassedDraft, validatedDraftId, verifyTitleSearch } from './notes-journey.js';
+import { isWorkflowReplyRequested } from './reply-policy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const notesMode = process.env.MOZAIKS_TRAVERSAL_NOTES === '1';
@@ -454,7 +455,8 @@ test('traversal: idea to accepted, validated artifact', async ({ page }) => {
     if (acted) { idle = 0; continue; }
 
     const composer = page.getByPlaceholder(/reply|message|ask|type/i).first();
-    if (await composer.count().catch(() => 0)
+    if (await isWorkflowReplyRequested(page)
+        && await composer.count().catch(() => 0)
         && await composer.isVisible().catch(() => false)
         && await composer.isEditable().catch(() => false)) {
       const text = idx === 0

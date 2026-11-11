@@ -17,7 +17,35 @@ import path from 'node:path';
 import test from 'node:test';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
+import { chromium } from '@playwright/test';
 import { createNote, finishTraversal, prepareTraversalOutput, requirePassedDraft, validatedDraftId, verifyTitleSearch } from '../live-traversal/notes-journey.js';
+import { isWorkflowReplyRequested } from '../live-traversal/reply-policy.js';
+
+test('traversal waits while working and answers an explicit reply request', async (t) => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent(`
+    <div role="status" aria-label="Assistant activity">Working on this step…</div>
+    <div role="group" aria-label="Chat status"><span>Working</span><span>Processing your request</span></div>
+    <input placeholder="Message the agent" />
+  `);
+  const composer = page.getByPlaceholder('Message the agent');
+  assert.equal(await composer.isEditable(), true);
+  for (let i = 0; i < 12; i += 1) {
+    assert.equal(await isWorkflowReplyRequested(page), false);
+  }
+  await page.getByRole('group', { name: 'Chat status' }).evaluate((el) => {
+    el.innerHTML = '<span>Waiting for you</span><span>Reply to continue</span>';
+  });
+  assert.equal(await isWorkflowReplyRequested(page), true);
+  await composer.fill('A simple notes app');
+  assert.equal(await composer.inputValue(), 'A simple notes app');
+  await page.getByRole('group', { name: 'Chat status' }).evaluate((el) => {
+    el.innerHTML = '<span>Waiting for you</span><span>Choose the next step</span>';
+  });
+  assert.equal(await isWorkflowReplyRequested(page), false);
+});
 
 test('notes output uses a new owned directory and preserves prior receipts', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'traversal-output-'));
