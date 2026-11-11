@@ -36,7 +36,7 @@ SWEEP_TIMEOUT_SECONDS = 300.0
 INTERNAL_SURFACES = frozenset({"internal", "admin_internal"})
 
 
-async def run_action_sweep(app_root: Path, *, mongo_uri: str) -> list[dict[str, Any]]:
+async def run_action_sweep(app_root: Path, *, mongo_uri: str, semantic_pack: str | None = None) -> list[dict[str, Any]]:
     """Every outcome the child recorded, on a disposable database dropped afterwards."""
     from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -44,7 +44,9 @@ async def run_action_sweep(app_root: Path, *, mongo_uri: str) -> list[dict[str, 
     environment = smoke.child_environment()
     environment["PYTHONPATH"] = os.pathsep.join([str(REPOSITORY_ROOT), environment["PYTHONPATH"]])
     environment["USERPROFILE" if os.name == "nt" else "HOME"] = str(app_root.parent)
-    request = {"app_root": str(app_root), "mongo_uri": mongo_uri, "database_name": database_name}
+    assert semantic_pack in {None, "social"}
+    request = {"app_root": str(app_root), "mongo_uri": mongo_uri, "database_name": database_name,
+               "semantic_pack": semantic_pack}
     client: Any = AsyncIOMotorClient(mongo_uri, serverSelectionTimeoutMS=5000)
     try:
         completed = await asyncio.to_thread(
@@ -109,6 +111,10 @@ async def _sweep(request: Mapping[str, Any], emit: Callable[..., None], initial_
                         path=run.last_exception_path or (f"modules/{module.name}/backend" if rejected else None),
                         http_status=status, coverage="http_wiring",
                     )
+            if request.get("semantic_pack") == "social":
+                from tests.pack_proof_social_lifecycle import prove_social_post_lifecycle
+
+                await prove_social_post_lifecycle(run)
     except Exception as exc:  # the sweep's own failure is a failed check, never a silent pass
         run.record("sweep.error", False, f"The action sweep could not complete: {type(exc).__name__}: {exc}")
     finally:
