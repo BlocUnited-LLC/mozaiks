@@ -1,5 +1,18 @@
 // Shared assertions for the real notes traversal and its offline browser fixture.
 import fs from 'node:fs';
+import path from 'node:path';
+
+export function prepareTraversalOutput(defaultDir, notesMode, requestedDir) {
+  if (!notesMode) {
+    fs.mkdirSync(defaultDir, { recursive: true });
+    return defaultDir;
+  }
+  if (!requestedDir || !path.isAbsolute(requestedDir)) {
+    throw new Error('Notes traversal requires an absolute, new MOZAIKS_TRAVERSAL_OUTPUT directory');
+  }
+  fs.mkdirSync(requestedDir);
+  return requestedDir;
+}
 
 export async function finishTraversal(receiptPath, generation, metadata, exerciseNotes = null) {
   const journey = generation.ok && exerciseNotes ? {} : null;

@@ -17,7 +17,9 @@ npx playwright test --config=live-traversal/traversal.config.js
 
 The default remains the generation-only tool-lending journey. Set
 `MOZAIKS_TRAVERSAL_NOTES=1` to run the notes build, preview, and search
-refinement journey instead. For a bounded run, pass an explicit Playwright
+refinement journey instead, and set `MOZAIKS_TRAVERSAL_OUTPUT` to an absolute,
+not-yet-existing directory under the run's owned evidence directory. This keeps
+prior receipts intact. For a bounded run, pass an explicit Playwright
 `--timeout` and configure the model request limits and owned Mongo server
 separately. The notes journey uses separate disposable preview databases and
 does not prove that records survive between versions.

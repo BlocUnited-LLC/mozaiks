@@ -18,12 +18,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { createNote, finishTraversal, requirePassedDraft, validatedDraftId, verifyTitleSearch } from './notes-journey.js';
+import { createNote, finishTraversal, prepareTraversalOutput, requirePassedDraft, validatedDraftId, verifyTitleSearch } from './notes-journey.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const OUT = path.join(__dirname, 'artifacts');
 const notesMode = process.env.MOZAIKS_TRAVERSAL_NOTES === '1';
-fs.mkdirSync(OUT, { recursive: true });
+let OUT;
 
 // Generated code lands in ChatSessions.generated_files in Mongo, not on disk.
 // A harness watching generated/apps reports a finished build as NO BUNDLE —
@@ -255,6 +254,7 @@ const GATES = [
 const REVERSING = new Set(['cancel', 'request_changes', 'reject', 'back']);
 
 test('traversal: idea to accepted, validated artifact', async ({ page }) => {
+  OUT = prepareTraversalOutput(path.join(__dirname, 'artifacts'), notesMode, process.env.MOZAIKS_TRAVERSAL_OUTPUT);
   recordProvenance();
   const baseline = bundleState();
   if (baseline === null) {

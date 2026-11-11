@@ -17,7 +17,21 @@ import path from 'node:path';
 import test from 'node:test';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
-import { createNote, finishTraversal, requirePassedDraft, validatedDraftId, verifyTitleSearch } from '../live-traversal/notes-journey.js';
+import { createNote, finishTraversal, prepareTraversalOutput, requirePassedDraft, validatedDraftId, verifyTitleSearch } from '../live-traversal/notes-journey.js';
+
+test('notes output uses a new owned directory and preserves prior receipts', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'traversal-output-'));
+  const prior = path.join(root, 'artifacts');
+  await fs.mkdir(prior);
+  await fs.writeFile(path.join(prior, 'verdict.json'), 'old receipt');
+  const run = path.join(root, 'owned-run');
+  assert.equal(prepareTraversalOutput(prior, true, run), run);
+  await fs.writeFile(path.join(run, 'verdict.json'), 'new receipt');
+  assert.equal(await fs.readFile(path.join(prior, 'verdict.json'), 'utf8'), 'old receipt');
+  assert.throws(() => prepareTraversalOutput(prior, true, run), /EEXIST/);
+  assert.throws(() => prepareTraversalOutput(prior, true, ''), /requires an absolute/);
+  assert.equal(prepareTraversalOutput(prior, false, run), prior);
+});
 
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const specPath = path.join(shell, 'live-traversal/traversal.spec.js');
