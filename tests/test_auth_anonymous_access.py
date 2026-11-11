@@ -1480,6 +1480,9 @@ def _startup_env(monkeypatch, tmp_path):
     policy = tmp_path / "secrets.yaml"
     policy.write_text("version: 1\nprovider: {type: env}\nsecrets: []\n")
     monkeypatch.setenv("MOZAIKS_SECRETS_CONFIG_PATH", str(policy))
+    # This suite exercises auth posture, not the runtime's selected-provider
+    # default. Keep its boot environment explicitly on the OpenAI fixture path.
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("MONGO_URI", "mongodb://127.0.0.1:27017")
     monkeypatch.setenv("INTERNAL_API_KEY", "test-startup-api-key-long-enough")

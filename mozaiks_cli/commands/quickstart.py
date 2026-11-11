@@ -44,7 +44,8 @@ def _print_intro(workspace_root: Path) -> None:
 
 def _print_environment_warnings(args) -> None:
     warnings: list[str] = []
-    provider = getattr(args, "provider", None)
+    # Onboarding flags describe the workspace. Runtime model selection is env-owned.
+    provider = os.environ.get("LLM_PRIMARY_API_TYPE", "google").strip().lower() or "google"
 
     if not os.environ.get("MONGO_URI"):
         warnings.append(
@@ -53,20 +54,18 @@ def _print_environment_warnings(args) -> None:
             "to a reachable MongoDB Atlas/local URI."
         )
 
-    if provider == "openai" and not os.environ.get("OPENAI_API_KEY"):
-        warnings.append("OPENAI_API_KEY is not set for the selected provider.")
-    elif provider == "anthropic" and not os.environ.get("ANTHROPIC_API_KEY"):
-        warnings.append("ANTHROPIC_API_KEY is not set for the selected provider.")
-    elif provider not in {"local", None} and provider not in {"openai", "anthropic"}:
+    provider_keys = {
+        "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+        "openai": ("OPENAI_API_KEY",),
+        "anthropic": ("ANTHROPIC_API_KEY",),
+    }
+    if provider in provider_keys and not any(
+        os.environ.get(key, "").strip() for key in ("LLM_PRIMARY_API_KEY", *provider_keys[provider])
+    ):
+        warnings.append(f"{provider_keys[provider][0]} is not set for the runtime provider ({provider}).")
+    elif provider not in {*provider_keys, "ollama"}:
         warnings.append(
             f"{provider.upper()} provider selected. Make sure the matching provider credentials are available."
-        )
-    elif provider is None and not any(
-        os.environ.get(key) for key in ("GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY")
-    ):
-        warnings.append(
-            "No provider API key detected. Set GEMINI_API_KEY (default provider, free tier), "
-            "OPENAI_API_KEY, or ANTHROPIC_API_KEY before starting a build."
         )
 
     if not warnings:

@@ -848,6 +848,7 @@ async def _execute_one_batch(
     ) -> dict[str, Any] | Exception:
         task_id = str(item["task_id"])
         outcome: dict[str, Any] | Exception
+        owned_http_clients: list[Any] = []
         try:
             outcome = await _run_one_task(
                 workflow_name=workflow_name, batch=batch, task=item, all_task_items=task_items,
@@ -856,6 +857,7 @@ async def _execute_one_batch(
                 fresh_agents_per_task=fresh_agents_per_task, agents_factory=agents_factory,
                 context_authority_policy=context_authority_policy, before_attempt=before_attempt,
                 prior_failure=recovery_failures.get(task_id), recovery_episode=recovery_request is not None,
+                owned_http_clients=owned_http_clients,
             )
         except asyncio.CancelledError:
             if batch.recovery:
@@ -886,6 +888,11 @@ async def _execute_one_batch(
                     batch.id, task_id, chat_id, exc, exc_info=exc,
                 )
             outcome = exc
+        finally:
+            from mozaiksai.core.adapters.llm_fallback import close_ag2_session_http_client
+
+            for client in owned_http_clients:
+                await close_ag2_session_http_client(client)
         async with state_lock:
             pending.pop(task_id, None)
             if isinstance(outcome, Exception):
@@ -1083,6 +1090,7 @@ async def _run_one_task(
     before_attempt: Callable[[str, int], Awaitable[None]] | None = None,
     prior_failure: dict[str, Any] | None = None,
     recovery_episode: bool = False,
+    owned_http_clients: list[Any] | None = None,
 ) -> dict[str, Any]:
     agent_name = str(task.get(batch.worker.agent_field) or "").strip()
     prompt = str(task.get(batch.worker.prompt_field) or "").strip()
@@ -1121,6 +1129,17 @@ async def _run_one_task(
         # Call factory with positional args matching the convention in orchestration_patterns:
         # agents_factory(workflow_name, context, cache_seed)
         task_agents = await agents_factory(workflow_name, task_context, None)
+        if owned_http_clients is not None:
+            seen_client_ids = {id(client) for client in owned_http_clients}
+            for task_agent in task_agents.values():
+                config = getattr(task_agent, "config", None)
+                client = getattr(config, "http_client", None)
+                if (
+                    getattr(client, "_mozaiks_ag2_session_owned", False)
+                    and id(client) not in seen_client_ids
+                ):
+                    owned_http_clients.append(client)
+                    seen_client_ids.add(id(client))
         agent = task_agents.get(agent_name)
     else:
         agent = agents.get(agent_name)

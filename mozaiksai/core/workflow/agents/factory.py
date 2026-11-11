@@ -4,6 +4,7 @@
 # ==============================================================================
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from collections.abc import Callable, Mapping, Sequence
@@ -687,6 +688,13 @@ async def create_agents(
             _, llm_config_dict = await _get_structured_llm(
                 workflow_name, "base", agent_name=agent_name, extra_config=extra,
             )
+        except asyncio.CancelledError:
+            from mozaiksai.core.adapters.llm_fallback import close_ag2_session_http_client
+
+            for created_agent in agents.values():
+                created_config = getattr(created_agent, "config", None)
+                await close_ag2_session_http_client(getattr(created_config, "http_client", None))
+            raise
         except Exception:
             llm_config_dict = base_llm_config
 

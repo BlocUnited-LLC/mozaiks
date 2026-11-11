@@ -16,8 +16,6 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, cast
 
-logger = logging.getLogger(__name__)
-
 from ag2.knowledge import KnowledgeStore, MemoryKnowledgeStore
 from ag2.network import (
     EV_CHANNEL_CLOSED,
@@ -57,6 +55,27 @@ from mozaiksai.core.workflow.context.authority import (
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.execution.network_graph import compile_transition_rules_to_graph
 from mozaiksai.core.workflow.outputs.runtime_validation import validate_agent_structured_output
+
+logger = logging.getLogger(__name__)
+
+
+def _owned_ag2_http_clients(agents: Mapping[str, Any]) -> tuple[Any, ...]:
+    clients: dict[int, Any] = {}
+    for agent in agents.values():
+        config = getattr(agent, "config", None)
+        client = getattr(config, "http_client", None)
+        if getattr(client, "_mozaiks_ag2_session_owned", False):
+            clients[id(client)] = client
+    return tuple(clients.values())
+
+
+async def _close_owned_ag2_http_clients(clients: Sequence[Any]) -> None:
+    for client in clients:
+        try:
+            await client.aclose()
+        except Exception:
+            logger.warning("AG2_SESSION_HTTP_CLIENT_CLOSE_FAILED", exc_info=True)
+
 
 _INITIATOR_NAME = "mozaiks_user"
 # A channel fails only after this long without progress; runs stay bounded by
@@ -431,6 +450,7 @@ class AG2NetworkRunner:
         initial_agent_name = str(request.initial_agent_name or "").strip()
         validation_error = self._validate_request(request, initial_agent_name)
         if validation_error:
+            await _close_owned_ag2_http_clients(_owned_ag2_http_clients(request.agents))
             return AG2NetworkRunnerResult(
                 status=RunStatus.FAILED,
                 workflow_name=request.workflow_name,
@@ -439,11 +459,16 @@ class AG2NetworkRunner:
                 error=validation_error,
             )
 
-        hub = await Hub.open(
-            request.knowledge_store if request.knowledge_store is not None else MemoryKnowledgeStore(),
-            ttl_sweep_interval=0,
-            expectation_sweep_interval=0,
-        )
+        owned_http_clients = _owned_ag2_http_clients(request.agents)
+        try:
+            hub = await Hub.open(
+                request.knowledge_store if request.knowledge_store is not None else MemoryKnowledgeStore(),
+                ttl_sweep_interval=0,
+                expectation_sweep_interval=0,
+            )
+        except BaseException:
+            await _close_owned_ag2_http_clients(owned_http_clients)
+            raise
         # Native WorkflowAdapter narrows the generic protocol's state types.
         hub.register_adapter(cast(ChannelAdapter, WorkflowHistoryAdapter()))
         turn_failure_listener = _TurnFailureListener()
@@ -699,6 +724,7 @@ class AG2NetworkRunner:
                     channel_id=channel.channel_id,
                     turn_failure_listener=turn_failure_listener,
                     progress_listener=progress_listener,
+                    owned_http_clients=owned_http_clients,
                     agent_name_by_id=_agent_names(),
                     snapshot_result=_snapshot_result,
                     idle_timeout_seconds=idle_timeout_seconds,
@@ -827,6 +853,7 @@ class AG2NetworkRunner:
                         channel_id=channel.channel_id,
                         turn_failure_listener=turn_failure_listener,
                         progress_listener=progress_listener,
+                        owned_http_clients=owned_http_clients,
                         agent_name_by_id=_agent_names(),
                         snapshot_result=_snapshot_result,
                         idle_timeout_seconds=idle_timeout_seconds,
@@ -891,6 +918,7 @@ class AG2NetworkRunner:
                         request.chat_id,
                         _hub_exc,
                     )
+                await _close_owned_ag2_http_clients(owned_http_clients)
 
     @staticmethod
     def _validate_request(request: AG2NetworkRunnerRequest, initial_agent_name: str) -> str | None:
@@ -960,6 +988,7 @@ class _AG2LiveWorkflowRun:
         channel_id: str,
         turn_failure_listener: _TurnFailureListener,
         progress_listener: _ChannelProgressListener,
+        owned_http_clients: Sequence[Any],
         agent_name_by_id: Mapping[str, str],
         snapshot_result: Callable[..., Awaitable[AG2NetworkRunnerResult]],
         idle_timeout_seconds: float,
@@ -974,6 +1003,7 @@ class _AG2LiveWorkflowRun:
         self._initiator = initiator
         self._turn_failure_listener = turn_failure_listener
         self._progress_listener = progress_listener
+        self._owned_http_clients = tuple(owned_http_clients)
         self._agent_name_by_id = dict(agent_name_by_id)
         self._snapshot_result: Callable[..., Awaitable[AG2NetworkRunnerResult]] = snapshot_result
         self._idle_timeout_seconds = idle_timeout_seconds
@@ -983,6 +1013,18 @@ class _AG2LiveWorkflowRun:
         self._context_authority_policy = context_authority_policy
 
     async def continue_with_user_message(
+        self,
+        message: str,
+        *,
+        context_updates: Mapping[str, Any] | None = None,
+    ) -> AG2NetworkRunnerResult:
+        try:
+            return await self._continue_with_user_message(message, context_updates=context_updates)
+        except asyncio.CancelledError:
+            await self.close()
+            raise
+
+    async def _continue_with_user_message(
         self,
         message: str,
         *,
@@ -1142,6 +1184,7 @@ class _AG2LiveWorkflowRun:
         failure_task = asyncio.create_task(
             self._turn_failure_listener.wait_for_failure(self.channel_id)
         )
+        event_task: asyncio.Task | None = None
         loop = asyncio.get_running_loop()
         wait_started = loop.time()
         try:
@@ -1210,8 +1253,14 @@ class _AG2LiveWorkflowRun:
                         close_reason="awaiting_user_input",
                     )
         finally:
-            failure_task.cancel()
-            await asyncio.gather(failure_task, return_exceptions=True)
+            pending_tasks = [
+                task for task in (failure_task, event_task)
+                if task is not None and not task.done()
+            ]
+            for task in pending_tasks:
+                task.cancel()
+            tasks = [failure_task, *([event_task] if event_task is not None else [])]
+            await asyncio.gather(*tasks, return_exceptions=True)
 
         return await self._snapshot_result(
             status=RunStatus.FAILED,
@@ -1245,6 +1294,7 @@ class _AG2LiveWorkflowRun:
                 self.chat_id,
                 exc,
             )
+        await _close_owned_ag2_http_clients(self._owned_http_clients)
 
 
 def _packet_body_text(event_data: Mapping[str, Any]) -> str:

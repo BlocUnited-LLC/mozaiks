@@ -1,6 +1,7 @@
 import json
 from argparse import Namespace
 
+import pytest
 import yaml
 
 from mozaiks_cli.commands import init_command, onboard_command
@@ -214,9 +215,8 @@ def test_onboard_command_defaults_provider_when_not_provided(tmp_path) -> None:
     ai_json = _load_json(target_dir / "app" / "config" / "ai.json")
     shell_json = _load_json(target_dir / "app" / "config" / "shell.json")
 
-    # Default provider is anthropic
-    assert ai_json["llm"]["provider"] == "anthropic"
-    assert ai_json["llm"]["model"] == "claude-sonnet-4-5"
+    assert ai_json["llm"]["provider"] == "google"
+    assert ai_json["llm"]["model"] == "gemini-3.8-flash"
     assert "control_plane" not in ai_json
     assert shell_json["header"]["actions"]
 
@@ -225,8 +225,8 @@ def test_onboard_command_prompts_when_values_are_missing(monkeypatch, tmp_path) 
     target_dir = tmp_path / "prompt-onboard"
     init_command.run(Namespace(preset="chat", name="atlas", directory=str(target_dir), starter=False))
 
-    # Responses: app name, provider choice (2=openai), model, decline open studio
-    responses = iter(["Atlas Prime", "2", "gpt-4.1", "n"])
+    # Responses: app name, provider choice (3=openai), model, decline open studio
+    responses = iter(["Atlas Prime", "3", "gpt-4.1", "n"])
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
 
     onboard_command.run(
@@ -254,4 +254,31 @@ def test_workspace_helpers_keep_brand_and_ui_inside_active_app_root(tmp_path) ->
     app_root = tmp_path / "workspace" / "app"
     assert resolve_theme_config_path(app_root) == app_root / "brand" / "theme_config.json"
     assert resolve_ui_route_manifest_path(app_root) == app_root / "ui" / "route_manifest.json"
+
+
+@pytest.mark.parametrize("command", ["onboard", "quickstart"])
+def test_workspace_parser_accepts_google(command) -> None:
+    assert create_parser().parse_args([command, "--provider", "google"]).provider == "google"
+
+
+@pytest.mark.parametrize("provider,expected_model", [(None, "custom-openai"), ("google", "gemini-3.8-flash")])
+def test_onboard_preserves_existing_choices_and_resets_model_when_provider_changes(tmp_path, provider, expected_model) -> None:
+    workspace = tmp_path / "existing-app"
+    init_command.create_scaffold(target_dir=workspace, preset="chat", app_name="Existing")
+    ai_path = workspace / "app" / "config" / "ai.json"
+    ai = _load_json(ai_path)
+    ai["llm"] = {"provider": "openai", "model": "custom-openai"}
+    ai_path.write_text(json.dumps(ai), encoding="utf-8")
+    policy_path = workspace / "app" / "config" / "refinement_policy.yaml"
+    policy = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+    policy["llm_profiles"]["codegen"]["llm_config"] = {"api_type": "openai", "model": "custom-codegen"}
+    policy_path.write_text(yaml.safe_dump(policy), encoding="utf-8")
+
+    assert onboard_command.run(Namespace(
+        directory=str(workspace), name=None, provider=provider, model=None,
+        non_interactive=True, open_studio=False,
+    )) == 0
+
+    assert _load_json(ai_path)["llm"] == {"provider": provider or "openai", "model": expected_model}
+    assert yaml.safe_load(policy_path.read_text(encoding="utf-8")) == policy
 

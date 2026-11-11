@@ -51,7 +51,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from mozaiksai.core.adapters.llm_fallback import MODEL_API_KEY_ENV_NAMES, resolve_model_api_key
+from mozaiksai.core.adapters.llm_fallback import (
+    DEFAULT_LLM_API_TYPE,
+    MODEL_API_KEY_ENV_NAMES,
+    resolve_model_api_key,
+)
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.environment import EnvironmentConfigError, deployment_environment
 from mozaiksai.core.secrets import (
@@ -75,7 +79,7 @@ def _startup_mode() -> str:
 
 def _can_resolve_api_key() -> tuple[bool, str]:
     """Use the AG2 adapter's selected-provider resolution for startup too."""
-    api_type = os.getenv("LLM_PRIMARY_API_TYPE", "openai").strip().lower()
+    api_type = os.getenv("LLM_PRIMARY_API_TYPE", DEFAULT_LLM_API_TYPE).strip().lower()
     names = MODEL_API_KEY_ENV_NAMES.get(api_type, MODEL_API_KEY_ENV_NAMES["openai"])
     if not names:
         return True, "ollama (no API key required)"
