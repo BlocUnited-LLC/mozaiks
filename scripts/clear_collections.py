@@ -1,6 +1,6 @@
 """mozaiksai dev utility: clear MongoDB collections (documents only).
 
-Designed to be called by `scripts/cleanse.ps1`.
+Standalone operator utility; not part of normal application startup.
 Safety goals:
 - Defaults to NO-OP unless `--yes` is provided.
 - Refuses to touch non-local MongoDB hosts unless explicitly allowed.
@@ -77,7 +77,7 @@ def _resolve_database_name(mongo_uri: str, override: str | None) -> str | None:
     if db:
         return str(db)
     # mozaiksai runtime consistently uses client["mozaiksai"], even if the URI omits a DB.
-    # Default here so cleanse works with plain mongodb://host:27017
+    # Default here so this utility works with plain mongodb://host:27017
     return os.getenv("MONGO_DB_NAME") or "mozaiksai"
 
 
@@ -135,7 +135,7 @@ def main(argv: list[str]) -> int:
             + ", ".join(nonlocal_hosts)
         )
         print("Set --allow-nonlocal only if you are 100% sure this is safe.")
-        # Non-zero so callers (e.g., cleanse.ps1) can surface this as a warning.
+        # Non-zero so callers can surface this as a warning.
         return 2
 
     db_name = _resolve_database_name(mongo_uri, args.database)

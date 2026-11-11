@@ -88,7 +88,8 @@ generated_apps/
 # Generator output staged for validation/promotion is never source. A live
 # Studio run writes app-intelligence artifacts here; one already reached main
 # this way before it was ignored.
-generated/app_intelligence/
+/generated/
+/generated_artifacts/
 uploads/
 mozaiks-platform/
 
@@ -105,7 +106,7 @@ ai-pricing/catalogs/usage-pricing.overrides.json
 site/
 .mkdocs-tmp/
 
-# Generated artifacts (from brand.json via `python -m mozaiksai.cli generate`)
+# Generated Keycloak theme assets
 infra/keycloak/themes/mozaiks/login/resources/css/login.css
 infra/keycloak/themes/mozaiks/login/resources/img/
 
