@@ -31,13 +31,41 @@
 # ==============================================================================
 from __future__ import annotations
 
+import math
 import os
 from collections.abc import Mapping
 from typing import Any
 
+import httpx
+
 from logs.logging_config import get_core_logger
 
 logger = get_core_logger("llm_fallback")
+
+
+class _GeminiTimeoutAsyncClient(httpx.AsyncClient):
+    """Keep the configured HTTPX timeout when google-genai passes timeout=None."""
+
+    async def request(self, *args: Any, **kwargs: Any) -> httpx.Response:
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = self.timeout
+        return await super().request(*args, **kwargs)
+
+
+def create_gemini_http_client(
+    timeout: Any,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> httpx.AsyncClient:
+    """Create an HTTPX client whose timeout applies to google-genai requests."""
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or not math.isfinite(timeout)
+        or timeout <= 0
+    ):
+        raise ValueError("timeout must be a finite positive number of seconds")
+    return _GeminiTimeoutAsyncClient(timeout=float(timeout), transport=transport)
 
 
 def resolve_structured_output_mode(llm_config: Mapping[str, Any] | None = None) -> str:
@@ -135,6 +163,7 @@ def build_fallback_config_list(
     fallback_base_urls: list[str] | None = None,
     temperature: float | None = None,
     timeout: int | None = None,
+    include_primary_key: bool = True,
 ) -> list[dict[str, Any]]:
     """Build an AG2-compatible ``config_list`` with a primary model and fallbacks.
 
@@ -168,7 +197,11 @@ def build_fallback_config_list(
     )
     if not resolved_primary:
         raise ValueError("LLM_PRIMARY_MODEL is required for the selected provider")
-    resolved_api_key = resolve_model_api_key(resolved_api_type, primary_api_key or None)
+    resolved_api_key = resolve_model_api_key(
+        resolved_api_type,
+        primary_api_key or None,
+        include_primary_key=include_primary_key,
+    )
     resolved_base_url = primary_base_url or _env("LLM_PRIMARY_BASE_URL") or None
 
     primary_entry: dict[str, Any] = {"model": resolved_primary, "api_type": resolved_api_type}
@@ -332,6 +365,14 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
             "streaming": streaming,
             **_model_call_limits(llm_config, entry, ("max_output_tokens",)),
         }
+        # AG2 1.3 exposes an httpx client for Gemini rather than a timeout
+        # field. Caller-supplied clients remain caller-owned; workflow configs
+        # get a client using the shared AG2 timeout's seconds unit.
+        http_client = llm_config.get("http_client")
+        if http_client is None and timeout is not None:
+            http_client = create_gemini_http_client(timeout)
+        if http_client is not None:
+            kwargs["http_client"] = http_client
         if llm_config.get("response_modalities"):
             kwargs["response_modalities"] = llm_config["response_modalities"]
         if llm_config.get("image_config") is not None:

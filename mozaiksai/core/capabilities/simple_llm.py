@@ -5,9 +5,8 @@ import os
 from dataclasses import asdict
 from typing import Any
 
-import httpx
-
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.adapters.llm_fallback import create_gemini_http_client
 from mozaiksai.core.tokens.guard import TokenUsageGuard
 from mozaiksai.core.workflow.llm_config import get_llm_config
 
@@ -30,7 +29,7 @@ class SimpleLLMCapabilityService:
         token_usage_guard: TokenUsageGuard | None = None,
     ) -> None:
         self._timeout = float(timeout)
-        self._client = httpx.AsyncClient(timeout=self._timeout)
+        self._client = create_gemini_http_client(self._timeout)
         self._token_usage_guard = token_usage_guard
 
     async def aclose(self) -> None:
@@ -218,8 +217,12 @@ class SimpleLLMCapabilityService:
         config["streaming"] = False
         if temperature is not None:
             config["temperature"] = temperature
+        if config.get("api_type") == "google":
+            # This service owns the shared HTTP client and its timeout; keep
+            # that ownership instead of creating an adapter-owned client.
+            config["http_client"] = self._client
         model_config = llm_config_to_ag2_config({**config, "config_list": [config]})
-        if config.get("api_type") in {"google", "ollama"}:
+        if config.get("api_type") == "ollama":
             model_config = model_config.copy(http_client=self._client)
 
         context = ConversationContext(stream=MemoryStream())

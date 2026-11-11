@@ -131,6 +131,9 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
             providers = db_doc.get("providers") or db_doc.get("models") or [db_doc]
             if not isinstance(providers, list):
                 providers = [providers]
+            configured_primary_api_type = os.getenv(
+                "LLM_PRIMARY_API_TYPE", DEFAULT_LLM_API_TYPE,
+            ).strip().lower()
             for provider in providers:
                 if not isinstance(provider, dict):
                     raise ValueError("Stored LLM provider must be an object")
@@ -139,13 +142,21 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
                 model = model or os.getenv("DEFAULT_LLM_MODEL") or ("gpt-5-nano" if api_type == "openai" else None)
                 if not model:
                     raise ValueError("Stored LLM provider requires an explicit model")
-                key = provider.get("api_key") or provider.get("ApiKey") or next(
-                    (provider[name] for name in MODEL_API_KEY_ENV_NAMES.get(api_type, ()) if provider.get(name)),
-                    None,
-                )
+                key = provider.get("api_key") or provider.get("ApiKey")
+                if not key:
+                    key_env_names = MODEL_API_KEY_ENV_NAMES.get(api_type, ())
+                    if api_type != configured_primary_api_type:
+                        key_env_names = tuple(
+                            name for name in key_env_names if name != "LLM_PRIMARY_API_KEY"
+                        )
+                    key = next(
+                        (provider[name] for name in key_env_names if provider.get(name)),
+                        None,
+                    )
                 entry = build_fallback_config_list(
                     primary_model=model, primary_api_type=api_type, primary_api_key=key,
                     primary_base_url=provider.get("base_url"), fallback_models=[],
+                    include_primary_key=api_type == configured_primary_api_type,
                 )[0]
                 if not provider.get("base_url"):
                     entry.pop("base_url", None)

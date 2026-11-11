@@ -118,6 +118,40 @@ def test_unconfigured_limits_keep_ag2_defaults():
 
 
 @pytest.mark.asyncio
+async def test_gemini_shared_timeout_uses_httpx_seconds_and_preserves_client_ownership():
+    pytest.importorskip("google.genai")
+    caller_client = httpx.AsyncClient(timeout=23.0)
+    actual = None
+    try:
+        actual = llm_config_to_ag2_config({
+            "config_list": [{"api_type": "google", "model": "gemini-test"}],
+            "timeout": 11,
+        })
+        assert actual.http_client.timeout.read == 11
+
+        supplied = llm_config_to_ag2_config({
+            "config_list": [{"api_type": "google", "model": "gemini-test"}],
+            "timeout": 11,
+            "http_client": caller_client,
+        })
+        assert supplied.http_client is caller_client
+        assert supplied.http_client.timeout.read == 23
+    finally:
+        if actual is not None:
+            await actual.http_client.aclose()
+        await caller_client.aclose()
+
+
+@pytest.mark.parametrize("timeout", [0, -1, True, float("inf"), float("nan"), "10"])
+def test_invalid_gemini_timeout_fails_before_client_creation(timeout):
+    with pytest.raises(ValueError, match="timeout must be a finite positive number"):
+        llm_config_to_ag2_config({
+            "config_list": [{"api_type": "google", "model": "gemini-test"}],
+            "timeout": timeout,
+        })
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("limit", ["max_tokens", "max_completion_tokens"])
 async def test_limit_reaches_provider_http_through_real_ag2_agent(limit):
     from ag2 import Agent

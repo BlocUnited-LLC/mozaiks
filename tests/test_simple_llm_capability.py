@@ -283,9 +283,11 @@ async def test_google_default_uses_real_ag2_provider_with_mock_http(monkeypatch)
         })
 
     monkeypatch.setattr(simple_llm, "get_llm_config", fake_config)
-    service = SimpleLLMCapabilityService()
+    service = SimpleLLMCapabilityService(timeout=47.0)
     await service._client.aclose()
-    service._client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+    service._client = simple_llm.create_gemini_http_client(
+        service._timeout, transport=httpx.MockTransport(handle),
+    )
     result = await service.generate_json_completion(
         system_prompt="Return JSON", user_prompt="Hello", app_id=None, user_id=None,
     )
@@ -298,6 +300,7 @@ async def test_google_default_uses_real_ag2_provider_with_mock_http(monkeypatch)
     assert len(requests) == 1
     request = requests[0]
     assert request.url.host == "generativelanguage.googleapis.com"
+    assert request.extensions["timeout"]["read"] == 47.0
     assert "gemini-3.8-flash:generateContent" in request.url.path
     assert request.headers["x-goog-api-key"] == "gemini-test-key"
     assert "authorization" not in request.headers

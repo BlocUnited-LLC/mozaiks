@@ -6,6 +6,8 @@ import pytest
 from mozaiksai.core.adapters import llm_fallback
 from mozaiksai.core.workflow import llm_config
 
+_REAL_RESOLVE_MODEL_API_KEY = llm_fallback.resolve_model_api_key
+
 
 @pytest.fixture(autouse=True)
 def isolated_config(monkeypatch):
@@ -17,7 +19,11 @@ def isolated_config(monkeypatch):
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("MOZAIKS_LLM_CONFIG_SKIP_MONGO", "true")
-    monkeypatch.setattr(llm_fallback, "resolve_model_api_key", lambda provider, explicit=None: explicit or "test-only-" + provider)
+    monkeypatch.setattr(
+        llm_fallback,
+        "resolve_model_api_key",
+        lambda provider, explicit=None, **kwargs: explicit or "test-only-" + provider,
+    )
     monkeypatch.setattr(llm_fallback, "_optional_secret", lambda name: "")
     llm_config.clear_llm_caches()
     yield
@@ -115,6 +121,23 @@ async def test_database_anthropic_does_not_consume_openai_named_key(monkeypatch)
     stored_config(monkeypatch, [{"api_type": "anthropic", "model": "stored-model", "OPENAI_API_KEY": "wrong-provider-key"}])
     _, config = await llm_config.get_llm_config()
     assert config["config_list"][0]["api_key"] == "test-only-anthropic"
+
+
+@pytest.mark.asyncio
+async def test_stored_non_primary_provider_does_not_consume_generic_primary_key(monkeypatch):
+    stored_config(monkeypatch, [{"api_type": "openai", "model": "stored-model"}])
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "google")
+    monkeypatch.setattr(llm_fallback, "resolve_model_api_key", _REAL_RESOLVE_MODEL_API_KEY)
+    fake_keys = {
+        "LLM_PRIMARY_API_KEY": "FAKE-GOOGLE-PRIMARY-KEY",
+        "OPENAI_API_KEY": "FAKE-OPENAI-PROVIDER-KEY",
+    }
+    monkeypatch.setattr(llm_fallback, "_optional_secret", lambda name: fake_keys.get(name, ""))
+
+    _, config = await llm_config.get_llm_config()
+
+    assert config["config_list"][0]["api_key"] == "FAKE-OPENAI-PROVIDER-KEY"
+    assert "FAKE-GOOGLE-PRIMARY-KEY" not in str(config)
 
 
 @pytest.mark.asyncio
@@ -290,6 +313,8 @@ async def test_default_google_uses_native_limit_and_ignores_openai_env(monkeypat
     assert isinstance(actual, GeminiConfig)
     assert actual.model == "gemini-3.8-flash"
     assert actual.max_output_tokens == 1024
+    assert actual.http_client.timeout.read == config["timeout"] == 600
+    await actual.http_client.aclose()
     assert "reasoning" not in config["config_list"][0]
     assert "use_responses_api" not in config["config_list"][0]
 
