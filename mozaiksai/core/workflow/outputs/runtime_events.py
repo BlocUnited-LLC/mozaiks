@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .rejection_audit import audit_structured_output_rejection
 from .runtime_validation import validate_agent_structured_output
 
 
@@ -41,6 +42,14 @@ async def emit_validated_agent_output(
             workflow_name.upper(),
             current_agent_name,
             validation.error,
+        )
+        await audit_structured_output_rejection(
+            validation,
+            source="runtime_turn",
+            workflow_name=workflow_name,
+            chat_id=chat_id,
+            app_id=app_id,
+            user_id=user_id,
         )
         return None
 

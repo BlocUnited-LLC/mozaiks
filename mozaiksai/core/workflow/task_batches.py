@@ -1193,6 +1193,7 @@ async def _run_one_task(
                         structured_registry=_structured_registry_for_agent(workflow_name, agent_name),
                         context_authority_policy=context_authority_policy,
                         timeout_seconds=batch.execution.timeout_seconds,
+                        user_id=user_id,
                     )
                 )
             if runner_result.status is not RunStatus.COMPLETED:

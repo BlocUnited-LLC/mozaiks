@@ -14,6 +14,25 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Agent replies rejected by structured-output validation now write an
+  `agent.output.rejected` record to the existing Mozaiks audit logger from the
+  live packet gate, the direct or resumed WAL check, and standalone task
+  batches, attributed to the initiating user. It adds an application-level
+  record next to AG2's native turn-failure audit: agent, workflow, chat, trace
+  id, failure category, error types with the field paths they apply to, and a
+  keyed digest of the reply (HMAC-SHA256, so a yes/no, enum or score reply
+  cannot be recovered by hashing the possible values). Set
+  `MOZAIKS_AUDIT_DIGEST_KEY` (32+ characters, resolved like other app
+  secrets) to make digests comparable across restarts; without it a random
+  per-process key is used and digests compare only within that process. A
+  path keeps only what the schema proves
+  (declared fields and list or tuple indexes); mapping keys and any component
+  the schema cannot prove become `<redacted-field>`. The reply and Pydantic's
+  input-quoting message are never stored. Each boundary writes its own record;
+  in the normal fail-closed path a rejected packet is never committed, so only
+  one boundary sees it. Whether a record persists depends on the configured
+  audit store; without one it falls back to a log line. Validation still fails
+  closed, and an audit failure cannot change that.
 - Generated bundle validation can resolve approved compiler inputs from the exact
   owned build record. Factory saves actual design/subscription input identities,
   and coding/media children preserve those inputs while validating fresh bytes.
