@@ -48,6 +48,14 @@ MongoDB can override the environment. The `llm.provider` and `llm.model` fields
 written to `app/config/ai.json` by `onboard` are display metadata, not runtime
 model selectors.
 
+For Gemini workflow requests, `LLM_GEMINI_THINKING_LEVEL` optionally selects
+`low`, `medium`, or `high`. When unset, the provider's default applies. A
+stored provider entry's `thinking_level` takes precedence over the environment
+setting. The selected Gemini model must support the requested level; for
+example, Gemini 3.8 Flash supports all three. This option does not change
+`LLM_MAX_TOKENS`, which limits the provider's generated output, including
+thinking tokens.
+
 OpenAI remains available with `LLM_PRIMARY_API_TYPE=openai`, an explicit
 `LLM_PRIMARY_MODEL`, and `OPENAI_API_KEY`. Supported OpenAI models can opt into
 `LLM_USE_RESPONSES_API=true` and `LLM_REASONING_EFFORT=low`; these settings are

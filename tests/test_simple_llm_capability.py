@@ -266,11 +266,13 @@ async def test_responses_rejects_incompatible_output_limit_before_http_call() ->
 
 
 @pytest.mark.asyncio
-async def test_google_default_uses_real_ag2_provider_with_mock_http(monkeypatch) -> None:
+@pytest.mark.parametrize(("thinking_level", "max_output_tokens"), [(None, 256), ("low", 8192)])
+async def test_google_default_uses_real_ag2_provider_with_mock_http(monkeypatch, thinking_level, max_output_tokens) -> None:
     async def fake_config(**kwargs):
         return None, {
             "config_list": [{"model": "gemini-3.8-flash", "api_type": "google", "api_key": "gemini-test-key"}],
-            "max_output_tokens": 256,
+            "max_output_tokens": max_output_tokens,
+            "thinking_level": thinking_level,
             "temperature": 0.2,
             "timeout": 13.0,
         }
@@ -328,8 +330,12 @@ async def test_google_default_uses_real_ag2_provider_with_mock_http(monkeypatch)
     payload = json.loads(request.content)
     assert payload["systemInstruction"]["parts"] == [{"text": "Return JSON"}]
     assert payload["contents"] == [{"parts": [{"text": "Hello"}], "role": "user"}]
-    assert payload["generationConfig"]["maxOutputTokens"] == 256
+    assert payload["generationConfig"]["maxOutputTokens"] == max_output_tokens
     assert payload["generationConfig"]["temperature"] == 0.2
+    if thinking_level is None:
+        assert "thinkingConfig" not in payload["generationConfig"]
+    else:
+        assert payload["generationConfig"]["thinkingConfig"]["thinking_level"] == "LOW"
     assert requests[1].extensions["timeout"]["read"] == 13.0
 
 

@@ -66,6 +66,19 @@ def test_provider_limit_overrides_shared_default_without_mutation():
     assert source == original
 
 
+def test_gemini_thinking_level_preserves_provider_precedence_without_mutation():
+    source = {
+        "config_list": [{"api_type": "google", "model": "gemini-3.8-flash", "thinking_level": "medium"}],
+        "thinking_level": "low",
+        "max_output_tokens": 8192,
+    }
+    original = deepcopy(source)
+    config = llm_config_to_ag2_config(source)
+    assert config.thinking_level == "medium"
+    assert config.max_output_tokens == 8192
+    assert source == original
+
+
 @pytest.mark.parametrize(
     "provider,responses,key",
     [
@@ -156,7 +169,8 @@ async def test_gemini_shared_timeout_uses_httpx_seconds_and_preserves_client_own
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("streaming", [False, True])
-async def test_real_ag2_gemini_streaming_and_nonstreaming_use_finite_timeout(streaming):
+@pytest.mark.parametrize("thinking_level", [None, "low"])
+async def test_real_ag2_gemini_streaming_and_nonstreaming_use_finite_timeout(streaming, thinking_level):
     from ag2 import Agent
 
     requests = []
@@ -190,6 +204,8 @@ async def test_real_ag2_gemini_streaming_and_nonstreaming_use_finite_timeout(str
         }],
         "timeout": 13,
         "streaming": streaming,
+        "thinking_level": thinking_level,
+        "max_output_tokens": 8192,
         "http_client": external_client,
     })
     agent = Agent("gemini-timeout", config=config)
@@ -201,6 +217,14 @@ async def test_real_ag2_gemini_streaming_and_nonstreaming_use_finite_timeout(str
         assert len(requests) == 2
         assert requests[0].extensions["timeout"]["read"] == 13.0
         assert requests[1].extensions["timeout"]["read"] == 13.0
+        body = json.loads(requests[0].content)
+        assert body["generationConfig"]["maxOutputTokens"] == 8192
+        assert not body.get("tools")
+        assert not body["generationConfig"].get("responseModalities")
+        if thinking_level is None:
+            assert "thinkingConfig" not in body["generationConfig"]
+        else:
+            assert body["generationConfig"]["thinkingConfig"]["thinking_level"] == "LOW"
     finally:
         await close_ag2_session_http_client(config.http_client)
         assert not external_client.is_closed

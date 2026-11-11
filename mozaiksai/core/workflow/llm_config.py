@@ -17,6 +17,7 @@ OPENAI_MODEL_FALLBACK  OpenAI model order when LLM_PRIMARY_MODEL is absent
 LLM_PRIMARY_API_TYPE  Selected provider: google (default), openai, anthropic, ollama
 LLM_PRIMARY_MODEL     Explicit model for the selected provider
 LLM_MAX_TOKENS        Optional positive output limit, mapped to the selected API
+LLM_GEMINI_THINKING_LEVEL  Optional Gemini thinking level: low, medium, or high
 LLM_USE_RESPONSES_API Select OpenAI Responses instead of Chat Completions
 LLM_REASONING_EFFORT  OpenAI reasoning effort, passed through in the API's shape
 LLM_STRUCTURED_OUTPUT_MODE  AG2 schema transport: native (default) or prompted
@@ -165,7 +166,7 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
                 for name in (
                     "max_tokens", "max_completion_tokens", "max_output_tokens", "max_retries",
                     "use_responses_api", "responses_api", "reasoning", "reasoning_effort",
-                    "max_tool_calls", "parallel_tool_calls", "store",
+                    "max_tool_calls", "parallel_tool_calls", "store", "thinking_level",
                 ):
                     if name in provider:
                         entry[name] = provider[name]
@@ -289,8 +290,16 @@ async def get_llm_config(
     # Refresh raw providers before consulting derived variants so TTL and
     # explicit invalidation can replace a previously cached provider.
     config_list = await _load_raw_config_list()
+    selected = (extra_config.get("config_list") or config_list)[0]
+    thinking_level = os.getenv("LLM_GEMINI_THINKING_LEVEL", "").strip()
+    if (
+        thinking_level
+        and (selected.get("api_type") or "openai").lower() == "google"
+        and "thinking_level" not in extra_config
+        and "thinking_level" not in selected
+    ):
+        extra_config["thinking_level"] = thinking_level
     if limit is not None and not {"max_tokens", "max_output_tokens", "max_completion_tokens"}.intersection(extra_config):
-        selected = (extra_config.get("config_list") or config_list)[0]
         api_type = selected.get("api_type", "openai")
         responses = extra_config.get(
             "use_responses_api", extra_config.get("responses_api", selected.get("use_responses_api", selected.get("responses_api", False))),

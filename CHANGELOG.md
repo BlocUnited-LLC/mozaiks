@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Workflow operators can optionally select the Gemini thinking level without
+  changing the provider's default when the setting is omitted.
+
 - Docker sandbox callers can attach a validated allocation identity before
   container creation, allowing an interrupted allocation to be identified for cleanup.
 
