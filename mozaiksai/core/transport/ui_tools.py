@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -32,6 +33,37 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger("simple_transport.ui_tools")
+
+
+def project_ui_tool_response_state(
+    tool_call: dict[str, Any] | None, *, chat_id: str, transport: Any = None,
+) -> dict[str, Any] | None:
+    """Describe current response availability without restoring a waiter.
+
+    Persisted UI is display state, not execution authority. Reopening it must
+    not start AG2 or make an old decision executable in a new process.
+    """
+    if not isinstance(tool_call, dict):
+        return None
+    payload = tool_call.get("payload")
+    if (
+        tool_call.get("awaiting_response") is False
+        or isinstance(payload, dict) and payload.get("interaction_type") == "ui_surface"
+    ):
+        return dict(tool_call)
+    event_id = tool_call.get("tool_call_id")
+    available = False
+    if (
+        transport is not None and isinstance(event_id, str) and event_id
+        and transport._tool_call_chat_id(event_id) == chat_id
+        and not transport._is_tool_call_response_resolved(event_id)
+    ):
+        future = transport._resolve_tool_call_future(event_id)
+        available = bool(
+            future is not None and not future.done()
+            or event_id in transport._input_request_registries.get(chat_id, {})
+        )
+    return {**tool_call, "response_available": available}
 
 
 class UIToolsMixin:
@@ -89,10 +121,13 @@ class UIToolsMixin:
         awaiting_response: bool = False,
         component_name: str | None = None,
         agent_name: str | None = None,
-    ) -> None:
+        require_persistence: bool = False,
+        persistence_app_id: str | None = None,
+        persistence_scope_guard: Callable[[], None] | None = None,
+    ) -> bool:
         """Persist pending interactions and the latest artifact before delivery."""
         if not chat_id or not isinstance(payload, dict):
-            return
+            return False
 
         mode_candidates = [
             display_type,
@@ -105,29 +140,36 @@ class UIToolsMixin:
         )
         normalized_mode = display_mode.lower() if display_mode else None
         if not normalized_mode:
-            return
+            return False
         if normalized_mode != "artifact" and not awaiting_response:
-            return
+            return False
 
         try:
             pm = self._get_or_create_persistence_manager()
         except Exception as pm_err:
             logger.debug("[UI_TOOL] Persistence manager unavailable: %s", pm_err)
-            return
+            return False
 
         try:
-            app_id, workflow_name = await self._resolve_chat_context(
-                chat_id,
-                pm=pm,
-                payload_workflow=payload.get("workflow_name"),
-            )
+            if require_persistence:
+                # The public helper binds this to the active runtime invocation.
+                # Never infer another app by looking up a caller-supplied chat ID.
+                app_id, workflow_name = persistence_app_id, payload.get("workflow_name")
+            else:
+                app_id, workflow_name = await self._resolve_chat_context(
+                    chat_id,
+                    pm=pm,
+                    payload_workflow=payload.get("workflow_name"),
+                )
             if not app_id:
                 logger.debug("[UI_TOOL] Missing app_id for chat %s; skipping last_artifact persist", chat_id)
-                return
+                return False
 
             try:
-                sanitized_payload = json.loads(json.dumps(payload))
+                sanitized_payload = json.loads(json.dumps(payload, allow_nan=not require_persistence))
             except Exception:
+                if require_persistence:
+                    raise
                 sanitized_payload = payload
 
             artifact_doc = {
@@ -149,13 +191,15 @@ class UIToolsMixin:
                     },
                 )
             if normalized_mode == "artifact":
-                await pm.update_last_artifact(
+                return await pm.update_last_artifact(
                     chat_id=chat_id,
                     app_id=app_id,
                     artifact=artifact_doc,
+                    **({"scope_guard": persistence_scope_guard} if require_persistence else {}),
                 )
         except Exception as persist_err:
             logger.debug("[UI_TOOL] Failed to persist last_artifact for chat %s: %s", chat_id, persist_err)
+        return False
 
     # ==================================================================================
     # UI TOOL EVENT EMISSION
@@ -170,8 +214,12 @@ class UIToolsMixin:
         display_type: str,
         payload: dict[str, Any],
         awaiting_response: bool = True,
-        agent_name: str | None = None
-    ) -> None:
+        agent_name: str | None = None,
+        *,
+        require_persistence: bool = False,
+        persistence_app_id: str | None = None,
+        persistence_scope_guard: Callable[[], None] | None = None,
+    ) -> bool | None:
         """Emit the canonical ``chat.tool_call`` workflow UI event to the frontend."""
         # Extract agent_name from payload if not explicitly provided
         if not agent_name and isinstance(payload, dict):
@@ -187,6 +235,26 @@ class UIToolsMixin:
         _display_norm = str(display_type or "").strip().lower()
         if _display_norm not in (UIDisplayMode.INLINE, UIDisplayMode.ARTIFACT):
             _display_norm = UIDisplayMode.INLINE
+
+        persistence_options: dict[str, Any] = {}
+        if require_persistence:
+            if (
+                not chat_id or not persistence_app_id or not workflow_name
+                or _display_norm != UIDisplayMode.ARTIFACT or awaiting_response
+                or not callable(persistence_scope_guard)
+            ):
+                raise ValueError("Durable UI emission requires a scoped one-way artifact")
+            persistence_scope_guard()
+            connection = self.connections.get(chat_id)
+            if connection is not None and (
+                connection.get("app_id") != persistence_app_id
+                or connection.get("workflow_name") != workflow_name
+            ):
+                raise ValueError("Durable UI emission does not match the connected chat scope")
+            persistence_options = {
+                "require_persistence": True, "persistence_app_id": persistence_app_id,
+                "persistence_scope_guard": persistence_scope_guard,
+            }
 
         event = {
             "kind": "tool_call",
@@ -212,7 +280,7 @@ class UIToolsMixin:
         )
 
         try:
-            await self._persist_ui_tool_state(
+            persisted = await self._persist_ui_tool_state(
                 chat_id=chat_id,
                 tool_name=tool_name,
                 event_id=event_id,
@@ -221,9 +289,18 @@ class UIToolsMixin:
                 awaiting_response=awaiting_response,
                 component_name=component_name,
                 agent_name=agent_name,
+                **persistence_options,
             )
         except Exception as persist_exc:
+            if require_persistence:
+                raise
             logger.debug("[UI_TOOL] Persist hook raised for chat %s: %s", chat_id, persist_exc)
+            persisted = False
+        if require_persistence:
+            assert persistence_scope_guard is not None
+            persistence_scope_guard()
+        if require_persistence and persisted is not True:
+            raise RuntimeError("Artifact persistence was not confirmed")
 
         if event_id and bool(awaiting_response):
             self._get_resolved_tool_call_registry().pop(event_id, None)
@@ -237,8 +314,25 @@ class UIToolsMixin:
                 "feedback_agent_name": payload.get("agent_name"),
             }
 
-        # Delegate to core event sender for namespacing and sequence handling
+        # Persistence success is separate from live rendering. A saved surface
+        # can be restored by chat-meta replay even without a connected viewer.
+        if require_persistence:
+            connection = self.connections.get(chat_id)
+            if connection is not None and (
+                connection.get("app_id") != persistence_app_id
+                or connection.get("workflow_name") != workflow_name
+            ):
+                logger.warning("[UI_TOOL] Artifact saved; delivery scope changed for chat %s", chat_id)
+                return True
+            try:
+                await self.send_event_to_ui(event, chat_id)
+            except Exception:
+                logger.warning("[UI_TOOL] Artifact saved; live delivery failed for chat %s", chat_id, exc_info=True)
+            return True
+
+        # Delegate to core event sender for namespacing and sequence handling.
         await self.send_event_to_ui(event, chat_id)
+        return None
 
     async def send_ui_update(
         self,

@@ -6,7 +6,8 @@ workflow only through the named context's ``context.yaml``.
 
 Env vars:
   MOZAIKS_BUILD_CONTEXT_PATH - explicit path to a build_context directory
-  MOZAIKS_APP_WORKSPACE_PATH - workspace root; build_context resolved from there
+  MOZAIKS_APP_WORKSPACE_PATH - workspace root, or its app/ bundle root; build_context
+                               resolved beside app/
 """
 
 from __future__ import annotations
@@ -44,7 +45,11 @@ def resolve_build_context_root(
 
     workspace_raw = workspace_path or os.getenv("MOZAIKS_APP_WORKSPACE_PATH")
     if workspace_raw:
-        return (Path(workspace_raw).expanduser().resolve() / "build_context").resolve()
+        workspace = Path(workspace_raw).expanduser().resolve()
+        if workspace.name == "app" and (workspace / "app.json").is_file():
+            # `mozaiks serve` and the Studio launcher export the app bundle root.
+            workspace = workspace.parent
+        return (workspace / "build_context").resolve()
 
     return None
 

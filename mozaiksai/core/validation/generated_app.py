@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -7,6 +8,8 @@ from pathlib import PurePosixPath
 from typing import Any, Literal
 
 import yaml
+
+from .compilation_inputs import ApprovedAppCompilation
 
 
 @dataclass(frozen=True)
@@ -28,6 +31,7 @@ class GeneratedAppValidationRequest:
     require_deployment_artifacts: bool = False
     build_tasks: list[dict[str, Any]] = field(default_factory=list)
     pages: list[dict[str, Any]] = field(default_factory=list)
+    approved_compilation: ApprovedAppCompilation | None = None
 
 
 @dataclass(frozen=True)
@@ -136,11 +140,27 @@ def validate_generated_app_bundle(
     )
 
     resolved_capability_packs: list[dict[str, str]] = []
+    compiler_context = None
+    if request.approved_compilation is not None:
+        try:
+            if not isinstance(request.approved_compilation, ApprovedAppCompilation):
+                raise ValueError("Approved compilation must come from the artifact resolver")
+            identity = json.loads(request.files.get("app.json", "{}"))
+            compiler_context = request.approved_compilation.context_for(identity.get("appId"))
+            if list(request.capability_packs) != compiler_context["capability_packs"]:
+                raise ValueError("Candidate pack selection differs from its bound build")
+        except (ValueError, TypeError, AttributeError) as exc:
+            return GeneratedAppValidationResult(False, [_diagnostic("approved_compilation_invalid", str(exc))])
     scanner_errors = scan_generated_bundle(
         request.files,
         capability_packs=list(request.capability_packs),
         require_deployment_artifacts=request.require_deployment_artifacts,
         resolved_capability_packs=resolved_capability_packs,
+        **({
+            "context_variables": compiler_context,
+            "planned_data_contract": compiler_context.get("data_contract"),
+            "subscription_contract": compiler_context.get("subscription_contract"),
+        } if compiler_context is not None else {}),
     )
     diagnostics.extend(
         _diagnostic("generated_bundle_contract_failed", error)
@@ -192,6 +212,7 @@ async def validate_generated_app_candidate(
     validation_strategy: str | None = None,
     timeout_seconds: int = 120,
     capability_packs: list[dict[str, Any]] | None = None,
+    approved_compilation: ApprovedAppCompilation | None = None,
 ) -> dict[str, Any]:
     """Check one complete candidate with the existing acceptance and build owners.
 
@@ -248,13 +269,25 @@ async def validate_generated_app_candidate(
         result["app_validation_result"]["validation_status"] = "skipped"
         return result
 
-    # Fresh context deliberately carries no Genesis task evidence or parent
-    # validation. Copies prevent a helper's context write-back changing bytes.
+    # Only the artifact resolver can supply original settled task evidence.
+    # Parent validation is never reused; candidate bytes receive fresh checks.
     text_files = {path: content for path, content in snapshot.items() if isinstance(content, str)}
     binary_assets = {path: content for path, content in snapshot.items() if isinstance(content, bytes)}
     binary_kwargs: dict[str, Any] = {"runtime_binary_assets": dict(binary_assets)} if binary_assets else {}
+    compiler_context = {"app_id": app_id}
+    if approved_compilation is not None:
+        try:
+            if not isinstance(approved_compilation, ApprovedAppCompilation):
+                raise ValueError("Approved compilation must come from the artifact resolver")
+            compiler_context.update(approved_compilation.context_for(app_id))
+            if deepcopy(capability_packs or []) != compiler_context["capability_packs"]:
+                raise ValueError("Candidate pack selection differs from its bound build")
+        except (ValueError, TypeError) as exc:
+            result["validation_status"] = "failed"
+            result["errors"] = [str(exc)]
+            return result
     acceptance = await run_app_bundle_acceptance_gate(
-        files=dict(text_files), context_variables={"app_id": app_id},
+        files=dict(text_files), context_variables=compiler_context,
         capability_packs=deepcopy(capability_packs or []),
         **binary_kwargs,
     )

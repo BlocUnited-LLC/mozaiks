@@ -181,6 +181,7 @@ class MozaiksMediaHarvestMiddleware(BaseMiddleware):
         context_variables: Any,
         generation_params: dict[str, Any] | None = None,
         promotion_targets: Iterable[MediaPromotionTarget | str] | None = None,
+        emit_ui: bool = True,
     ) -> None:
         super().__init__(event, context)
         self._agent_name = agent_name
@@ -188,6 +189,7 @@ class MozaiksMediaHarvestMiddleware(BaseMiddleware):
         self._context_variables = context_variables
         self._generation_params = dict(generation_params or {})
         self._promotion_targets = list(promotion_targets or [])
+        self._emit_ui = emit_ui
 
     async def on_llm_call(
         self,
@@ -204,6 +206,7 @@ class MozaiksMediaHarvestMiddleware(BaseMiddleware):
             events=events,
             generation_params=self._generation_params,
             promotion_targets=self._promotion_targets,
+            emit_ui=self._emit_ui,
         )
         return response
 
@@ -215,6 +218,7 @@ def build_ag2_media_harvest_middleware(
     context_variables: Any,
     generation_params: dict[str, Any] | None = None,
     promotion_targets: Iterable[MediaPromotionTarget | str] | None = None,
+    emit_ui: bool = True,
 ) -> Middleware:
     return Middleware(
         MozaiksMediaHarvestMiddleware,
@@ -223,6 +227,7 @@ def build_ag2_media_harvest_middleware(
         context_variables=context_variables,
         generation_params=generation_params,
         promotion_targets=list(promotion_targets or []),
+        emit_ui=emit_ui,
     )
 
 

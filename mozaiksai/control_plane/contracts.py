@@ -4,6 +4,7 @@ from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
+import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mozaiksai.core.session.build_binding import BuildIdentity, RunBuildBinding
@@ -499,7 +500,30 @@ class FileUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     path: str
-    content: str
+    content: str = Field(description="Full file contents; concrete .yaml/.yml files must be valid YAML.")
+
+    @model_validator(mode="after")
+    def _validate_yaml_content(self) -> FileUpdate:
+        if PurePosixPath(self.path.replace("\\", "/")).suffix.lower() not in {".yaml", ".yml"}:
+            return self
+        try:
+            yaml.safe_load(self.content)
+        except yaml.YAMLError as exc:
+            # Keep parser buffers/snippets out of the diagnostic. AG2 owns the
+            # bounded schema correction; full candidate admission still follows.
+            mark = getattr(exc, "problem_mark", None)
+            position = getattr(exc, "position", None)
+            if mark is not None:
+                location = f"line {mark.line + 1}, column {mark.column + 1}"
+            elif isinstance(position, int):
+                location = f"character {position}"
+            else:
+                location = "unknown location"
+            path = safe_artifact_relpath(self.path) or "<invalid path>"
+            if len(path) > 200:
+                path = path[:197] + "..."
+            raise ValueError(f"{path}: invalid YAML ({type(exc).__name__}) at {location}") from exc
+        return self
 
 
 class CodingWorkerPlan(BaseModel):

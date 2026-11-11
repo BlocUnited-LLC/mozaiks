@@ -86,22 +86,10 @@ NOT_MATERIALIZABLE_ALONE = {
 # decision rather than a pack fix: (the failure's own message text, why). The proof
 # must fail with exactly that message, and fails once it passes, so the entry is removed.
 BLOCKED_PACKS: dict[str, tuple[str, str]] = {
-    "commerce": ("an approved subscription contract is required before writing a gated module manifest", (
-        "Assembly refuses commerce alone: its template module.yaml gates create_product and "
-        "start_checkout, and gated manifests need an approved subscription contract. With one, "
-        "assembly rewrites the gates and the template-integrity scan rejects the changed "
-        "template. Its contracts/admin.yaml is also still mozaiks.admin.v1, which the module "
-        "loader refuses."
-    )),
     "notifications": ("contains placeholder/not-implemented marker 'NotImplementedError'", (
         "The provider adapter stubs raise NotImplementedError by design "
         "(test_adapters_have_not_implemented_stub), and the acceptance gate's "
         "PLACEHOLDER_IMPLEMENTATION check fails every bundle that contains that marker."
-    )),
-    "outcome_feedback": ("differs from the verified template of the selected pack 'outcome_feedback'", (
-        "The approved plan must declare outcome_feedback.records, which makes the generator's "
-        "read closure add get/list actions to the pack's template-owned module files, which "
-        "the template-integrity scan then rejects."
     )),
 }
 

@@ -7,6 +7,9 @@ import json
 from collections.abc import Collection, Iterable
 from typing import Any, NoReturn
 
+from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
+    revision_baseline_required,
+)
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import planned_page_path, safe_relpath
 from mozaiksai.core.workflow.task_batches import (
@@ -125,6 +128,60 @@ def task_allowed_paths(task: dict[str, Any], tasks: list[dict[str, Any]]) -> set
     return (own | optional_task_output_paths(task)) - foreign - {""}
 
 
+def settled_task_snapshot(context: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Validate and detach original settled execution evidence for artifact capture."""
+    items = _get(context, "app_task_batch_items")
+    results = _get(context, "app_task_batch_results")
+    if results and (
+        not isinstance(results, dict) or not isinstance(results.get("_meta"), dict)
+        or not isinstance(results["_meta"].get("input_digests"), dict)
+    ):
+        raise ValueError("Approved compilation task execution metadata is invalid")
+    tasks = approved_task_inventory(context)
+    if not tasks and not results:
+        if items not in (None, []):
+            raise ValueError("Approved compilation has unexpected task execution inventory")
+        return [], {}
+    if not isinstance(items, list) or not isinstance(results, dict):
+        raise ValueError("Approved compilation requires original settled task execution evidence")
+    meta = results.get("_meta")
+    if not isinstance(meta, dict) or (
+        _get(context, "app_task_batch_status") != "completed"
+        or meta.get("status") != "completed" or meta.get("evidence_version") != 1
+        or meta.get("batch_id") != "app_build_tasks"
+        or meta.get("result_context_key") != "app_task_batch_results"
+        or results.get("_failed") or meta.get("failed_tasks")
+        or meta.get("pending_tasks") or meta.get("in_flight")
+    ):
+        raise ValueError("Approved compilation task execution is not settled and completed")
+    ids = {str(task["task_id"]) for task in tasks}
+    completed = meta.get("completed_tasks")
+    digests = meta.get("accepted_output_digests")
+    if (
+        not isinstance(completed, list) or not all(isinstance(item, str) for item in completed)
+        or len(completed) != len(ids) or set(completed) != ids
+        or meta.get("task_count") != len(ids)
+        or set(results) - {"_meta", "_failed"} != ids
+        or not isinstance(digests, dict) or set(digests) != ids
+        or meta.get("task_inventory_digest") != task_inventory_digest(items)
+        or not isinstance(meta.get("input_digests"), dict)
+        or meta["input_digests"].get("app_build_plan") != task_evidence_digest(_get(context, "app_build_plan"))
+    ):
+        raise ValueError("Approved compilation task evidence differs from its complete original inventory")
+    for task in tasks:
+        task_id = str(task["task_id"])
+        output = results[task_id]
+        if not isinstance(output, dict) or (
+            output.get("_task_id") != task_id or output.get("task_id") != task_id
+            or output.get("_worker_agent") != task.get("initial_agent")
+            or output.get("_owned_paths") != task.get("owned_paths")
+            or digests[task_id] != task_evidence_digest(output)
+            or any(dependency not in ids for dependency in task.get("depends_on") or [])
+        ):
+            raise ValueError(f"Approved compilation accepted task evidence is missing or changed for {task_id}")
+    return items, results
+
+
 def planned_artifact_diagnostics(context: Any, files: dict[str, str]) -> list[dict[str, Any]]:
     """Require accepted task evidence and all required artifacts in the final snapshot."""
     diagnostics: list[dict[str, Any]] = []
@@ -215,10 +272,7 @@ def artifact_snapshot_digest(
     context: Any, files: dict[str, str], *, binary_assets: dict[str, bytes] | None = None,
 ) -> str:
     """Bind acceptance to its approved inputs and the exact exported contents."""
-    revision = (
-        _get(context, "build_mode") == "revision"
-        and _get(context, "workflow_sequence") not in {"conceptual_replan", "full_rebuild"}
-    )
+    revision = revision_baseline_required(context)
     snapshot = {
         "plan": _get(context, "app_build_plan"),
         "tasks": _get(context, "app_task_batch_items"),
@@ -230,6 +284,8 @@ def artifact_snapshot_digest(
         snapshot["binary_assets"] = {
             path: hashlib.sha256(content).hexdigest() for path, content in binary_assets.items()
         }
+    if _get(context, "revision_first_generation") is True:
+        snapshot["revision_first_generation"] = True
     if revision:
         snapshot["revision_source_artifact_version_id"] = (
             _get(context, "revision_source_artifact_version_id") or _get(context, "artifact_version_id")

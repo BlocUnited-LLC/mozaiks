@@ -9,7 +9,10 @@ from copy import deepcopy
 import httpx
 import pytest
 
-from mozaiksai.core.adapters.llm_fallback import llm_config_to_ag2_config
+from mozaiksai.core.adapters.llm_fallback import (
+    close_ag2_session_http_client,
+    llm_config_to_ag2_config,
+)
 
 
 @pytest.mark.parametrize(
@@ -115,6 +118,102 @@ def test_unconfigured_limits_keep_ag2_defaults():
     assert actual.max_retries == defaults.max_retries
     assert actual.max_completion_tokens == defaults.max_completion_tokens
     assert actual.max_tokens == defaults.max_tokens
+
+
+@pytest.mark.asyncio
+async def test_gemini_shared_timeout_uses_httpx_seconds_and_preserves_client_ownership():
+    pytest.importorskip("google.genai")
+    caller_client = httpx.AsyncClient(timeout=23.0)
+    actual = None
+    try:
+        actual = llm_config_to_ag2_config({
+            "config_list": [{"api_type": "google", "model": "gemini-test"}],
+            "timeout": 11,
+        })
+        assert actual.http_client.timeout.read == 11
+
+        supplied = llm_config_to_ag2_config({
+            "config_list": [{"api_type": "google", "model": "gemini-test"}],
+            "timeout": 11,
+            "http_client": caller_client,
+        })
+        assert supplied.http_client is not caller_client
+        assert supplied.http_client.timeout.read == 11
+        default_request = supplied.http_client.build_request("GET", "https://provider.invalid")
+        explicit_request = supplied.http_client.build_request(
+            "GET", "https://provider.invalid", timeout=2.5,
+        )
+        assert default_request.extensions["timeout"]["read"] == 11
+        assert explicit_request.extensions["timeout"]["read"] == 2.5
+    finally:
+        if actual is not None:
+            await actual.http_client.aclose()
+        if "supplied" in locals():
+            await close_ag2_session_http_client(supplied.http_client)
+            assert not caller_client.is_closed
+        await caller_client.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("streaming", [False, True])
+async def test_real_ag2_gemini_streaming_and_nonstreaming_use_finite_timeout(streaming):
+    from ag2 import Agent
+
+    requests = []
+    payload = {
+        "candidates": [{
+            "content": {"role": "model", "parts": [{"text": "Complete."}]},
+            "finishReason": "STOP",
+        }],
+        "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1, "totalTokenCount": 2},
+    }
+
+    def respond(request):
+        requests.append(request)
+        expected_path = ":streamGenerateContent" if streaming else ":generateContent"
+        assert expected_path in request.url.path
+        assert request.extensions["timeout"]["read"] == 13.0
+        if streaming:
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                content=f"data: {json.dumps(payload)}\n\n".encode(),
+            )
+        return httpx.Response(200, json=payload)
+
+    external_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), timeout=7.0,
+    )
+    config = llm_config_to_ag2_config({
+        "config_list": [{
+            "api_type": "google", "model": "gemini-test", "api_key": "fake-gemini-key",
+        }],
+        "timeout": 13,
+        "streaming": streaming,
+        "http_client": external_client,
+    })
+    agent = Agent("gemini-timeout", config=config)
+    try:
+        for _ in range(2):
+            async with agent.run("Complete the task.") as run:
+                result = await run.result()
+            assert result
+        assert len(requests) == 2
+        assert requests[0].extensions["timeout"]["read"] == 13.0
+        assert requests[1].extensions["timeout"]["read"] == 13.0
+    finally:
+        await close_ag2_session_http_client(config.http_client)
+        assert not external_client.is_closed
+        await external_client.aclose()
+
+
+@pytest.mark.parametrize("timeout", [0, -1, True, float("inf"), float("nan"), "10"])
+def test_invalid_gemini_timeout_fails_before_client_creation(timeout):
+    with pytest.raises(ValueError, match="timeout must be a finite positive number"):
+        llm_config_to_ag2_config({
+            "config_list": [{"api_type": "google", "model": "gemini-test"}],
+            "timeout": timeout,
+        })
 
 
 @pytest.mark.asyncio
@@ -232,3 +331,53 @@ async def test_disabled_sdk_retries_make_only_one_attempt(responses):
 
     assert len(requests) == 1
     assert requests[0][limit] == 128
+
+
+@pytest.mark.asyncio
+async def test_luna_reasoning_and_function_tools_reach_responses_http():
+    from ag2 import Agent
+
+    requests = []
+
+    def inspect_workspace() -> str:
+        """Return the current workspace status."""
+        return "ready"
+
+    def respond(request):
+        assert request.url.path == "/v1/responses"
+        requests.append(json.loads(request.content))
+        output = [{
+            "type": "function_call", "id": "fc_1", "call_id": "call_1",
+            "name": "inspect_workspace", "arguments": "{}", "status": "completed",
+        }] if len(requests) == 1 else [{
+            "id": "msg_1", "type": "message", "role": "assistant", "status": "completed",
+            "content": [{"type": "output_text", "text": "Ready.", "annotations": []}],
+        }]
+        return httpx.Response(200, json={
+            "id": f"resp_{len(requests)}", "object": "response", "created_at": 1,
+            "status": "completed", "model": "gpt-6-luna", "output": output,
+            "usage": {
+                "input_tokens": 10, "output_tokens": 5, "total_tokens": 15,
+                "input_tokens_details": {"cached_tokens": 0},
+                "output_tokens_details": {"reasoning_tokens": 0},
+            },
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        config = llm_config_to_ag2_config({
+            "config_list": [{
+                "api_type": "openai", "model": "gpt-6-luna", "api_key": "test",
+                "base_url": "https://provider.invalid/v1", "use_responses_api": True,
+                "reasoning": {"effort": "medium"},
+            }],
+            "streaming": False, "max_output_tokens": 128, "max_retries": 0,
+        }).copy(http_client=http)
+        async with Agent("refiner", config=config, tools=[inspect_workspace]).run("Inspect the workspace.") as run:
+            await run.result()
+
+    assert len(requests) == 2
+    assert all(body["reasoning"] == {"effort": "medium"} for body in requests)
+    assert all(body["max_output_tokens"] == 128 for body in requests)
+    assert requests[0]["tools"][0]["name"] == "inspect_workspace"
+    assert any(item.get("type") == "function_call_output" and item.get("output") == "ready" for item in requests[1]["input"])
+    assert all("temperature" not in body for body in requests)

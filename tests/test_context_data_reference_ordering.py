@@ -65,6 +65,29 @@ def _install_collection(monkeypatch, collection):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("fields", "value_type", "expected"), [
+    (None, "object", {"title": "Reviewed design"}),
+    (["title"], "string", "Reviewed design"),
+    (["title", "missing"], "object", {"title": "Reviewed design"}),
+    (["_id"], "string", "design-used"),
+    (["_id", "title"], "object", {"_id": "design-used", "title": "Reviewed design"}),
+])
+async def test_data_reference_identity_requires_explicit_projection(monkeypatch, fields, value_type, expected):
+    collection = _Collection([{"_id": "design-used", "title": "Reviewed design"}])
+    _install_collection(monkeypatch, collection)
+    definition = ContextVariableDefinition.model_validate({
+        "type": value_type,
+        "source": {"type": "data_reference", "database_name": "mozaiksai",
+                   "collection": "ArtifactVersions", "fields": fields},
+    })
+    value = await variables._load_data_reference_value(
+        "selected_design", definition, default_database_name=None,
+        app_id="target", context={},
+    )
+    assert value == expected
+
+
+@pytest.mark.asyncio
 async def test_newest_build_draft_revokes_grants_despite_reverse_random_ids(monkeypatch):
     context = _reviewed_context(_policy())
     older = deepcopy(context["design_docs_artifact"])

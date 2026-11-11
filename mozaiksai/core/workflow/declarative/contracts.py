@@ -113,6 +113,10 @@ class PromptSectionSpec(DeclarativeModel):
 
 
 class ImageGenerationSpec(DeclarativeModel):
+    emit_ui: bool = Field(
+        default=True, strict=True,
+        description="Emit the shared generated-media review card. False keeps assets and context for workflow-owned review UI.",
+    )
     quality: Literal["low", "medium", "high", "auto"] | None = None
     size: str | None = None
     background: Literal["transparent", "opaque", "auto"] | None = None

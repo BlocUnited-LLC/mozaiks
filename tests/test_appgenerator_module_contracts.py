@@ -437,6 +437,30 @@ def test_appgenerator_guides_module_auth_surface_and_scope_contract() -> None:
     assert "never trust `tenant_id`, `workspace_id`, or `user_id` values from params as authorization" in source
 
 
+def test_appgenerator_guides_complete_authored_role_write_family_and_optional_requests() -> None:
+    agents = _read_yaml("factory_app/workflows/AppGenerator/agents.yaml")["agents"]
+    config_agent = next(agent for agent in agents if agent["name"] == "ConfigMiddlewareAgent")
+    guidance = " ".join(" ".join(section["content"].split()) for section in config_agent["prompt_sections"])
+    file_contracts = _read_yaml("factory_app/build_context/AppGenerator/file_contracts.yaml")
+    module_constraints = " ".join(
+        " ".join(rule.split()) for rule in file_contracts["task_contracts"]["module_contract"]["hard_constraints"]
+    )
+    outputs = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")["models"]
+    nullable_descriptions = [
+        outputs[model]["fields"]["nullable"]["description"]
+        for model in ("JsonSchemaLeafProperty", "JsonSchemaProperty")
+    ]
+
+    family_rule = "For a role-protected app_wide collection, any narrowed canonical write input must be part of a"
+    complete_action_shape = "each with handler_method, input_schema, output_schema, permissions, and api_surface"
+    assert family_rule in guidance and family_rule in module_constraints
+    assert complete_action_shape in guidance and complete_action_shape in module_constraints
+    assert "Never narrow only one write or leave a sibling action partial" in guidance
+    assert "Never narrow only one write or leave a sibling action partial" in module_constraints
+    assert all("always set false; use required false when a caller may omit the value" in text
+               for text in nullable_descriptions)
+
+
 def test_refinement_harness_codegen_seeds_refinement_policy_yaml() -> None:
     from factory_app.workflows.AppGenerator.tools.refinement_harness_codegen import (
         build_refinement_harness_code_files,

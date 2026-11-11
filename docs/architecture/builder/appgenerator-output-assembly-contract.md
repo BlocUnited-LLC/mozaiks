@@ -55,6 +55,42 @@ without exposing that field as required form input. The service must enforce
 ownership and allowed state transitions before persistence; role grants alone do
 not enforce those business rules.
 
+## Implementation Baseline After Design Revision
+
+`design_revision` can start from an owned DesignDocs artifact before the app has
+an implementation. The existing AppGenerator baseline loader checks that saved
+design's owner, target and registry against the server-owned refinement binding,
+then queries the target's app-bundle family without filtering out failed or
+retired records. Only a successful empty lookup establishes
+`revision_first_generation`. This closed-writer boolean defaults to false and is
+cleared and recomputed on hydration; caller/model input cannot set it.
+
+With no app bundle, AppGenerator uses complete-plan coverage and the existing
+greenfield generation instructions, as explicit full rebuilds do. The journey
+remains a refinement: `build_mode`, the new build binding, the original design
+request and upstream review inputs are unchanged. This does not approve or
+inherit an earlier build's permission review. The first app bundle has no
+implementation parent; its canonical design inputs remain separate lineage.
+
+When a bundle exists, the loader selects the newest app-bundle record and
+requires a passed, current or stale record with the exact owner and registry.
+An ordinary stale record must also carry valid acceptance evidence naming that
+exact record, principal, time and acceptance transition: invalidation can make an
+unaccepted draft stale. Imported bundles retain their canonical accepted-source
+registry receipt check. These checks also apply to every pinned baseline read.
+The loader verifies the committed archive before pinning
+`revision_source_artifact_version_id`. Later hydration rechecks that pinned
+record rather than selecting a newer one or treating a changed upstream result
+ID as implementation. Missing, foreign, failed, draft, retired or unreadable
+records fail closed; they never authorize first generation or fallback to an
+older bundle. Direct app-bundle revisions retain their existing selected-source
+rules. Neither path changes routing, schema approval or runtime permissions.
+
+Registration and export normally finish in the same tool invocation. If the
+process stops after publishing the first draft bundle but before export finishes,
+hydration sees that draft and refuses to reclassify the app as empty. Recovery
+from that interruption is outside this first-generation admission path.
+
 ## Typed Intake Readiness
 
 Guided intake returns `AppInterviewResult`: a short `agent_message` and an
@@ -118,7 +154,17 @@ AppSchemaAgent receives accepted module actions with their declared input and
 output schemas and entitlement gates. A metric's `value_key` selects a declared
 output field. A table's `data_key` selects a declared array, and its columns
 select fields declared on that array's items. These checks apply to client and
-server pagination. Compilation fills canonical `items`/`total` list bindings
+server pagination. Client tables also accept the canonical nullable array type
+`["array", "null"]`, including an optional response field. An explicit
+`data_key` that returns null or is absent renders no rows; it never selects a
+different array from the response. Its columns still require declared row
+properties. Server paging continues to require nonnullable, required rows and
+totals. Declared `page`/`page_size` inputs and a required nonnullable integer
+`total` identify the paged envelope even when its rows are nullable; client mode
+cannot bypass the server requirements for that envelope. Optional or nullable
+totals retain the existing noncanonical-envelope classification, which does not
+establish a valid server paging contract.
+Compilation fills canonical `items`/`total` list bindings
 when the action contract determines them; it does not guess semantic metric
 renames or invent row fields. Invalid selections identify the bound action and
 list the valid fields so the page worker can revise them.
@@ -1177,6 +1223,19 @@ route. Returning `{ "allowed": false, "reason": "..." }` denies the route and
 lets the shell show the denial reason. This gate protects deep links and avoids
 rendering pages before scope is known, but backend module actions must
 still perform their own authorization checks.
+
+The referenced action's `output_schema` must be an object whose `required` list
+includes `allowed` and whose `properties.allowed.type` is `boolean`. A missing,
+optional, nullable or differently typed field fails the shared route-contract
+audit; an `authorized` field cannot substitute for `allowed`. Other declared
+response metadata remains optional. This checks the response shape, not the
+correctness of the app's authorization decision.
+
+AppGenerator wiring and refinement validation resolve both declarative and custom
+route references against the exact module/action companion schema. Final snapshots
+cannot defer a missing module contract. Page saving uses the same check before
+publishing whenever companion contracts are available; a partial page-only output
+defers that check until assembly instead of inventing an action schema.
 
 ### 2b. AdminRegistryAgent
 

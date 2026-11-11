@@ -368,7 +368,7 @@ async def _load_data_reference_value(
                 return _coerce_value(definition, source.default)
             return None
 
-        if isinstance(doc, dict) and "_id" in doc:
+        if isinstance(doc, dict) and "_id" in doc and "_id" not in (source.fields or []):
             doc = {k: v for k, v in doc.items() if k != "_id"}
 
         # If only one field was requested, extract it directly.

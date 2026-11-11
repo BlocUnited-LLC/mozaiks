@@ -67,6 +67,12 @@ workspace/
 │       ├── readiness.yml       ← optional environment staging proof
 │       └── deploy.yml          ← optional names-only CI workflow contract
 ├── workflows/
+├── refinement_harness/        ← apps with an app-local refinement harness
+│   ├── config/
+│   │   ├── harness.yaml        ← overlay over mozaiks.default_refinement_harness
+│   │   ├── tools.yaml          ← optional
+│   │   └── policies.yaml       ← optional
+│   └── prompts/                ← optional
 ├── build_context/
 │   └── {context_name}/
 │       ├── context.yaml
@@ -102,6 +108,10 @@ workspace/
   provider-neutral handoff artifacts, not provider-owned adapters or product
   operations code.
 - `workflows/` at the workspace root owns app-local AI workflows.
+- `refinement_harness/` at the workspace root owns an optional app overlay of
+  the refinement harness (see [Refinement Harness](refinement-harness.md)).
+  AppGenerator emits these files as bundle members; export, preview and restore
+  place them beside `app/`, where the Refinement Engine reads them.
 - `build_context/` is workspace-level build-time context when the workspace has
     prompt overlays, pack descriptors, service templates, or reusable build-time
     contracts consumed by shared factory workflows. Proprietary or operator

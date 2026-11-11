@@ -67,6 +67,7 @@ from mozaiksai.core.transport.request_middleware import (
 )
 from mozaiksai.core.transport.security_headers import SecurityHeadersMiddleware
 from mozaiksai.core.transport.simple_transport import SimpleTransport
+from mozaiksai.core.transport.ui_tools import project_ui_tool_response_state
 from mozaiksai.core.workflow.idempotency import ensure_idempotency_indexes
 from mozaiksai.core.workflow.workflow_manager import (
     get_workflow_tools,
@@ -404,10 +405,19 @@ async def _runtime_shutdown() -> None:
     """Clean up runtime-only services."""
     global mongo_client, simple_transport
 
-    simple_transport = None
-    if mongo_client:
-        close_mongo_client()
-        mongo_client = None
+    from mozaiksai.core.capabilities import close_general_capability_service
+
+    try:
+        if simple_transport is not None:
+            await simple_transport.close_live_ag2_workflow_runs()
+    finally:
+        try:
+            await close_general_capability_service()
+        finally:
+            simple_transport = None
+            if mongo_client:
+                close_mongo_client()
+                mongo_client = None
 
 
 @asynccontextmanager
@@ -1108,7 +1118,9 @@ async def websocket_endpoint(
             "has_children": False,
             "cache_seed": cache_seed,
             "chat_exists": True,
-            "last_artifact": extract_last_artifact(resolved_doc),
+            "last_artifact": project_ui_tool_response_state(
+                extract_last_artifact(resolved_doc), chat_id=resolved_chat_id, transport=simple_transport,
+            ),
             "status": int(resolved_doc.get("status", 0) or 0),
             "run_history_count": run_history_count,
             "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else created_at,

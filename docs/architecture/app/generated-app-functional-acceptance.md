@@ -1001,6 +1001,30 @@ Saved archives use the same canonical identity and digest checks as normal build
 The existing Studio lifecycle registers the exact candidate for review; explicit
 acceptance and promotion remain separate from generating or validating edits.
 
+Pack compilation inputs are saved with the successful AppGenerator bundle, not
+reconstructed from its generated manifests. The existing BuildRecord metadata
+stores the validated AppBuildPlan and exact DesignDocs/subscription record IDs
+and summary digests, bound to the archive digest and original RunBuildBinding.
+The selected input IDs replace late CURRENT lookups for those compiler inputs.
+No task results, prior validation success, or arbitrary workflow context becomes
+validation authority.
+
+Hosts obtain `ApprovedAppCompilation` only through
+`resolve_app_compilation_inputs`, using the authenticated owner, target app,
+registry and exact BuildRecord ID. The resolver verifies stored summary hashes,
+ownership, build lineage, archive bytes and the existing DesignDocs review policy.
+It refuses missing or stale input records rather than selecting a newer design.
+`GeneratedAppValidationRequest.approved_compilation` and the candidate validator
+accept this opaque input; they reject candidate-supplied mappings and mismatched
+pack selections. The calling host still owns authorization to select the record.
+
+Coding and media children preserve the original input references and add their
+exact parent/archive binding. They execute fresh validation for their own bytes.
+Bundles without saved compiler authority retain strict static-template checks;
+uploading a data contract or subscription manifest cannot approve a transformation.
+Hosted source handoffs must also compare their source snapshot with the bound
+artifact before using its compiler authority.
+
 ## App root route acceptance
 
 When `app.json` declares `startup.landing_spot: "/"`, a page declared at `/`

@@ -11,22 +11,29 @@ installed version.
 
 ## Quickstart
 
-The single command most users need:
+Start in your user folder, or another writable directory:
 
 === "Windows"
 
     ```powershell
+    Set-Location $env:USERPROFILE
     python -m mozaiks quickstart --dir .\my-workspace
     ```
 
 === "macOS / Linux"
 
     ```bash
+    cd "$HOME"
     python -m mozaiks quickstart --dir ./my-workspace
     ```
 
 Scaffolds the workspace, starts the backend and frontend, and opens Studio at
 `http://127.0.0.1:3000/apps`.
+
+A relative `--dir` is resolved from the current directory. On Windows, avoid
+protected locations such as `C:\Windows\System32`; administrator access is not
+required. Later examples assume you are in the same writable parent directory,
+or that you replace `--dir` with your workspace's absolute path.
 
 Run it with `--dir` from a Mozaiks source checkout. Without `--dir` there,
 `quickstart` and `onboard` create no workspace: they rewrite the config of the
@@ -63,7 +70,7 @@ command.
 
 ```text
 mozaiks quickstart [-h] [--dir DIRECTORY] [--preset {engine,chat,integrated,full}]
-                   [--name NAME] [--provider {anthropic,openai,local,other}]
+                   [--name NAME] [--provider {google,anthropic,openai,local,other}]
                    [--model MODEL] [--backend-port BACKEND_PORT]
                    [--frontend-port FRONTEND_PORT] [--no-browser]
 ```
@@ -82,9 +89,11 @@ mozaiks quickstart [-h] [--dir DIRECTORY] [--preset {engine,chat,integrated,full
 The provider and model are shown by [`studio`](#studio), but builds do not
 read those workspace display values. Runtime builds use `LLM_PRIMARY_API_TYPE`
 and `LLM_PRIMARY_MODEL` with the selected provider's credential. Without an
-explicit provider, OpenAI and `DEFAULT_LLM_MODEL` (default `gpt-5-nano`) remain
-the defaults. Install the selected provider's optional SDK package; see
-[getting started](getting-started.md#3-set-environment-variables).
+explicit provider, Google and `gemini-3.8-flash` are the defaults.
+Generated workspaces install `mozaiks[gemini]` and include the matching `.env.example`.
+Supply `GEMINI_API_KEY`; Google's free-tier quotas and data terms apply.
+See [model configuration](model-configuration.md) for provider overrides,
+refinement profiles, and the distinction between free quota and paid API usage.
 
 === "Windows"
 
@@ -107,9 +116,8 @@ Quickstart workspace: /path/to/my-workspace
 Bootstrapping workspace and opening Studio. Use Studio to create your first app.
 ```
 
-The key warning also names `GEMINI_API_KEY` and `ANTHROPIC_API_KEY`, but only
-`OPENAI_API_KEY` makes builds work today. The scaffold and config lines from
-`onboard` follow, then:
+The key warning checks the runtime provider selected by `LLM_PRIMARY_API_TYPE`
+(Google by default). The scaffold and config lines from `onboard` follow, then:
 
 ```text
 Setup complete.
@@ -192,7 +200,7 @@ writes them to the app config, and offers to open Studio.
 
 ```text
 mozaiks onboard [-h] [--dir DIRECTORY] [--preset {engine,chat,integrated,full}]
-                [--name NAME] [--provider {anthropic,openai,local,other}] [--model MODEL]
+                [--name NAME] [--provider {google,anthropic,openai,local,other}] [--model MODEL]
                 [--non-interactive] [--open-studio] [--backend-port BACKEND_PORT]
                 [--frontend-port FRONTEND_PORT] [--no-browser]
 ```
@@ -209,6 +217,12 @@ mozaiks onboard [-h] [--dir DIRECTORY] [--preset {engine,chat,integrated,full}]
 | `--backend-port BACKEND_PORT` | Backend port used when launching Studio (default: `8000`) |
 | `--frontend-port FRONTEND_PORT` | Frontend port used when launching Studio (default: `3000`) |
 | `--no-browser` | Launch Studio services without opening a browser |
+
+New workspaces default to `google` / `gemini-3.8-flash`. Existing provider/model
+selections are retained unless overridden; selecting another provider without
+`--model` uses that provider's default model. These values describe the workspace;
+the [runtime environment and refinement profiles](model-configuration.md) select
+the models used for actual requests.
 
 === "Windows"
 
@@ -294,11 +308,10 @@ virtual environment with `source .venv/bin/activate`, copy the env file with
 `cp .env.example .env`, and open Studio with
 `python -m mozaiks studio --dir . --open`.
 
-Until Mozaiks is published on PyPI, the printed step
-`python -m pip install -r requirements.txt` fails, because the generated
-`requirements.txt` pins `mozaiks==0.2.0`. Install Mozaiks into the workspace's
-virtual environment from your checkout first
-(`python -m pip install -e <path-to-mozaiks>`); pip then treats that pin as
+The generated `requirements.txt` pins `mozaiks==0.2.0`; install it normally
+with `python -m pip install -r requirements.txt`. When developing against a
+Mozaiks checkout, install that checkout into the workspace environment first
+with `python -m pip install -e <path-to-mozaiks>`; pip then treats the pin as
 already satisfied.
 
 The `full` preset includes the admin portal, so `init` also asks for an admin
@@ -653,6 +666,10 @@ In check mode, the command exits with `1` when any file is missing, outdated,
 or unmanaged, and suggests the flag that applies changes.
 
 ## Troubleshooting
+
+For `WinError 5`, an unquoted PowerShell API key, or `Backend failed to start`,
+see [Local Setup](local-setup.md#troubleshooting). A successful scaffold followed
+by a startup error does not require deleting or recreating the workspace.
 
 ??? "Port already in use"
 

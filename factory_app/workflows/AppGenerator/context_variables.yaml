@@ -221,9 +221,9 @@ definitions:
   artifact_version_id:
     type: string
     description: >
-      Version id of the app bundle artifact being refined. Null for initial
-      generation runs. AppPlanAgent loads the existing build_tasks from this
-      version when build_mode is revision.
+      Version id carried by the refinement journey. It can identify an upstream
+      design or workflow artifact. The baseline loader separately pins the
+      verified implementation in revision_source_artifact_version_id.
     source:
       type: state
       default: null
@@ -231,11 +231,23 @@ definitions:
     type: string
     description: Verified source BuildRecord selected for this revision, retained when artifact_version_id becomes the new result.
     authority_class: closed_writer_quality_state
-    writer_ids: [deterministic_tool]
+    writer_ids: [lifecycle_tool, deterministic_tool]
     persisted: true
     source:
       type: state
       default: null
+  revision_first_generation:
+    type: boolean
+    description: >
+      Derived only by the baseline loader after an owned design_revision source
+      and an unfiltered app-bundle lookup prove this is the app's first generation.
+      Recomputed before assembly; does not change the revision journey or build identity.
+    authority_class: closed_writer_quality_state
+    writer_ids: [lifecycle_tool, deterministic_tool]
+    persisted: true
+    source:
+      type: state
+      default: false
   revision_asset_evidence:
     type: object
     description: Exact source BuildRecord, opaque asset hashes, and accepted deleted-file tombstones.
@@ -696,7 +708,7 @@ definitions:
         source_workflow: DesignDocs
         lifecycle_status: current
       sort: [{field: version_number, direction: desc}, {field: created_at, direction: desc}]
-      fields: [app_id, build_family, build_key, source_workflow, lifecycle_status, commit_metadata]
+      fields: [_id, app_id, build_family, build_key, source_workflow, lifecycle_status, commit_metadata]
       default: null
   design_docs_build_artifact:
     type: object
@@ -716,7 +728,7 @@ definitions:
         lifecycle_status: {$in: [current, draft]}
         commit_metadata.metadata.summary_payload.access_policy_review.build_id: '{{run_build_binding.build_id}}'
       sort: [{field: version_number, direction: desc}, {field: created_at, direction: desc}]
-      fields: [app_id, build_family, build_key, source_workflow, lifecycle_status, commit_metadata]
+      fields: [_id, app_id, build_family, build_key, source_workflow, lifecycle_status, commit_metadata]
       default: null
   access_policy:
     type: object
@@ -797,8 +809,16 @@ definitions:
         build_key: subscription_contract
         lifecycle_status: current
       fields:
+      - _id
       - commit_metadata
       default: null
+  subscription_contract_artifact_version_id:
+    type: string
+    authority_class: tool_only_information
+    writer_ids: [lifecycle_tool, transition_router]
+    model_visible: false
+    description: Exact saved subscription input carried from its owning workflow; never reconstructed from candidate files.
+    source: {type: state, default: null}
   revenue_model:
     type: string
     description: >
@@ -1763,6 +1783,8 @@ agents:
     variables:
     - platform_user_email
     - build_mode
+    - revision_first_generation
+    - workflow_sequence
     - revision_scope
     - change_request_id
     - revision_id
@@ -1813,6 +1835,7 @@ agents:
     - platform_user_email
     - app_backend_url
     - build_mode
+    - revision_first_generation
     - workflow_sequence
     - revision_scope
     - change_request_id
@@ -1950,6 +1973,8 @@ agents:
     - bundle_repair_request
     - bundle_repair_errors
     - build_mode
+    - revision_first_generation
+    - workflow_sequence
     - revision_scope
     - change_request_id
     - revision_id

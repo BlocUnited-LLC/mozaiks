@@ -12,11 +12,13 @@ Goals
 Environment (optional)
 ----------------------
 LLM_CONFIG_CACHE_TTL   Seconds to keep raw provider list (default 300)
-DEFAULT_LLM_MODEL      Override fallback model name (default gpt-5-nano)
+DEFAULT_LLM_MODEL      Override fallback model name (default gemini-3.8-flash)
 OPENAI_MODEL_FALLBACK  OpenAI model order when LLM_PRIMARY_MODEL is absent
-LLM_PRIMARY_API_TYPE  Selected provider: openai (default), anthropic, google, ollama
+LLM_PRIMARY_API_TYPE  Selected provider: google (default), openai, anthropic, ollama
 LLM_PRIMARY_MODEL     Explicit model for the selected provider
-LLM_MAX_TOKENS        Optional positive provider-native max_tokens limit
+LLM_MAX_TOKENS        Optional positive output limit, mapped to the selected API
+LLM_USE_RESPONSES_API Select OpenAI Responses instead of Chat Completions
+LLM_REASONING_EFFORT  OpenAI reasoning effort, passed through in the API's shape
 LLM_STRUCTURED_OUTPUT_MODE  AG2 schema transport: native (default) or prompted
 
 Public API
@@ -36,6 +38,8 @@ from typing import Any
 from pydantic import BaseModel
 
 from mozaiksai.core.adapters.llm_fallback import (
+    DEFAULT_LLM_API_TYPE,
+    DEFAULT_MODELS_BY_API_TYPE,
     MODEL_API_KEY_ENV_NAMES,
     build_fallback_config_list,
     resolve_structured_output_mode,
@@ -127,6 +131,9 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
             providers = db_doc.get("providers") or db_doc.get("models") or [db_doc]
             if not isinstance(providers, list):
                 providers = [providers]
+            configured_primary_api_type = os.getenv(
+                "LLM_PRIMARY_API_TYPE", DEFAULT_LLM_API_TYPE,
+            ).strip().lower()
             for provider in providers:
                 if not isinstance(provider, dict):
                     raise ValueError("Stored LLM provider must be an object")
@@ -135,31 +142,43 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
                 model = model or os.getenv("DEFAULT_LLM_MODEL") or ("gpt-5-nano" if api_type == "openai" else None)
                 if not model:
                     raise ValueError("Stored LLM provider requires an explicit model")
-                key = provider.get("api_key") or provider.get("ApiKey") or next(
-                    (provider[name] for name in MODEL_API_KEY_ENV_NAMES.get(api_type, ()) if provider.get(name)),
-                    None,
-                )
+                key = provider.get("api_key") or provider.get("ApiKey")
+                if not key:
+                    key_env_names = MODEL_API_KEY_ENV_NAMES.get(api_type, ())
+                    if api_type != configured_primary_api_type:
+                        key_env_names = tuple(
+                            name for name in key_env_names if name != "LLM_PRIMARY_API_KEY"
+                        )
+                    key = next(
+                        (provider[name] for name in key_env_names if provider.get(name)),
+                        None,
+                    )
                 entry = build_fallback_config_list(
                     primary_model=model, primary_api_type=api_type, primary_api_key=key,
                     primary_base_url=provider.get("base_url"), fallback_models=[],
+                    include_primary_key=api_type == configured_primary_api_type,
                 )[0]
                 if not provider.get("base_url"):
                     entry.pop("base_url", None)
                 if "price" in provider:
                     entry["price"] = provider["price"]
-                for name in ("max_tokens", "max_completion_tokens", "max_output_tokens", "max_retries"):
+                for name in (
+                    "max_tokens", "max_completion_tokens", "max_output_tokens", "max_retries",
+                    "use_responses_api", "responses_api", "reasoning", "reasoning_effort",
+                    "max_tool_calls", "parallel_tool_calls", "store",
+                ):
                     if name in provider:
                         entry[name] = provider[name]
                 config_list.append(entry)
 
         if not config_list:
-            api_type = os.getenv("LLM_PRIMARY_API_TYPE", "openai").strip().lower()
+            api_type = os.getenv("LLM_PRIMARY_API_TYPE", DEFAULT_LLM_API_TYPE).strip().lower()
             legacy_models = [model.strip() for model in os.getenv("OPENAI_MODEL_FALLBACK", "").split(",") if model.strip()] if api_type == "openai" else []
             primary_model = os.getenv("LLM_PRIMARY_MODEL", "").strip()
             if not primary_model:
                 primary_model = (legacy_models[0] if legacy_models else os.getenv("DEFAULT_LLM_MODEL", "").strip())
-            if not primary_model and api_type == "openai":
-                primary_model = "gpt-5-nano"
+            if not primary_model:
+                primary_model = DEFAULT_MODELS_BY_API_TYPE.get(api_type)
             if not primary_model:
                 raise ValueError("LLM_PRIMARY_MODEL is required for the selected provider")
             fallback_models = None
@@ -169,6 +188,19 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
                 primary_model=primary_model, primary_api_type=api_type,
                 fallback_models=fallback_models,
             )
+            if api_type == "openai":
+                raw_responses = os.getenv("LLM_USE_RESPONSES_API", "").strip().lower()
+                if raw_responses and raw_responses not in {"true", "false", "1", "0"}:
+                    raise ValueError("LLM_USE_RESPONSES_API must be true or false")
+                effort = os.getenv("LLM_REASONING_EFFORT", "").strip()
+                for entry in config_list:
+                    if raw_responses:
+                        entry["use_responses_api"] = raw_responses in {"true", "1"}
+                    if effort:
+                        if entry.get("use_responses_api"):
+                            entry["reasoning"] = {"effort": effort}
+                        else:
+                            entry["reasoning_effort"] = effort
         for entry in config_list:
             if "price" not in entry and entry["model"] in PRICE_MAP:
                 entry["price"] = PRICE_MAP[entry["model"]]
@@ -246,6 +278,7 @@ async def get_llm_config(
     extra_config = dict(extra_config or {})
     extra_config["structured_output_mode"] = resolve_structured_output_mode(extra_config)
     raw_limit = os.getenv("LLM_MAX_TOKENS", "").strip()
+    limit = None
     if raw_limit:
         try:
             limit = int(raw_limit)
@@ -253,14 +286,21 @@ async def get_llm_config(
             raise ValueError("LLM_MAX_TOKENS must be a positive integer") from None
         if limit < 1:
             raise ValueError("LLM_MAX_TOKENS must be a positive integer")
-        if not {"max_tokens", "max_output_tokens", "max_completion_tokens"}.intersection(extra_config):
-            extra_config["max_tokens"] = limit
-    cache_key = _build_llm_cache_key(
-        response_format=response_format, extra_config=extra_config
-    )
     # Refresh raw providers before consulting derived variants so TTL and
     # explicit invalidation can replace a previously cached provider.
     config_list = await _load_raw_config_list()
+    if limit is not None and not {"max_tokens", "max_output_tokens", "max_completion_tokens"}.intersection(extra_config):
+        selected = (extra_config.get("config_list") or config_list)[0]
+        api_type = selected.get("api_type", "openai")
+        responses = extra_config.get(
+            "use_responses_api", extra_config.get("responses_api", selected.get("use_responses_api", selected.get("responses_api", False))),
+        )
+        if not {"max_tokens", "max_output_tokens", "max_completion_tokens"}.intersection(selected):
+            limit_name = "max_output_tokens" if api_type == "google" or (api_type == "openai" and responses) else "max_tokens"
+            extra_config[limit_name] = limit
+    cache_key = _build_llm_cache_key(
+        response_format=response_format, extra_config=extra_config
+    )
     if cache and cache_key in _LLM_CONFIG_CACHE:
         import copy
         cfg = copy.deepcopy(_LLM_CONFIG_CACHE[cache_key])

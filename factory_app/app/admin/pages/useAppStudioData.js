@@ -118,6 +118,8 @@ export function useAppStudioData(appId, expectedBuildRegistryId = null) {
 
   useEffect(() => {
     let cancelled = false
+    const controller = new AbortController()
+    const requestOptions = { signal: controller.signal }
     const demoMode = isStudioDemoModeEnabled()
     const usageDemoMode = isStudioUsageDemoModeEnabled()
 
@@ -132,9 +134,10 @@ export function useAppStudioData(appId, expectedBuildRegistryId = null) {
           return
         }
 
-        const appsResponse = await studioFetch('/api/studio/apps')
+        const appsResponse = await studioFetch('/api/studio/apps', requestOptions)
         if (!appsResponse.ok) throw new Error('App registry unavailable.')
         const appsPayload = await appsResponse.json()
+        if (cancelled) return
         const registeredApp = resolveStudioApp(appsPayload.apps, appId, expectedBuildRegistryId)
         const buildRegistryId = registeredApp?.build_registry_id || null
         const buildScope = buildRegistryId
@@ -153,19 +156,20 @@ export function useAppStudioData(appId, expectedBuildRegistryId = null) {
           contextRes,
           runtimeMetricsRes,
         ] = await Promise.allSettled([
-          studioFetch(`/api/studio/overview?${buildScope}`),
-          studioFetch(`/api/admin/stats?app_id=${encodeURIComponent(appId)}`),
-          studioFetch(`/api/admin/runs?app_id=${encodeURIComponent(appId)}&limit=12`),
-          studioFetch(`/api/admin/sessions?app_id=${encodeURIComponent(appId)}&limit=12`),
-          studioFetch(`/api/admin/usage?app_id=${encodeURIComponent(appId)}&limit=500`),
-          studioFetch(`/api/studio/build?${buildScope}`),
+          studioFetch(`/api/studio/overview?${buildScope}`, requestOptions),
+          studioFetch(`/api/admin/stats?app_id=${encodeURIComponent(appId)}`, requestOptions),
+          studioFetch(`/api/admin/runs?app_id=${encodeURIComponent(appId)}&limit=12`, requestOptions),
+          studioFetch(`/api/admin/sessions?app_id=${encodeURIComponent(appId)}&limit=12`, requestOptions),
+          studioFetch(`/api/admin/usage?app_id=${encodeURIComponent(appId)}&limit=500`, requestOptions),
+          studioFetch(`/api/studio/build?${buildScope}`, requestOptions),
           buildRegistryId
-            ? studioFetch(`/api/studio/build/history?build_registry_id=${encodeURIComponent(buildRegistryId)}&build_family=app_bundle&limit=8`)
+            ? studioFetch(`/api/studio/build/history?build_registry_id=${encodeURIComponent(buildRegistryId)}&build_family=app_bundle&limit=8`, requestOptions)
             : Promise.resolve(null),
-          studioFetch(`/api/studio/integrations?app_id=${encodeURIComponent(appId)}`),
-          studioFetch(`/api/studio/apps/${encodeURIComponent(appId)}/context`),
-          studioFetch('/api/admin/metrics/runtime'),
+          studioFetch(`/api/studio/integrations?app_id=${encodeURIComponent(appId)}`, requestOptions),
+          studioFetch(`/api/studio/apps/${encodeURIComponent(appId)}/context`, requestOptions),
+          studioFetch('/api/admin/metrics/runtime', requestOptions),
         ])
+        if (cancelled) return
 
         const overview = overviewRes.status === 'fulfilled' && overviewRes.value.ok ? await overviewRes.value.json() : null
         const stats = statsRes.status === 'fulfilled' && statsRes.value.ok ? await statsRes.value.json() : null
@@ -220,6 +224,7 @@ export function useAppStudioData(appId, expectedBuildRegistryId = null) {
     load()
     return () => {
       cancelled = true
+      controller.abort()
     }
   }, [appId, expectedBuildRegistryId, refreshKey])
 

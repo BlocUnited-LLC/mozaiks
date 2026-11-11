@@ -34,6 +34,9 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     release_pack_owned_paths,
     release_subscriptions_config,
 )
+from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
+    revision_baseline_required,
+)
 from factory_app.workflows.AppGenerator.tools.plan_page_data_sources import (
     drop_unapproved_page_data_sources,
 )
@@ -42,6 +45,10 @@ from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.dependency_graph import deterministic_topological_order
 from mozaiksai.core.workflow.generator_support.code_files import planned_page_path
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_design_page_roles,
+    validate_page_role_preservation,
+)
 from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     PackFacadeDirectory,
@@ -458,6 +465,7 @@ def _approved_page_inventory(context: Any) -> list[dict[str, Any]]:
 
 def _validate_page_realizations(plan: dict[str, Any], context: Any) -> None:
     """A plan implements the approved rendering contract; it cannot re-decide it."""
+    validate_page_role_preservation(plan.get("pages") or [], context)
     planned = {page.get("route"): page for page in plan.get("pages") or []}
     for approved in _approved_page_inventory(context):
         surface = approved.get("ui_surface")
@@ -654,11 +662,12 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
     """
     repairs: list[str] = []
     tasks = plan.get("build_tasks") or []
-    if context.get("build_mode") == "revision" or context.get("brownfield_build_path"):
+    if revision_baseline_required(context) or context.get("brownfield_build_path"):
         return repairs
 
     # 1. The approved page inventory is authority.
     approved_pages = _approved_page_inventory(context)
+    approved_roles = resolve_design_page_roles(context)
     expected = [
         (page["name"], page["route"])
         for page in approved_pages
@@ -672,6 +681,8 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
             approved_page = approved_by_route.get(page.get("route"))
             if approved_page is not None and not page.get("ui_surface"):
                 page["ui_surface"] = approved_page["ui_surface"]
+                if approved_roles is not None:
+                    page["roles"] = approved_roles[approved_page["route"]]
                 repairs.append(f"{page['route']}: copied approved ui_surface for constructed page")
         by_route = {page.get("route"): page for page in planned}
         by_name = {page.get("name"): page for page in planned}
@@ -687,6 +698,8 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
                 page.update(existing)
                 page["name"], page["route"] = name, route
                 page["ui_surface"] = approved_page["ui_surface"]
+                if not existing and approved_roles is not None:
+                    page["roles"] = approved_roles[route]
                 rebuilt.append(page)
             plan["pages"] = rebuilt
             repairs.append(f"pages -> approved inventory {sorted(expected)}")
@@ -1309,6 +1322,43 @@ def _base_handler_class(handler_class: str) -> str:
         if handler_class.endswith(suffix) and stem:
             return f"{stem}Base{suffix}"
     return f"{handler_class}Base"
+
+
+def _restate_page_task_outputs(plan: dict[str, Any]) -> list[str]:
+    """Bind page-worker instructions to final ownership without interpreting product prose.
+
+    Coverage can assign app.json to a page-only task or move shared page artifacts
+    between workers. Preserve the planner's behavior requirements, but restate the
+    output boundary in both inputs workers receive, as for handler split repairs.
+    """
+    repairs: list[str] = []
+    for task in plan.get("build_tasks") or []:
+        if task.get("task_type") != "page_bundle":
+            continue
+        paths = _normalized_owned_paths(task)
+        manifest = (
+            "Emit a non-null AppSchemaOutput.manifest to materialize app.json. Its page "
+            "inventory covers the full approved app_build_plan, not just this worker's pages."
+            if "app.json" in paths else
+            "Set AppSchemaOutput.manifest to null. Preserve the existing app.json and provenance; "
+            "do not emit replacements."
+        )
+        note = (
+            "Page output contract from final owned_paths: " + json.dumps(paths) + ". "
+            "This contract supersedes earlier artifact inclusion/exclusion wording in this task's "
+            "initial_message and acceptance_criteria, including page-only or no-manifest wording. "
+            "It does not change approved product behavior, routes, roles, layout, or bindings. "
+            + manifest + " Emit only pages and optional output fields whose materialized paths "
+            "are owned by this task; leave unowned fields null. Do not widen owned_paths."
+        )
+        message = str(task.get("initial_message") or "").rstrip()
+        criteria = list(task.get("acceptance_criteria") or [])
+        if message.endswith(note) and criteria and criteria[-1] == note:
+            continue
+        task["initial_message"] = "\n\n".join(part for part in (message, note) if part)
+        task["acceptance_criteria"] = [*criteria, note]
+        repairs.append(f"{task.get('task_id')}: restated page output scope from final owned_paths")
+    return repairs
 
 
 def _restate_handler_split(plan: dict[str, Any], context: Any) -> list[str]:
@@ -2054,7 +2104,7 @@ def validate_plan_coverage(plan: dict[str, Any], context: Any) -> None:
             "Selected packs own these paths (template outputs and facade modules), so no task may own them: "
             + "; ".join(f"{task_id} owns {paths}" for task_id, paths in sorted(pack_owned.items()))
         )
-    if context.get("build_mode") == "revision" or context.get("brownfield_build_path"):
+    if revision_baseline_required(context) or context.get("brownfield_build_path"):
         return
 
     errors: list[str] = []
@@ -2226,6 +2276,7 @@ def review_app_build_plan(
             *_repair_page_contract_dependencies(plan, context_variables),
             *_note_pack_pages(plan, context_variables),
             *drop_unapproved_page_data_sources(plan, context_variables),
+            *_restate_page_task_outputs(plan),
         ):
             logger.info("[AppGenerator] plan repaired: %s", repair)
         validate_plan_dependencies(plan, context_variables)

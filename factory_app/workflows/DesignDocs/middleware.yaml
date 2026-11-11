@@ -1,5 +1,8 @@
 prompt_middleware:
 - agent: DesignDocsAgent
+  filename: tools/hook_save_feedback_directive.py
+  function: inject_save_feedback_directive
+- agent: DesignDocsAgent
   filename: tools/hook_ai_pack_surface_context.py
   function: inject_ai_pack_surface_context
 - agent: DesignDocsAgent
@@ -8,3 +11,10 @@ prompt_middleware:
 - agent: DesignDocsAgent
   filename: ../_shared/ui_surface_context.py
   function: inject_ui_surface_context
+# The newest input on a repair turn is the save rejection, not the agent's own
+# rejected bundle. AG2 appends this fresh to each model request and never
+# records it in conversation history.
+statusbar_middleware:
+- agent: DesignDocsAgent
+  variables:
+  - design_docs_save_feedback

@@ -216,7 +216,7 @@ def test_minimal_judgment_plan_constructs_all_omitted_structure(omit_capabilitie
     }
 
 
-def test_complete_correct_plan_passes_unchanged():
+def test_complete_correct_plan_preserves_structure_and_restates_page_outputs():
     # Complete the independent prior-PR fixture explicitly, without using the
     # repair under test to manufacture its own supposedly correct input.
     plan, context = _approved_plan(monetized=False)
@@ -246,6 +246,22 @@ def test_complete_correct_plan_passes_unchanged():
     assert result["outcome"] == "ready", result
     assert complete == original
     cached = detach(context.get("app_build_plan"))
+    # Permit only the authoritative instruction addition; every other task
+    # field and the complete structural inventories still compare exactly.
+    expected_page = next(task for task in expected["build_tasks"] if task["task_type"] == "page_bundle")
+    output_contract = (
+        'Page output contract from final owned_paths: ["brand/theme_config.json", "app.json", '
+        '"ui/pages/dashboard.yaml", "ui/pages/tasks.yaml"]. '
+        "This contract supersedes earlier artifact inclusion/exclusion wording in this task's "
+        "initial_message and acceptance_criteria, including page-only or no-manifest wording. "
+        "It does not change approved product behavior, routes, roles, layout, or bindings. "
+        "Emit a non-null AppSchemaOutput.manifest to materialize app.json. Its page "
+        "inventory covers the full approved app_build_plan, not just this worker's pages. "
+        "Emit only pages and optional output fields whose materialized paths "
+        "are owned by this task; leave unowned fields null. Do not widen owned_paths."
+    )
+    expected_page["initial_message"] += "\n\n" + output_contract
+    expected_page["acceptance_criteria"] = [*(expected_page["acceptance_criteria"] or []), output_contract]
     for key in ("build_tasks", "capability_packs", "pages", "generation_order"):
         assert cached[key] == expected[key]
 

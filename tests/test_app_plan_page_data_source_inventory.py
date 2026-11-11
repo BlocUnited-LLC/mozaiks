@@ -120,7 +120,25 @@ def test_live_plan_drops_the_unapproved_source_and_changes_nothing_else(caplog):
     unbound["pages"][0]["sections_hint"][0]["data_source"] = None
     _, expected = _review(unbound)
     page_task = _page_task(cached)
-    page_task["initial_message"] = page_task["initial_message"].split(f"\n\n{NOTE}")[0]
+    expected_task = _page_task(expected)
+    output_contract = expected_task["acceptance_criteria"][-1]
+    assert output_contract.startswith(
+        "Page output contract from final owned_paths: " + json.dumps(expected_task["owned_paths"]) + ". "
+    )
+    assert "Emit a non-null AppSchemaOutput.manifest to materialize app.json." in output_contract
+    assert "inventory covers the full approved app_build_plan" in output_contract
+    assert output_contract.endswith("leave unowned fields null. Do not widen owned_paths.")
+    for task in (page_task, expected_task):
+        assert task["acceptance_criteria"][-1] == output_contract
+        assert task["initial_message"].endswith("\n\n" + output_contract)
+    # Remove only the diagnosed hint's note, retaining the authoritative output
+    # contract and every other instruction for the exact whole-plan comparison.
+    removed_source_note = note + (
+        " Bind each such section only to an action its module declares, through that "
+        "action's declared output keys; do not invent actions."
+    )
+    assert page_task["initial_message"].count("\n\n" + removed_source_note) == 1
+    page_task["initial_message"] = page_task["initial_message"].replace("\n\n" + removed_source_note, "", 1)
     assert cached == expected
 
 

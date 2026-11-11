@@ -75,6 +75,88 @@ def test_complete_plan_is_cached_without_losing_typed_fields():
     assert context.get("app_build_plan")["revenue_model"] == "free"
 
 
+@pytest.mark.parametrize("owns_manifest", [False, True])
+def test_page_output_contract_reconciles_manifest_ownership_with_page_only_brief(owns_manifest):
+    plan = _plan()
+    task = next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")
+    task["owned_paths"] = (["app.json"] if owns_manifest else []) + ["ui/pages/reports.yaml"]
+    task["initial_message"] = "Emit ui/pages/reports.yaml only. Keep owner-only editing in a modal."
+    task["acceptance_criteria"] = ["No manifest or unrelated UI files are added.", "Keep owner-only editing."]
+    original = deepcopy(task)
+    context = _context()
+
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    assert result["outcome"] == "ready", result
+    accepted = next(item for item in detach(context.get("app_task_batch_items")) if item["task_id"] == task["task_id"])
+    assert accepted["owned_paths"] == ["app.json", "ui/pages/reports.yaml"]
+    contract = accepted["acceptance_criteria"][-1]
+    assert "Emit a non-null AppSchemaOutput.manifest" in contract
+    assert "supersedes earlier artifact inclusion/exclusion" in contract
+    assert accepted["initial_message"].endswith(contract)
+    assert accepted["initial_message"].startswith(original["initial_message"])
+    assert accepted["acceptance_criteria"][:-1] == original["acceptance_criteria"]
+    assert accepted["current_build_task"]["initial_message"] == accepted["initial_message"]
+    assert task == original, "Review must not mutate the submitted plan."
+
+
+@pytest.mark.parametrize("manifest_owner", [0, 1])
+def test_split_page_output_contract_has_one_manifest_owner(manifest_owner):
+    plan = _plan()
+    first = next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")
+    second = {**deepcopy(first), "task_id": "archive-page", "owned_paths": ["ui/pages/archive.yaml"]}
+    first["owned_paths"] = ["ui/pages/reports.yaml"]
+    page_tasks = [first, second]
+    page_tasks[manifest_owner]["owned_paths"].insert(0, "app.json")
+    for task in page_tasks:
+        task["initial_message"] = "Emit only this page. Keep its approved behavior."
+        task["acceptance_criteria"] = ["No manifest is added."]
+    plan["build_tasks"].append(second)
+    plan["pages"].append({**deepcopy(plan["pages"][0]), "name": "Archive", "route": "/archive"})
+    context = _context()
+    experience = detach(context.get("experience_spec"))
+    experience["pages"].append({"name": "Archive", "route": "/archive", "ui_surface": "declarative_page"})
+    context.set("experience_spec", experience)
+
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    assert result["outcome"] == "ready", result
+    accepted = {task["task_id"]: task for task in detach(context.get("app_task_batch_items"))}
+    for index, task in enumerate(page_tasks):
+        item = accepted[task["task_id"]]
+        assert set(item["owned_paths"]) == set(task["owned_paths"])
+        contract = item["acceptance_criteria"][-1]
+        expected = ("Emit a non-null AppSchemaOutput.manifest" if index == manifest_owner
+                    else "Set AppSchemaOutput.manifest to null")
+        assert expected in contract
+        assert item["initial_message"].endswith(contract)
+
+
+def test_revision_page_output_contract_preserves_page_only_scope_and_is_idempotent():
+    plan = _plan()
+    task = next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")
+    task["owned_paths"] = ["ui/pages/reports.yaml"]
+    task["initial_message"] = "Revise only this page's editor; preserve its route and roles."
+    task["acceptance_criteria"] = ["Keep the approved editor fields."]
+    context = _context()
+    context.set("build_mode", "revision")
+    context.set("generated_files", {"app.json": '{"appName":"Existing App","authRequired":true}'})
+    baseline = detach(context.get("generated_files"))
+
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+
+    assert result["outcome"] == "ready", result
+    accepted = next(item for item in detach(context.get("app_task_batch_items")) if item["task_id"] == task["task_id"])
+    assert accepted["owned_paths"] == ["ui/pages/reports.yaml"]
+    assert "Set AppSchemaOutput.manifest to null" in accepted["acceptance_criteria"][-1]
+    assert detach(context.get("generated_files")) == baseline
+    first = deepcopy(accepted)
+    result = review_app_build_plan(AppBuildPlan=detach(context.get("app_build_plan")), context_variables=context)
+    assert result["outcome"] == "ready", result
+    accepted = next(item for item in detach(context.get("app_task_batch_items")) if item["task_id"] == task["task_id"])
+    assert accepted == first
+
+
 @pytest.mark.parametrize(("approved", "proposed"), [
     ("custom_react_page", "declarative_page"),
     ("declarative_page", "custom_react_page"),

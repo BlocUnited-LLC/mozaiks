@@ -176,6 +176,7 @@ def workflow_integration_from_live_agentgenerator(live_result: dict[str, Any]) -
 
 def build_appgenerator_acceptance_files(
     workflow_integration: dict[str, Any] | None = None,
+    *, app_id: str = DEFAULT_APP_ID,
 ) -> dict[str, str]:
     integration = workflow_integration or default_workflow_integration()
     workflow_name = str(integration.get("workflow_name") or DEFAULT_WORKFLOW_NAME)
@@ -190,7 +191,7 @@ def build_appgenerator_acceptance_files(
 
     data_contract = {
         "version": "1",
-        "app_id": DEFAULT_APP_ID,
+        "app_id": app_id,
         "surfaces": [
             {
                 "surface_id": "support_tickets",
@@ -219,7 +220,7 @@ def build_appgenerator_acceptance_files(
     files = {
         "app.json": json.dumps(
             {
-                "appId": DEFAULT_APP_ID,
+                "appId": app_id,
                 "appName": "Support Operations",
                 "version": "1.0.0",
                 "startup": {"landing_spot": "/support-tickets"},
@@ -519,11 +520,16 @@ def build_appgenerator_acceptance_task_state(files: dict[str, str]) -> dict[str,
     return {
         "data_contract": json.loads(files["data/contract.json"]),
         "app_build_plan": {
+            "agent_message": "Build the support fixture from its approved contracts.",
+            "agent_backend_required": True,
             "app_kind": "internal_app", "auth_strategy": "public", "roles": [], "entities": [],
             "build_tasks": tasks,
-            "pages": [{"name": "SupportTickets", "route": "/support-tickets", "purpose": "Manage support tickets."}],
+            "pages": [{"name": "SupportTickets", "route": "/support-tickets", "purpose": "Manage support tickets.",
+                       "ui_surface": "declarative_page"}],
             "capability_packs": [{
                 "capability_pack_id": "support_tickets", "surface_id": "support_tickets",
+                "pack_type": "custom_domain", "label": "Support Tickets",
+                "summary": "Manage support tickets and request triage.", "implementation_mode": "declarative_module",
                 "surface_kind": "module", "capability_source": "generated_module",
                 "primary_entities": ["Ticket"],
                 "operations": ["list_tickets", "create_ticket", "request_batch_triage"],

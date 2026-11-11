@@ -86,6 +86,7 @@ from mozaiksai.core.session.launcher import (
     create_routed_chat_session,
     validate_context_for_workflow,
 )
+from mozaiksai.core.transport.ui_tools import project_ui_tool_response_state
 from mozaiksai.core.workflow.paths import candidate_app_workflows_roots
 from mozaiksai.hosts import runtime as runtime_app
 from mozaiksai.hosts.source_path_policy import authorize_http_workflow_source_paths
@@ -419,6 +420,8 @@ async def _platform_startup() -> None:
                 event_emitter=dispatcher.emit,
                 capability_invoker=invoke_capability,
                 idempotency_store=_reaction_idempotency_store,
+                data_contract=load_result.data_contract,
+                platform_modules=load_result.platform_modules,
             )
             module_event_router.register(dispatcher)
             app.state.module_event_router = module_event_router
@@ -2512,7 +2515,9 @@ async def chat_meta(
         )
         if doc:
             exists = True
-            last_artifact = extract_last_artifact(doc)
+            last_artifact = project_ui_tool_response_state(
+                extract_last_artifact(doc), chat_id=chat_id, transport=runtime_app.simple_transport,
+            )
             status = doc.get("status")
             run_history = await runtime_app.persistence_manager.load_run_history(
                 chat_id=chat_id,
@@ -2881,7 +2886,9 @@ async def websocket_endpoint(
                         {"workflow_ui_state.last_artifact": 1, "created_at": 1, "status": 1},
                     )
                     if doc:
-                        last_artifact = extract_last_artifact(doc)
+                        last_artifact = project_ui_tool_response_state(
+                            extract_last_artifact(doc), chat_id=active_chat_id, transport=runtime_app.simple_transport,
+                        )
                         created_at = doc.get("created_at")
                         if created_at:
                             try:

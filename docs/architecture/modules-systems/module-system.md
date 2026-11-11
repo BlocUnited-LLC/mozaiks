@@ -469,20 +469,31 @@ The rejection is also named on the dispatch result
 as `MODULE_EVENT_REJECTED` and counted in `ModuleExecutor.health()`. The
 AppGenerator runtime smoke fails a generated bundle on any rejected event.
 
-The emitted-event contract checks belong to the context `ModuleExecutor`
-builds for a dispatched action. Other contexts may not apply those checks:
+The router applies the same declared-event validation and envelope construction
+when a reaction handler emits. Its `handler_method` must resolve to exactly one
+module action with `api_surface: internal`, `permissions: []`, and the event in
+`emits`. The event must be declared by that same module with a valid payload
+schema. A callback that does not emit does not need an action declaration.
 
-- **No event bus wired.** Emitting does nothing and returns `None`.
-- **Caller-supplied context.** A context passed to `ModuleExecutor.execute`
-  keeps its own emitter and may return a test-specific value.
-- **Reaction handlers.** A reaction handler's `ctx.emit` sends its event
-  straight to the bus and returns its dispatch receipt when wired. There the
-  event router checks only the event's
-  `payload_schema`, and only when exactly one module declares a schema for that
-  event type, before running that event's reactions. It drops an invalid event.
-  It never checks a reaction-emitted event against any `emits` list.
-- **Contexts that code builds itself,** such as the stub context of the
-  generated cron script.
+Reaction emissions identify the reacting module and its selected action as the
+producer. They preserve the source event's app, tenant, workspace, actor and
+correlation, and name that source event as their immediate causation. Only the
+permissions already admitted by the reaction gate are carried forward. The
+existing workflow-trigger trace is retained for cycle and depth enforcement.
+Payload fields and changes to the handler's context cannot replace this binding.
+
+A refused reaction emission returns `ModuleEventRejection` without raising into
+the handler. The router logs `MODULE_REACTION_EVENT_REJECTED` and records the
+reaction's existing failed status and audit reason, even if the handler ignores
+the rejection and returns an effect acknowledgement. Earlier writes remain;
+failed delivery does not imply rollback or authorize automatic repetition of
+non-idempotent work. Rejected emission cannot record durable completion.
+Social's activity reaction entry points declare internal actions for this
+contract; they remain unavailable through public module HTTP dispatch.
+
+Caller-supplied contexts and contexts that custom code constructs itself retain
+their own emitter behavior. An accepted emission with no bus wired returns
+`None`; it does not establish downstream delivery.
 
 ### `contracts/reactions.yaml`
 
@@ -501,6 +512,24 @@ reactions:
 ```
 
 Add the matching method to `handler.py` and delegate to service.
+
+Handler reactions receive `ctx.persistence` from the platform's loaded data
+contract and mounted-module collection declarations, with the reaction's module
+as the dispatch owner. `ctx.module_id` and `ctx.workspace_id` describe that
+reaction context. An unconfigured router or an event without an app identity
+has no persistence context; an explicitly empty data contract permits no
+undeclared collections.
+
+The event actor, recipient and permission metadata do not create a persistence
+principal. Synchronous reactions can reuse only the already-active authenticated
+dispatch for the same app. Nonempty event user, workspace or tenant identities
+that conflict with that principal fail closed. Collection handles resolve the
+principal again on each operation, so a detached task cannot retain it after
+the originating dispatch ends. Background reactions without that principal
+cannot access `per_user` or `per_workspace` collections; declared `app_wide`
+collections retain the adapter's existing app-scoped behavior. Modules remain
+responsible for recipient selection and business authorization. This injection
+does not change reaction permissions, event provenance or emission validation.
 
 `service_adapter` is the bounded escape hatch for provider or hosted-product
 mechanics that belong under `app/services/adapters/...`, not inside a generated

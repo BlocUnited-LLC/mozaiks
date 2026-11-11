@@ -9,7 +9,11 @@ from typing import Any
 from urllib.parse import urlencode
 
 from mozaiksai.control_plane import load_control_plane_config
-from mozaiksai.core.adapters.llm_fallback import MODEL_API_KEY_ENV_NAMES
+from mozaiksai.core.adapters.llm_fallback import (
+    DEFAULT_LLM_API_TYPE,
+    DEFAULT_MODELS_BY_API_TYPE,
+    MODEL_API_KEY_ENV_NAMES,
+)
 from mozaiksai.core.data.persistence.connector_store import ConnectorStore
 from mozaiksai.core.data.persistence.namespaces import (
     SYSTEM_DATABASE,
@@ -426,7 +430,7 @@ async def build_integrations_summary(*, app_id: str | None = None) -> dict:
     def _configured(value: str) -> bool:
         return bool(value and value.strip())
 
-    api_type = os.getenv("LLM_PRIMARY_API_TYPE", "openai").strip().lower()
+    api_type = os.getenv("LLM_PRIMARY_API_TYPE", DEFAULT_LLM_API_TYPE).strip().lower()
     key_names = MODEL_API_KEY_ENV_NAMES.get(api_type, MODEL_API_KEY_ENV_NAMES["openai"])
     model_key = None
     for env_name in key_names:
@@ -449,8 +453,14 @@ async def build_integrations_summary(*, app_id: str | None = None) -> dict:
     auth_jwks_url = os.getenv("AUTH_JWKS_URL", "")
     azure_kv_name = os.getenv("AZURE_KEY_VAULT_NAME", "")
 
-    default_model = os.getenv("DEFAULT_LLM_MODEL", "gpt-5-nano")
-    fallback_models = [model.strip() for model in os.getenv("OPENAI_MODEL_FALLBACK", "").split(",") if model.strip()]
+    legacy_models = [model.strip() for model in os.getenv("OPENAI_MODEL_FALLBACK", "").split(",") if model.strip()] if api_type == "openai" else []
+    default_model = (
+        os.getenv("LLM_PRIMARY_MODEL") or (legacy_models[0] if legacy_models else None)
+        or os.getenv("DEFAULT_LLM_MODEL") or DEFAULT_MODELS_BY_API_TYPE.get(api_type)
+    )
+    fallback_models = [model.strip() for model in os.getenv("LLM_FALLBACK_MODELS", "").split(",") if model.strip()]
+    if not fallback_models:
+        fallback_models = [model for model in legacy_models if model != default_model]
 
     mongo_llm_configured = False
     if not model_configured and model_key and model_key.source == "missing" and mongo_config.configured:
