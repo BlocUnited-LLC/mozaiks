@@ -110,15 +110,22 @@ class MozaiksPromptMiddleware(BaseMiddleware):
                 self._captured = message
 
         history = context.variables.get("_mozaiks_history", [])
+        prompt_context = context_to_dict(self._context_bridge)
+        invocation_context = context_to_dict(context.variables)
+        # AG2 task calls carry scoped variables; prompt hooks may read only the
+        # current agent's declared keys from that invocation.
+        for key in self._context_variables:
+            if key in invocation_context:
+                prompt_context[key] = invocation_context[key]
         projected_message = apply_context_exposures(
             self._base_system_message,
             self._context_exposures,
-            context_to_dict(self._context_bridge),
+            prompt_context,
             self._context_variables,
         )
         capture = _PromptCapture(
             self._agent_name,
-            self._context_bridge,
+            prompt_context,
             projected_message,
         )
 

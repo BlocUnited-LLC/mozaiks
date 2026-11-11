@@ -118,3 +118,10 @@ prompt_middleware:
 - agent: AppPlanAgent
   filename: ../_shared/ui_surface_context.py
   function: inject_ui_surface_context
+# A refused plan's newest input is the review's feedback, not the agent's own
+# rejected plan. AG2 appends this fresh to each model request and never records
+# it in history (the same repair fix as DesignDocs; mozaiks#1005 run 7).
+statusbar_middleware:
+- agent: AppPlanAgent
+  variables:
+  - app_plan_feedback

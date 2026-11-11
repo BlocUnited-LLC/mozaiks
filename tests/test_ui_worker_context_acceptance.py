@@ -113,6 +113,12 @@ async def _agent(monkeypatch, workflow, name, context, output):
 
     config = factory.workflow_manager._load_modular_workflow_config(WORKFLOWS / workflow)
     config["agents"]["agents"] = {name: config["agents"]["agents"][name]}
+    # A one-agent roster keeps only that agent's statusbar projection; the contract
+    # rejects a statusbar entry for an agent the roster does not declare.
+    middleware = config.get("middleware") or {}
+    middleware["statusbar_middleware"] = [
+        entry for entry in middleware.get("statusbar_middleware") or [] if entry.get("agent") == name
+    ]
     outputs = config["structured_outputs"]
     models = build_models_from_config(outputs["models"], exact_model_ids=frozenset(outputs["models"]))
     model = models[outputs["registry"][name]]

@@ -55,6 +55,42 @@ without exposing that field as required form input. The service must enforce
 ownership and allowed state transitions before persistence; role grants alone do
 not enforce those business rules.
 
+## Implementation Baseline After Design Revision
+
+`design_revision` can start from an owned DesignDocs artifact before the app has
+an implementation. The existing AppGenerator baseline loader checks that saved
+design's owner, target and registry against the server-owned refinement binding,
+then queries the target's app-bundle family without filtering out failed or
+retired records. Only a successful empty lookup establishes
+`revision_first_generation`. This closed-writer boolean defaults to false and is
+cleared and recomputed on hydration; caller/model input cannot set it.
+
+With no app bundle, AppGenerator uses complete-plan coverage and the existing
+greenfield generation instructions, as explicit full rebuilds do. The journey
+remains a refinement: `build_mode`, the new build binding, the original design
+request and upstream review inputs are unchanged. This does not approve or
+inherit an earlier build's permission review. The first app bundle has no
+implementation parent; its canonical design inputs remain separate lineage.
+
+When a bundle exists, the loader selects the newest app-bundle record and
+requires a passed, current or stale record with the exact owner and registry.
+An ordinary stale record must also carry valid acceptance evidence naming that
+exact record, principal, time and acceptance transition: invalidation can make an
+unaccepted draft stale. Imported bundles retain their canonical accepted-source
+registry receipt check. These checks also apply to every pinned baseline read.
+The loader verifies the committed archive before pinning
+`revision_source_artifact_version_id`. Later hydration rechecks that pinned
+record rather than selecting a newer one or treating a changed upstream result
+ID as implementation. Missing, foreign, failed, draft, retired or unreadable
+records fail closed; they never authorize first generation or fallback to an
+older bundle. Direct app-bundle revisions retain their existing selected-source
+rules. Neither path changes routing, schema approval or runtime permissions.
+
+Registration and export normally finish in the same tool invocation. If the
+process stops after publishing the first draft bundle but before export finishes,
+hydration sees that draft and refuses to reclassify the app as empty. Recovery
+from that interruption is outside this first-generation admission path.
+
 ## Typed Intake Readiness
 
 Guided intake returns `AppInterviewResult`: a short `agent_message` and an

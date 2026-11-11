@@ -11,22 +11,29 @@ installed version.
 
 ## Quickstart
 
-The single command most users need:
+Start in your user folder, or another writable directory:
 
 === "Windows"
 
     ```powershell
+    Set-Location $env:USERPROFILE
     python -m mozaiks quickstart --dir .\my-workspace
     ```
 
 === "macOS / Linux"
 
     ```bash
+    cd "$HOME"
     python -m mozaiks quickstart --dir ./my-workspace
     ```
 
 Scaffolds the workspace, starts the backend and frontend, and opens Studio at
 `http://127.0.0.1:3000/apps`.
+
+A relative `--dir` is resolved from the current directory. On Windows, avoid
+protected locations such as `C:\Windows\System32`; administrator access is not
+required. Later examples assume you are in the same writable parent directory,
+or that you replace `--dir` with your workspace's absolute path.
 
 Run it with `--dir` from a Mozaiks source checkout. Without `--dir` there,
 `quickstart` and `onboard` create no workspace: they rewrite the config of the
@@ -294,11 +301,10 @@ virtual environment with `source .venv/bin/activate`, copy the env file with
 `cp .env.example .env`, and open Studio with
 `python -m mozaiks studio --dir . --open`.
 
-Until Mozaiks is published on PyPI, the printed step
-`python -m pip install -r requirements.txt` fails, because the generated
-`requirements.txt` pins `mozaiks==0.2.0`. Install Mozaiks into the workspace's
-virtual environment from your checkout first
-(`python -m pip install -e <path-to-mozaiks>`); pip then treats that pin as
+The generated `requirements.txt` pins `mozaiks==0.2.0`; install it normally
+with `python -m pip install -r requirements.txt`. When developing against a
+Mozaiks checkout, install that checkout into the workspace environment first
+with `python -m pip install -e <path-to-mozaiks>`; pip then treats the pin as
 already satisfied.
 
 The `full` preset includes the admin portal, so `init` also asks for an admin
@@ -653,6 +659,10 @@ In check mode, the command exits with `1` when any file is missing, outdated,
 or unmanaged, and suggests the flag that applies changes.
 
 ## Troubleshooting
+
+For `WinError 5`, an unquoted PowerShell API key, or `Backend failed to start`,
+see [Local Setup](local-setup.md#troubleshooting). A successful scaffold followed
+by a startup error does not require deleting or recreating the workspace.
 
 ??? "Port already in use"
 

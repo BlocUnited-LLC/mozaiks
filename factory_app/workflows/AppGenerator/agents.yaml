@@ -32,7 +32,8 @@ agents:
     heading: '[INSTRUCTIONS]'
     content: |-
       1. **Revision Mode (Highest Priority)**:
-         - IF `ContextVariables.build_mode` equals `revision`:
+         - When `revision_first_generation` is true or the sequence is `conceptual_replan`/`full_rebuild`, generate the complete approved app through the greenfield path. There is no implementation baseline to patch; keep the current approved design, ownership, permissions, and build identity.
+         - IF `ContextVariables.build_mode` equals `revision`, `revision_first_generation` is false, and `workflow_sequence` is neither `conceptual_replan` nor `full_rebuild`:
            - Do NOT greet the user or re-interview from scratch.
            - Do NOT ask questions about scope that was already established.
            - Read `refinement_request` — this is the scoped change the user wants.
@@ -268,7 +269,8 @@ agents:
     heading: '[INSTRUCTIONS]'
     content: |-
       1. **Revision Mode (Highest Priority)**:
-         - IF `ContextVariables.build_mode` equals `revision`:
+         - When `revision_first_generation` is true or the sequence is `conceptual_replan`/`full_rebuild`, generate the complete approved app through the greenfield path. There is no implementation baseline to patch; keep the current approved design, ownership, permissions, and build identity.
+         - IF `ContextVariables.build_mode` equals `revision`, `revision_first_generation` is false, and `workflow_sequence` is neither `conceptual_replan` nor `full_rebuild`:
            - Do NOT rebuild the entire app build plan from scratch.
            - The selected artifact is preloaded into `generated_files`. Use its actual contracts, routes, identities, permissions, and implementation signatures as the baseline, together with the current App Intelligence context. Do not pretend an artifact id itself contains a loaded plan.
            - Read `refinement_request` — this describes only the scoped change.
@@ -1394,7 +1396,7 @@ agents:
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
-      **Greenfield (build_mode != revision)**:
+      **Greenfield (build_mode != revision, revision_first_generation is true, or workflow_sequence is conceptual_replan/full_rebuild)**:
       - If `bundle_repair_target == "DatabaseAgent"`, repair only the data files named in bundle_repair_request using generated_files and the approved DesignDocs data_contract. Emit the corrected database_files/code_files; do not alter the plan or other file families.
       - Preserve the approved DesignDocs data contract exactly. Required describes the stored document, not whether the user enters a value in a form. Code serializes data/contract.json from context; omit that file from model-authored output.
       - Read `data_contract` from context; it is the canonical typed database source of truth.
@@ -1406,7 +1408,7 @@ agents:
       - Do not emit removed `backend/database/schema.json` or seed files.
       - Do not call live database provisioning, schema application, or seeding tools in the OSS flow.
 
-      **Revision (build_mode = revision)**:
+      **Revision (build_mode = revision, revision_first_generation is false, and workflow_sequence is not conceptual_replan/full_rebuild)**:
       - Read `revision_scope` to determine your action (see Instructions).
       - Compare prior and target `data_contract` values when both are available.
       - Produce a migration document only for additive collection, field, or index changes.
@@ -1417,7 +1419,7 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Inputs**:
-      - `build_mode`: `revision` when refining an existing app; otherwise treat the run as greenfield.
+      - `build_mode`: the journey mode. `revision_first_generation` is set by code only when an upstream design revision has no saved app bundle; use the complete greenfield generation path in that case. `workflow_sequence` identifies explicit conceptual_replan/full_rebuild runs, which also use that path.
       - `revision_scope`: patch | design | feature | core — controls how deep the schema work goes.
       - `app_build_plan`: canonical entity list, required operations, roles, and integration constraints.
       - `database_design_document`: design-time Markdown schema doc from DesignDocs.
@@ -1480,7 +1482,7 @@ agents:
       }
       ```
 
-      **Greenfield path (build_mode != revision, current_build_task_type != "data_migrations")**:
+      **Greenfield path (no implementation baseline: build_mode != revision, revision_first_generation is true, or workflow_sequence is conceptual_replan/full_rebuild; current_build_task_type != "data_migrations")**:
       1. Read `data_contract` from context.
       2. Reconcile it with `app_build_plan.entities` and `database_design_document`.
       3. If it is missing or incomplete for a persistent module, describe the gap in `agent_message`.
@@ -1488,7 +1490,7 @@ agents:
       5. Mirror database entries into `code_files`.
       6. Set `pending_schema_migration` to null in your output.
 
-      **Revision path (build_mode = revision)**:
+      **Revision path (build_mode = revision, revision_first_generation is false, and workflow_sequence is not conceptual_replan/full_rebuild)**:
 
       Read `revision_scope` first:
 
@@ -1683,6 +1685,13 @@ agents:
         service derives, such as requester identity or initial state. Retained
         fields keep their canonical types and requiredness; update/delete keep
         the required record id. The business-services task implements those restricted writes.
+        For a role-protected app_wide collection, any narrowed canonical write input must be part of a
+        complete authored create/update/delete family. Explicitly include all three actions in
+        module.yaml.actions, each with handler_method, input_schema, output_schema, permissions, and
+        api_surface. Keep each input a closed subset with the canonical types, enums, and requiredness;
+        update/delete must require the canonical record id. Never narrow only one write or leave a
+        sibling action partial; if server-supplied fields do not need to be omitted, preserve the
+        canonical request schemas so the compiler can own ordinary CRUD.
         Approved role permissions remain code-owned in both cases. You may
         declare `emits` and, for runtime-only writes, `api_surface:
         internal` or `admin_internal` on a canonical write id; everything else on it

@@ -381,7 +381,9 @@ def validate_module_fixture_record_identities(
                     continue
                 if action_id in supplied:
                     continue
-                schema = _materialize_schema_contract(action["input_schema"], closed_request=True)
+                schema = _materialize_schema_contract(
+                    action["input_schema"], closed_request=True, where=f"{module_id}/{action_id}.input_schema",
+                )
                 if _default_read_inputs_compatible(schema, read):
                     continue
                 binding = (
