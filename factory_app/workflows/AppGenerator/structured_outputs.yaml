@@ -2288,7 +2288,7 @@ models:
       nullable:
         type: bool
         default: false
-        description: Permit JSON null in an output member. Closed action/capability requests require false.
+        description: Permit JSON null in an output member. For action/capability requests always set false; use required false when a caller may omit the value.
 
   JsonSchemaProperty:
     type: model
@@ -2337,7 +2337,7 @@ models:
       nullable:
         type: bool
         default: false
-        description: Permit JSON null in an output property. Closed action/capability requests require false.
+        description: Permit JSON null in an output property. For action/capability requests always set false; use required false when a caller may omit the value.
 
   JsonSchemaContract:
     type: model

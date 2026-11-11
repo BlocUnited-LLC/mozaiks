@@ -1,0 +1,176 @@
+"""Schema rejections name the field, its location, and the fix.
+
+The 2026-11-10 live traversal (mozaiks#1005, run 5) lost two module_contract
+tasks to "Nullable schema properties are supported only for non-null output
+types; closed requests require false" and "Only object properties may declare
+properties". Neither said which capability, event or field was wrong, so both
+repair attempts failed. No log line recorded either rejection.
+"""
+from __future__ import annotations
+
+import logging
+
+import pytest
+
+from mozaiksai.core.workflow import task_batches
+from mozaiksai.core.workflow.generator_support.code_files import (
+    _materialize_module_contract_file_map,
+    _materialize_schema_contract,
+)
+
+
+def _object(*properties):
+    return {"type": "object", "properties": list(properties)}
+
+
+def test_nullable_request_field_names_its_path_and_the_fix():
+    schema = _object({"name": "address", "type": "object", "properties": [
+        {"name": "zip", "type": "string", "nullable": True},
+    ]})
+    with pytest.raises(ValueError) as error:
+        _materialize_schema_contract(schema, closed_request=True)
+    assert str(error.value) == (
+        "property 'address.zip': request schemas (input_schema) cannot be nullable; set nullable "
+        "to false and use required: false for a value the caller may omit"
+    )
+    # Output schemas may still be nullable.
+    assert _materialize_schema_contract(schema)["properties"]["address"]["properties"]["zip"]["type"] == [
+        "string", "null",
+    ]
+
+
+def test_properties_on_a_scalar_name_the_field_and_the_object_shape():
+    schema = _object({"name": "email", "type": "string", "properties": [{"name": "domain", "type": "string"}]})
+    with pytest.raises(ValueError, match=r"^property 'email': type 'string' cannot declare properties; "
+                                         r"use type 'object' for nested fields"):
+        _materialize_schema_contract(schema)
+
+
+def test_null_type_and_non_boolean_nullable_stay_rejected_with_their_own_reasons():
+    with pytest.raises(ValueError, match=r"^property 'gone': a 'null' type property cannot also be nullable"):
+        _materialize_schema_contract(_object({"name": "gone", "type": "null", "nullable": True}))
+    with pytest.raises(ValueError, match=r"^property 'flag': nullable must be a boolean$"):
+        _materialize_schema_contract(_object({"name": "flag", "type": "string", "nullable": "yes"}))
+
+
+@pytest.mark.parametrize("workflow,agent,feedback", [
+    ("DesignDocs", "DesignDocsAgent", "design_docs_save_feedback"),
+    ("AppGenerator", "AppPlanAgent", "app_plan_feedback"),
+])
+def test_self_repairing_agents_receive_their_rejection_as_the_newest_input(workflow, agent, feedback):
+    """Both self-looping repairs resubmitted identical output while the reason sat in the prompt."""
+    from pathlib import Path
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[1] / "factory_app/workflows" / workflow
+    middleware = yaml.safe_load((root / "middleware.yaml").read_text(encoding="utf-8"))
+    statusbar = {entry["agent"]: entry["variables"] for entry in middleware["statusbar_middleware"]}
+    assert feedback in statusbar[agent]
+    views = yaml.safe_load((root / "context_variables.yaml").read_text(encoding="utf-8"))["agents"]
+    assert feedback in views[agent]["variables"]
+
+
+def _field(name, kind="string", **extra):
+    # The generator's typed output always carries every list field, empty when unused.
+    return {"name": name, "type": kind, "description": name, "required": True, "enum_values": [],
+            "items_type": None, "properties": [], "items_properties": [], "nullable": False, **extra}
+
+
+def test_the_run_8_request_schema_with_empty_list_fields_materializes():
+    """mozaiks#1005 run 8: create_tool was rejected twice for items_properties: [], which declares nothing."""
+    schema = {"type": "object", "description": "Request to create a new tool.",
+              "properties": [_field("name"), _field("category")], "items_type": None, "items_properties": []}
+    result = _materialize_schema_contract(schema, closed_request=True, where="tool_catalogue/create_tool.input_schema")
+    assert result["properties"] == {"name": {"type": "string"}, "category": {"type": "string"}}
+    assert result["required"] == ["name", "category"] and result["additionalProperties"] is False
+
+
+def test_nonempty_list_fields_on_the_wrong_type_stay_rejected():
+    with pytest.raises(ValueError, match=r"^property 'tool_id': type 'string' cannot declare properties"):
+        _materialize_schema_contract(_object(_field("tool_id", properties=[_field("x")])))
+    with pytest.raises(ValueError, match=r"^a 'object' schema cannot declare items_type or items_properties"):
+        _materialize_schema_contract({"type": "object", "properties": [_field("name")],
+                                      "items_type": None, "items_properties": [_field("x")]})
+
+
+def test_top_level_items_on_an_object_schema_name_the_owner_and_the_fix():
+    """Run 6 (mozaiks#1005) lost module_contract_tool to this message with no location."""
+    schema = {"type": "object", "items_type": "string", "properties": [{"name": "name", "type": "string"}]}
+    with pytest.raises(ValueError) as error:
+        _materialize_schema_contract(schema, where="tool/list_tools.output_schema")
+    assert str(error.value) == (
+        "tool/list_tools.output_schema: a 'object' schema cannot declare items_type or items_properties; "
+        "set both to null, or use type 'array' for a list"
+    )
+
+
+def test_every_generator_schema_compile_names_its_owner():
+    """Every caller that compiles a generated schema passes where=, so no rejection is location-less."""
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "mozaiksai/core/workflow/generator_support"
+    unlabeled = []
+    for path in sorted(root.glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", None))
+                    == "_materialize_schema_contract" and not any(k.arg == "where" for k in node.keywords)):
+                unlabeled.append(f"{path.name}:{node.lineno}")
+    # The one exception compiles the platform's own canonical event schema for comparison.
+    assert unlabeled == [f"module_write_actions.py:{_canonical_event_compile_line(root)}"]
+
+
+def _canonical_event_compile_line(root):
+    import ast
+
+    tree = ast.parse((root / "module_write_actions.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "_materialize_schema_contract"
+                and isinstance(node.args[0], ast.Subscript) and ast.unparse(node.args[0]) == "expected['payload_schema']"):
+            return node.lineno
+    raise AssertionError("canonical event comparison compile not found")
+
+
+@pytest.mark.parametrize("key,bundle,location", [
+    ("module_yaml", {"actions": [], "capabilities": [{
+        "capability_id": "tools.create", "input_schema": _object({"name": "note", "type": "string", "nullable": True}),
+    }]}, "tools capability tools.create.input_schema: property 'note': request schemas"),
+    ("events_yaml", {"events": [{
+        "type": "domain.tools.created",
+        "payload_schema": _object({"name": "tool_id", "type": "string", "properties": [{"name": "x", "type": "string"}]}),
+    }]}, "tools event domain.tools.created.payload_schema: property 'tool_id': type 'string' cannot declare"),
+])
+def test_module_contract_rejections_name_the_module_and_item(key, bundle, location):
+    with pytest.raises(ValueError) as error:
+        _materialize_module_contract_file_map({"module_contract": {"module_id": "tools", key: bundle}})
+    assert location in str(error.value)
+
+
+@pytest.mark.asyncio
+async def test_rejected_task_output_reaches_the_log(monkeypatch, caplog):
+    from tests.test_draining_a_dependent_needs_another_pass import _spec
+
+    batch = _spec()
+    error = "Invalid module action schemas: tools capability tools.create.input_schema: property 'note'"
+
+    async def rejected(*, task, **_):
+        raise task_batches._TaskRejected(task_batches.TaskBatchFailure(
+            task_id=str(task["task_id"]), failure_kind="output_rejected", error=error,
+            worker_agent="ConfigMiddlewareAgent", attempts=2,
+        ))
+
+    monkeypatch.setattr(task_batches, "_run_one_task", rejected)
+    caplog.set_level(logging.WARNING, logger=task_batches.logger.name)
+    result = await task_batches._execute_one_batch(
+        workflow_name="AppGenerator", batch=batch,
+        task_items=[{"task_id": "module_contract_tools", "agent": "A", "message": "m", "depends_on": []}],
+        agents={}, context_variables={}, chat_id="chat-1", app_id=None, user_id=None, wf_logger=None,
+        fresh_agents_per_task=False, agents_factory=None, context_authority_policy=None,
+    )
+    assert result["failed_tasks"] == ["module_contract_tools"]
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("TASK_OUTPUT_REJECTED")]
+    assert lines == [
+        f"TASK_OUTPUT_REJECTED: batch={batch.id} task=module_contract_tools chat=chat-1 "
+        f"worker=ConfigMiddlewareAgent attempts=2: {error}"
+    ]

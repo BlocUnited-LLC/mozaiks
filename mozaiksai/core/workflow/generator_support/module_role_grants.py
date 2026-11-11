@@ -40,6 +40,46 @@ class DesignAccessPolicy(BaseModel):
     grants: list[DesignGrant]
 
 
+def _canonical_spelling(action: str, name: str, collection: dict[str, Any], canonical: set[str]) -> str:
+    """Name the canonical id an unknown action misspelled, without accepting the alias.
+
+    Reads take the collection name and writes the entity name, so a design writes
+    get_tool for the canonical get_tools. A live repair that was only told the
+    action was not approved dropped the read instead of renaming it.
+    """
+    operation = action.split("_", 1)[0]
+    if operation in ("get", "list"):
+        candidate = canonical_read_action_id(name, operation)
+    elif operation in CANONICAL_WRITE_OPERATIONS and collection_has_canonical_writes(collection):
+        candidate = canonical_write_action_id(collection["entity"], operation)
+    else:
+        return ""
+    # Only a singular/plural slip is a misspelling. Live run 7 (mozaiks#1005) put
+    # create_borrow_request under 'tools'; calling that a misspelling of create_tool
+    # sent the repair the wrong way.
+    if candidate == action or candidate not in canonical or candidate.rstrip("s") != action.rstrip("s"):
+        return ""
+    return f"Use the canonical {candidate!r} instead of {action!r}. "
+
+
+def _other_collection_owner(action: str, name: str, canonical_owners: dict[tuple[str, str], str]) -> str:
+    """Name the collection whose canonical action this is, when it is not this one."""
+    owners = sorted({collection for (_, candidate), collection in canonical_owners.items()
+                     if candidate == action and collection != name})
+    if len(owners) != 1:
+        return ""
+    return (f"{action!r} is the canonical action of collection {owners[0]!r}; "
+            f"grant it in a grant whose collection is {owners[0]!r}, not {name!r}. ")
+
+
+def _custom_action_remedy(action: str, owner: str, collection: dict[str, Any]) -> str:
+    """Say how an undeclared domain action, such as an approval, becomes grantable."""
+    generic = (f" or grant the canonical {canonical_write_action_id(collection['entity'], 'update')!r}"
+               if collection_has_canonical_writes(collection) else "")
+    return (f"To grant {action!r}, declare it in surface_map surface {owner!r} owned_mutations "
+            f"(custom_reads for a read) in this same bundle{generic}. ")
+
+
 def validate_access_policy(
     raw: Any, *, data_contract: Any, design_surface_map: Any,
 ) -> dict[str, Any]:
@@ -103,8 +143,11 @@ def validate_access_policy(
             if action not in allowed:
                 choices = sorted(candidate for candidate in allowed
                                  if canonical_owners.get((owner, candidate), name) == name)
+                remedy = (_other_collection_owner(action, name, canonical_owners)
+                          or _canonical_spelling(action, name, collection, canonical | reads)
+                          or _custom_action_remedy(action, owner, collection))
                 raise ValueError(
-                    f"access_policy action {action!r} is not an approved action of {name!r}. "
+                    f"access_policy action {action!r} is not an approved action of {name!r}. {remedy}"
                     f"Approved actions: {choices}. Canonical reads use the exact collection name; "
                     "canonical writes use the snake_case entity name."
                 )
@@ -127,6 +170,7 @@ def validate_access_policy(
         "even when its implementation changes several collections"
         for (owner, action), names in sorted(action_collections.items()) if len(names) > 1
     ]
+    write_gaps = False
     for name, actions in sorted(selected.items()):
         _, collection = collections[name]
         required = {
@@ -134,10 +178,27 @@ def validate_access_policy(
             for operation in CANONICAL_WRITE_OPERATIONS
         } if collection_has_canonical_writes(collection) else set()
         if missing := required - actions:
+            write_gaps = True
             errors.append(f"access_policy for {name!r} omits canonical write grants {sorted(missing)}")
         reads = {canonical_read_action_id(name, operation) for operation in ("get", "list")}
         if actions & reads and (missing_reads := reads - actions):
-            errors.append(f"access_policy for {name!r} omits canonical read grants {sorted(missing_reads)}")
+            errors.append(
+                f"access_policy for {name!r} omits canonical read grants {sorted(missing_reads)}; "
+                "canonical get and list both use the collection name, so grant "
+                f"{sorted(missing_reads)} wherever {sorted(actions & reads)} is granted"
+            )
+    if write_gaps:
+        # The rejection must name the remedy: a design that keeps members from editing
+        # or deleting records repeated the same omission until its repairs ran out.
+        errors.append(
+            "every canonical create, update and delete of a collection in access_policy must be granted "
+            "to at least one role, because an ungranted canonical write would be open to every signed-in "
+            "user; when members should not change or delete these records directly, grant the missing "
+            "canonical writes to the role that administers them (for example an admin or approver role) "
+            "instead of omitting them. For example, when the approved concept has submitter and approver "
+            "roles, submitter may receive create_<entity> while approver receives update_<entity> and "
+            "delete_<entity> for the same collection; use this split only when it matches the approved roles"
+        )
     if errors:
         raise ValueError("; ".join(errors))
     return policy

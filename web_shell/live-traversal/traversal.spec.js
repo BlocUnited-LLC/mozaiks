@@ -83,6 +83,13 @@ const myAcceptedAppBundle = () => {
   ) || null;
 };
 
+const makeBlockedEntryVerdict = (reason) => ({
+  ok: false,
+  outcome: 'BLOCKED',
+  summary: `BLOCKED - ${String(reason).slice(0, 120)}`,
+  notes: ['the build sequence did not start; no bundle claim is made'],
+});
+
 // What was running, so a result can be tied to the code that produced it. A
 // whole session was once spent debugging fixes against a stack that did not
 // contain them; the run looked identical either way.
@@ -279,22 +286,33 @@ test('traversal: idea to accepted, validated artifact', async ({ page }) => {
   await page.goto('/create');
   note('START', new URL(page.url()).pathname);
 
-  const greenfield = page.getByRole('button', { name: /start build/i }).first();
-  let ready = await greenfield.waitFor({ state: 'visible', timeout: 45000 })
+  // The current app_type_selector registers the target before resolving the
+  // journey. Its Greenfield card exposes the Start Build action; a generic
+  // LauncherScreen fallback cannot register a target and must not be clicked.
+  const startBuild = page.getByRole('button', { name: /start build/i }).first();
+  let ready = await startBuild.waitFor({ state: 'visible', timeout: 45000 })
     .then(() => true).catch(() => false);
   if (!ready) {
     note('RETRY', 'no Start Build yet; reloading');
     await page.reload();
-    ready = await greenfield.waitFor({ state: 'visible', timeout: 45000 })
+    ready = await startBuild.waitFor({ state: 'visible', timeout: 45000 })
       .then(() => true).catch(() => false);
   }
   await page.screenshot({ path: path.join(OUT, '00-create.png'), fullPage: true }).catch(() => {});
   if (!ready) {
-    note('RESULT', 'BLOCKED - no Start Build control');
-    return;
+    const genericChooserVisible = await page.getByRole('button', { name: /Greenfield App/i })
+      .first().isVisible().catch(() => false);
+    const reason = genericChooserVisible
+      ? 'the factory AppTypeSelector did not load; a registered build target was not created'
+      : 'no Start Build control was available';
+    const verdict = makeBlockedEntryVerdict(reason);
+    note('RESULT', verdict.summary);
+    fs.writeFileSync(path.join(OUT, 'verdict.json'),
+      JSON.stringify({ ...verdict, provenance, chats: [], workflows: [] }, null, 2), 'utf8');
+    throw new Error(verdict.summary);
   }
-  await greenfield.click().catch(() => {});
-  note('CHOSE', 'greenfield');
+  await startBuild.click().catch(() => {});
+  note('CHOSE', 'greenfield via app_type_selector');
   await page.waitForTimeout(8000);
 
   const seen = new Set();

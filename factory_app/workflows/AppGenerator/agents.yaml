@@ -1685,6 +1685,13 @@ agents:
         service derives, such as requester identity or initial state. Retained
         fields keep their canonical types and requiredness; update/delete keep
         the required record id. The business-services task implements those restricted writes.
+        For a role-protected app_wide collection, any narrowed canonical write input must be part of a
+        complete authored create/update/delete family. Explicitly include all three actions in
+        module.yaml.actions, each with handler_method, input_schema, output_schema, permissions, and
+        api_surface. Keep each input a closed subset with the canonical types, enums, and requiredness;
+        update/delete must require the canonical record id. Never narrow only one write or leave a
+        sibling action partial; if server-supplied fields do not need to be omitted, preserve the
+        canonical request schemas so the compiler can own ordinary CRUD.
         Approved role permissions remain code-owned in both cases. You may
         declare `emits` and, for runtime-only writes, `api_surface:
         internal` or `admin_internal` on a canonical write id; everything else on it

@@ -383,7 +383,9 @@ def _authored_role_write_contracts(
         prior = existing.get(action_id)
         if prior is None or "input_schema" not in prior:
             continue
-        schema = _materialize_schema_contract(prior["input_schema"], closed_request=True)
+        schema = _materialize_schema_contract(
+            prior["input_schema"], closed_request=True, where=f"{module_id}/{action_id}.input_schema",
+        )
         import_closed_contract_schema(schema)
         canonical = expected["input_schema"]
         properties = schema.get("properties", {})
@@ -974,7 +976,10 @@ def materialize_module_actions(
         for action in expanded.get("actions") or []:
             for key in ("input_schema", "output_schema"):
                 if isinstance(action.get(key), dict):
-                    action[key] = _materialize_schema_contract(action[key], closed_request=key == "input_schema")
+                    action[key] = _materialize_schema_contract(
+                        action[key], closed_request=key == "input_schema",
+                        where=f"{module_id}/{action.get('id', '<unnamed>')}.{key}",
+                    )
         if expanded != manifest:
             changed[path] = yaml.safe_dump(expanded, sort_keys=False, allow_unicode=True)
         for key, relative in companion_paths.items():
@@ -984,7 +989,9 @@ def materialize_module_actions(
             if key == _EVENTS_KEY:
                 for event in document.get("events") or []:
                     if isinstance(event.get("payload_schema"), dict):
-                        event["payload_schema"] = _materialize_schema_contract(event["payload_schema"])
+                        event["payload_schema"] = _materialize_schema_contract(
+                            event["payload_schema"], where=f"{module_id} event {event.get('type', '<unnamed>')}.payload_schema",
+                        )
             if document != authored.get(key):
                 changed[f"modules/{module_id}/{relative}"] = yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
     return changed
