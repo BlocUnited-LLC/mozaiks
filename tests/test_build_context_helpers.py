@@ -271,6 +271,32 @@ class TestResolveBuildContextRoot:
         assert result is not None
         assert result == (tmp_path / "build_context").resolve()
 
+    def test_app_bundle_root_resolves_build_context_beside_app(self, tmp_path: Path):
+        app_root = tmp_path / "app"
+        app_root.mkdir()
+        (app_root / "app.json").write_text("{}", encoding="utf-8")
+        result = resolve_build_context_root(workspace_path=app_root)
+        assert result == (tmp_path / "build_context").resolve()
+
+    def test_cli_app_root_env_resolves_build_context_beside_app(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        # `mozaiks serve` and the Studio launcher export the active app root.
+        app_root = tmp_path / "app"
+        app_root.mkdir()
+        (app_root / "app.json").write_text("{}", encoding="utf-8")
+        monkeypatch.setenv("MOZAIKS_APP_WORKSPACE_PATH", str(app_root))
+        monkeypatch.delenv("MOZAIKS_BUILD_CONTEXT_PATH", raising=False)
+        result = resolve_build_context_root()
+        assert result == (tmp_path / "build_context").resolve()
+
+    def test_workspace_named_app_without_bundle_manifest_is_a_workspace(self, tmp_path: Path):
+        workspace = tmp_path / "app"
+        (workspace / "app").mkdir(parents=True)
+        (workspace / "app" / "app.json").write_text("{}", encoding="utf-8")
+        result = resolve_build_context_root(workspace_path=workspace)
+        assert result == (workspace / "build_context").resolve()
+
     def test_nothing_provided_returns_none(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.delenv("MOZAIKS_BUILD_CONTEXT_PATH", raising=False)
         monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)

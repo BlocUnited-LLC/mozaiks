@@ -304,7 +304,7 @@ lifecycle_tools:
     agent: null
     file: hydrate_app_revision_context.py
     function: hydrate_app_revision_context
-    description: Verify and load the selected app-bundle baseline for partial revisions; preserve unchanged files before reasoning and assembly.
+    description: Verify the owned revision source, select an app-bundle baseline or establish first generation after an upstream design revision, and preserve unchanged files before reasoning and assembly.
     tool_type: Agent_Tool
   - trigger: before_chat
     agent: null

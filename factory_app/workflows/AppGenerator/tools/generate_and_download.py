@@ -618,11 +618,7 @@ async def _register_app_bundle_artifact_version(
     sandbox_provider = None
     if context_variables is not None and hasattr(context_variables, "get"):
         try:
-            parent_version_id = (
-                revision_source_artifact_id(context_variables)
-                if revision_baseline_required(context_variables)
-                else context_variables.get("artifact_version_id")
-            )
+            parent_version_id = revision_source_artifact_id(context_variables)
             validation_status_raw = context_variables.get("app_bundle_acceptance_status")
             # Sandbox build-validation outcome, persisted first-class so
             # "which builds passed e2b/docker validation" is queryable

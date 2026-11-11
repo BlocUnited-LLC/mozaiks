@@ -383,6 +383,16 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Prompt hooks receive the active task's values for context keys declared by the agent, so AppGenerator uses task-specific file ownership guidance without changing shared workflow state.
+
+- A generated app's refinement harness now reaches the Refinement Engine. Studio
+  restore, sandbox preview and app validation place `refinement_harness/` beside
+  `app/`, where it is read; before, it landed inside `app/` and the Factory
+  default silently applied instead.
+- Workspace `build_context/` is found when `mozaiks serve` or the Studio launcher
+  exports the app bundle root as `MOZAIKS_APP_WORKSPACE_PATH`; it was looked up
+  inside `app/`.
+
 - App Studio cancels abandoned data loads during navigation and development
   StrictMode replay, preventing duplicate detail requests while keeping refresh available.
 
@@ -564,6 +574,10 @@ This project follows a practical pre-1.0 changelog format:
   Pending reviews saved before a committed chat turn receive the same state.
   Reconnecting to a still-live review keeps its controls available. Failed
   response submissions no longer make an inline review appear completed.
+
+- Design revisions made before the first app bundle now generate the complete
+  approved app. Existing apps use a verified app-bundle baseline separately from
+  the design artifact, preserving revision ownership and build identity.
 
 - The shell no longer offers Profile, Sign in, or Sign out when nobody can sign
   in. A fresh Studio runs with authentication disabled, yet its account menu
@@ -821,6 +835,18 @@ This project follows a practical pre-1.0 changelog format:
   and handler-grammar checks as a shipped pack. If the parent's selection
   cannot be resolved or verified, every candidate is refused with
   `PACK_OWNERSHIP_UNRESOLVED` instead of being admitted unchecked.
+
+### Fixed
+
+- Clarified public quickstart instructions for writable workspace paths,
+  quoted PowerShell API keys, a running MongoDB server, and diagnosing backend
+  startup failures without recreating the workspace. Local Setup now describes
+  the published package and how to distinguish it from an older editable install
+  with the same version, repair older empty secret contracts and missing app IDs,
+  restore a missing refinement regeneration profile, and configure local-only
+  Studio access.
+
+
 ## 0.2.0 - 2026-10-17
 
 ### Added

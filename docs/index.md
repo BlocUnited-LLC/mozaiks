@@ -38,6 +38,10 @@ separate from builder workflows.
 
 --- 
 
+--8<-- "docs/agent-bootstrap-prompt.md:local-setup"
+
+---
+
 ## See It In Action
 
 <div align="center" markdown>
