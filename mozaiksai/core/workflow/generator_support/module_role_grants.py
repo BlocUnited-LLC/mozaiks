@@ -195,7 +195,9 @@ def validate_access_policy(
             "to at least one role, because an ungranted canonical write would be open to every signed-in "
             "user; when members should not change or delete these records directly, grant the missing "
             "canonical writes to the role that administers them (for example an admin or approver role) "
-            "instead of omitting them"
+            "instead of omitting them. For example, when the approved concept has submitter and approver "
+            "roles, submitter may receive create_<entity> while approver receives update_<entity> and "
+            "delete_<entity> for the same collection; use this split only when it matches the approved roles"
         )
     if errors:
         raise ValueError("; ".join(errors))

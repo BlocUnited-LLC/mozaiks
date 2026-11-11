@@ -96,6 +96,7 @@ def test_design_read_guidance_keeps_explicit_policy_and_canonical_wire_contract(
     assert "cover all three canonical writes" in policy
     # A design that keeps members from editing or deleting must still assign those writes.
     assert "grant the update and delete writes to the role that administers the records" in policy
+    assert "submitter may receive create_<entity> while the approver receives update_<entity> and delete_<entity>" in policy
     assert "omission cannot make an update or delete public" not in policy
     assert "never inherit read authority from write grants" in policy
     assert "Without explicit canonical read grants" in policy
@@ -115,6 +116,7 @@ def test_design_action_guidance_distinguishes_collection_reads_from_entity_write
         for action in ("get_project_updates", "list_project_updates", "create_project_update",
                        "update_project_update", "delete_project_update"):
             assert action in guidance
+    assert "counted across grant rows rather than per row" in description
 
 
 def test_unknown_read_feedback_reaches_next_declared_prompt_without_authorizing(monkeypatch, persistence):

@@ -86,7 +86,11 @@ agents:
       otherwise be open to every signed-in user. When the concept keeps members
       from editing or deleting those records directly (for example, an approver
       decides), grant the update and delete writes to the role that administers
-      the records instead of omitting them. No wildcards, invented
+      the records instead of omitting them. For example, when the approved
+      concept has submitter and approver roles, the submitter may receive
+      create_<entity> while the approver receives update_<entity> and
+      delete_<entity> for the same collection. Use that split only when it
+      matches the approved roles; do not broaden submitter access. No wildcards, invented
       permission strings, platform/hosted collections, or implicit role assignment.
       Code derives permission ids and renders auth grants after approval. The
       collection is the action's permission anchor, not a list of records it
