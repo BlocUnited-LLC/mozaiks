@@ -785,6 +785,13 @@ def close_module_events(
     return {**(document or {}), "schema_version": "mozaiks.events.v1", "events": events}
 
 
+def _warn_read_fixture_diagnostic_failure() -> None:
+    try:
+        logger.warning("Module read-fixture diagnostic failed after write rejection")
+    except Exception:
+        pass  # A logging failure must not replace the rejected write's feedback.
+
+
 def close_module_actions(
     payload: Any, *, app_build_plan: Any, data_contract: Any = None, design_surface_map: Any = None,
     subscription_contract: Any = None, declared_auth_scopes: frozenset[str] | None = None,
@@ -874,10 +881,36 @@ def close_module_actions(
     } or _companions_from_files(module_id, companion_files)
     role_permissions = role_grants.get(module_id, {})
     apply_module_role_permissions(manifest, role_permissions)
-    _close_manifest_writes(
-        module_id, manifest, plan, contract, subscription_contract=subscription_contract, granted=granted,
-        companions=companions, role_permissions=role_permissions,
-    )
+    try:
+        _close_manifest_writes(
+            module_id, manifest, plan, contract, subscription_contract=subscription_contract, granted=granted,
+            companions=companions, role_permissions=role_permissions,
+        )
+    except ValueError as write_error:
+        # Read closure is diagnostic only: it cannot make a rejected write admissible.
+        try:
+            read_probe = close_module_read_actions(
+                payload, app_build_plan=plan, data_contract=contract,
+                design_surface_map=design_surface_map, subscription_contract=subscription_contract,
+                access_policy=access_policy,
+            )
+        except Exception:
+            _warn_read_fixture_diagnostic_failure()
+            raise write_error from None
+        probe_bundle = read_probe.get("module_contract") if isinstance(read_probe, dict) else None
+        if isinstance(probe_bundle, dict) and isinstance(probe_bundle.get("module_yaml"), dict):
+            from .module_smoke_fixtures import validate_module_fixture_record_identities
+
+            try:
+                validate_module_fixture_record_identities(
+                    module_id, probe_bundle.get("fixtures_yaml"), data_contract=contract,
+                    manifest=probe_bundle["module_yaml"],
+                )
+            except ValueError as read_error:
+                raise ValueError(f"{write_error}\n{read_error}") from write_error
+            except Exception:
+                _warn_read_fixture_diagnostic_failure()
+        raise write_error from None
     output = close_module_read_actions(
         output, app_build_plan=plan, data_contract=contract, design_surface_map=design_surface_map,
         subscription_contract=subscription_contract,

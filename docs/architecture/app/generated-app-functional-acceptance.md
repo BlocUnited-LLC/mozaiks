@@ -139,6 +139,21 @@ These diagnostics are exposed through
 `mozaiksai.core.validation.validate_generated_app_bundle(...)` and through the
 AppGenerator `functional_completeness` acceptance subgate.
 
+The AppGenerator validation gate emits `APP_GENERATOR_VALIDATION` with the gate
+outcome, known failed and skipped gate names, acceptance and validation statuses,
+infrastructure status when known,
+failed task count, failure kind, attempt count and blocked dependencies.
+Chat, task and worker identifiers are represented by the first 16 hexadecimal
+characters of their SHA-256 digest for correlation with saved task evidence.
+These digests support correlation, not anonymization of predictable identifiers.
+The record includes up to 32 failed tasks and eight prior attempts per task.
+Recognized nullable request properties and missing read fixtures carry fixed
+reason and contract-location codes; other errors are `unclassified`. A provider
+status is included when an HTTP error appears in a task failure. Raw errors,
+candidate payloads and prompts are not copied into this diagnostic record.
+Failures that occur before the AppGenerator validation gate, including an
+AppPlanAgent provider rejection, remain in the owning runtime's logs.
+
 ## Runtime Smoke Gate
 
 The other acceptance checks read files. A recorded app (AppGenerator chat
@@ -270,6 +285,10 @@ the check does not rewrite native schemas. Internal reads and collections with
 no observed create action do not acquire a fixture requirement. The module
 contract task already owns the optional companion even if its initial file
 manifest omits it; another task's explicit ownership still takes precedence.
+When a write contract is rejected, a successful independent read closure can
+also report a missing or invalid read fixture in the same repair feedback. The
+original write rejection remains decisive, and no fixture or permission is
+invented on the candidate's behalf.
 Update fixtures must make an observable declared-field change when the action
 has such a field. Internal canonical reads remain explicitly
 `not_run` on the user HTTP surface; this does not prove their business behavior.
@@ -1064,6 +1083,12 @@ and review identity when the original saved-version payload refreshes or a later
 request fails. Responses from a previously opened version cannot replace the
 current selection. Server-confirmed acceptance and activation show separate
 receipts; activation reports when an app restart is required.
+
+The live notes traversal requires a passed app-validation result for the exact
+saved draft before opening its preview. It creates and lists notes, then checks
+that title search filters and restores two notes in the refined preview. Preview
+databases are disposable per draft, so this does not prove that records survive
+across preview versions; continuity requires a shared app-runtime data boundary.
 
 ## Remaining Gaps
 

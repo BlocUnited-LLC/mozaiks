@@ -15,6 +15,13 @@ It drives an **already-running** stack; it starts nothing itself.
 npx playwright test --config=live-traversal/traversal.config.js
 ```
 
+The default remains the generation-only tool-lending journey. Set
+`MOZAIKS_TRAVERSAL_NOTES=1` to run the notes build, preview, and search
+refinement journey instead. For a bounded run, pass an explicit Playwright
+`--timeout` and configure the model request limits and owned Mongo server
+separately. The notes journey uses separate disposable preview databases and
+does not prove that records survive between versions.
+
 The Python interpreter for the evidence probe is resolved in order:
 `MOZAIKS_TRAVERSAL_PYTHON`, a repo-local `.venv`, then `python3`/`python` on
 PATH. Nothing is hardcoded, so this runs on any checkout.
@@ -37,7 +44,9 @@ consecutive failed traversals were recorded as four passing tests.
 
 | Verdict | Passes? | Meaning |
 |---|---|---|
-| `VALIDATED ARTIFACT - <id> (<status>, n files)` | yes | an artifact from this run's chats reached `lifecycle_status: current` **and** carries a validation result |
+| `VALIDATED ARTIFACT - <id> (<status>, n files)` | yes | an artifact from this run's chats reached `lifecycle_status: current` **and** has passed validation |
+| `VALIDATED NOTES JOURNEY` | yes | the opt-in notes journey also verified creation and title search in the refined preview |
+| `NOTES JOURNEY FAILED` | no | generation passed but preview, refinement, or its behavioral checks did not complete |
 | `NOT VALIDATED - ...` | no | an accepted artifact exists but nothing validated it |
 | `NO ACCEPTED ARTIFACT - ...` | no | files were written; none promoted to the accepted version |
 | `NO BUNDLE - none of our N chat(s) produced files` | no | ran, did not fail, produced nothing |

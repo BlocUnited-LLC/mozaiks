@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Factory validation reports bounded failed-gate and task-dependency diagnostics
+  without copying raw prompts or generated payloads into the diagnostic record.
+
 - Generated bundle validation can resolve approved compiler inputs from the exact
   owned build record. Factory saves actual design/subscription input identities,
   and coding/media children preserve those inputs while validating fresh bytes.
@@ -384,6 +387,9 @@ This project follows a practical pre-1.0 changelog format:
 - Module actions return a sanitized `DEPENDENCY_UNAVAILABLE` HTTP 503 when the
   generated Cloud or Pay client cannot resolve its required connector
   configuration. Permission denials still precede connector lookup and provider calls.
+
+- Module generation repair can see an independent missing read-fixture issue
+  alongside a rejected write contract, without relaxing either validation.
 
 - AppGenerator now tells module-contract generation to keep role-protected
   narrowed writes complete across create, update, and delete, matching the
