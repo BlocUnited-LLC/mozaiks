@@ -96,6 +96,11 @@ artifact before activation. There is currently no persisted-draft revalidation
 endpoint; the build workflow must produce that new artifact. Source checks on a
 refinement alone do not certify the whole app build.
 One-shot validation always terminates its sandbox and returns `preview_url: null`.
+For Docker, a caller may supply a unique 32-character lowercase hexadecimal
+`allocation_id` in sandbox metadata. The adapter validates it and labels the
+container `mozaiks.sandbox.allocation` before allocation. This optional label
+identifies an allocation for recovery; it does not replace preview-manager
+identity or establish authorization by itself.
 The shared shell bundles its fallback logo and does not require undeclared
 app-owned background images. Existing preview templates must be rebuilt to pick
 up frontend changes; host-side lifecycle updates do not update template contents.

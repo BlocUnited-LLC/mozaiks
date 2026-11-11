@@ -91,6 +91,40 @@ async def test_docker_validation_session_has_no_network_or_published_ports(monke
 
 
 @pytest.mark.asyncio
+async def test_docker_allocation_identity_is_labeled_before_validation_dispatch():
+    adapter = DockerSandboxAdapter()
+    allocation_id = "a" * 32
+    fake_run = AsyncMock(return_value=(0, "validation-container\n", ""))
+    with patch.object(adapter, "_run", fake_run):
+        await adapter.create_session(metadata={"purpose": "app_validation", "allocation_id": allocation_id})
+    args = fake_run.await_args.args[0]
+    assert f"mozaiks.sandbox.allocation={allocation_id}" in args
+    assert args[args.index("--network") + 1] == "none"
+    assert "-p" not in args
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("allocation_id", [None, "", "A" * 32, "a" * 31, "a" * 33, "-" * 32, 123])
+async def test_docker_invalid_allocation_identity_fails_before_dispatch(allocation_id):
+    adapter = DockerSandboxAdapter()
+    fake_run = AsyncMock()
+    with patch.object(adapter, "_run", fake_run), pytest.raises(ValueError, match="allocation ID"):
+        await adapter.create_session(metadata={"purpose": "app_validation", "allocation_id": allocation_id})
+    fake_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_docker_preview_and_allocation_labels_remain_distinct():
+    adapter = DockerSandboxAdapter()
+    fake_run = AsyncMock(return_value=(0, "preview-container\n", ""))
+    with patch.object(adapter, "_run", fake_run):
+        await adapter.create_session(metadata={"purpose": "artifact_preview", "manager_sandbox_id": "preview-id", "allocation_id": "b" * 32})
+    args = fake_run.await_args.args[0]
+    assert "mozaiks.preview=preview-id" in args
+    assert f"mozaiks.sandbox.allocation={'b' * 32}" in args
+
+
+@pytest.mark.asyncio
 async def test_app_runtime_diagnostic_has_bounded_writable_space(monkeypatch):
     monkeypatch.setenv("SANDBOX_PREVIEW_PORT", "invalid-preview-port")
     adapter = DockerSandboxAdapter()

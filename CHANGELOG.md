@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Docker sandbox callers can attach a validated allocation identity before
+  container creation, allowing an interrupted allocation to be identified for cleanup.
+
 - Factory validation reports bounded failed-gate and task-dependency diagnostics
   without copying raw prompts or generated payloads into the diagnostic record.
 
