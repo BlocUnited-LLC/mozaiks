@@ -14,6 +14,8 @@ Determinism requirements verified here
 """
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -122,6 +124,58 @@ class _FakeReply:
         raise AssertionError(  # pragma: no cover
             f"_FakeReply ran out of outcomes after {attempt} attempt(s)"
         )
+
+
+class _OwnedHTTPClientProbe:
+    _mozaiks_ag2_session_owned = True
+
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["success", "failure", "cancel"])
+async def test_structured_runner_closes_owned_gemini_client_after_turn(outcome, monkeypatch):
+    started = asyncio.Event()
+    client = _OwnedHTTPClientProbe()
+
+    class OneTurnAgent:
+        config = SimpleNamespace(http_client=client)
+
+        async def ask(self, *args: Any, **kwargs: Any) -> _FakeReply:
+            started.set()
+            if outcome == "failure":
+                raise RuntimeError("expected provider failure")
+            if outcome == "cancel":
+                await asyncio.Event().wait()
+            return _FakeReply(_RunnerResponse(status="complete"))
+
+    runner = AG2StructuredAgentRunner()
+    monkeypatch.setattr(runner, "_make_agent", lambda **kwargs: OneTurnAgent())
+    call = {
+        "agent_name": "OneTurn",
+        "system_prompt": "test",
+        "user_prompt": "run",
+        "llm_config": None,
+        "response_schema": _RunnerResponse,
+        "usage_context": _USAGE_CONTEXT,
+    }
+    if outcome == "cancel":
+        task = asyncio.create_task(runner.run(**call))
+        await asyncio.wait_for(started.wait(), timeout=3.0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    elif outcome == "failure":
+        with pytest.raises(RuntimeError, match="expected provider failure"):
+            await runner.run(**call)
+    else:
+        assert await runner.run(**call) == _RunnerResponse(status="complete")
+
+    assert client.close_calls == 1
 
 
 class _FakeAgent:

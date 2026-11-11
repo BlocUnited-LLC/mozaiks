@@ -9,7 +9,10 @@ from copy import deepcopy
 import httpx
 import pytest
 
-from mozaiksai.core.adapters.llm_fallback import llm_config_to_ag2_config
+from mozaiksai.core.adapters.llm_fallback import (
+    close_ag2_session_http_client,
+    llm_config_to_ag2_config,
+)
 
 
 @pytest.mark.parametrize(
@@ -134,12 +137,74 @@ async def test_gemini_shared_timeout_uses_httpx_seconds_and_preserves_client_own
             "timeout": 11,
             "http_client": caller_client,
         })
-        assert supplied.http_client is caller_client
-        assert supplied.http_client.timeout.read == 23
+        assert supplied.http_client is not caller_client
+        assert supplied.http_client.timeout.read == 11
+        default_request = supplied.http_client.build_request("GET", "https://provider.invalid")
+        explicit_request = supplied.http_client.build_request(
+            "GET", "https://provider.invalid", timeout=2.5,
+        )
+        assert default_request.extensions["timeout"]["read"] == 11
+        assert explicit_request.extensions["timeout"]["read"] == 2.5
     finally:
         if actual is not None:
             await actual.http_client.aclose()
+        if "supplied" in locals():
+            await close_ag2_session_http_client(supplied.http_client)
+            assert not caller_client.is_closed
         await caller_client.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("streaming", [False, True])
+async def test_real_ag2_gemini_streaming_and_nonstreaming_use_finite_timeout(streaming):
+    from ag2 import Agent
+
+    requests = []
+    payload = {
+        "candidates": [{
+            "content": {"role": "model", "parts": [{"text": "Complete."}]},
+            "finishReason": "STOP",
+        }],
+        "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1, "totalTokenCount": 2},
+    }
+
+    def respond(request):
+        requests.append(request)
+        expected_path = ":streamGenerateContent" if streaming else ":generateContent"
+        assert expected_path in request.url.path
+        assert request.extensions["timeout"]["read"] == 13.0
+        if streaming:
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                content=f"data: {json.dumps(payload)}\n\n".encode(),
+            )
+        return httpx.Response(200, json=payload)
+
+    external_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), timeout=7.0,
+    )
+    config = llm_config_to_ag2_config({
+        "config_list": [{
+            "api_type": "google", "model": "gemini-test", "api_key": "fake-gemini-key",
+        }],
+        "timeout": 13,
+        "streaming": streaming,
+        "http_client": external_client,
+    })
+    agent = Agent("gemini-timeout", config=config)
+    try:
+        for _ in range(2):
+            async with agent.run("Complete the task.") as run:
+                result = await run.result()
+            assert result
+        assert len(requests) == 2
+        assert requests[0].extensions["timeout"]["read"] == 13.0
+        assert requests[1].extensions["timeout"]["read"] == 13.0
+    finally:
+        await close_ag2_session_http_client(config.http_client)
+        assert not external_client.is_closed
+        await external_client.aclose()
 
 
 @pytest.mark.parametrize("timeout", [0, -1, True, float("inf"), float("nan"), "10"])

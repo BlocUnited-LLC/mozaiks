@@ -242,6 +242,19 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
 
     def pop_live_ag2_workflow_run(self, chat_id: str) -> Any | None:
         return self._live_ag2_workflow_runs.pop(chat_id, None)
+
+    async def close_live_ag2_workflow_runs(self) -> None:
+        """Close process-local paused runs and their owned AG2 resources."""
+        live_runs = tuple(self._live_ag2_workflow_runs.values())
+        self._live_ag2_workflow_runs.clear()
+        for live_run in live_runs:
+            close = getattr(live_run, "close", None)
+            if not callable(close):
+                continue
+            try:
+                await close()
+            except Exception:
+                logger.warning("LIVE_AG2_RUN_SHUTDOWN_CLOSE_FAILED", exc_info=True)
         
     async def _handle_usage_delta_event(self, payload: dict[str, Any]) -> None:
         chat_id = payload.get("chat_id")

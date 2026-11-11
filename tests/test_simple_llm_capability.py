@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
@@ -271,6 +272,7 @@ async def test_google_default_uses_real_ag2_provider_with_mock_http(monkeypatch)
             "config_list": [{"model": "gemini-3.8-flash", "api_type": "google", "api_key": "gemini-test-key"}],
             "max_output_tokens": 256,
             "temperature": 0.2,
+            "timeout": 13.0,
         }
 
     requests = []
@@ -283,6 +285,17 @@ async def test_google_default_uses_real_ag2_provider_with_mock_http(monkeypatch)
         })
 
     monkeypatch.setattr(simple_llm, "get_llm_config", fake_config)
+    from mozaiksai.core.adapters import llm_fallback
+
+    original_converter = llm_fallback.llm_config_to_ag2_config
+    request_clients = []
+
+    def capture_converted_client(config):
+        converted = original_converter(config)
+        request_clients.append(converted.http_client)
+        return converted
+
+    monkeypatch.setattr(llm_fallback, "llm_config_to_ag2_config", capture_converted_client)
     service = SimpleLLMCapabilityService(timeout=47.0)
     await service._client.aclose()
     service._client = simple_llm.create_gemini_http_client(
@@ -291,16 +304,24 @@ async def test_google_default_uses_real_ag2_provider_with_mock_http(monkeypatch)
     result = await service.generate_json_completion(
         system_prompt="Return JSON", user_prompt="Hello", app_id=None, user_id=None,
     )
+    second_result = await service.generate_json_completion(
+        system_prompt="Return JSON", user_prompt="Hello again", app_id=None, user_id=None,
+    )
+    assert second_result["parsed"] == {"ok": True}
+    assert not service._client.is_closed
+    assert len(request_clients) == 2
+    assert all(client.is_closed for client in request_clients)
+    assert all(request.extensions["timeout"]["read"] == 13.0 for request in requests)
     await service.aclose()
 
     assert result["parsed"] == {"ok": True}
     assert result["usage"]["prompt_tokens"] == 10
     assert result["usage"]["completion_tokens"] == 4
     assert result["usage"]["total_tokens"] == 14
-    assert len(requests) == 1
+    assert len(requests) == 2
     request = requests[0]
     assert request.url.host == "generativelanguage.googleapis.com"
-    assert request.extensions["timeout"]["read"] == 47.0
+    assert request.extensions["timeout"]["read"] == 13.0
     assert "gemini-3.8-flash:generateContent" in request.url.path
     assert request.headers["x-goog-api-key"] == "gemini-test-key"
     assert "authorization" not in request.headers
@@ -309,6 +330,83 @@ async def test_google_default_uses_real_ag2_provider_with_mock_http(monkeypatch)
     assert payload["contents"] == [{"parts": [{"text": "Hello"}], "role": "user"}]
     assert payload["generationConfig"]["maxOutputTokens"] == 256
     assert payload["generationConfig"]["temperature"] == 0.2
+    assert requests[1].extensions["timeout"]["read"] == 13.0
+
+
+@pytest.mark.asyncio
+async def test_general_capability_singleton_closes_its_owned_http_client(monkeypatch) -> None:
+    service = SimpleLLMCapabilityService()
+    monkeypatch.setattr(simple_llm, "_service", service)
+    from mozaiksai.hosts import runtime
+
+    class Transport:
+        closed_live_runs = False
+
+        async def close_live_ag2_workflow_runs(self) -> None:
+            self.closed_live_runs = True
+
+    transport = Transport()
+
+    monkeypatch.setattr(runtime, "mongo_client", None)
+    monkeypatch.setattr(runtime, "simple_transport", transport)
+
+    await runtime._runtime_shutdown()
+    assert service._client.is_closed
+    assert simple_llm._service is None
+    assert transport.closed_live_runs
+    assert runtime.simple_transport is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["failure", "cancel"])
+async def test_gemini_timeout_proxy_closes_without_closing_capability_client(outcome, monkeypatch) -> None:
+    from mozaiksai.core.adapters import llm_fallback
+
+    started = asyncio.Event()
+
+    class RequestTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            started.set()
+            if outcome == "cancel":
+                await asyncio.Event().wait()
+            raise httpx.ConnectError("synthetic offline failure", request=request)
+
+    service = SimpleLLMCapabilityService(timeout=47.0)
+    await service._client.aclose()
+    service._client = simple_llm.create_gemini_http_client(
+        47.0, transport=RequestTransport(),
+    )
+    original_converter = llm_fallback.llm_config_to_ag2_config
+    request_clients = []
+
+    def capture_converted_client(config):
+        converted = original_converter(config)
+        request_clients.append(converted.http_client)
+        return converted
+
+    monkeypatch.setattr(llm_fallback, "llm_config_to_ag2_config", capture_converted_client)
+    call = service._generate_ag2_completion(
+        provider={
+            "api_type": "google", "model": "gemini-test", "api_key": "fake-key", "timeout": 13.0,
+        },
+        messages=[{"role": "user", "content": "Hello"}],
+        temperature=None,
+        extra_payload=None,
+    )
+    if outcome == "cancel":
+        task = asyncio.create_task(call)
+        await asyncio.wait_for(started.wait(), timeout=3.0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    else:
+        with pytest.raises(Exception, match="synthetic offline failure"):
+            await call
+
+    assert len(request_clients) == 1
+    assert request_clients[0].is_closed
+    assert not service._client.is_closed
+    await service.aclose()
 
 
 @pytest.mark.asyncio

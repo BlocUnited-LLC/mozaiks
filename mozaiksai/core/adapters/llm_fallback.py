@@ -46,26 +46,82 @@ logger = get_core_logger("llm_fallback")
 class _GeminiTimeoutAsyncClient(httpx.AsyncClient):
     """Keep the configured HTTPX timeout when google-genai passes timeout=None."""
 
-    async def request(self, *args: Any, **kwargs: Any) -> httpx.Response:
+    def build_request(self, *args: Any, **kwargs: Any) -> httpx.Request:
         if kwargs.get("timeout") is None:
             kwargs["timeout"] = self.timeout
-        return await super().request(*args, **kwargs)
+        return super().build_request(*args, **kwargs)
+
+
+class _BorrowedGeminiTransport(httpx.AsyncBaseTransport):
+    """Route Gemini requests through a caller-owned HTTPX client without owning it."""
+
+    def __init__(self, client: httpx.AsyncClient, *, close_client: bool = False) -> None:
+        if client.is_closed:
+            raise ValueError("Gemini http_client is already closed")
+        self._client = client
+        self._close_client = close_client
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        headers = httpx.Headers(self._client.headers)
+        headers.update(request.headers)
+        request.headers = headers
+        return await self._client.send(request, stream=True)
+
+    async def aclose(self) -> None:
+        # The original client belongs to the caller and must remain open.
+        if self._close_client:
+            await self._client.aclose()
 
 
 def create_gemini_http_client(
     timeout: Any,
     *,
     transport: httpx.AsyncBaseTransport | None = None,
+    owned_by_ag2_session: bool = False,
 ) -> httpx.AsyncClient:
     """Create an HTTPX client whose timeout applies to google-genai requests."""
-    if (
+    if isinstance(timeout, httpx.Timeout):
+        timeout_values = (timeout.connect, timeout.read, timeout.write, timeout.pool)
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value <= 0
+            for value in timeout_values
+        ):
+            raise ValueError("timeout must be a finite positive number of seconds")
+        configured_timeout: float | httpx.Timeout = timeout
+    elif (
         isinstance(timeout, bool)
         or not isinstance(timeout, (int, float))
         or not math.isfinite(timeout)
         or timeout <= 0
     ):
         raise ValueError("timeout must be a finite positive number of seconds")
-    return _GeminiTimeoutAsyncClient(timeout=float(timeout), transport=transport)
+    else:
+        configured_timeout = float(timeout)
+    client = _GeminiTimeoutAsyncClient(timeout=configured_timeout, transport=transport)
+    client._mozaiks_ag2_session_owned = owned_by_ag2_session
+    return client
+
+
+async def close_ag2_session_http_client(client: Any) -> None:
+    """Close only clients created by this adapter for an AG2 session."""
+    if getattr(client, "_mozaiks_ag2_session_owned", False):
+        await client.aclose()
+
+
+def _http_timeout_matches(client_timeout: httpx.Timeout, selected_timeout: Any) -> bool:
+    fields = ("connect", "read", "write", "pool")
+    if isinstance(selected_timeout, httpx.Timeout):
+        return all(
+            getattr(client_timeout, name) == getattr(selected_timeout, name)
+            for name in fields
+        )
+    if isinstance(selected_timeout, bool) or not isinstance(selected_timeout, (int, float)):
+        return False
+    selected_seconds = float(selected_timeout)
+    return all(getattr(client_timeout, name) == selected_seconds for name in fields)
 
 
 def resolve_structured_output_mode(llm_config: Mapping[str, Any] | None = None) -> str:
@@ -370,7 +426,23 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
         # get a client using the shared AG2 timeout's seconds unit.
         http_client = llm_config.get("http_client")
         if http_client is None and timeout is not None:
-            http_client = create_gemini_http_client(timeout)
+            http_client = create_gemini_http_client(timeout, owned_by_ag2_session=True)
+        elif http_client is not None:
+            selected_timeout = timeout if timeout is not None else http_client.timeout
+            timeout_aware = isinstance(http_client, _GeminiTimeoutAsyncClient)
+            timeout_matches = _http_timeout_matches(http_client.timeout, selected_timeout)
+            if not timeout_aware or not timeout_matches:
+                client_is_adapter_owned = bool(
+                    getattr(http_client, "_mozaiks_ag2_session_owned", False)
+                )
+                http_client = create_gemini_http_client(
+                    selected_timeout,
+                    transport=_BorrowedGeminiTransport(
+                        http_client,
+                        close_client=client_is_adapter_owned,
+                    ),
+                    owned_by_ag2_session=True,
+                )
         if http_client is not None:
             kwargs["http_client"] = http_client
         if llm_config.get("response_modalities"):

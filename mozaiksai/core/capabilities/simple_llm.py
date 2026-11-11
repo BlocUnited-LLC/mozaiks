@@ -211,7 +211,10 @@ class SimpleLLMCapabilityService:
         from ag2.stream import MemoryStream
         from fast_depends.pydantic import PydanticSerializer
 
-        from mozaiksai.core.adapters.llm_fallback import llm_config_to_ag2_config
+        from mozaiksai.core.adapters.llm_fallback import (
+            close_ag2_session_http_client,
+            llm_config_to_ag2_config,
+        )
 
         config = {**provider, **(extra_payload or {})}
         config["streaming"] = False
@@ -225,31 +228,34 @@ class SimpleLLMCapabilityService:
         if config.get("api_type") == "ollama":
             model_config = model_config.copy(http_client=self._client)
 
-        context = ConversationContext(stream=MemoryStream())
-        events: list[BaseEvent] = []
-        for message in messages:
-            role = str(message.get("role") or "user").lower()
-            content = str(message.get("content") or "")
-            if role in {"system", "developer"}:
-                context.prompt.append(content)
-            elif role == "user":
-                events.append(ModelRequest.ensure_request([content]))
-            elif role == "assistant":
-                events.append(ModelResponse(ModelMessage(content)))
-            else:
-                raise ValueError(f"Unsupported capability message role: {role}")
+        try:
+            context = ConversationContext(stream=MemoryStream())
+            events: list[BaseEvent] = []
+            for message in messages:
+                role = str(message.get("role") or "user").lower()
+                content = str(message.get("content") or "")
+                if role in {"system", "developer"}:
+                    context.prompt.append(content)
+                elif role == "user":
+                    events.append(ModelRequest.ensure_request([content]))
+                elif role == "assistant":
+                    events.append(ModelResponse(ModelMessage(content)))
+                else:
+                    raise ValueError(f"Unsupported capability message role: {role}")
 
-        response = await model_config.create()(
-            events,
-            context,
-            tools=[],
-            response_schema=None,
-            serializer=PydanticSerializer(),
-        )
-        return {
-            "content": (response.content or "").strip(),
-            "usage": {key: value for key, value in asdict(response.usage).items() if value is not None},
-        }
+            response = await model_config.create()(
+                events,
+                context,
+                tools=[],
+                response_schema=None,
+                serializer=PydanticSerializer(),
+            )
+            return {
+                "content": (response.content or "").strip(),
+                "usage": {key: value for key, value in asdict(response.usage).items() if value is not None},
+            }
+        finally:
+            await close_ag2_session_http_client(getattr(model_config, "http_client", None))
 
     async def _generate_responses_completion(
         self,
@@ -484,4 +490,19 @@ def get_general_capability_service() -> SimpleLLMCapabilityService:
     if _service is None:
         _service = SimpleLLMCapabilityService()
     return _service
+
+
+async def close_general_capability_service() -> None:
+    """Close the runtime-owned singleton HTTP client during host shutdown."""
+    global _service
+    service, _service = _service, None
+    if service is not None:
+        await service.aclose()
+
+
+__all__ = [
+    "SimpleLLMCapabilityService",
+    "close_general_capability_service",
+    "get_general_capability_service",
+]
 
