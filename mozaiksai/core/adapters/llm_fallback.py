@@ -46,6 +46,8 @@ logger = get_core_logger("llm_fallback")
 class _GeminiTimeoutAsyncClient(httpx.AsyncClient):
     """Keep the configured HTTPX timeout when google-genai passes timeout=None."""
 
+    _mozaiks_ag2_session_owned: bool
+
     def build_request(self, *args: Any, **kwargs: Any) -> httpx.Request:
         if kwargs.get("timeout") is None:
             kwargs["timeout"] = self.timeout
