@@ -16,6 +16,22 @@ A module is a self-contained unit of **deterministic business logic** declared i
 Modules are **not** AI workflows. They run without AI. Workflows call modules; modules do not
 contain orchestration or reasoning logic.
 
+### Expected dependency configuration failures
+
+An action's client may raise `ModuleDependencyUnavailableError` from
+`mozaiksai.core.runtime.composition.module_executor` when a required service is
+unconfigured or its configuration cannot be read. The executor records a failed
+dispatch with `DEPENDENCY_UNAVAILABLE`; HTTP module routes return 503 with the
+sanitized message `Required service is unavailable.` No exception text, endpoint,
+credential, or vault diagnostic reaches the response. Permission enforcement
+still precedes the handler, so a caller without its required grant receives 403
+without reading connector configuration or calling the provider.
+
+The generated Cloud and Pay clients retain their existing configuration exception
+types and classify only those errors this way. Provider HTTP failures and
+unexpected implementation exceptions retain their existing error handling. A
+503 is a failed action, not evidence that a role holder's operation works.
+
 ### Workflow tool dispatch
 
 Tools running in a live authenticated workflow may call

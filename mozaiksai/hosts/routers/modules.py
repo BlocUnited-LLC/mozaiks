@@ -555,6 +555,8 @@ async def _execute_module_action(
         status_code = 403
     elif result.error_code == "INVALID_PARAMS":
         status_code = 400
+    elif result.error_code == "DEPENDENCY_UNAVAILABLE":
+        status_code = 503
     else:
         status_code = 500
 

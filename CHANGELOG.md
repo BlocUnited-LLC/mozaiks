@@ -381,6 +381,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Module actions return a sanitized `DEPENDENCY_UNAVAILABLE` HTTP 503 when the
+  generated Cloud or Pay client cannot resolve its required connector
+  configuration. Permission denials still precede connector lookup and provider calls.
+
 - AppGenerator now tells module-contract generation to keep role-protected
   narrowed writes complete across create, update, and delete, matching the
   validator's authored-write contract.

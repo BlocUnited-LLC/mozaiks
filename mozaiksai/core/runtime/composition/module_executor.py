@@ -232,6 +232,10 @@ class ModuleRecordNotFoundError(LookupError):
     """A requested record is absent from the caller's authorized scope."""
 
 
+class ModuleDependencyUnavailableError(RuntimeError):
+    """A required service is unconfigured or its configuration cannot be read."""
+
+
 # ---------------------------------------------------------------------------
 # ModuleExecutor
 # ---------------------------------------------------------------------------
@@ -721,6 +725,20 @@ class ModuleExecutor:
                 success=False,
                 error=f"Action '{request.action}' timed out",
                 error_code="ACTION_TIMEOUT",
+            )
+        except ModuleDependencyUnavailableError:
+            logger.info(
+                "MODULE_DEPENDENCY_UNAVAILABLE: module=%s action=%s",
+                request.module, request.action,
+            )
+            await self._finalize_dispatch_audit(
+                replace(dispatch_audit, outcome="failed", reason="DEPENDENCY_UNAVAILABLE"),
+                error="DEPENDENCY_UNAVAILABLE",
+            )
+            return ModuleResult(
+                success=False,
+                error="Required service is unavailable.",
+                error_code="DEPENDENCY_UNAVAILABLE",
             )
         except ModuleRecordNotFoundError:
             await self._finalize_dispatch_audit(
