@@ -1324,6 +1324,43 @@ def _base_handler_class(handler_class: str) -> str:
     return f"{handler_class}Base"
 
 
+def _restate_page_task_outputs(plan: dict[str, Any]) -> list[str]:
+    """Bind page-worker instructions to final ownership without interpreting product prose.
+
+    Coverage can assign app.json to a page-only task or move shared page artifacts
+    between workers. Preserve the planner's behavior requirements, but restate the
+    output boundary in both inputs workers receive, as for handler split repairs.
+    """
+    repairs: list[str] = []
+    for task in plan.get("build_tasks") or []:
+        if task.get("task_type") != "page_bundle":
+            continue
+        paths = _normalized_owned_paths(task)
+        manifest = (
+            "Emit a non-null AppSchemaOutput.manifest to materialize app.json. Its page "
+            "inventory covers the full approved app_build_plan, not just this worker's pages."
+            if "app.json" in paths else
+            "Set AppSchemaOutput.manifest to null. Preserve the existing app.json and provenance; "
+            "do not emit replacements."
+        )
+        note = (
+            "Page output contract from final owned_paths: " + json.dumps(paths) + ". "
+            "This contract supersedes earlier artifact inclusion/exclusion wording in this task's "
+            "initial_message and acceptance_criteria, including page-only or no-manifest wording. "
+            "It does not change approved product behavior, routes, roles, layout, or bindings. "
+            + manifest + " Emit only pages and optional output fields whose materialized paths "
+            "are owned by this task; leave unowned fields null. Do not widen owned_paths."
+        )
+        message = str(task.get("initial_message") or "").rstrip()
+        criteria = list(task.get("acceptance_criteria") or [])
+        if message.endswith(note) and criteria and criteria[-1] == note:
+            continue
+        task["initial_message"] = "\n\n".join(part for part in (message, note) if part)
+        task["acceptance_criteria"] = [*criteria, note]
+        repairs.append(f"{task.get('task_id')}: restated page output scope from final owned_paths")
+    return repairs
+
+
 def _restate_handler_split(plan: dict[str, Any], context: Any) -> list[str]:
     """Restate the two-file handler contract in every business_services task that owns base_handler.py.
 
@@ -2239,6 +2276,7 @@ def review_app_build_plan(
             *_repair_page_contract_dependencies(plan, context_variables),
             *_note_pack_pages(plan, context_variables),
             *drop_unapproved_page_data_sources(plan, context_variables),
+            *_restate_page_task_outputs(plan),
         ):
             logger.info("[AppGenerator] plan repaired: %s", repair)
         validate_plan_dependencies(plan, context_variables)
