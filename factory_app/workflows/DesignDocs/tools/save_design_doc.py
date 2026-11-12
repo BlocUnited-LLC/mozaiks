@@ -21,8 +21,10 @@ from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.runtime.persistence.intent_loader import (
-    iter_data_contract_collections,
+    is_shared_collection_reference,
+    storage_metadata_content,
     validate_collection_ownership,
+    validate_complete_data_contract_ownership,
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.data_contract_fields import (
@@ -478,7 +480,7 @@ def _canonical_data_contract(
             {
                 "surface_id": surface_id,
                 "surface_kind": surface_kind,
-                "collections": collections,
+                "collections": [storage_metadata_content(row) if isinstance(row, dict) else row for row in collections],
             }
         )
 
@@ -487,6 +489,13 @@ def _canonical_data_contract(
         shared_collections = []
     if not isinstance(shared_collections, list):
         raise ValueError("data_contract.shared_collections must be a list")
+    shared_collections = [
+        storage_metadata_content(row) if isinstance(row, dict) and not is_shared_collection_reference(row) else row
+        for row in shared_collections
+    ]
+    aliases = raw.get("aliases")
+    if isinstance(aliases, list):
+        aliases = [storage_metadata_content(row, alias=True) if isinstance(row, dict) else row for row in aliases]
 
     policies = raw.get("policies")
     if policies is None:
@@ -507,6 +516,7 @@ def _canonical_data_contract(
         "artifact_version_id": str(artifact_version_id).strip() if artifact_version_id else None,
         "surfaces": normalized_surfaces,
         "shared_collections": shared_collections,
+        **({"aliases": aliases} if aliases is not None else {}),
         "policies": {
             "default_scope_field": default_scope_field,
             "allow_destructive_migrations": bool(policies.get("allow_destructive_migrations", False)),
@@ -657,7 +667,8 @@ def _validate_design_collections(
         (group["surface_id"], collection)
         for group in data_contract["surfaces"] for collection in group["collections"]
     ]
-    collections.extend(("", collection) for collection in data_contract["shared_collections"])
+    collections.extend(("", collection) for collection in data_contract["shared_collections"]
+                       if not is_shared_collection_reference(collection))
     # Each owner's collections hold distinct entities: (owner, entity) -> collection name.
     holders: dict[tuple[str, str], str] = {}
     for group_id, collection in collections:
@@ -698,7 +709,7 @@ def _validate_design_collections(
             field_normalizations.append(message)
         validate_collection_fields(collection, path)
     # One owner/entity and owner/name must identify one collection across both locations.
-    list(iter_data_contract_collections(data_contract))
+    validate_complete_data_contract_ownership(data_contract)
     for surface in surfaces.values():
         reads = surface.get("custom_reads") or []
         if not isinstance(reads, list) or any(

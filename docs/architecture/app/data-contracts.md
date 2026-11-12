@@ -172,7 +172,38 @@ needs runtime-managed indexes, surface the collection under its owner in
 An entry identifies the shared collection by a literal `mongo_collection`, or
 by its owner's `owner_module` and declared `name` when the storage name is
 derived from the module. It lists the receiving modules in `shared_with` or
-`read_by`; the `access` and `purpose` notes are not enforced.
+`read_by`. In either list, `access` accepts only `read_only`, null, or omission;
+unknown labels fail validation. `purpose` is descriptive rationale, not authority.
+
+Factory validation distinguishes these reference-only entries from full
+collection definitions in the same list. A reference requires an explicit
+`owner_module` and a declared logical `name` or literal `mongo_collection`;
+all supplied selectors and aliases must resolve to the same single owner and
+collection. It must not contain collection-definition fields. Full definitions
+retain their complete ownership, entity, tenancy, field, and index requirements.
+Unknown reference fields, malformed grants, conflicting aliases, and unresolved
+or foreign owners fail before materialization. Both `read_by.access` and
+`shared_with.access` may only state `read_only` when supplied. An explicit
+`access: read_only` prevents receiver
+mutations and index creation through both canonical collection handles and
+hosted aliases, before driver invocation. Safe reads and aggregation retain
+their existing scope and namespace checks. Owners retain writes; absent/null
+access retains existing behavior. Unknown modes and conflicting targets fail loading,
+and missing dispatch-module identity cannot access restricted targets. This
+least-privilege handle contract does not sandbox Python inside the host.
+
+Existing runtime aggregate definitions may identify an explicit owner and one
+literal collection without a logical entity, with real `indexes` or
+`owner_fields` metadata. Their explicit readers receive the same literal-handle
+write fence; no logical binding is inferred. Reference-only rows still require
+a declared target, ambiguous owners fail loading, and these incomplete runtime
+definitions do not satisfy Factory's complete collection ownership contract.
+
+Verified pack compilation preserves owner-declared aliases and references,
+accepts identical contributions once, and rejects retargeted aliases or changed
+reader declarations. A reference does not create another collection or index,
+infer row ownership, or schedule a migration. DesignDocs and assembly preserve
+the same declarations rather than dropping them during normalization.
 
 ### Platform modules mounted into a workspace
 
@@ -190,8 +221,9 @@ Runtime persistence composes the two contracts per dispatching module:
   surface or shares with it;
 - undeclared collections are refused for both.
 
-Shares are enforced only for mounted platform modules; app modules keep the
-workspace contract's existing, module-agnostic allow-list. A workspace that
+Share-based namespace admission applies to mounted platform modules; ordinary
+app modules keep the workspace contract's existing collection allow-list.
+Explicit read-only operation restrictions apply to both. A workspace that
 overrides a platform module by id owns that module's data, and the platform
 declarations for it, including shares made to or by it, no longer apply.
 Redeclaring a mounted platform module's collection in the workspace contract
@@ -274,6 +306,13 @@ contract. Empty mappings retain the existing default-resolution behavior.
   collection it does not own.
 - Destructive migrations, document rewrites, collection drops, and arbitrary
   migration code are not supported by the generated app migration contract.
+
+Account export and deletion bind a fresh persistence context to each registered
+handler's module identity and the current authenticated principal. The host
+supplies that per-request factory; handlers cannot select another identity or
+reuse another request's scope. Existing database-only handlers keep their raw
+database contract, and direct registry callers may still supply an explicit
+persistence instance.
 
 ## Complex Workspace Example
 

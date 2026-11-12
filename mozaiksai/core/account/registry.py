@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from .protocol import AccountDataHandler
@@ -53,17 +54,21 @@ class AccountDataRegistry:
         user_id: str,
         db: Any,
         persistence: Any = None,
+        persistence_factory: Callable[[str], Any] | None = None,
     ) -> dict[str, Any]:
         """Call ``delete_user_data`` on every registered handler.
 
         Returns a summary dict ``{module_id: result_or_error}`` for audit
         logging.  A failed handler is logged as a warning but does not
         prevent other handlers from running — all deletions are attempted.
+        The host may provide a per-request factory bound to each registered
+        module's identity; it is never stored on the shared registry.
         """
         results: dict[str, Any] = {}
         for module_id, handler in self._handlers.items():
             try:
-                instance = _resolve_instance(handler, db, persistence)
+                module_persistence = persistence_factory(module_id) if persistence_factory is not None else persistence
+                instance = _resolve_instance(handler, db, module_persistence)
                 result = await instance.delete_user_data(app_id=app_id, user_id=user_id)
                 results[module_id] = result
                 logger.info(
@@ -91,16 +96,20 @@ class AccountDataRegistry:
         user_id: str,
         db: Any,
         persistence: Any = None,
+        persistence_factory: Callable[[str], Any] | None = None,
     ) -> dict[str, Any]:
         """Call ``export_user_data`` on every registered handler.
 
         Returns a merged dict of all exported records.  Module IDs are used
-        as top-level namespace keys so collisions are avoided.
+        as top-level namespace keys so collisions are avoided. A host-supplied
+        per-request factory binds each handler to its registered module identity
+        without changing another handler's or request's persistence.
         """
         export: dict[str, Any] = {}
         for module_id, handler in self._handlers.items():
             try:
-                instance = _resolve_instance(handler, db, persistence)
+                module_persistence = persistence_factory(module_id) if persistence_factory is not None else persistence
+                instance = _resolve_instance(handler, db, module_persistence)
                 module_export = await instance.export_user_data(app_id=app_id, user_id=user_id)
                 export.update(module_export or {})
             except Exception as exc:

@@ -130,7 +130,7 @@ async def test_preview_account_routes_reach_module_persistence(app_root, monkeyp
     for app_id, user_id in (("preview-app", "owner-a"), ("preview-app", "owner-b"), ("other-app", "owner-a")):
         persistence = ModuleExecutor()._build_persistence_context(SimpleNamespace(
             app_id=app_id, user_id=user_id, tenant_id=None, workspace_id=None,
-            persistence_principal=None,
+            persistence_principal=None, module="user_onboarding",
         ))
         assert persistence is not None
         assert persistence.collection_name("user_onboarding", "status") == collection_name_for(

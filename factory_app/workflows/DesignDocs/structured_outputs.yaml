@@ -198,6 +198,15 @@ models:
       name:
         type: str
         description: Canonical Mongo collection name.
+      mongo_collection:
+        type: optional_str
+        description: Explicit existing literal storage target when required. Omit for canonical generated module storage; never infer or rename existing storage.
+      data_alias:
+        type: optional_str
+        description: Optional declared alias for mongo_collection. An alias is addressability metadata, not ownership or authorization.
+      owner_module:
+        type: optional_str
+        description: Existing module-owner metadata when supplied; it must agree with ownership.surface_id and surface_kind module.
       scope:
         type: literal
         values:
@@ -274,6 +283,76 @@ models:
         type: bool
         description: False unless the product explicitly permits destructive migrations.
 
+  DataContractAlias:
+    type: model
+    fields:
+      alias:
+        type: str
+        description: Exact logical alias used by app-data helpers.
+      collection:
+        type: str
+        description: Exact literal Mongo collection target. Never retarget an existing alias.
+      owner_module:
+        type: optional_str
+        description: Optional explicit owner, which must uniquely own the referenced literal collection.
+
+  DataContractSharedAccess:
+    type: literal
+    values:
+    - read_only
+
+  DataContractSharedGrant:
+    type: model
+    fields:
+      module:
+        type: str
+        description: Receiving module ID; this does not transfer collection ownership.
+      access:
+        type: union
+        variants:
+        - DataContractSharedAccess
+        - 'null'
+        description: Null or read_only for both read_by and shared_with. Explicit read_only blocks receiver mutations and index writes through runtime persistence handles. Absent or null access retains existing grant behavior; ownership is unchanged. Descriptive rationale belongs in purpose, never access.
+      purpose:
+        type: optional_str
+        description: Short rationale for the declared access.
+      data_alias:
+        type: optional_str
+        description: Optional alias for the same literal target; conflicting aliases are rejected.
+
+  DataContractSharedReference:
+    type: model
+    fields:
+      owner_module:
+        type: str
+        description: Existing module that declares the referenced collection. Never infer an owner from a reader.
+      name:
+        type: optional_str
+        description: Exact declared collection name under owner_module. Supply name or mongo_collection; both must resolve to the same declaration.
+      mongo_collection:
+        type: optional_str
+        description: Exact literal storage name already declared by owner_module.
+      primary_alias:
+        type: optional_str
+        description: Optional alias identifying that same literal collection; requires explicit mongo_collection on this reference.
+      read_by:
+        type: optional_list
+        items: DataContractSharedGrant
+        description: Declared readers of the existing collection. At least one read_by or shared_with entry is required.
+      shared_with:
+        type: optional_list
+        items: DataContractSharedGrant
+        description: Explicitly shared module access. Only read_only or null is accepted for access; absent or null access retains existing behavior. Unknown access labels are rejected.
+      notes:
+        type: optional_str
+        description: Optional bounded rationale. A reference declares no fields, indexes, entity, tenancy, ownership, or lifecycle.
+
+  DataContractSharedEntry:
+    type: union
+    variants:
+    - DataContractCollection
+    - DataContractSharedReference
+
   DataContractBundle:
     type: model
     fields:
@@ -296,10 +375,14 @@ models:
         type: list
         items: DataContractSurface
         description: Database ownership grouped by realization surface.
+      aliases:
+        type: optional_list
+        items: DataContractAlias
+        description: Explicit literal collection aliases, preserved without retargeting during save and compilation.
       shared_collections:
         type: optional_list
-        items: DataContractCollection
-        description: Collections intentionally shared across surfaces or modules.
+        items: DataContractSharedEntry
+        description: Full owned collection definitions or closed references to existing owned collections. References never create another collection or infer row ownership.
       policies:
         type: DataContractPolicies
         description: Global migration and scoping policies for the app.

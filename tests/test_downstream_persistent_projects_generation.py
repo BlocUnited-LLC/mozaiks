@@ -148,9 +148,13 @@ class FakePersistenceContext:
         client: Any | None = None,
         data_contract: dict[str, Any] | None = None,
         principal: PersistencePrincipal | None = None,
+        platform_modules: Any | None = None,
+        module_id: str | None = None,
     ) -> None:
         self._app_id = app_id
         self._principal = principal
+        self.module_id = module_id
+        self.platform_modules = platform_modules
         self._scope_metadata = {"app_id": app_id}
         if tenant_id:
             self._scope_metadata["tenant_id"] = tenant_id
@@ -848,4 +852,8 @@ async def test_downstream_artifact_loads_indexes_migrations_and_executes(
     assert app_b_projects.success is True
     assert app_b_projects.data == {"items": [], "count": 0}
     assert any(context.app_id == "app_a" for context in FakePersistenceContext.constructed)
+    assert [context.module_id for context in FakePersistenceContext.constructed] == [
+        None, "projects", "projects", "tasks", "tasks", "projects",
+    ]
+    assert all(context.platform_modules is None for context in FakePersistenceContext.constructed)
 

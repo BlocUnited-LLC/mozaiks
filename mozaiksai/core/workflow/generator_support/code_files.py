@@ -17,7 +17,11 @@ from mozaiksai.core.runtime.app.provenance import (
     dump_app_provenance_yaml,
 )
 from mozaiksai.core.runtime.persistence.intent_loader import (
+    is_shared_collection_reference,
     iter_data_contract_collections,
+    resolve_shared_collection_references,
+    shared_reference_content,
+    storage_metadata_content,
     validate_complete_data_contract_ownership,
 )
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
@@ -332,6 +336,10 @@ def _materialize_app_schema_file_map(
     return file_map
 
 
+def _surface_data_content(surface: dict[str, Any]) -> dict[str, Any]:
+    return {**surface, "collections": [storage_metadata_content(row) for row in surface["collections"]]}
+
+
 def compile_data_contract(
     data_contract: dict[str, Any], *, subscription_contract: dict[str, Any] | None = None,
     context_variables: Any = None,
@@ -345,11 +353,26 @@ def compile_data_contract(
     """
     contract = normalize_data_contract_indexes(data_contract)
     contributed_surfaces = []
+    contributed_aliases = []
+    contributed_references: list[dict[str, Any]] = []
     for contribution in pack_data_contracts or []:
-        if set(contribution) - {"version", "surfaces", "shared_collections"} or contribution.get("shared_collections"):
-            raise ValueError("Pack data contributions must declare module-owned collection surfaces only")
+        if set(contribution) - {"version", "surfaces", "shared_collections", "aliases"}:
+            raise ValueError("Pack data contributions may declare module-owned surfaces, aliases, and shared references only")
         contribution = normalize_data_contract_indexes(contribution)
         validate_complete_data_contract_ownership(contribution)
+        if any(not is_shared_collection_reference(row) for row in contribution.get("shared_collections") or []):
+            raise ValueError("Pack collection definitions must belong to module-owned surfaces")
+        # Each pack can share or alias only the collections it declares. The
+        # verified inventory has already bound those owners to shipped modules.
+        literal_targets = {
+            row.get("mongo_collection") or row.get("collection")
+            for _, _, row in iter_data_contract_collections(contribution)
+        } - {None}
+        for alias in contribution.get("aliases") or []:
+            if alias["collection"] not in literal_targets:
+                raise ValueError(f"Pack data alias {alias['alias']!r} must target a collection declared by that pack")
+            contributed_aliases.append(alias)
+        contributed_references.extend(contribution.get("shared_collections") or [])
         identities = [surface.get("surface_id") for surface in contribution.get("surfaces") or []]
         if len(identities) != len(set(identities)):
             raise ValueError("Pack data contribution has duplicate surface owners")
@@ -360,10 +383,25 @@ def compile_data_contract(
     surfaces = contract.setdefault("surfaces", [])
     for surface in sorted(contributed_surfaces, key=lambda row: row["surface_id"]):
         existing = [row for row in surfaces if row.get("surface_id") == surface["surface_id"]]
-        if existing and (len(existing) != 1 or existing[0] != surface):
+        if existing and (len(existing) != 1 or _surface_data_content(existing[0]) != _surface_data_content(surface)):
             raise ValueError(f"Conflicting pack data contribution for {surface['surface_id']!r}")
         if not existing:
             surfaces.append(deepcopy(surface))
+    for field, contributions in (("aliases", contributed_aliases), ("shared_collections", contributed_references)):
+        if not contributions:
+            continue
+        entries = contract.setdefault(field, [])
+        if not isinstance(entries, list):
+            raise ValueError(f"data_contract.{field} must be a list")
+        for entry in sorted(contributions, key=lambda row: json.dumps(row, sort_keys=True)):
+            if field == "aliases":
+                identical = any(storage_metadata_content(row, alias=True) == storage_metadata_content(entry, alias=True)
+                                for row in entries)
+            else:
+                identical = any(is_shared_collection_reference(row)
+                                and shared_reference_content(row) == shared_reference_content(entry) for row in entries)
+            if not identical:
+                entries.append(deepcopy(entry))
     managed_owners = managed_data_owners(context_variables)
     for surface in contract.get("surfaces") or []:
         if surface.get("surface_id") in managed_owners and surface.get("collections"):
@@ -371,7 +409,9 @@ def compile_data_contract(
     for collection in contract.get("shared_collections") or []:
         if (collection.get("ownership") or {}).get("surface_id") in managed_owners:
             raise ValueError(f"Managed facade cannot own app collection {collection.get('name')!r}")
-    return ensure_subscription_assignment_stores(contract, subscription_contract)
+    contract = ensure_subscription_assignment_stores(contract, subscription_contract)
+    resolve_shared_collection_references(contract)
+    return contract
 
 
 def materialize_data_contract(

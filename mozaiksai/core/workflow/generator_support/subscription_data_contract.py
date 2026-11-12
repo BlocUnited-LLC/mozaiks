@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import Any
 
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionAssignmentStoreDef
+from mozaiksai.core.runtime.persistence.intent_loader import is_shared_collection_reference
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     subscription_contract_payload,
 )
@@ -94,7 +95,8 @@ def ensure_subscription_assignment_stores(
     aliases = result.setdefault("aliases", [])
     surfaces = result.setdefault("surfaces", [])
     collections = [collection for surface in surfaces for collection in surface.get("collections", [])]
-    collections.extend(result.get("shared_collections") or [])
+    shared = result.get("shared_collections") or []
+    collections.extend(row for row in shared if not is_shared_collection_reference(row))
     declared: dict[str, str] = {}
 
     def declare(alias: str, name: Any) -> None:
@@ -109,7 +111,7 @@ def ensure_subscription_assignment_stores(
         alias = entry.get("alias") or entry.get("data_alias")
         if alias in configured:
             declare(alias, entry.get("collection") or entry.get("mongo_collection"))
-    for collection in collections:
+    for collection in [*collections, *(row for row in shared if is_shared_collection_reference(row))]:
         name = collection.get("mongo_collection") or collection.get("collection") or collection.get("name")
         collection_aliases = [collection.get("data_alias"), collection.get("primary_alias")]
         collection_aliases.extend(entry.get("data_alias") or entry.get("alias")

@@ -53,6 +53,7 @@ class MongoPersistenceCollection:
         ownership: CollectionOwnership | None = None,
         principal: PersistencePrincipal | Callable[[], PersistencePrincipal | None] | None = None,
         restrict_aggregation: bool = False,
+        read_only: bool = False,
     ) -> None:
         self._collection = collection
         self._app_id = scope_metadata(app_id)["app_id"]
@@ -64,7 +65,8 @@ class MongoPersistenceCollection:
         )
         self._ownership = ownership
         self._principal = principal
-        self._restrict_aggregation = restrict_aggregation or ownership is not None
+        self._read_only = read_only
+        self._restrict_aggregation = restrict_aggregation or ownership is not None or read_only
         # Identity comparison must not inherit a case-insensitive collection collation.
         self._options = {"collation": {"locale": "simple"}} if ownership is not None else {}
 
@@ -72,6 +74,10 @@ class MongoPersistenceCollection:
     def _owner_scope(self) -> dict[str, str]:
         principal = self._principal() if callable(self._principal) else self._principal
         return self._ownership.scope(principal) if self._ownership is not None else {}
+
+    def _require_writable(self) -> None:
+        if self._read_only:
+            raise PersistenceScopeError("Declared read_only collection access forbids writes")
 
     def _scoped_query(self, query: Query) -> dict[str, Any]:
         owner_scope = self._owner_scope
@@ -118,6 +124,7 @@ class MongoPersistenceCollection:
         return await cursor.to_list(length=safe_limit)  # type: ignore[no-any-return]
 
     async def insert_one(self, document: Mapping[str, Any]) -> Any:
+        self._require_writable()
         owner_scope = self._owner_scope
         for field, identity in owner_scope.items():
             if field in document and document[field] != identity:
@@ -142,6 +149,7 @@ class MongoPersistenceCollection:
         *,
         upsert: bool = False,
     ) -> Any:
+        self._require_writable()
         owner_scope = self._owner_scope
         safe_update = (
             owned_update(update, scope={"app_id": self._app_id, **owner_scope}, upsert=upsert)
@@ -155,9 +163,11 @@ class MongoPersistenceCollection:
         )
 
     async def delete_one(self, query: Query) -> Any:
+        self._require_writable()
         return await self._collection.delete_one(self._scoped_query(query), **self._options)
 
     async def delete_many(self, query: Query) -> Any:
+        self._require_writable()
         return await self._collection.delete_many(self._scoped_query(query), **self._options)
 
     async def count(self, query: Query) -> int:
@@ -176,6 +186,7 @@ class MongoPersistenceCollection:
     async def ensure_indexes(self, indexes: Sequence[IndexSpec]) -> list[Any]:
         """Materialize and verify declared indexes before reporting readiness."""
 
+        self._require_writable()
         if not indexes:
             return []
         if self._owner_scope:
@@ -229,10 +240,11 @@ class MongoPersistenceContext:
         self._client = client
         self._collections: dict[tuple[str, str], MongoPersistenceCollection] = {}
         self._principal = principal
+        self._module_id = module_id.strip() or None if isinstance(module_id, str) else None
         access = (
-            platform_modules.access_for(module_id, data_contract)
+            platform_modules.access_for(self._module_id, data_contract)
             if platform_modules is not None
-            else CollectionAccess(data_contract=data_contract)
+            else CollectionAccess.for_workspace(self._module_id, data_contract)
         )
         contract = access.data_contract
         self._ownership = collection_ownership(contract, app_id=self.app_id, app_slug=app_slug)
@@ -245,6 +257,10 @@ class MongoPersistenceContext:
         self._literal_names = None if access.literal_names is None else access.literal_names | {
             collection_name_for(app_id=self.app_id, app_slug=app_slug, module_id=owner, entity_name=name)
             for (owner, _reference), name in (self._bindings or {}).items()
+        }
+        self._read_only_names = access.read_only_literals | {
+            collection_name_for(app_id=self.app_id, app_slug=app_slug, module_id=owner, entity_name=name)
+            for owner, name in access.read_only_collections
         }
 
     @property
@@ -278,7 +294,12 @@ class MongoPersistenceContext:
         )
         if storage_name in self._reserved:
             raise PersistenceScopeError(f"Collection {module_id}.{collection_name} belongs to a platform module")
+        self._require_module_identity(storage_name)
         return storage_name
+
+    def _require_module_identity(self, name: str) -> None:
+        if self._module_id is None and name in self._read_only_names:
+            raise PersistenceScopeError("Restricted collection access requires a dispatching module identity")
 
     def collection(self, module_id: str, collection_name: str) -> MongoPersistenceCollection:
         key = (module_id, collection_name)
@@ -294,6 +315,7 @@ class MongoPersistenceContext:
                 ownership=self._ownership.get(collection_name),
                 principal=lambda: self.principal,
                 restrict_aggregation=self._bounded_collection_access,
+                read_only=collection_name in self._read_only_names,
             )
         return self._collections[key]
 
@@ -321,8 +343,10 @@ class MongoPersistenceContext:
             raise PersistenceScopeError(f"Undeclared collection {name}")
         if name in self._ownership:
             raise PersistenceScopeError("Raw collection access is unavailable for owned collections")
+        self._require_module_identity(name)
         collection = self._client_handle()[self._database_name][name]
-        return GuardedAliasCollection(collection) if self._bounded_collection_access else collection
+        read_only = name in self._read_only_names
+        return GuardedAliasCollection(collection, read_only=read_only) if self._bounded_collection_access or read_only else collection
 
     def scope_filter(self, extra: Mapping[str, Any] | None = None) -> dict[str, Any]:
         return scope_filter_for(self.app_id, extra)

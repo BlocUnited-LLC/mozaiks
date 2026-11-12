@@ -215,7 +215,9 @@ def test_data_contract_failure_has_explicit_database_repair_owner():
 
 
 def test_data_contract_cannot_drop_fields_or_make_optional_email_required():
-    planned = {"surfaces": [{"surface_id": "contacts", "collections": [{"name": "contacts", "fields": [
+    planned = {"surfaces": [{"surface_id": "contacts", "surface_kind": "module", "collections": [{
+        "name": "contacts", "entity": "contact", "scope": "app", "tenancy": "app_wide", "owner_field": None,
+        "fields": [
         {"name": "email", "type": "string", "required": False},
         {"name": "notes", "type": "string", "required": False},
     ]}]}]}

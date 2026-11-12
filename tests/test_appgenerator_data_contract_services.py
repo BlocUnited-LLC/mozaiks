@@ -53,13 +53,20 @@ def _data_contract() -> dict:
     return {
         "version": "1",
         "mode": "app_data_contract",
-        "surfaces": [],
+        "surfaces": [{
+            "surface_id": "orders",
+            "surface_kind": "module",
+            "collections": [{
+                "name": "orders", "mongo_collection": "orders", "entity": "order",
+                "scope": "app", "tenancy": "app_wide", "owner_field": None,
+                "fields": [{"name": "order_id", "type": "string", "required": True}],
+            }],
+        }],
         "aliases": [
             {
                 "alias": "orders.lifecycle",
                 "collection": "orders",
                 "owner_module": "orders",
-                "access": "lifecycle_update",
             }
         ],
         "shared_collections": [],

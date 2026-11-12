@@ -402,7 +402,7 @@ def with_long_constant_in_the_repository(files: dict[str, str]) -> None:
 def with_tasks_shared_with_digest(files: dict[str, str]) -> None:
     _json(files, CONTRACT, lambda contract: contract.update(shared_collections=[{
         "owner_module": "task_management", "name": "tasks",
-        "shared_with": [{"module": "task_digest", "access": "read", "purpose": "Digest of tasks."}],
+        "shared_with": [{"module": "task_digest", "access": "read_only", "purpose": "Digest of tasks."}],
     }]))
 
 

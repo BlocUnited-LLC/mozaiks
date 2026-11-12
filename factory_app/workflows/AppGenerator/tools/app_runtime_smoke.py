@@ -1155,14 +1155,17 @@ class _SmokeRun:
         from mozaiksai.core.runtime.persistence import MongoPersistenceContext
         from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 
-        names = MongoPersistenceContext(app_id=self.app_id, database_name=self.database_name,
-                                        client=self.client, data_contract=self.load.data_contract)
-        collections = {
-            names.collection_name(owner, str(collection["name"]))
-            for owner, _kind, collection in iter_data_contract_collections(
-                self.load.data_contract, require_complete_ownership=False,
-            )
-        }
+        names_by_owner: dict[str, MongoPersistenceContext] = {}
+        collections = set()
+        for owner, _kind, collection in iter_data_contract_collections(
+            self.load.data_contract, require_complete_ownership=False,
+        ):
+            if owner not in names_by_owner:
+                names_by_owner[owner] = MongoPersistenceContext(
+                    app_id=self.app_id, database_name=self.database_name, client=self.client,
+                    data_contract=self.load.data_contract, module_id=owner,
+                )
+            collections.add(names_by_owner[owner].collection_name(owner, str(collection["name"])))
         return {name: await self.database[name].find({}).sort("_id", 1).to_list(length=None)
                 for name in sorted(collections)}
 
@@ -2112,7 +2115,7 @@ async def _missing_get_lookup(run: _SmokeRun, module: Any, entity: _Entity) -> A
             "integer": list(range(32)), "number": list(range(32)), "boolean": [False, True],
         }.get(_schema_type(schema) or "", [])
     names = MongoPersistenceContext(app_id=run.app_id, database_name=run.database_name,
-                                    client=run.client, data_contract=run.load.data_contract)
+                                    client=run.client, data_contract=run.load.data_contract, module_id=entity.module)
     collection = run.database[names.collection_name(entity.module, str(entity.collection["name"]))]
     validator = Draft7Validator(schema)
     for candidate in candidates:
@@ -2130,7 +2133,8 @@ async def _stored(run: _SmokeRun, entity: _Entity, record_id: Any) -> dict[str, 
     from mozaiksai.core.runtime.persistence import MongoPersistenceContext
 
     names = MongoPersistenceContext(
-        app_id=run.app_id, database_name=run.database_name, client=run.client, data_contract=run.load.data_contract,
+        app_id=run.app_id, database_name=run.database_name, client=run.client,
+        data_contract=run.load.data_contract, module_id=entity.module,
     )
     try:
         collection_name = names.collection_name(entity.module, str(entity.collection.get("name")))
@@ -2150,7 +2154,8 @@ async def _stored_fields(run: _SmokeRun, entity: _Entity) -> list[str]:
     from mozaiksai.core.runtime.persistence import MongoPersistenceContext
 
     names = MongoPersistenceContext(
-        app_id=run.app_id, database_name=run.database_name, client=run.client, data_contract=run.load.data_contract,
+        app_id=run.app_id, database_name=run.database_name, client=run.client,
+        data_contract=run.load.data_contract, module_id=entity.module,
     )
     try:
         collection_name = names.collection_name(entity.module, str(entity.collection.get("name")))
