@@ -287,8 +287,9 @@ Instead, module-level collections should be declared inside
 That keeps one canonical database source of truth while still expressing module
 ownership clearly.
 
-The same factory collection contract applies to `shared_collections`. Each generated
-shared entry declares `ownership.surface_id` and `ownership.surface_kind`; its placement
+`shared_collections` contains two distinct shapes. A full collection definition
+uses the same factory collection contract: it declares `ownership.surface_id`
+and `ownership.surface_kind`; its placement
 does not erase module ownership or row tenancy. Runtime loading preserves entries
 without declared ownership as metadata only: they receive no entity or database indexes,
 generated reads, or policies. Malformed present ownership still fails. Runtime metadata,
@@ -296,6 +297,42 @@ read inventories, and policy compilation use the same owner resolver for both lo
 An owner/entity pair and an owner/collection-name pair must each be unique across
 the entire contract. An entry inside a surface cannot override that surface's
 owner or kind.
+
+A reference-only entry instead declares `owner_module`, a declared collection
+`name` or literal `mongo_collection`, and a nonempty `read_by` or `shared_with`
+list. Optional `primary_alias`, per-grantee `data_alias`, `access`, `purpose`,
+and `notes` preserve the existing runtime grant contract. Both `read_by.access`
+and `shared_with.access` accept only `read_only`, null, or omission. Descriptive
+labels belong in `purpose`; unknown access modes fail validation. An explicit
+`access: read_only` restricts receiver
+operations through both canonical collection and alias handles: mutations and
+index creation fail before driver invocation. Owner writes remain available.
+Absent/null access keeps existing grant behavior. Unknown modes or conflicting
+physical collection owners fail contract loading. Missing
+module identity cannot access restricted targets. Normal module permissions,
+row ownership and namespace fences remain in force; this is not a sandbox for
+arbitrary Python executing inside the host.
+Aliases on a reference require its explicit `mongo_collection`; a logical-only
+reference cannot invent a literal alias from its target's metadata.
+
+Strict factory validation resolves each reference to one existing module-owned
+collection. Multiple selectors must agree; aliases cannot retarget another
+collection, and a foreign or ambiguous owner fails. Reference entries cannot
+contain collection metadata such as fields, entity, tenancy, indexes, ownership,
+or lifecycle. A partial definition with a grant remains a definition and must
+satisfy all collection requirements. References never create collections,
+indexes, generated CRUD, ownership fields, or migrations.
+
+DesignDocs preserves typed root aliases and references through save. Save omits
+optional null `mongo_collection`, `data_alias`, and `owner_module` metadata;
+explicit `owner_field: null` remains a row-ownership decision. Compilation treats
+these optional storage nulls and omission equivalently while preserving every
+supplied non-null storage value. Verified
+pack contributions may supply aliases and references only for collections
+declared by their shipped module owners. Compilation preserves existing app
+metadata, composes identical declarations idempotently, and rejects conflicting
+alias targets or grants. Assembly may retain an identical carried reference;
+it rejects a reference whose target or readers changed or disappeared.
 
 Generated module files such as:
 

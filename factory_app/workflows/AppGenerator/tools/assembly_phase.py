@@ -30,6 +30,11 @@ from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templat
     verified_pack_template_inventory,
     verified_template_module_ids,
 )
+from mozaiksai.core.runtime.persistence.intent_loader import (
+    is_shared_collection_reference,
+    resolve_shared_collection_references,
+    shared_reference_content,
+)
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     compile_data_contract,
@@ -106,7 +111,7 @@ def _carried_contract_conflict(content: str, composed: dict[str, Any]) -> str | 
     (fields, indexes, tenancy, owner_field, collection-level aliases), so a
     changed pack contribution recomposes. Every top-level alias must be one
     the derivation declares, so it targets a derived collection. Any other
-    surface, collection or alias, any shared collection, and metadata the
+    surface, collection or alias, any full shared collection definition, and metadata the
     composition would change are the app's own. Order is not compared: a
     carried composition, such as the pack lifecycle's recomposition, may list
     the same surfaces in another order. Unreadable text never qualifies.
@@ -173,7 +178,19 @@ def _carried_contract_conflict(content: str, composed: dict[str, Any]) -> str | 
             else:
                 owned.append(f"collection {name!r} in surface {surface_id!r}")
     if carried.get("shared_collections"):
-        owned.append("shared collections")
+        try:
+            carried_references = resolve_shared_collection_references(carried)
+            composed_references = resolve_shared_collection_references(composed)
+        except ValueError as exc:
+            return _CANNOT_REPLACE + f"declares invalid shared collection references: {exc}"
+        for entry in carried["shared_collections"]:
+            if not is_shared_collection_reference(entry):
+                owned.append("shared collections")
+                continue
+            reference_identity = next((owner, name) for owner, name, row in carried_references if row is entry)
+            if not any((owner, name) == reference_identity and shared_reference_content(row) == shared_reference_content(entry)
+                       for owner, name, row in composed_references):
+                owned.append(f"shared collection grant {reference_identity[0]}.{reference_identity[1]}")
     aliases = {_alias_identity(alias) for alias in composed.get("aliases") or []} - {None}
     for alias in carried.get("aliases") or []:
         identity = _alias_identity(alias)

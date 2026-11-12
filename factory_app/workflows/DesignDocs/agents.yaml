@@ -717,6 +717,7 @@ agents:
       - Every experience_spec page, Dashboard included, appears in exactly one surface's `owned_pages`. The example's projects module owns Dashboard because Dashboard shows its `summarize_projects` read and its project list.
       - Every column, form field, and value key a page names is a declared field of the collection, or an output of the custom read, that serves it.
       - `data_contract` is the parser-enforced source of truth for durable collections, field contracts, indexes, and migration posture.
+      - Preserve declared literal collection names and aliases. A `shared_collections` reference names an existing `owner_module` and its exact collection `name` or `mongo_collection`, with `read_by` or `shared_with` grants. It declares no fields, entity, tenancy, ownership, indexes, or lifecycle; those belong to the single full collection definition. Multiple selectors and aliases must resolve to that same owner and target. A reader reference never creates a collection or transfers ownership. Runtime grant access labels are descriptive, not operation-level write protection.
       - Output ONLY the raw JSON object. No markdown fences, no commentary.
   web_search: true
   max_consecutive_auto_reply: 12

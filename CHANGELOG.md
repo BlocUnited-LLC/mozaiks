@@ -381,6 +381,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Shared collection references retain aliases and approved reader grants through
+  design save, pack compilation and assembly. Explicit `read_only` grants now
+  prevent persistence mutations through logical collections and app-data aliases,
+  while owner writes and omitted access retain their behavior. Descriptive grant
+  labels belong in purpose; unknown access modes fail validation.
+
 - Module actions return a sanitized `DEPENDENCY_UNAVAILABLE` HTTP 503 when the
   generated Cloud or Pay client cannot resolve its required connector
   configuration. Permission denials still precede connector lookup and provider calls.

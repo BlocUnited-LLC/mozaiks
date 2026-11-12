@@ -240,21 +240,21 @@
       "owner_module": "messages",
       "name": "threads",
       "shared_with": [
-        {"module": "workspace_support", "access": "support_thread_lifecycle", "purpose": "Creates, updates and deletes the message thread behind each support request."}
+        {"module": "workspace_support", "purpose": "support_thread_lifecycle: Creates, updates and deletes the message thread behind each support request."}
       ]
     },
     {
       "owner_module": "messages",
       "name": "messages",
       "shared_with": [
-        {"module": "workspace_support", "access": "support_thread_lifecycle", "purpose": "Posts support replies and deletes them with their support request."}
+        {"module": "workspace_support", "purpose": "support_thread_lifecycle: Posts support replies and deletes them with their support request."}
       ]
     },
     {
       "owner_module": "messages",
       "name": "thread_reads",
       "shared_with": [
-        {"module": "workspace_support", "access": "support_thread_lifecycle", "purpose": "Deletes read state with its support request."}
+        {"module": "workspace_support", "purpose": "support_thread_lifecycle: Deletes read state with its support request."}
       ]
     }
   ]

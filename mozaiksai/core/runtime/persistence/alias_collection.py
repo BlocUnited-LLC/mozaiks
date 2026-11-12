@@ -190,10 +190,15 @@ class GuardedAliasCollection:
     positional through to the driver.
     """
 
-    __slots__ = ("__collection",)
+    __slots__ = ("__collection", "__read_only")
 
-    def __init__(self, collection: Any) -> None:
+    def __init__(self, collection: Any, *, read_only: bool = False) -> None:
         self.__collection = collection
+        self.__read_only = read_only
+
+    def _require_writable(self) -> None:
+        if self.__read_only:
+            raise PersistenceScopeError("Declared read_only collection access forbids writes")
 
     def find(self, *args: Any, **kwargs: Any) -> GuardedAliasCursor:
         call, named = _bind("find", args, kwargs)
@@ -206,30 +211,37 @@ class GuardedAliasCollection:
         return await self.__collection.find_one(*call, **named)
 
     async def insert_one(self, *args: Any, **kwargs: Any) -> Any:
+        self._require_writable()
         call, named = _bind("insert_one", args, kwargs)
         return await self.__collection.insert_one(*call, **named)
 
     async def insert_many(self, *args: Any, **kwargs: Any) -> Any:
+        self._require_writable()
         call, named = _bind("insert_many", args, kwargs)
         return await self.__collection.insert_many(*call, **named)
 
     async def update_one(self, *args: Any, **kwargs: Any) -> Any:
+        self._require_writable()
         call, named = _bind("update_one", args, kwargs)
         return await self.__collection.update_one(*call, **named)
 
     async def update_many(self, *args: Any, **kwargs: Any) -> Any:
+        self._require_writable()
         call, named = _bind("update_many", args, kwargs)
         return await self.__collection.update_many(*call, **named)
 
     async def replace_one(self, *args: Any, **kwargs: Any) -> Any:
+        self._require_writable()
         call, named = _bind("replace_one", args, kwargs)
         return await self.__collection.replace_one(*call, **named)
 
     async def delete_one(self, *args: Any, **kwargs: Any) -> Any:
+        self._require_writable()
         call, named = _bind("delete_one", args, kwargs)
         return await self.__collection.delete_one(*call, **named)
 
     async def delete_many(self, *args: Any, **kwargs: Any) -> Any:
+        self._require_writable()
         call, named = _bind("delete_many", args, kwargs)
         return await self.__collection.delete_many(*call, **named)
 
@@ -242,14 +254,17 @@ class GuardedAliasCollection:
         return await self.__collection.distinct(*call, **named)
 
     async def find_one_and_update(self, *args: Any, **kwargs: Any) -> Any:
+        self._require_writable()
         call, named = _bind("find_one_and_update", args, kwargs)
         return await self.__collection.find_one_and_update(*call, **named)
 
     async def find_one_and_replace(self, *args: Any, **kwargs: Any) -> Any:
+        self._require_writable()
         call, named = _bind("find_one_and_replace", args, kwargs)
         return await self.__collection.find_one_and_replace(*call, **named)
 
     async def find_one_and_delete(self, *args: Any, **kwargs: Any) -> Any:
+        self._require_writable()
         call, named = _bind("find_one_and_delete", args, kwargs)
         return await self.__collection.find_one_and_delete(*call, **named)
 

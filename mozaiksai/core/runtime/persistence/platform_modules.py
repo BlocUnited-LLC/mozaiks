@@ -49,6 +49,13 @@ class CollectionAccess:
     reserved_collections: frozenset[CollectionKey] = field(default_factory=frozenset)
     reserved_literals: frozenset[str] = field(default_factory=frozenset)
     literal_names: frozenset[str] | None = None
+    read_only_collections: frozenset[CollectionKey] = field(default_factory=frozenset)
+    read_only_literals: frozenset[str] = field(default_factory=frozenset)
+
+    @classmethod
+    def for_workspace(cls, module_id: str | None, contract: DataContract | None) -> CollectionAccess:
+        collections, literals = _read_only_targets(_shared_grants(contract), module_id)
+        return cls(data_contract=contract, read_only_collections=collections, read_only_literals=literals)
 
 
 @dataclass(frozen=True)
@@ -58,6 +65,9 @@ class _SharedGrant:
     owner: str
     collection: CollectionKey | None
     literals: frozenset[str]
+    read_only_grantees: frozenset[str]
+    collection_targets: frozenset[CollectionKey]
+    literal_targets: frozenset[str]
 
 
 def _storage_name(collection: Mapping[str, Any]) -> str:
@@ -82,24 +92,85 @@ def _literal_names(collection: Mapping[str, Any]) -> frozenset[str]:
 
 def _shared_grants(contract: DataContract | None) -> list[_SharedGrant]:
     grants: list[_SharedGrant] = []
+    owned = _owned_collections(contract)
     for index, entry in enumerate((contract or {}).get("shared_collections") or []):
         if not isinstance(entry, Mapping):
             continue
+        declarations: list[Mapping[str, Any]] = []
+        for grant_field in _GRANT_FIELDS:
+            value = entry.get(grant_field)
+            if value is None:
+                continue
+            if not isinstance(value, list):
+                raise DataContractLoadError(f"shared_collections[{index}].{grant_field} must be a list or null")
+            for declaration in value:
+                if not isinstance(declaration, Mapping):
+                    raise DataContractLoadError(f"shared_collections[{index}].{grant_field} entries must be objects")
+                receiver = declaration.get("module")
+                if not isinstance(receiver, str) or not receiver.strip():
+                    raise DataContractLoadError("Shared collection access requires a receiving module")
+                declarations.append(declaration)
         grantees = frozenset(
-            str(grant.get("module")).strip()
-            for grant_field in _GRANT_FIELDS
-            for grant in entry.get(grant_field) or []
-            if isinstance(grant, Mapping) and str(grant.get("module") or "").strip()
+            declaration["module"].strip() for declaration in declarations
         )
         ownership = entry.get("ownership")
         owner_surface = ownership.get("surface_id") if isinstance(ownership, Mapping) else None
         owner = str(entry.get("owner_module") or owner_surface or entry.get("module_id") or "").strip()
         name = _storage_name(entry)
+        literals = _literal_names(entry)
+        targets = {
+            key for key, (_kind, row) in owned.items()
+            if key[0] == owner and (not name or key[1] == name)
+            and (not literals or bool(literals & _literal_names(row)))
+        } if owner and (name or literals) else set()
+        target_literals = literals | frozenset(
+            literal for key in targets for literal in _literal_names(owned[key][1])
+        )
+        read_only: set[str] = set()
+        for declaration in declarations:
+            access = declaration.get("access")
+            if access is None:
+                continue  # Unmarked grants retain their existing operation behavior.
+            if not isinstance(access, str) or access != "read_only":
+                raise DataContractLoadError("Shared collection access must be read_only or null when declared")
+            if len(targets) != 1:
+                raise DataContractLoadError("A read_only grant must resolve to one declared collection owner")
+            target = next(iter(targets))
+            if any(
+                key != target and (
+                    _physical_identity(key) == _physical_identity(target)
+                    or bool(target_literals & _literal_names(row))
+                )
+                for key, (_kind, row) in owned.items()
+            ):
+                raise DataContractLoadError("A read_only target has conflicting physical collection owners")
+            read_only.add(declaration["module"].strip())
         grants.append(_SharedGrant(
             index=index, grantees=grantees, owner=owner,
-            collection=(owner, name) if owner and name else None, literals=_literal_names(entry),
+            collection=(owner, name) if owner and name else None, literals=literals,
+            read_only_grantees=frozenset(read_only), collection_targets=frozenset(targets),
+            literal_targets=target_literals,
         ))
     return grants
+
+
+def validate_shared_collection_access(contract: DataContract) -> None:
+    """Reject ambiguous explicit operation grants before the host loads modules."""
+    _shared_grants(contract)
+
+
+def _read_only_targets(
+    grants: Iterable[_SharedGrant], module_id: str | None,
+) -> tuple[frozenset[CollectionKey], frozenset[str]]:
+    collections: set[CollectionKey] = set()
+    literals: set[str] = set()
+    for grant in grants:
+        if grant.owner != module_id and grant.read_only_grantees and (
+            module_id is None or module_id in grant.read_only_grantees
+        ):
+            collections.update(grant.collection_targets)
+            literals.update(grant.literal_targets)
+    return frozenset(collections), frozenset(literals)
 
 
 def _physical_identity(key: CollectionKey) -> CollectionKey:
@@ -133,9 +204,10 @@ class PlatformModuleDeclarations:
         self._grants: dict[str, set[CollectionKey]] = {}
         self._literal_grants: dict[str, set[str]] = {}
         reserved_literals: set[str] = set()
-        for grant in _shared_grants(contract):
-            if grant.owner and grant.owner not in self.module_ids:
-                continue  # The workspace overrides the owner; that data is the app's.
+        self._access_grants = tuple(
+            grant for grant in _shared_grants(contract) if not grant.owner or grant.owner in self.module_ids
+        )
+        for grant in self._access_grants:
             if grant.collection is not None and grant.collection not in self._collections:
                 raise DataContractLoadError(
                     f"data_contract.shared_collections[{grant.index}] shares "
@@ -158,11 +230,13 @@ class PlatformModuleDeclarations:
 
     def access_for(self, module_id: str | None, workspace: DataContract | None) -> CollectionAccess:
         """Resolve the allow-list for one dispatching module."""
+        read_only_collections, read_only_literals = _read_only_targets(_shared_grants(workspace), module_id)
         if module_id not in self.module_ids:
             return CollectionAccess(
                 data_contract=workspace,
                 reserved_collections=frozenset(self._collections),
                 reserved_literals=self._reserved_literals,
+                read_only_collections=read_only_collections, read_only_literals=read_only_literals,
             )
         rows = {key: row for key, row in self._collections.items() if key[0] == module_id}
         rows.update({key: self._collections[key] for key in self._grants.get(module_id, ())})
@@ -186,10 +260,13 @@ class PlatformModuleDeclarations:
             rows[key] = workspace_rows[key]
         for _kind, row in rows.values():
             literals |= _literal_names(row)
+        platform_read_only, platform_read_only_literals = _read_only_targets(self._access_grants, module_id)
         return CollectionAccess(
             data_contract=_contract(rows, self._version), literal_names=frozenset(literals),
             reserved_collections=frozenset(self._collections.keys() - rows.keys()),
             reserved_literals=self._reserved_literals - platform_literals,
+            read_only_collections=read_only_collections | platform_read_only,
+            read_only_literals=read_only_literals | platform_read_only_literals,
         )
 
     def validate_workspace(self, workspace: DataContract | None) -> None:
@@ -213,4 +290,4 @@ class PlatformModuleDeclarations:
             collection_ownership(contract, app_id="platform-module-validation", app_slug=None)
 
 
-__all__ = ["CollectionAccess", "PlatformModuleDeclarations"]
+__all__ = ["CollectionAccess", "PlatformModuleDeclarations", "validate_shared_collection_access"]

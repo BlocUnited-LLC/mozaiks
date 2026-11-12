@@ -1111,11 +1111,6 @@ class ModuleExecutor:
         app_id = str(request.app_id or "").strip()
         if not app_id:
             return None
-        # Mounted platform modules bind each dispatch to its module's allow-list.
-        module_binding: dict[str, Any] = (
-            {"platform_modules": self._platform_modules, "module_id": request.module}
-            if self._platform_modules is not None else {}
-        )
         return MongoPersistenceContext(
             app_id=app_id,
             tenant_id=request.tenant_id,
@@ -1125,5 +1120,6 @@ class ModuleExecutor:
             client=self._persistence_client,
             data_contract=self._data_contract,
             principal=lambda: current_persistence_principal(app_id),
-            **module_binding,
+            platform_modules=self._platform_modules,
+            module_id=request.module,
         )
