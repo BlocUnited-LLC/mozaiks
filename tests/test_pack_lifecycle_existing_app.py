@@ -1438,3 +1438,55 @@ def test_host_requirement_pins_preserve_existing_module_identifier_contract(tmp_
     pins = json.loads((roots.build_context_root / ".mozaiks/installed_components.json").read_text(encoding="utf-8"))
     assert pins["components"][0]["host_requirements"]["modules"] == [{"module_id": module_id, "actions": ["lookup"]}]
     assert verify_installed_components(roots=roots)["status"] == "clean"
+
+
+@pytest.mark.parametrize("operation", ["install", "upgrade"])
+def test_registry_workflow_source_must_exist_after_the_change(tmp_path, operation):
+    roots = _ordinary_app(tmp_path / "shop")
+    if operation == "upgrade":
+        apply_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots)
+        pack = _version_two(tmp_path)
+        # The registry keeps StockReview, but the candidate removes its files.
+        shutil.rmtree(pack / "workflows/StockReview")
+    else:
+        pack = _pack(tmp_path)
+        registry = pack / "workflows/extended_orchestration/extension_registry.json"
+        doc = {"workflows": [{"id": "PhantomReview"}],
+               "entrypoints": [{"id": "phantom", "path": "/phantom", "workflow": "PhantomReview"}]}
+        registry.write_text(json.dumps(doc), encoding="utf-8")
+    before = _tree(tmp_path / "shop")
+    planner = plan_workspace_upgrade if operation == "upgrade" else plan_component_install
+    apply = apply_workspace_upgrade if operation == "upgrade" else apply_component_install
+    source = PackSource(directory=pack)
+    plan = planner(source=source, roots=roots)
+    assert plan.status == "blocked"
+    assert any(row["kind"] == "missing_workflow_source" for row in plan.conflicts)
+    with pytest.raises(CommunityComponentConflictError):
+        apply(source=source, roots=roots)
+    assert _tree(tmp_path / "shop") == before
+
+
+def test_verify_reports_a_missing_registered_workflow_source(tmp_path):
+    roots = _install(tmp_path)
+    (roots.workflows_root / "StockReview/orchestrator.yaml").unlink()
+    report = verify_installed_components(roots=roots)
+    assert report["status"] == "findings"
+    assert any(row["kind"] == "missing_workflow_source" for row in report["packs"][0]["findings"])
+
+
+def test_registry_source_closure_preserves_packaged_default_workflows(tmp_path):
+    from mozaiksai.core.workflow.pack.config import load_global_pack_graph
+    from mozaiksai.core.workflow.paths import resolve_workflow_path
+
+    roots = _ordinary_app(tmp_path / "shop")
+    default_graph = load_global_pack_graph(roots.workflows_root)
+    inherited = next(row.id for row in default_graph.workflows if row.startup_mode != "BackendOnly")
+    assert resolve_workflow_path(inherited, roots.workflows_root) is not None
+    assert not (roots.workflows_root / inherited).exists()
+    pack = _pack(tmp_path)
+    registry = pack / "workflows/extended_orchestration/extension_registry.json"
+    doc = json.loads(registry.read_text(encoding="utf-8"))
+    doc["entrypoints"] = [{"id": "default-review", "path": "/default-review", "workflow": inherited}]
+    registry.write_text(json.dumps(doc), encoding="utf-8")
+    assert apply_component_install(source=PackSource(directory=pack), roots=roots).status == "applied"
+    assert verify_installed_components(roots=roots)["status"] == "clean"

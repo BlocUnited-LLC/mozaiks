@@ -700,7 +700,9 @@ are spliced into these files. Every other byte, including the app's comments,
 formatting and entries, stays as it was, and the result is parsed again
 before anything is written. The effective workflow graph is validated with the
 runtime's default-registry overlay rules, including app-owned references to
-pack workflows. Removing or renaming a referenced workflow blocks the upgrade.
+pack workflows. Every declared workflow must also retain a source folder after
+the planned writes; the packaged-default fallback follows the runtime rules.
+Removing or renaming a referenced workflow blocks the upgrade.
 Workflow assets must supply valid orchestrator and agent declarations, including
 a declared initial agent. An app without a workflow registry launches every
 loaded workflow, so initial registry entries are skipped there with a warning.
@@ -756,8 +758,9 @@ re-read an old source. Provenance that AppGenerator wrote has no such marker
 and keeps the upgrade path described above, from a directory source.
 
 The workspace pin, its source sidecar, the provenance and the app's files are
-written as one transaction. Each file is replaced atomically, a failure
-restores every file and removes any directory the transaction created, and a
+written as one transaction. Each file is replaced atomically; a failure attempts
+to restore files and remove newly created directories, and reports any incomplete
+rollback. A
 lock file at `build_context/.mozaiks/lifecycle.lock` refuses concurrent
 operations.
 

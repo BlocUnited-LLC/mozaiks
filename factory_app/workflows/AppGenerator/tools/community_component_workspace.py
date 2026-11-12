@@ -932,7 +932,10 @@ def _route_conflicts(document: Mapping[str, Any], pack_keys: set[str], plan: Lif
             plan.conflicts.append({"kind": "route_path_conflict", "root": _ROUTE_MANIFEST_PATH, "key": path})
 
 
-def _workflow_registry_conflicts(document: dict[str, Any], roots: WorkspaceRoots, plan: LifecyclePlan) -> None:
+def _workflow_registry_conflicts(
+    document: dict[str, Any], roots: WorkspaceRoots, plan: LifecyclePlan,
+    writes: Mapping[Path, str | None] | None = None,
+) -> None:
     """Validate the prospective graph with the runtime's exact default-overlay semantics."""
     from mozaiksai.core.workflow.pack.config import (
         _load_json_file,
@@ -945,7 +948,19 @@ def _workflow_registry_conflicts(document: dict[str, Any], roots: WorkspaceRoots
         path = _destination(roots.workflows_root, WORKFLOW_REGISTRY_PATH)
         base = _resolve_default_registry_path(path, document)
         effective = _merge_registry_overlay(_load_json_file(base) or {}, document) if base else document
-        parse_global_pack_graph(effective)
+        graph = parse_global_pack_graph(effective)
+        for workflow in graph.workflows:
+            relative = f"{workflow.id}/orchestrator.yaml"
+            source = _planned_text(_destination(roots.workflows_root, relative), writes or {})
+            if source is None and base is not None:
+                # The canonical runtime falls back to packaged folders only for
+                # a registry that explicitly extends the default registry.
+                source = _read_text(_destination(base.parent.parent, relative))
+            if not isinstance(source, str):
+                plan.conflicts.append({
+                    "kind": "missing_workflow_source" if source is None else "invalid_workflow_source",
+                    "root": f"workflows/{relative}", "key": workflow.id,
+                })
     except (ValueError, OSError) as exc:
         plan.conflicts.append({
             "kind": "invalid_workflow_registry", "root": f"workflows/{WORKFLOW_REGISTRY_PATH}", "detail": str(exc),
@@ -987,12 +1002,6 @@ def _plan_entries(
                         "kind": "workflow_registry_absent",
                         "detail": "the app has no workflow registry, so every loaded workflow launches; entrypoints are not created",
                     })
-                continue
-            if old_hashes:
-                plan.conflicts.extend(
-                    {"kind": "locally_modified_composed_entry", "root": label, "key": f"{container}:{key}"}
-                    for container, key in sorted(old_hashes)
-                )
                 continue
             document = dict(_NEW_ROOT_DOCUMENTS.get(root.path, {}))
             if root.path == _DATA_CONTRACT_PATH:
@@ -1059,7 +1068,7 @@ def _plan_entries(
         if root.path == _ROUTE_MANIFEST_PATH:
             _route_conflicts(merged, {key for (_c, key) in new_entries}, plan)
         if root.path == WORKFLOW_REGISTRY_PATH:
-            _workflow_registry_conflicts(merged, roots, plan)
+            _workflow_registry_conflicts(merged, roots, plan, outcome.writes)
         if len(plan.conflicts) != conflicts_before or not (upserts or removals):
             continue
         try:
