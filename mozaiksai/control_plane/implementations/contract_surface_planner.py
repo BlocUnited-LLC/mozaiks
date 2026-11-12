@@ -498,7 +498,7 @@ class ContractSurfacePlanner:
             owner = next((target for target in available if target["kind"] == "module_action"
                           and target["target_id"] == binding["module_id"]), None)
             binding["owner_available"] = owner is not None and binding["action_declared"]
-            binding["owner_within_allowed_paths"] = binding["owner_available"] and (
+            binding["owner_within_allowed_paths"] = owner is not None and binding["owner_available"] and (
                 allowed_paths is None or set(owner["affected_paths"]).issubset(allowed_paths)
             )
         payload: dict[str, Any] = {
