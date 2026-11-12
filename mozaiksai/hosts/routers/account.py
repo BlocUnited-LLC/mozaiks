@@ -36,7 +36,9 @@ router = APIRouter(tags=["account"])
 logger = logging.getLogger("mozaiks_app.account_router")
 
 
-def _account_persistence(request: Request, principal: UserPrincipal, *, app_id: str, user_id: str) -> Any:
+def _account_persistence(
+    request: Request, principal: UserPrincipal, *, app_id: str, user_id: str, module_id: str,
+) -> Any:
     """The requesting account's persistence, scoped as a module action's would be.
 
     The loaded app's data contract (``app.state.data_contract``) binds collection
@@ -48,6 +50,7 @@ def _account_persistence(request: Request, principal: UserPrincipal, *, app_id: 
         user_id=user_id,
         data_contract=getattr(request.app.state, "data_contract", None),
         principal=PersistencePrincipal.from_authenticated_user(principal),
+        module_id=module_id,
     )
 
 
@@ -88,7 +91,9 @@ async def delete_account(
         app_id=app_id,
         user_id=user_id,
         db=db,
-        persistence=_account_persistence(request, principal, app_id=app_id, user_id=user_id),
+        persistence_factory=lambda module_id: _account_persistence(
+            request, principal, app_id=app_id, user_id=user_id, module_id=module_id,
+        ),
     )
 
     # Platform hook — hosted product can cancel subscriptions, revoke OIDC, etc.
@@ -159,7 +164,9 @@ async def export_account_data(
         app_id=app_id,
         user_id=user_id,
         db=db,
-        persistence=_account_persistence(request, principal, app_id=app_id, user_id=user_id),
+        persistence_factory=lambda module_id: _account_persistence(
+            request, principal, app_id=app_id, user_id=user_id, module_id=module_id,
+        ),
     )
     export_payload.update(module_export)
 

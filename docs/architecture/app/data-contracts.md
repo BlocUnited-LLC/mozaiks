@@ -307,6 +307,13 @@ contract. Empty mappings retain the existing default-resolution behavior.
 - Destructive migrations, document rewrites, collection drops, and arbitrary
   migration code are not supported by the generated app migration contract.
 
+Account export and deletion bind a fresh persistence context to each registered
+handler's module identity and the current authenticated principal. The host
+supplies that per-request factory; handlers cannot select another identity or
+reuse another request's scope. Existing database-only handlers keep their raw
+database contract, and direct registry callers may still supply an explicit
+persistence instance.
+
 ## Complex Workspace Example
 
 `C:\Repos\BlocUnitedRepo\mozaiks-app\app\data\contract.json` is explicit because
