@@ -109,7 +109,8 @@ def _canonical_host_requirements(raw: Any) -> dict[str, Any]:
             raise InstalledComponentStateError("host_requirements.modules entries require module_id and actions")
         module_id = item.get("module_id")
         actions = item.get("actions") or []
-        if not isinstance(module_id, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", module_id):
+        if (not isinstance(module_id, str) or not module_id or module_id != module_id.strip()
+                or "/" in module_id.replace("\\", "/") or ".." in module_id):
             raise InstalledComponentStateError("host_requirements module_id is invalid")
         if not isinstance(actions, list) or not all(isinstance(action, str) and action for action in actions):
             raise InstalledComponentStateError("host_requirements actions must be action ids")

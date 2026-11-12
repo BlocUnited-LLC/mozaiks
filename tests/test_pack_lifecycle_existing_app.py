@@ -1421,3 +1421,20 @@ def test_generator_materialized_conflicts_keep_blocked_exit_code(tmp_path, dry_r
     assert result.returncode == 1, result.stdout + result.stderr
     assert json.loads(result.stdout)["status"] == "blocked"
     assert _tree(tmp_path / "shop") == before
+
+
+@pytest.mark.parametrize("module_id", ["host-ledger", "host_ledger", "7host"])
+def test_host_requirement_pins_preserve_existing_module_identifier_contract(tmp_path, module_id):
+    roots = _ordinary_app(tmp_path / "shop")
+    module = roots.app_root / "modules" / module_id / "module.yaml"
+    module.parent.mkdir(parents=True)
+    module.write_text("actions:\n  - id: lookup\n", encoding="utf-8")
+    pack = _pack(tmp_path)
+    contract = pack / "contract.yaml"
+    document = yaml.safe_load(contract.read_text(encoding="utf-8"))
+    document["requires"]["modules"] = [{"module_id": module_id, "actions": ["lookup"]}]
+    contract.write_text(yaml.safe_dump(document), encoding="utf-8")
+    assert apply_component_install(source=PackSource(directory=pack), roots=roots).status == "applied"
+    pins = json.loads((roots.build_context_root / ".mozaiks/installed_components.json").read_text(encoding="utf-8"))
+    assert pins["components"][0]["host_requirements"]["modules"] == [{"module_id": module_id, "actions": ["lookup"]}]
+    assert verify_installed_components(roots=roots)["status"] == "clean"
