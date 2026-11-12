@@ -449,7 +449,7 @@ def test_dry_run_plans_every_output_and_writes_nothing(tmp_path: Path) -> None:
     assert "services/adapters/stock/memory.py" in plan["files"]["write"]
     assert plan["files"]["seed"] == ["config/stock_ledger.yaml"]
     assert plan["workflow_files"]["write"] == [
-        "StockReview/orchestrator.yaml", "StockReview/tools/review_stock.py", "_shared/tools/stock_lookup.py",
+        "StockReview/agents.yaml", "StockReview/orchestrator.yaml", "StockReview/tools/review_stock.py", "_shared/tools/stock_lookup.py",
     ]
     assert {(row["root"], row["key"], row["action"]) for row in plan["composed"]} == {
         ("data/contract.json", "stock_ledger", "add"),
@@ -493,7 +493,7 @@ def test_install_records_hashed_ownership_and_a_pin(tmp_path: Path) -> None:
     assert owners["modules/stock_ledger/backend/service.py"] == "templates"
     assert all(len(row["sha256"]) == 64 for row in entry["materialized_owned_files"])
     assert {row["path"] for row in entry["materialized_workflow_files"]} == {
-        "StockReview/orchestrator.yaml", "StockReview/tools/review_stock.py", "_shared/tools/stock_lookup.py",
+        "StockReview/agents.yaml", "StockReview/orchestrator.yaml", "StockReview/tools/review_stock.py", "_shared/tools/stock_lookup.py",
     }
     assert set(provenance["composed_outputs"]) == {"admin/admin_registry.yaml", "data/contract.json", "ui/route_manifest.json"}
     assert provenance["composed_workflow_outputs"]["extended_orchestration/extension_registry.json"][0]["entries"] == [
@@ -505,7 +505,7 @@ def test_install_records_hashed_ownership_and_a_pin(tmp_path: Path) -> None:
     assert verify_installed_components(roots=roots)["status"] == "clean"
     [status] = installed_component_status(roots=roots)["packs"]
     assert (status["ownership"], status["owned_files"], status["seeded_files"], status["workflow_files"]) == (
-        "content_hash", 8, 1, 3,
+        "content_hash", 8, 1, 4,
     )
 
 
@@ -1247,3 +1247,177 @@ def test_a_generator_materialized_pack_upgrades_through_the_base_lifecycle(tmp_p
     assert applied.status == "applied"
     pins = json.loads((roots.build_context_root / ".mozaiks" / "installed_components.json").read_text(encoding="utf-8"))
     assert pins["components"][0]["version"] == "0.2.0"
+
+
+@pytest.mark.parametrize("operation", ["install", "upgrade"])
+def test_registry_reference_closure_blocks_before_writing(tmp_path, operation):
+    roots = _ordinary_app(tmp_path / "shop")
+    if operation == "upgrade":
+        apply_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots)
+        registry = roots.workflows_root / "extended_orchestration/extension_registry.json"
+        doc = json.loads(registry.read_text(encoding="utf-8"))
+        doc["entrypoints"] = [{"id": "app-review", "path": "/review", "workflow": "StockReview"}]
+        registry.write_text(json.dumps(doc), encoding="utf-8")
+        pack = _version_two(tmp_path)
+        (pack / "workflows/StockReview").rename(pack / "workflows/StockReviewV2")
+        _edit(pack / "workflows/StockReviewV2/orchestrator.yaml", "workflow_name: StockReview", "workflow_name: StockReviewV2")
+        _edit(pack / "workflows/extended_orchestration/extension_registry.json", "StockReview", "StockReviewV2")
+    else:
+        pack = _pack(tmp_path)
+        registry = pack / "workflows/extended_orchestration/extension_registry.json"
+        doc = json.loads(registry.read_text(encoding="utf-8"))
+        doc["entrypoints"] = [{"id": "orphan", "path": "/orphan", "workflow": "DoesNotExist"}]
+        registry.write_text(json.dumps(doc), encoding="utf-8")
+    before = _tree(tmp_path / "shop")
+    planner = plan_workspace_upgrade if operation == "upgrade" else plan_component_install
+    apply = apply_workspace_upgrade if operation == "upgrade" else apply_component_install
+    plan = planner(source=PackSource(directory=pack), roots=roots)
+    assert plan.status == "blocked"
+    assert any(row["kind"] == "invalid_workflow_registry" for row in plan.conflicts)
+    with pytest.raises(CommunityComponentConflictError):
+        apply(source=PackSource(directory=pack), roots=roots)
+    assert _tree(tmp_path / "shop") == before
+
+
+def test_verify_reports_an_invalid_composed_workflow_graph(tmp_path):
+    roots = _install(tmp_path)
+    registry = roots.workflows_root / "extended_orchestration/extension_registry.json"
+    doc = json.loads(registry.read_text(encoding="utf-8"))
+    doc["entrypoints"] = [{"id": "orphan", "path": "/orphan", "workflow": "DoesNotExist"}]
+    registry.write_text(json.dumps(doc), encoding="utf-8")
+    report = verify_installed_components(roots=roots)
+    assert report["status"] == "findings"
+    assert any(row["kind"] == "invalid_workflow_registry" for row in report["packs"][0]["findings"])
+
+
+def test_upgrade_keeps_missing_workflow_registry_ownership_visible(tmp_path):
+    roots = _install(tmp_path)
+    (roots.workflows_root / "extended_orchestration/extension_registry.json").unlink()
+    before = _tree(tmp_path / "shop")
+    candidate = PackSource(directory=_version_two(tmp_path))
+    plan = plan_workspace_upgrade(source=candidate, roots=roots)
+    assert plan.status == "blocked"
+    assert any(row["kind"] == "locally_modified_composed_entry" for row in plan.conflicts)
+    with pytest.raises(CommunityComponentConflictError):
+        apply_workspace_upgrade(source=candidate, roots=roots)
+    assert _tree(tmp_path / "shop") == before
+    assert verify_installed_components(roots=roots)["status"] == "findings"
+
+
+@pytest.mark.parametrize("requirement", ["action", "import"])
+def test_upgrade_preserves_installed_dependents_host_requirements(tmp_path, requirement):
+    roots = _install(tmp_path)
+    dependent = _capability_pack(tmp_path, "reports")
+    requires = ({"modules": [{"module_id": "stock_ledger", "actions": ["record_item"]}]}
+                if requirement == "action" else
+                {"imports": ["app.modules.stock_ledger.backend.legacy_import"]})
+    contract = dependent / "contract.yaml"
+    doc = yaml.safe_load(contract.read_text(encoding="utf-8"))
+    doc["requires"] = requires
+    contract.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    apply_component_install(source=PackSource(directory=dependent), roots=roots)
+    pins = json.loads((roots.build_context_root / ".mozaiks/installed_components.json").read_text(encoding="utf-8"))
+    pin = next(item for item in pins["components"] if item["pack_id"] == "library.reports")
+    assert pin["host_requirements"]["modules" if requirement == "action" else "imports"]
+    candidate = _version_two(tmp_path)
+    if requirement == "action":
+        manifest = candidate / "templates/modules/stock_ledger/module.yaml"
+        doc = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+        doc["actions"] = [row for row in doc["actions"] if row["id"] != "record_item"]
+        manifest.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    before = _tree(tmp_path / "shop")
+    plan = plan_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+    assert plan.status == "blocked"
+    assert any(row["kind"] == "required_by" and row["owner"] == "library.reports" for row in plan.conflicts)
+    with pytest.raises(CommunityComponentConflictError):
+        apply_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+    assert _tree(tmp_path / "shop") == before
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+    # Verification also checks live host requirements, independently of an upgrade.
+    if requirement == "action":
+        manifest = roots.app_root / "modules/stock_ledger/module.yaml"
+        doc = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+        doc["actions"] = [row for row in doc["actions"] if row["id"] != "record_item"]
+        manifest.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    else:
+        (roots.app_root / "modules/stock_ledger/backend/legacy_import.py").unlink()
+    report = verify_installed_components(roots=roots)
+    findings = next(row["findings"] for row in report["packs"] if row["pack_id"] == "library.reports")
+    assert findings and findings[0]["kind"] in {"missing_host_action", "missing_host_import"}
+
+
+@pytest.mark.parametrize("invalid", ["missing_agents", "unknown_initial"])
+def test_invalid_workflow_agents_are_rejected_before_install(tmp_path, invalid):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    if invalid == "missing_agents":
+        (pack / "workflows/StockReview/agents.yaml").unlink()
+    else:
+        _edit(pack / "workflows/StockReview/orchestrator.yaml", "initial_agent: StockReviewAgent", "initial_agent: Missing")
+    before = _tree(tmp_path / "shop")
+    with pytest.raises(CommunityComponentLifecycleError, match="workflow StockReview is invalid"):
+        apply_component_install(source=PackSource(directory=pack), roots=roots)
+    assert _tree(tmp_path / "shop") == before
+    assert not roots.build_context_root.exists()
+
+
+def test_plain_plan_lists_permissions_host_requirements_and_dependencies(tmp_path, capsys):
+    from mozaiks_cli.commands.pack import _print_plan
+
+    roots = _install(tmp_path)
+    dependent = _capability_pack(tmp_path, "reports", requires="stock.ledger")
+    plan = plan_component_install(source=PackSource(directory=dependent), roots=roots).to_dict()
+    _print_plan(plan)
+    assert "dependency added_capabilities" in capsys.readouterr().out
+    fresh = _ordinary_app(tmp_path / "other")
+    _print_plan(plan_component_install(source=PackSource(directory=_pack(tmp_path, "fresh")), roots=fresh).to_dict())
+    output = capsys.readouterr().out
+    assert "permission stock.read" in output and "requires secrets" in output
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_cli_returns_invalid_for_operating_system_failures(tmp_path, monkeypatch, capsys, as_json):
+    from mozaiks_cli.commands import pack as pack_cli
+
+    _ordinary_app(tmp_path / "shop")
+    parser = argparse.ArgumentParser()
+    pack_cli.add_parser(parser.add_subparsers())
+    command = ["pack", "install", str(_pack(tmp_path)), "--workspace", str(tmp_path / "shop")]
+    if as_json:
+        command.append("--json")
+    failure = OSError("disk full")
+    failure.add_note("Rollback could not restore a file")
+    def fail(**kwargs):
+        raise failure
+    monkeypatch.setattr(workspace_module, "apply_component_install", fail)
+    assert pack_cli.run(parser.parse_args(command)) == pack_cli.EXIT_INVALID
+    output = capsys.readouterr().out
+    assert "disk full" in output and "Rollback could not restore" in output
+    if as_json:
+        assert json.loads(output)["status"] == "invalid"
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_generator_materialized_conflicts_keep_blocked_exit_code(tmp_path, dry_run):
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        install_verified_local_pack,
+    )
+    from tests.test_community_component_lifecycle import (
+        GREETINGS,
+        _greetings_v2,
+        _write_app_root_from_pack,
+    )
+
+    roots = _ordinary_app(tmp_path / "shop")
+    install_verified_local_pack(pack_source_path=GREETINGS, build_context_root=roots.build_context_root)
+    _write_app_root_from_pack(roots.app_root, GREETINGS, "greetings")
+    service = roots.app_root / "modules/greetings/backend/service.py"
+    service.write_text(service.read_text(encoding="utf-8") + "# local edit\n", encoding="utf-8")
+    before = _tree(tmp_path / "shop")
+    command = ["upgrade", str(_greetings_v2(tmp_path)), "--workspace", str(tmp_path / "shop"), "--json"]
+    if dry_run:
+        command.append("--dry-run")
+    result = _cli(*command)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert json.loads(result.stdout)["status"] == "blocked"
+    assert _tree(tmp_path / "shop") == before

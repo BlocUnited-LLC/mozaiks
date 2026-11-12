@@ -14,7 +14,7 @@ export function registerModuleUi(modules, registry) {
       if (!registry.hasComponent(namespaced)) {
         registry.registerComponent(namespaced, component, { description: `${moduleId} module component (namespaced)` });
       }
-      if (!registry.hasComponent(name)) {
+      if (!['LoginPage', 'AuthCallbackPage'].includes(name) && !registry.hasComponent(name)) {
         registry.registerComponent(name, component, { description: `${moduleId} module component` });
       }
     }

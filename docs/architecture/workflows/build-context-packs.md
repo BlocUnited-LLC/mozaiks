@@ -698,14 +698,21 @@ Keyed shared files are `data/contract.json` (`surfaces` by `surface_id`),
 `transitions` and `workflow_sequences` by `id`). Only the pack's own entries
 are spliced into these files. Every other byte, including the app's comments,
 formatting and entries, stays as it was, and the result is parsed again
-before anything is written. An app without a workflow registry launches every
-loaded workflow, so registry entries are skipped there with a warning.
+before anything is written. The effective workflow graph is validated with the
+runtime's default-registry overlay rules, including app-owned references to
+pack workflows. Removing or renaming a referenced workflow blocks the upgrade.
+Workflow assets must supply valid orchestrator and agent declarations, including
+a declared initial agent. An app without a workflow registry launches every
+loaded workflow, so initial registry entries are skipped there with a warning.
+Deleting an already-owned registry remains drift and blocks an upgrade.
 
 A pack may not write `ui/index.js`: hand-written registration code cannot be
 merged safely. A module registers its own React components from
 `modules/<module_id>/ui/index.js`, which the web shell discovers by folder
 scan. Each export registers as `<module_id>:<Export>` and as `<Export>`, after
 the app's own barrel, so an app component of the same name always wins.
+`LoginPage` and `AuthCallbackPage` register only under their module-prefixed
+names; module exports cannot replace the shell's authentication defaults.
 
 Editing a pack-owned file or entry fails `mozaiks pack verify` and blocks
 upgrades. Customize instead through seeded files, the app's own entries and
@@ -718,7 +725,8 @@ install. Reconcile the difference in a normal reviewed change first.
 
 Before writing, an install checks the pack's closure. Pack dependencies are
 checked as before, and an upgrade also refuses to move a version another
-installed pack pins (`required_by`). The pack's contract may declare host
+installed pack pins or to remove a capability, host module/action or import
+that an installed pack requires (`required_by`). The pack's contract may declare host
 requirements under `requires`:
 
 | Key | Checked |
@@ -729,9 +737,13 @@ requirements under `requires`:
 
 Every absolute import in the pack's Python that reaches app code must resolve
 to a file the pack ships or be declared in `requires.imports`; an undeclared
-host import blocks the install.
+host import blocks the install. Module/action and import requirements are
+recorded in the immutable workspace pin and checked against the resulting files
+on upgrades, so removing a provider cannot silently break an installed consumer.
+`verify` also checks these requirements and the effective workflow registry.
 
-The plan lists `permissions_introduced`. Granting those permissions to roles
+Both human-readable and JSON plans list introduced permissions, host requirements
+and dependency changes. Granting those permissions to roles
 stays the app's decision. Composing host policy files (subscriptions,
 production operations, flags, shell, dashboard, secrets entries) is out of
 scope.

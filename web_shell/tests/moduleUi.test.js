@@ -78,3 +78,15 @@ test('module components register namespaced and plain, and the app keeps its own
   assert.equal(target.components.get('StockHelper'), helper);
   assert.equal(target.components.has('default'), false);
 });
+
+
+test('module exports cannot take the shell authentication page names', () => {
+  const login = () => 'module login';
+  const callback = () => 'module callback';
+  const target = registry();
+  registerModuleUi({ stock: { LoginPage: login, AuthCallbackPage: callback } }, target);
+  assert.equal(target.components.has('LoginPage'), false);
+  assert.equal(target.components.has('AuthCallbackPage'), false);
+  assert.equal(target.components.get('stock:LoginPage'), login);
+  assert.equal(target.components.get('stock:AuthCallbackPage'), callback);
+});

@@ -120,6 +120,13 @@ def _component_entry_from_verified_pack(pack_source_path: Path, pack_id: str) ->
         "digest": metadata["digest"],
         "source": metadata["source"],
         "dependencies": _dependency_block(contract),
+        **({"host_requirements": {
+            "modules": [
+                {"module_id": item["module_id"], "actions": item.get("actions") or []}
+                for item in (contract.get("requires") or {}).get("modules") or []
+            ],
+            "imports": (contract.get("requires") or {}).get("imports") or [],
+        }} if any((contract.get("requires") or {}).get(key) for key in ("modules", "imports")) else {}),
         "capabilities": [
             {"capability_id": cap_id}
             for cap_id in sorted(_capabilities_from_context(context))
