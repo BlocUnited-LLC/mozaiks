@@ -1129,8 +1129,12 @@ class TestPlannerOutputContract:
         assert "```" not in self.output
 
     def test_task_context_does_not_duplicate_shared_inputs(self):
-        assert "Workers inherit app_build_plan and dependency_task_outputs" in self.output
-        assert "Task context_variables contain only task-local overrides" in self.output
+        output = " ".join(self.output.split())
+        assert "Workers inherit app_build_plan and dependency_task_outputs" in output
+        assert "`context_variables` belongs only inside each `AppBuildPlan.build_tasks[]` task" in output
+        assert "never put it directly on `AppBuildPlan`" in output
+        assert "Task values contain only task-local overrides" in output
+        assert "Never embed a copy of app_build_plan, upstream documents, or shared catalogs" in output
 
     def test_output_does_not_expand_page_schemas(self):
         assert "Do not expand nested modal/page schemas during planning" in self.output
