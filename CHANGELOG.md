@@ -390,6 +390,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator requests a short assembly acknowledgement instead of repeating
+  generated files that its assembly tool already combines.
+
 - Module actions return a sanitized `DEPENDENCY_UNAVAILABLE` HTTP 503 when the
   generated Cloud or Pay client cannot resolve its required connector
   configuration. Permission denials still precede connector lookup and provider calls.

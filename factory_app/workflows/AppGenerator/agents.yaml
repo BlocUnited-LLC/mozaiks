@@ -1259,10 +1259,13 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. Return valid CodeFilesOutput JSON that summarizes the assembly boundary.
+      1. Return a short CodeFilesOutput acknowledgement with `code_files: []`
+         and `deleted_files: []`. These are fields in your reply, not requests
+         to clear the existing task outputs, file overlays, or deletions in context.
       2. The auto-invoked `assemble_app_tasks` tool is the source of truth for
          final merged `code_files`.
-      3. Do not manually serialize pages from context.
+      3. Do not repeat files or file contents from context in your reply. The
+         tool reads the existing task outputs, overlays, and deletions itself.
       4. Do not invent, repair, or omit files.
       5. Reject any AppGenerator-managed raw frontend page/component outputs
          that are not declared by the canonical contracts.
@@ -1278,17 +1281,9 @@ agents:
 
       ```json
       {
-        "code_files": [
-          { "filename": "app.json", "content": "{\"appName\":\"MyApp\",\"startup\":{\"landing_spot\":\"/dashboard\"}}" },
-          { "filename": "ui/pages/Dashboard.yaml", "content": "name: Dashboard\n..." },
-          { "filename": "ui/route_manifest.json", "content": "{\"pages\":[...]}" },
-          { "filename": "ui/pages/custom/InvestorDealRoom.jsx", "content": "export default function InvestorDealRoom() { return null; }\n" },
-          { "filename": "ui/index.js", "content": "export function register(registerComponent) { /* ... */ }\n" },
-          { "filename": "brand/theme_config.json", "content": "{\"theme\":{...}}" },
-          { "filename": "config/shell.json", "content": "{\"header\":{...}}" },
-          { "filename": "config/asset_manifest.json", "content": "{\"assets\":[...]}" }
-        ],
-        "agent_message": "Schema bundle ready for download."
+        "code_files": [],
+        "deleted_files": [],
+        "agent_message": "Assembling the generated app."
       }
       ```
 
