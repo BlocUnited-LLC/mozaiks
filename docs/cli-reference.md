@@ -491,7 +491,10 @@ python -m mozaiks pack status [--json]
 | `--json` | Print machine-readable output. |
 
 Exit codes: `0` applied, unchanged or verified clean; `1` blocked or drift
-found, nothing written; `2` invalid input. A blocked plan lists each conflict,
+found, nothing written; `2` invalid input or an operating-system failure, with
+any incomplete rollback reported in both text and JSON output. Plans list
+permissions, host requirements and dependency changes before application.
+A blocked plan lists each conflict,
 for example a locally edited pack file (`locally_modified_owned_file`) or an
 app file the pack would overwrite (`workspace_owned_file`).
 

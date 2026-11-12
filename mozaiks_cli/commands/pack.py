@@ -88,6 +88,14 @@ def _print_plan(plan: dict[str, Any]) -> None:
                 print(f"  {action:<9} {label}/{path}")
     for row in plan["composed"]:
         print(f"  {row['action']:<9} {row['root']} {row['container']}:{row['key']}")
+    for permission in plan.get("permissions_introduced") or []:
+        print(f"  permission {permission}")
+    for group, rows in (plan.get("host_requirements") or {}).items():
+        for row in rows:
+            print(f"  requires {group}: {json.dumps(row, sort_keys=True)}")
+    for group, rows in (plan.get("dependencies") or {}).items():
+        for row in rows:
+            print(f"  dependency {group}: {json.dumps(row, sort_keys=True)}")
     for conflict in plan["conflicts"]:
         where = conflict.get("path") or conflict.get("root") or ""
         key = f" {conflict['key']}" if conflict.get("key") else ""
@@ -183,6 +191,7 @@ def run(args: Any) -> int:
         ManagedCapabilityTemplateError,
         PackSourceError,
         InstalledComponentStateError,
+        OSError,
     ) as exc:
         error = "\n".join([str(exc), *getattr(exc, "__notes__", [])])
         if getattr(args, "json", False):

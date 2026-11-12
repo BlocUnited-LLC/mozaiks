@@ -200,6 +200,9 @@ def _check_recorded_paths(manifest: Mapping[str, Any], roots: WorkspaceRoots) ->
 def _write_destination(path: Path, roots: WorkspaceRoots) -> Path:
     for root in (roots.app_root, roots.workflows_root, roots.build_context_root):
         if path.is_relative_to(root):
+            if path == root:
+                # Validate the root's parent chain without treating "." as a portable file name.
+                return _destination(root, ".mozaiks-path-check").parent
             return _destination(root, path.relative_to(root).as_posix())
     raise CommunityComponentLifecycleError(f"Unsafe workspace path: {path}")
 
@@ -469,6 +472,7 @@ def _render(pack_dir: Path, pack_id: str, locator: str | None) -> _RenderedPack:
         if not asset_dir.is_dir():
             raise CommunityComponentLifecycleError(f"Pack '{pack_id}' workflows asset must be a directory: {asset_dir}")
         _render_workflow_asset(rendered, asset_dir, owner_map=owner_map, files=files)
+    _validate_workflow_assets(rendered)
     return rendered
 
 
@@ -510,6 +514,28 @@ def _render_workflow_asset(
         rendered.workflow_files[name] = content
 
 
+def _validate_workflow_assets(rendered: _RenderedPack) -> None:
+    from mozaiksai.core.workflow.declarative.contracts import (
+        parse_agents_config,
+        parse_orchestrator_config,
+    )
+
+    for path, content in rendered.workflow_files.items():
+        if not path.endswith("/orchestrator.yaml"):
+            continue
+        folder = path.rsplit("/", 1)[0]
+        try:
+            orchestrator = parse_orchestrator_config(yaml.safe_load(content))
+            agents = parse_agents_config(yaml.safe_load(rendered.workflow_files.get(f"{folder}/agents.yaml", "")))
+            if not agents["agents"]:
+                raise ValueError("workflow requires at least one agent")
+            initial = orchestrator.get("initial_agent")
+            if initial and initial not in agents["agents"]:
+                raise ValueError(f"initial_agent {initial!r} is not a declared agent")
+        except (ValueError, yaml.YAMLError) as exc:
+            raise CommunityComponentLifecycleError(f"Pack '{rendered.pack_id}' workflow {folder} is invalid: {exc}") from exc
+
+
 # --------------------------------------------------------------------------------------
 # Host requirements: modules, imports, secrets
 # --------------------------------------------------------------------------------------
@@ -528,7 +554,11 @@ def _module_names(paths: list[str]) -> set[str]:
     return names
 
 
-def _host_module_exists(name: str, roots: WorkspaceRoots) -> bool:
+def _planned_text(path: Path, writes: Mapping[Path, str | None]) -> Any:
+    return writes[path] if path in writes else _read_text(path)
+
+
+def _host_module_exists(name: str, roots: WorkspaceRoots, writes: Mapping[Path, str | None]) -> bool:
     """Whether the app provides a module: ``app.x`` and bare ``x`` are bundle-relative, ``_shared.x`` workflow-shared."""
     parts = name.split(".")
     if parts[0] == "_shared":
@@ -540,7 +570,10 @@ def _host_module_exists(name: str, roots: WorkspaceRoots) -> bool:
     if not rest:
         return False
     relative = "/".join(rest)
-    return _destination(base, f"{relative}.py").is_file() or _destination(base, f"{relative}/__init__.py").is_file()
+    return any(
+        isinstance(_planned_text(_destination(base, candidate), writes), str)
+        for candidate in (f"{relative}.py", f"{relative}/__init__.py")
+    )
 
 
 def _python_sources(rendered: _RenderedPack) -> list[tuple[str, str]]:
@@ -585,7 +618,10 @@ def _host_imports(rendered: _RenderedPack, namespaces: set[str]) -> list[tuple[s
     ]
 
 
-def _check_host_requirements(rendered: _RenderedPack, roots: WorkspaceRoots, plan: LifecyclePlan) -> None:
+def _check_host_requirements(
+    rendered: _RenderedPack, roots: WorkspaceRoots, plan: LifecyclePlan,
+    writes: Mapping[Path, str | None],
+) -> None:
     requires = rendered.contract.get("requires") or {}
     bundle_modules = _module_names([*rendered.owned, *rendered.seeds])
     shared_modules = _module_names([path for path in rendered.workflow_files if path.startswith("_shared/")])
@@ -596,7 +632,7 @@ def _check_host_requirements(rendered: _RenderedPack, roots: WorkspaceRoots, pla
         return any(name == item or name.startswith(item + ".") for item in declared)
 
     for item in declared:
-        present = _host_module_exists(item, roots)
+        present = _host_module_exists(item, roots, writes)
         plan.host_requirements["imports"].append({"name": item, "status": "present" if present else "missing"})
         if not present:
             plan.conflicts.append({"kind": "missing_host_import", "key": item})
@@ -612,7 +648,7 @@ def _check_host_requirements(rendered: _RenderedPack, roots: WorkspaceRoots, pla
         manifest_path = f"modules/{module_id}/module.yaml"
         text = rendered.owned.get(manifest_path)
         if text is None:
-            current = _read_text(_destination(roots.app_root, manifest_path))
+            current = _planned_text(_destination(roots.app_root, manifest_path), writes)
             text = current if isinstance(current, str) else None
         actions = [str(action) for action in item.get("actions") or []]
         if text is None:
@@ -632,7 +668,7 @@ def _check_host_requirements(rendered: _RenderedPack, roots: WorkspaceRoots, pla
         )
         plan.conflicts.extend({"kind": "missing_host_action", "key": f"{module_id}.{action}"} for action in missing)
 
-    secrets_text = _read_text(_destination(roots.app_root, "security/secrets.yaml"))
+    secrets_text = _planned_text(_destination(roots.app_root, "security/secrets.yaml"), writes)
     declared_envs: set[str] = set()
     if isinstance(secrets_text, str):
         try:
@@ -665,6 +701,22 @@ def _check_host_requirements(rendered: _RenderedPack, roots: WorkspaceRoots, pla
                 if isinstance(permission_id, str) and permission_id:
                     permissions.add(permission_id)
     plan.permissions_introduced = sorted(permissions)
+
+
+def _check_dependent_host_requirements(
+    rendered: _RenderedPack, installed: Mapping[str, dict[str, Any]], roots: WorkspaceRoots, outcome: _Outcome,
+) -> None:
+    for pack_id, pin in sorted(installed.items()):
+        if pack_id == rendered.pack_id or not pin.get("host_requirements"):
+            continue
+        dependent = _RenderedPack(pack_id=pack_id, entry=pin, contract={"requires": pin["host_requirements"]})
+        checked = _new_plan("verify", dependent, pin)
+        _check_host_requirements(dependent, roots, checked, outcome.writes)
+        outcome.plan.conflicts.extend(
+            {"kind": "required_by", "key": pack_id, "owner": pack_id,
+             "detail": f"{finding['kind']} {finding['key']}"}
+            for finding in checked.conflicts
+        )
 
 
 # --------------------------------------------------------------------------------------
@@ -880,6 +932,26 @@ def _route_conflicts(document: Mapping[str, Any], pack_keys: set[str], plan: Lif
             plan.conflicts.append({"kind": "route_path_conflict", "root": _ROUTE_MANIFEST_PATH, "key": path})
 
 
+def _workflow_registry_conflicts(document: dict[str, Any], roots: WorkspaceRoots, plan: LifecyclePlan) -> None:
+    """Validate the prospective graph with the runtime's exact default-overlay semantics."""
+    from mozaiksai.core.workflow.pack.config import (
+        _load_json_file,
+        _merge_registry_overlay,
+        _resolve_default_registry_path,
+    )
+    from mozaiksai.core.workflow.pack.schema import parse_global_pack_graph
+
+    try:
+        path = _destination(roots.workflows_root, WORKFLOW_REGISTRY_PATH)
+        base = _resolve_default_registry_path(path, document)
+        effective = _merge_registry_overlay(_load_json_file(base) or {}, document) if base else document
+        parse_global_pack_graph(effective)
+    except (ValueError, OSError) as exc:
+        plan.conflicts.append({
+            "kind": "invalid_workflow_registry", "root": f"workflows/{WORKFLOW_REGISTRY_PATH}", "detail": str(exc),
+        })
+
+
 def _splice(text: str, root: KeyedRoot, upserts: dict[tuple[str, str], Any], removals: set[tuple[str, str]]) -> str:
     crlf = "\r\n" in text
     result = splice_document(text.replace("\r\n", "\n"), root, upserts=upserts, removals=removals)
@@ -902,6 +974,12 @@ def _plan_entries(
         if not isinstance(text, str):
             if text is _BINARY:
                 plan.conflicts.append({"kind": "composed_output_conflict", "root": label})
+                continue
+            if old_hashes:
+                plan.conflicts.extend(
+                    {"kind": "locally_modified_composed_entry", "root": label, "key": f"{container}:{key}"}
+                    for container, key in sorted(old_hashes)
+                )
                 continue
             if root.path == WORKFLOW_REGISTRY_PATH:
                 if new_entries:
@@ -980,6 +1058,8 @@ def _plan_entries(
             _data_conflicts(document, {key: value for (_c, key), value in new_entries.items()}, plan)
         if root.path == _ROUTE_MANIFEST_PATH:
             _route_conflicts(merged, {key for (_c, key) in new_entries}, plan)
+        if root.path == WORKFLOW_REGISTRY_PATH:
+            _workflow_registry_conflicts(merged, roots, plan)
         if len(plan.conflicts) != conflicts_before or not (upserts or removals):
             continue
         try:
@@ -1139,30 +1219,50 @@ def _prune_empty_parents(paths: list[Path], stop: tuple[Path, ...], roots: Works
 @contextmanager
 def _lifecycle_lock(build_context_root: Path) -> Iterator[None]:
     path = _destination(build_context_root, _LOCK_PATH)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        descriptor = os.open(_destination(build_context_root, _LOCK_PATH), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError as exc:
-        raise CommunityComponentLockedError(
-            f"Another pack operation holds {path}. If none is running, delete that file and try again."
-        ) from exc
+    created = _missing_parents(path)
+    acquired = False
+    descriptor: int | None = None
     failure: BaseException | None = None
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            descriptor = os.open(_destination(build_context_root, _LOCK_PATH), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError as exc:
+            raise CommunityComponentLockedError(
+                f"Another pack operation holds {path}. If none is running, delete that file and try again."
+            ) from exc
+        acquired = True
         os.write(descriptor, f"{os.getpid()} {int(time.time())}\n".encode())
         os.close(descriptor)
+        descriptor = None
         yield
     except BaseException as exc:
         failure = exc
         raise
     finally:
-        try:
-            _destination(build_context_root, _LOCK_PATH).unlink()
-        except FileNotFoundError:
-            pass
-        except (OSError, CommunityComponentLifecycleError) as exc:
-            if failure is None:
-                raise
-            failure.add_note(f"Could not safely remove lifecycle lock {path}: {exc}")
+        if descriptor is not None:
+            os.close(descriptor)
+        if acquired:
+            try:
+                _destination(build_context_root, _LOCK_PATH).unlink()
+            except FileNotFoundError:
+                pass
+            except (OSError, CommunityComponentLifecycleError) as exc:
+                if failure is None:
+                    raise
+                failure.add_note(f"Could not safely remove lifecycle lock {path}: {exc}")
+        for directory in created:
+            try:
+                checked = (_destination(build_context_root, ".mozaiks-path-check").parent
+                           if directory == build_context_root else
+                           _destination(build_context_root, directory.relative_to(build_context_root).as_posix()))
+                checked.rmdir()
+            except OSError:
+                # Successful operations retain their populated state directories.
+                pass
+            except CommunityComponentLifecycleError as exc:
+                if failure is not None:
+                    failure.add_note(f"Could not safely remove lifecycle directory {directory}: {exc}")
 
 
 # --------------------------------------------------------------------------------------
@@ -1245,10 +1345,11 @@ def _plan_workspace_change(
         {"kind": "ui_barrel_contribution_unsupported", "path": path} for path in sorted(rendered.ui_barrels)
     )
     _check_dependencies(rendered, installed, plan, current=current if operation == "upgrade" else None)
-    _check_host_requirements(rendered, roots, plan)
     _plan_owned_files(outcome, rendered, recorded, roots, other_files, adopt=adopt)
     _plan_workflow_files(outcome, rendered, recorded, roots, other_workflow_files, adopt=adopt)
     _plan_entries(outcome, rendered, recorded, roots, other_entries, adopt=adopt)
+    _check_host_requirements(rendered, roots, plan, outcome.writes)
+    _check_dependent_host_requirements(rendered, installed, roots, outcome)
     if plan.conflicts:
         plan.status = "blocked"
     return outcome, rendered, manifest
@@ -1402,6 +1503,13 @@ def _generator_upgrade_plan(candidate: _Candidate, roots: WorkspaceRoots, *, app
                     f"Pack '{candidate.pack_id}' was materialized by AppGenerator; upgrade it from a directory "
                     "checkout of that commit rather than --git, because its upgrade path re-reads the source later."
                 )
+            preview = plan_component_upgrade(
+                build_context_root=roots.build_context_root,
+                candidate_pack_source_path=candidate.pack_dir,
+                workspace_app_root=roots.app_root,
+            )
+            if preview.status == "blocked":
+                raise _blocked(_plan_from_base_upgrade(preview, metadata, candidate, applied=False))
             result = apply_component_upgrade(
                 build_context_root=roots.build_context_root,
                 candidate_pack_source_path=candidate.pack_dir,
@@ -1461,6 +1569,20 @@ def verify_installed_components(*, roots: WorkspaceRoots) -> dict[str, Any]:
         if pin is None or (pin["version"], pin["digest"]) != (entry.get("version"), entry.get("digest")):
             findings.append({"kind": "provenance_without_pin"})
         recorded = _recorded(manifest, pack_id)
+        checked = LifecyclePlan(operation="verify", status="ready", pack_id=pack_id,
+                                to_version=str(entry.get("version") or ""), to_digest=str(entry.get("digest") or ""), source="")
+        if pin and pin.get("host_requirements"):
+            required = _RenderedPack(pack_id=pack_id, entry=pin, contract={"requires": pin["host_requirements"]})
+            _check_host_requirements(required, roots, checked, {})
+        if recorded.workflow or recorded.entries.get(WORKFLOW_REGISTRY_PATH):
+            registry_text = _read_text(_destination(roots.workflows_root, WORKFLOW_REGISTRY_PATH))
+            if isinstance(registry_text, str):
+                try:
+                    registry_document = parse_document(registry_text, "json")
+                    _workflow_registry_conflicts(registry_document, roots, checked)
+                except CompositionFormatError as exc:
+                    checked.conflicts.append({"kind": "invalid_workflow_registry", "detail": str(exc)})
+        findings.extend(checked.conflicts)
         for path, digest in sorted(recorded.owned.items()):
             current = _read_text(_destination(roots.app_root, path))
             if current is None:
