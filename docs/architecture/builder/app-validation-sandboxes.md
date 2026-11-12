@@ -129,7 +129,8 @@ installed at runtime. The trusted caller must attest the local image's build
 source and installed dependencies against the candidate's framework pin and
 provenance before claiming exact candidate behavior. Source is staged once,
 read-only to the app UID. Docker has no network or published ports, and the
-manager returns health and identity without a preview URL. This does not
+per-app Vite dependency cache uses a bounded disposable `.vite-apps` tmpfs.
+The manager returns health and identity without a preview URL. This does not
 provide a browser preview or authorize promotion. It boots the framework
 platform host; authenticated apps need a future preview-scoped OIDC setup, and
 hosted product entrypoints need a trusted fixed host selection before their

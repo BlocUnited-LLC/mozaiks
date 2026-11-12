@@ -7,6 +7,7 @@ worker's honest strategy vocabulary.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -149,6 +150,32 @@ async def test_app_runtime_diagnostic_has_bounded_writable_space(monkeypatch):
     assert any(mount.startswith("/workspace:") and "size=128m" in mount for mount in tmpfs)
     assert any(mount.startswith("/tmp:") and "size=64m" in mount for mount in tmpfs)
     assert any(mount.startswith("/home/sandbox:") and "size=16m" in mount for mount in tmpfs)
+
+
+@pytest.mark.asyncio
+async def test_sealed_preview_mounts_the_configured_per_app_vite_cache():
+    vite_config = (Path(__file__).resolve().parents[1] / "web_shell/vite.config.js").read_text(encoding="utf-8")
+    assert "cacheDir: path.join(__dirname, 'node_modules', '.vite-apps'," in vite_config
+    assert "createHash('sha256').update(platformAppDir).digest('hex').slice(0, 16)" in vite_config
+
+    adapter = DockerSandboxAdapter()
+    commands: list[list[str]] = []
+
+    async def fake_run(args, timeout: float = 60.0):
+        commands.append(list(args))
+        return 0, "sealed-container\n", ""
+
+    image_id = "sha256:" + "a" * 64
+    with patch.object(adapter, "_run", side_effect=fake_run):
+        await adapter.create_session(template=image_id, envs={}, metadata={"purpose": "sealed_candidate_preview"})
+
+    args = next(command for command in commands if command[1] == "run")
+    tmpfs = [args[index + 1] for index, value in enumerate(args) if value == "--tmpfs"]
+    assert "/opt/mozaiks/web_shell/node_modules/.vite-apps:rw,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700" in tmpfs
+    assert "--read-only" in args and "--user=10001:10001" in args and "--pull=never" in args
+    assert "--cap-drop=ALL" in args and "--security-opt=no-new-privileges" in args
+    assert args[args.index("--network") + 1] == "none"
+    assert image_id in args and "-p" not in args and "-e" not in args
 
 
 @pytest.mark.asyncio

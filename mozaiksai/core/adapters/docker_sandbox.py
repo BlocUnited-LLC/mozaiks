@@ -226,7 +226,8 @@ class DockerSandboxAdapter:
                "--tmpfs", "/workspace/logs:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700",
                "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,uid=10001,gid=10001,mode=0700",
                "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite-temp:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700",
-               "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite:rw,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700"]
+               "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite:rw,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700",
+               "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite-apps:rw,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700"]
               if sealed_candidate else []),
             *contained_args,
             *(["--network", "none"] if offline_validation else []),
