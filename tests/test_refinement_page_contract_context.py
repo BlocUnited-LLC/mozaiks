@@ -115,5 +115,3 @@ def test_planner_advertises_linked_server_owner_without_expanding_scope():
         "owner_available": True, "owner_within_allowed_paths": False,
     }]
     assert payload["allowed_paths"] == ["ui/pages/notes.yaml"]
-
-
