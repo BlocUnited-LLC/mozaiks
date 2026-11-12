@@ -378,3 +378,80 @@ async def test_factory_support_purpose_labels_preserve_existing_writes():
         assert grant["purpose"].startswith("support_thread_lifecycle:")
         await ctx.collection("messages", entry["name"]).insert_one({})
     assert [call[0] for call in client.driver.calls] == ["insert_one"] * 3
+
+
+def literal_aggregate_contract():
+    return {
+        "version": "1", "surfaces": [], "shared_collections": [{
+            "owner_module": "writer", "mongo_collection": "shared_records",
+            "primary_alias": "shared.records", "owner_fields": ["record_id", "owner_id"],
+            "indexes": [{"name": "record_lookup", "keys": [{"field": "record_id", "order": 1}]}],
+            "read_by": [{"module": "reader", "access": "read_only"}],
+            "shared_with": [{"module": "lifecycle", "purpose": "Existing lifecycle writes"}],
+        }],
+    }
+
+
+async def test_existing_full_literal_aggregate_keeps_owner_and_lifecycle_writes(tmp_path):
+    value = literal_aggregate_contract()
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data/contract.json").write_text(json.dumps(value), encoding="utf-8")
+    assert load_data_contract(tmp_path) == value
+    for module in ("writer", "lifecycle", "reader"):
+        ctx, client = context(module=module, value=value)
+        collection = ctx.literal_collection("shared_records")
+        assert await collection.find_one({}) == {"ok": True}
+        if module == "reader":
+            with pytest.raises(PersistenceScopeError, match="read_only"):
+                await collection.update_one({}, {"$set": {"x": 1}})
+            assert len(client.driver.calls) == 1
+        else:
+            await collection.update_one({}, {"$set": {"x": 1}})
+            assert client.driver.calls[-1][0] == "update_one"
+        with pytest.raises(PersistenceScopeError, match="Undeclared collection"):
+            ctx.collection("writer", "shared_records")
+
+
+@pytest.mark.parametrize("change", [
+    {"owner_module": None}, {"owner_module": ""}, {"indexes": [], "owner_fields": []},
+    {"collection": "different_literal"}, {"mongo_collection": None},
+])
+def test_literal_aggregate_needs_explicit_unique_owner_and_real_definition(change):
+    value = literal_aggregate_contract()
+    value["shared_collections"][0].update(change)
+    with pytest.raises(DataContractLoadError):
+        context(value=value)
+
+
+def test_reference_without_a_declared_target_cannot_claim_literal_aggregate_authority():
+    value = literal_aggregate_contract()
+    entry = value["shared_collections"][0]
+    entry.pop("indexes")
+    entry.pop("owner_fields")
+    with pytest.raises(DataContractLoadError, match="one declared collection owner"):
+        context(value=value)
+
+
+@pytest.mark.parametrize("named_other_owner", [False, True])
+def test_literal_aggregate_refuses_conflicting_physical_owner(named_other_owner):
+    value = literal_aggregate_contract()
+    if named_other_owner:
+        row = contract()["surfaces"][0]
+        row["surface_id"] = "other_writer"
+        row["collections"][0]["ownership"]["surface_id"] = "other_writer"
+        value["surfaces"] = [row]
+    else:
+        other = deepcopy(value["shared_collections"][0])
+        other["owner_module"] = "other_writer"
+        value["shared_collections"].append(other)
+    with pytest.raises(DataContractLoadError, match="conflicting physical collection owners"):
+        context(value=value)
+
+
+def test_literal_runtime_aggregate_does_not_authorize_factory_generation():
+    from mozaiksai.core.runtime.persistence.intent_loader import (
+        validate_complete_data_contract_ownership,
+    )
+
+    with pytest.raises(DataContractLoadError):
+        validate_complete_data_contract_ownership(literal_aggregate_contract())

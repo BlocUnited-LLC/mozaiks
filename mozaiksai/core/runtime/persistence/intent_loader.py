@@ -11,6 +11,7 @@ DataEntityIndex = dict[tuple[str, str], dict[str, Any]]
 _OWNERSHIP_FIELDS = frozenset({"scope", "entity", "tenancy", "owner_field", "fields"})
 _COLLECTION_DEFINITION_FIELDS = _OWNERSHIP_FIELDS | {
     "ownership", "indexes", "lifecycle", "search_by", "module_id", "entity_name", "scope_field",
+    "owner_fields", "record_key_fields",
 }
 _SHARED_REFERENCE_FIELDS = frozenset({
     "owner_module", "name", "mongo_collection", "primary_alias", "read_by", "shared_with", "notes",

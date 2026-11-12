@@ -90,10 +90,33 @@ def _literal_names(collection: Mapping[str, Any]) -> frozenset[str]:
     )
 
 
+
+def _literal_aggregate_owner(entry: Any) -> str | None:
+    """An existing runtime aggregate can own a literal without a logical entity.
+
+    Definition metadata distinguishes this declaration from a reference. It
+    supplies no logical collection binding or factory generation authority.
+    """
+    if not isinstance(entry, Mapping) or _storage_name(entry):
+        return None
+    owner = entry.get("owner_module")
+    if not isinstance(owner, str) or not owner.strip() or len(_literal_names(entry)) != 1:
+        return None
+    if any(key in entry and (not isinstance(entry[key], str) or not entry[key].strip())
+           for key in _LITERAL_FIELDS):
+        return None
+    if not any(isinstance(entry.get(key), list) and entry[key] for key in ("indexes", "owner_fields")):
+        return None
+    return owner.strip()
+
+
 def _shared_grants(contract: DataContract | None) -> list[_SharedGrant]:
     grants: list[_SharedGrant] = []
     owned = _owned_collections(contract)
-    for index, entry in enumerate((contract or {}).get("shared_collections") or []):
+    shared = (contract or {}).get("shared_collections") or []
+    literal_aggregates = [(owner, _literal_names(entry)) for entry in shared
+                          if (owner := _literal_aggregate_owner(entry)) is not None]
+    for index, entry in enumerate(shared):
         if not isinstance(entry, Mapping):
             continue
         declarations: list[Mapping[str, Any]] = []
@@ -133,16 +156,18 @@ def _shared_grants(contract: DataContract | None) -> list[_SharedGrant]:
                 continue  # Unmarked grants retain their existing operation behavior.
             if not isinstance(access, str) or access != "read_only":
                 raise DataContractLoadError("Shared collection access must be read_only or null when declared")
-            if len(targets) != 1:
+            literal_only = not targets and _literal_aggregate_owner(entry) == owner
+            if len(targets) != 1 and not literal_only:
                 raise DataContractLoadError("A read_only grant must resolve to one declared collection owner")
-            target = next(iter(targets))
+            target = next(iter(targets), None)
             if any(
                 key != target and (
-                    _physical_identity(key) == _physical_identity(target)
+                    (target is not None and _physical_identity(key) == _physical_identity(target))
                     or bool(target_literals & _literal_names(row))
                 )
                 for key, (_kind, row) in owned.items()
-            ):
+            ) or any(other_owner != owner and bool(target_literals & other_literals)
+                     for other_owner, other_literals in literal_aggregates):
                 raise DataContractLoadError("A read_only target has conflicting physical collection owners")
             read_only.add(declaration["module"].strip())
         grants.append(_SharedGrant(

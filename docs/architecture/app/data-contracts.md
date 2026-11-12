@@ -192,6 +192,13 @@ access retains existing behavior. Unknown modes and conflicting targets fail loa
 and missing dispatch-module identity cannot access restricted targets. This
 least-privilege handle contract does not sandbox Python inside the host.
 
+Existing runtime aggregate definitions may identify an explicit owner and one
+literal collection without a logical entity, with real `indexes` or
+`owner_fields` metadata. Their explicit readers receive the same literal-handle
+write fence; no logical binding is inferred. Reference-only rows still require
+a declared target, ambiguous owners fail loading, and these incomplete runtime
+definitions do not satisfy Factory's complete collection ownership contract.
+
 Verified pack compilation preserves owner-declared aliases and references,
 accepts identical contributions once, and rejects retargeted aliases or changed
 reader declarations. A reference does not create another collection or index,
