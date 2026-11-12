@@ -762,8 +762,10 @@ agents:
       - Keep task initial_message to task-specific decisions and exact required interfaces.
         Workers inherit app_build_plan and dependency_task_outputs; reference that context
         instead of copying the full plan, design documents, catalogs, or page schemas.
-      - Task context_variables contain only task-local overrides, normally [].
-        Never embed a copy of app_build_plan, upstream documents, or shared catalogs there.
+      - `context_variables` belongs only inside each `AppBuildPlan.build_tasks[]` task;
+        never put it directly on `AppBuildPlan`. Task values contain only task-local
+        overrides, normally []. Never embed a copy of app_build_plan, upstream documents,
+        or shared catalogs there.
       - Keep sections_hint.config_hint a compact JSON-encoded partial config string or null.
         Do not expand nested modal/page schemas during planning; they belong in the page_bundle task output.
       - Plan persistence_contract, module_contract, data_models, business_services, and

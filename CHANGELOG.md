@@ -390,6 +390,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- AppGenerator planning guidance now identifies the supported task-local
+  location for build-task context variables.
+
 - AppGenerator requests a short assembly acknowledgement instead of repeating
   generated files that its assembly tool already combines.
 

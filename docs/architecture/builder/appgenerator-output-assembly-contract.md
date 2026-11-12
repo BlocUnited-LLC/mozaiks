@@ -611,6 +611,10 @@ Auth scaffolding uses an assembled
 `app.json` when present. A rejected or empty plan cannot fall through to standalone
 page generation.
 
+Task-local `context_variables` belong to individual `AppBuildPlan.build_tasks[]`
+entries, not to `AppBuildPlan` itself. The structured-output boundary rejects
+unknown plan-level fields before plan review.
+
 The workflow-owned `review_app_build_plan` tool validates the strict AppBuildPlan
 model, registered pack origins, approved app-owned module identities, page
 inventory, and complete genesis task ownership. Capability sources use the
