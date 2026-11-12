@@ -613,6 +613,65 @@ async def test_planner_prompt_uses_verified_inventory_not_graph_write_authority(
     assert {"kind": "page_binding", "target_kind": "page", "target_id": "Focus", "affected_paths": ["ui/pages/custom/focus.jsx"]} in payload["available_targets"]
 
 
+def _server_search_bundle():
+    files = _saved_bundle()
+    files["modules/projects/module.yaml"] = "module:\n  id: projects\nactions:\n  - id: list_projects\n"
+    page = yaml.safe_load(files["ui/pages/projects.yaml"])
+    page["sections"].append({"id": "list", "primitive": "DataTable", "config": {
+        "columns": ["name"], "api_endpoint": "/api/modules/projects/list_projects",
+        "pagination": True, "pagination_mode": "server", "page_size": 20,
+        "data_key": "items", "total_key": "total", "search": True,
+    }})
+    files["ui/pages/projects.yaml"] = yaml.safe_dump(page)
+    return files
+
+
+@pytest.mark.asyncio
+async def test_presentation_only_search_request_accepts_page_only_classification():
+    runner = _FakeAgentRunner(_make_classification(surfaces=[_entry(target_id="projects")]).model_dump())
+    planner = ContractSurfacePlanner(agent_runner=runner, config_loader=_enabled_contract_surface_config,
+                                     pack_loader=_planner_pack)
+    request = _planner_request().model_copy(update={"raw_user_request": (
+        "Change the padding around the search input only, keeping matching behavior unchanged"
+    )})
+    plan = await planner.propose(
+        refinement_request=request, routing_decision=_planner_routing_decision(),
+        workspace_files=_server_search_bundle(), allowed_paths=["ui/pages/projects.yaml"],
+    )
+    assert not plan.fallback_to_workflow
+    assert [surface.kind for surface in plan.surfaces] == ["page_binding"]
+
+
+@pytest.mark.asyncio
+async def test_server_query_classification_admits_owner_only_within_write_scope():
+    entries = [_entry(target_id="projects"), _entry(kind="module_action", target_id="projects", target_kind="module")]
+    runner = _FakeAgentRunner(_make_classification(surfaces=entries).model_dump())
+    planner = ContractSurfacePlanner(agent_runner=runner, config_loader=_enabled_contract_surface_config,
+                                     pack_loader=_planner_pack)
+    request = _planner_request().model_copy(update={"raw_user_request": "Filter projects by name"})
+    files = _server_search_bundle()
+    plan = await planner.propose(refinement_request=request, routing_decision=_planner_routing_decision(),
+                                 workspace_files=files)
+    assert [surface.kind for surface in plan.surfaces] == ["module_action", "page_binding"]
+    with pytest.raises(ValueError, match="explicitly approved write scope"):
+        await planner.propose(refinement_request=request, routing_decision=_planner_routing_decision(),
+                              workspace_files=files, allowed_paths=["ui/pages/projects.yaml"])
+
+
+@pytest.mark.asyncio
+async def test_server_query_classifier_can_request_workflow_when_owner_is_unavailable():
+    runner = _FakeAgentRunner(_make_classification(
+        fallback_to_workflow=True, fallback_reason="Server query owner unavailable",
+    ).model_dump())
+    planner = ContractSurfacePlanner(agent_runner=runner, config_loader=_enabled_contract_surface_config,
+                                     pack_loader=_planner_pack)
+    request = _planner_request().model_copy(update={"raw_user_request": "Filter projects by name"})
+    plan = await planner.propose(refinement_request=request, routing_decision=_planner_routing_decision(),
+                                 workspace_files=_server_search_bundle(), allowed_paths=["ui/pages/projects.yaml"])
+    assert plan.fallback_to_workflow
+    assert plan.fallback_reason == "Server query owner unavailable"
+
+
 @pytest.mark.asyncio
 async def test_planner_rejects_missing_snapshot_before_classifier():
     runner = _FakeAgentRunner({})

@@ -341,20 +341,29 @@ test('notes journey checks creation, filtering and restoration after clearing', 
         document.querySelector('#save').onclick = () => {
           const li = document.createElement('li');
           li.textContent = document.querySelector('#title').value;
+          li.dataset.body = document.querySelector('#body').value;
           document.querySelector('#notes').append(li);
         };
         window.filterMode = 'works';
         document.querySelector('#search').oninput = event => {
           for (const item of document.querySelectorAll('#notes li')) {
-            if (window.filterMode === 'works' || (window.filterMode === 'sticky' && event.target.value)) {
-              item.hidden = !item.textContent.toLowerCase().includes(event.target.value.toLowerCase());
+            if (window.filterMode === 'works' || window.filterMode === 'title_and_body' || (window.filterMode === 'sticky' && event.target.value)) {
+              const searchable = window.filterMode === 'title_and_body' ? item.textContent + item.dataset.body : item.textContent;
+              item.hidden = !searchable.toLowerCase().includes(event.target.value.toLowerCase());
             }
           }
         };
       </script>`);
     await createNote(page, 'Cobalt acceptance note', 'Synthetic body');
-    await createNote(page, 'Amber acceptance note', 'Another synthetic body');
+    await createNote(page, 'Amber acceptance note', 'Cobalt appears only in the body');
     await verifyTitleSearch(page, 'Cobalt acceptance note', 'Amber acceptance note', 'Cobalt', 500);
+
+    await t.test('matching body alone must not count as a title match', async () => {
+      await page.evaluate(() => { window.filterMode = 'title_and_body'; });
+      await assert.rejects(verifyTitleSearch(page, 'Cobalt acceptance note', 'Amber acceptance note', 'Cobalt', 250));
+      await page.getByRole('searchbox').fill('');
+      await page.evaluate(() => { window.filterMode = 'works'; });
+    });
 
     await t.test('a field that does not filter fails', async () => {
       await page.evaluate(() => { window.filterMode = 'broken'; });

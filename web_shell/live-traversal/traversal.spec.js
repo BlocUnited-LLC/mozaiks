@@ -563,7 +563,7 @@ test('traversal: idea to accepted, validated artifact', async ({ page }) => {
     // baseline preview record survives the new preview's database lifecycle.
     journey.cross_version_data_continuity = 'not_proven_separate_preview_databases';
     await createNote(frame, firstTitle, 'A synthetic note for title-search acceptance.');
-    await createNote(frame, secondTitle, 'A second synthetic note must return after clearing search.');
+    await createNote(frame, secondTitle, 'Cobalt appears only in this note body; clearing search must restore it.');
     await verifyTitleSearch(frame, firstTitle, secondTitle, 'Cobalt');
     journey.refined_create_list_and_search = true;
     await page.screenshot({ path: path.join(OUT, '96-refined-notes.png'), fullPage: true }).catch(() => {});

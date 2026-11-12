@@ -390,6 +390,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Scoped page refinements receive supported page contracts and linked
+  server-query context, with guidance for selecting the query owner when server
+  matching changes and for keeping presentation-only edits page-scoped.
+
 - AppGenerator planning guidance now identifies the supported task-local
   location for build-task context variables.
 
