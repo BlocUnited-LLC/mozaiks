@@ -163,6 +163,46 @@ AUTH_ISSUER=https://your-provider/
 
 ---
 
+## Independently Configured JWT Verifiers
+
+Use the public adapter directly when a process validates tokens for multiple
+resources with distinct issuer, audience or claim settings:
+
+```python
+from mozaiksai.core.auth import GenericJWTAdapter, JWTAdapterConfig
+
+verifier = GenericJWTAdapter(config=JWTAdapterConfig(
+    issuer="https://identity.example.com",
+    jwks_url="https://identity.example.com/.well-known/jwks.json",
+    audience="resource-api",
+    scopes_claim="scope",
+    required_scope="resource.read",
+    clock_skew_seconds=0,
+))
+claims = await verifier.validate_token(access_token)
+```
+
+Both classes are also public through `mozaiksai.core.auth.adapters`. Reuse an
+instance for its configured resource; each instance owns its discovery and JWKS
+caches. Construction does not register the instance, change environment settings
+or replace the adapter returned by `get_auth_adapter()`. The latter continues to
+use the process configuration. `JWTAdapterConfig.from_env(settings)` accepts an
+explicit settings mapping when environment-style names are convenient. Config
+objects are mutable: treat them as fixed after constructing a verifier.
+
+Signature, issuer, audience and access-token type checks are the same as for the
+process adapter. An audience is required. An audience list containing the
+configured value is accepted; this is not an exclusive-audience check, and there
+is no rejected-audience setting. Distinct configured audiences alone do not
+isolate a token listing both. Apply any stronger routing policy at every resource
+that might accept such a token.
+
+The default clock skew is 120 seconds. Set `clock_skew_seconds=0` to reject an
+expired token without that allowance at validation time. This does not revoke
+already-returned claims or continuously authorize a connection. Token validation
+does not issue OAuth grants, establish product consent, grant membership or
+replace current resource authorization and revocation checks.
+
 ## Claim Mappings
 
 Different providers put user data in different JWT claims. Configure as needed:

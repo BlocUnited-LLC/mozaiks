@@ -23,6 +23,7 @@ from mozaiksai.core.auth.adapters.base import (
     AuthError,
     UserClaims,
 )
+from mozaiksai.core.auth.adapters.jwt_adapter import GenericJWTAdapter, JWTAdapterConfig
 from mozaiksai.core.auth.adapters.registry import (
     get_auth_adapter,
     list_adapters,
@@ -33,6 +34,8 @@ __all__ = [
     "AuthAdapter",
     "UserClaims",
     "AuthError",
+    "GenericJWTAdapter",
+    "JWTAdapterConfig",
     "get_auth_adapter",
     "register_adapter",
     "list_adapters",
