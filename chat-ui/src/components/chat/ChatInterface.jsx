@@ -707,7 +707,7 @@ const ModernChatInterface = ({
                   className="mx-auto w-8 h-8 md:w-10 md:h-10 opacity-70 group-hover:opacity-100 transition-all duration-300 group-hover:scale-105"
                   alt=""
                   aria-hidden="true"
-                  onError={applyBrandImageFallback}
+                  onError={event => applyBrandImageFallback(event, getBrandLogoSrc({ branding: { name: chatTheme?.branding?.name } }))}
                 />
                 {conversationMode === 'workflow' && (
                   <span aria-hidden="true" className="block mt-1 text-[10px] font-medium text-[var(--color-text-primary)]">Results</span>
@@ -737,7 +737,7 @@ const ModernChatInterface = ({
                   className={`mx-auto w-7 h-7 transition-all duration-300 group-hover:scale-105 ${hasUnseenArtifact && conversationMode === 'workflow' ? 'opacity-100' : 'opacity-80 group-hover:opacity-100'}`}
                   alt=""
                   aria-hidden="true"
-                  onError={applyBrandImageFallback}
+                  onError={event => applyBrandImageFallback(event, getBrandLogoSrc({ branding: { name: chatTheme?.branding?.name } }))}
                 />
                 {conversationMode === 'workflow' && (
                   <span aria-hidden="true" className="block mt-1 text-[10px] font-medium text-[var(--color-text-primary)]">Results</span>
@@ -757,7 +757,7 @@ const ModernChatInterface = ({
                 src={brandLogoSrc}
                 className="w-8 h-8 md:w-10 md:h-10 opacity-70 group-hover:opacity-100 transition-all duration-300 group-hover:scale-105"
                 alt="Artifact Canvas"
-                onError={applyBrandImageFallback}
+                onError={event => applyBrandImageFallback(event, getBrandLogoSrc({ branding: { name: chatTheme?.branding?.name } }))}
               />
               <div className="absolute inset-0 bg-[rgba(var(--color-primary-light-rgb),0.1)] rounded-lg blur opacity-0 group-hover:opacity-100 transition-opacity duration-300 -z-10"></div>
             </button>

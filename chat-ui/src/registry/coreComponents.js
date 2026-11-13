@@ -20,6 +20,7 @@ import { registerComponent } from './componentRegistry';
 import ChatPage from '../pages/ChatPage';
 import { SchemaPage } from '../ui/screens/SchemaPage.jsx';
 import ProfilePage from '../pages/ProfilePage.jsx';
+import AdminPage from '../pages/AdminPage.jsx';
 
 // Transition renderers — referenced by transition.ui.component
 import { LauncherScreen } from '../ui/screens/LauncherScreen.jsx';
@@ -54,6 +55,11 @@ registerComponent('ConfirmScreen', ConfirmScreen, {
 registerComponent('ProfilePage', ProfilePage, {
   core: true,
   description: 'Host-owned account page — calls /api/me and /api/me/preferences.',
+});
+
+registerComponent('AdminPortal', AdminPage, {
+  core: true,
+  description: 'Permission-aware admin shell for app-declared administration pages.',
 });
 
 registerComponent('WorkflowCompletion', WorkflowCompletion, {

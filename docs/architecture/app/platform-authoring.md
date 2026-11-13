@@ -509,3 +509,22 @@ That means:
 - [surface-model.md](surface-model.md)
 
 
+
+## App home and assistant chrome
+
+The profile menu includes the declared `startup.landing_spot` when it resolves
+to a page the current user may view, using the existing page label.
+
+The shell projects `assistant_available` from the active app's `config/ai.json`
+Ask or chat configuration. Floating assistants require this projection. The
+projection describes configuration, rather than provider health or permission
+to invoke a model. Apps without this configuration retain ordinary navigation.
+
+Chat surfaces consume the existing `theme.branding.logo`. An app name without
+a logo produces an escaped text monogram from that name.
+
+The shared shell registers `AdminPortal` as a core component. App registries opt
+in to administration routes and control their visibility with
+`show_in_navigation`; visible entries retain the `admin` role requirement.
+Factory admin barrels register their app-specific extensions. Administration
+requests use the current authenticated session through `authFetch`.

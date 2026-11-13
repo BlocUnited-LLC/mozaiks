@@ -77,7 +77,7 @@ function pagePanels(panels, pageId) {
 // Root
 // ---------------------------------------------------------------------------
 
-export default function AdminPage() {
+export default function AdminPage({ route } = {}) {
   const { user } = useChatUI()
   const location = useLocation()
   const { data: config } = useAdminFetch('/api/admin/config')
@@ -95,7 +95,7 @@ export default function AdminPage() {
     )
   }
 
-  const activePage        = AdminSectionRoute(location.pathname)
+  const activePage        = route?.meta?.adminPage || AdminSectionRoute(location.pathname)
   const allPages          = config?.pages ?? []
   const allRuntimePanels  = normalizeRuntimePanels(config?.runtime_panels)
   const allModulePanels   = normalizeModulePanels(config?.module_panels)

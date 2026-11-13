@@ -94,7 +94,7 @@ const ArtifactPanel = ({
                       src={brandLogoSrc}
                       alt="Mozaiks Logo"
                       className="w-16 h-16 sm:w-20 sm:h-20"
-                      onError={applyBrandImageFallback}
+                      onError={event => applyBrandImageFallback(event, getBrandLogoSrc({ branding: { name: chatTheme?.branding?.name } }))}
                     />
                   </div>
                   <div className="text-[11px] uppercase tracking-[0.28em] text-[rgba(var(--color-primary-light-rgb),0.72)] mb-3 heading-font">

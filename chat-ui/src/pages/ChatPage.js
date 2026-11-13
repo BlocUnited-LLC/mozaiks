@@ -6203,7 +6203,7 @@ const ChatPage = () => {
       onOpen={handleOpenViewWidget}
       onClose={handleCloseViewWidget}
       brandLogoSrc={brandLogoSrc}
-      onBrandImageError={applyBrandImageFallback}
+      onBrandImageError={event => applyBrandImageFallback(event, getBrandLogoSrc({ branding: { name: chatTheme?.branding?.name } }))}
       appDisplayName={resolvedAppDisplayName}
       onAskClick={handleViewWidgetAsk}
       onWorkflowClick={handleViewWidgetWorkflow}
@@ -6456,7 +6456,7 @@ const ChatPage = () => {
               src={brandLogoSrc} 
               alt="mozaiksai" 
               className="w-11 h-11 relative z-10 group-hover:scale-110 transition-transform"
-              onError={applyBrandImageFallback}
+              onError={event => applyBrandImageFallback(event, getBrandLogoSrc({ branding: { name: chatTheme?.branding?.name } }))}
             />
           </button>
         </div>

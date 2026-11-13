@@ -76,27 +76,27 @@ function buildAppPath(appId, templatePath) {
  * When appId is present, show app-scope pages with appId substituted into paths.
  * Otherwise, show workspace-scope pages as the top-level Studio nav.
  */
-function buildNavGroups(adminPages, appId) {
+function buildNavGroups(adminPages, appId, shellSurface = 'studio') {
   if (!adminPages?.length) {
     // Fallback before API responds — show minimal workspace nav
     return [
       {
         label: null,
-        items: [
+        items: shellSurface === 'studio' ? [
           { id: 'apps', label: 'Apps', path: '/apps', icon: RiAppsFill, exact: true },
-        ],
+        ] : [],
       },
     ]
   }
 
-  if (appId) {
+  if (appId || shellSurface === 'platform') {
     const appPages = adminPages
       .filter((p) => p.scope === 'app' && p.enabled !== false && p.show_in_navigation !== false)
       .sort((a, b) => a.order - b.order)
       .map((p) => ({
         id: p.id,
         label: p.label,
-        path: buildAppPath(appId, p.path),
+        path: appId ? buildAppPath(appId, p.path) : p.path,
         icon: resolveIcon(p.icon),
         exact: true,
       }))
@@ -264,11 +264,11 @@ function AdminMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio', shellLabel 
 export function AdminWorkspaceLayout({ children, adminPages = null }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
-  const { appName } = useNavigation()
+  const { appName, surface } = useNavigation()
   const appId = resolveAppId(location.pathname)
   const shellLabel = resolveShellLabel(appName, appId)
-  const shellSubtext = resolveShellSubtext(appId)
-  const navGroups = useMemo(() => buildNavGroups(adminPages, appId), [adminPages, appId])
+  const shellSubtext = surface === 'platform' ? 'App admin' : resolveShellSubtext(appId)
+  const navGroups = useMemo(() => buildNavGroups(adminPages, appId, surface), [adminPages, appId, surface])
   const activeNav = useMemo(() => getActiveNavItem(navGroups, location), [navGroups, location])
   const activeLabel = activeNav.item?.label || activeNav.group?.label || 'Studio'
 

@@ -13,7 +13,6 @@
 
 import { lazy } from 'react'
 
-const AdminPage          = lazy(() => import('@mozaiks/chat-ui/pages/AdminPage.jsx'))
 const StudioPage        = lazy(() => import('./pages/StudioPage.jsx'))
 const AppsPage           = lazy(() => import('./pages/AppsPage.jsx'))
 const WorkspacePerformancePage   = lazy(() => import('./pages/WorkspacePerformancePage.jsx'))
@@ -37,10 +36,6 @@ const ProfilePage         = lazy(() => import('@mozaiks/chat-ui/pages/ProfilePag
 
 export function registerAdminComponents(registerComponent) {
   if (typeof registerComponent !== 'function') return
-
-  registerComponent('AdminPortal', AdminPage, {
-    description: 'Unified admin shell — app, module, and runtime/operator panels. Platform-management surface registered by Studio.',
-  })
 
   registerComponent('StudioPage', StudioPage, {
     description: 'Studio shell — internal router for the first-party app directory and app management surfaces.',

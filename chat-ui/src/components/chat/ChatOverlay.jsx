@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import useTheme from '../../styles/useTheme';
 import {
   applyBrandImageFallback,
   getBrandLogoSrc,
@@ -18,7 +19,8 @@ const ChatOverlay = ({
   workflowName = null
 }) => {
   const navigate = useNavigate();
-  const brandLogoSrc = getBrandLogoSrc(null);
+  const { theme } = useTheme();
+  const brandLogoSrc = getBrandLogoSrc(theme);
 
   if (!isOpen) return null;
 
@@ -87,7 +89,7 @@ const ChatOverlay = ({
                   src={brandLogoSrc}
                   alt="Mozaik"
                   className="w-12 h-12 opacity-50"
-                  onError={applyBrandImageFallback}
+                  onError={event => applyBrandImageFallback(event, getBrandLogoSrc({ branding: { name: theme?.branding?.name } }))}
                 />
               </div>
               <div>

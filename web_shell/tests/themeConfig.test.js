@@ -153,6 +153,10 @@ test('shared brand fallbacks are bundled and missing backgrounds remain optional
   const { getBrandLogoSrc, getBrandLoadingIconSrc, getChatBackgroundSrc, applyBrandImageFallback } = module.exports;
   assert.match(getBrandLogoSrc({}), /^data:image\/png;base64,/);
   assert.equal(getBrandLoadingIconSrc({}), getBrandLogoSrc({}));
+  const initials = decodeURIComponent(getBrandLogoSrc({ branding: { name: '<& Notes' } }));
+  assert.ok(initials.includes('&lt;&amp;'));
+  assert.ok(!initials.includes('<&'));
+  assert.equal(getBrandLogoSrc({ branding: { name: 'App', logo: '/app-logo.png' } }), '/app-logo.png');
   assert.equal(getChatBackgroundSrc({}), null);
   assert.equal(getBrandLogoSrc({ branding: { logo: '/assets/custom.png' } }), '/assets/custom.png');
   assert.equal(getChatBackgroundSrc({ branding: { chatbackgroundImage: '/assets/custom-bg.png' } }), '/assets/custom-bg.png');

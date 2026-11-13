@@ -12,6 +12,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- Standalone app administration uses the shared core renderer and authenticated configuration reads.
+- App profile menus offer the declared app home, floating assistants follow app AI configuration, and chat surfaces use the app brand.
+
+
 ### Added
 
 - Factory refinement agents can receive advisory file and dependency evidence

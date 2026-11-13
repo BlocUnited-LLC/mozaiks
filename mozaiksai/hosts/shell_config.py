@@ -997,6 +997,14 @@ async def build_shell_config(
         workflows = ai.get("workflows") or {}
         result["chat_startup_mode"] = chat.get("chat_startup_mode") or chat.get("startup_mode") or "ask"
         result["entry_point"] = workflows.get("entry_point")
+        ask = ai.get("ask") if isinstance(ai.get("ask"), dict) else {}
+        ask_prompt = ask.get("ask_mode_prompt")
+        result["assistant_available"] = bool(
+            (isinstance(ask_prompt, str) and ask_prompt.strip())
+            or chat.get("chat_startup_mode") == "ask"
+            or chat.get("startup_mode") == "ask"
+            or (isinstance(workflows.get("entry_point"), str) and workflows["entry_point"].strip())
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Failed to read shell config") from exc
 
@@ -1109,6 +1117,10 @@ async def build_shell_config(
                 "appShell": True,
                 "adminPage": route["admin_page"],
                 "shellMode": "workspace",
+                "navigation": {
+                    "include": route["show_in_navigation"],
+                    "scope": "profile",
+                },
                 **({"surfaces": route_surfaces} if isinstance(route_surfaces, list) else {}),
             },
         })
