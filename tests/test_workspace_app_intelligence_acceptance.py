@@ -187,7 +187,9 @@ async def test_active_workspace_app_intelligence_feeds_refinement_and_chat_ui(
         artifact_store=store,
     )
     assert intelligence["present"] is True
-    assert intelligence["source"] == "current_app_context"
+    assert intelligence["source"] == "artifact_zip"
+    assert intelligence["provenance"]["build_record_id"] == registration.app_bundle_artifact_version_id
+    assert intelligence["provenance"]["verified"] is False
     catalog = intelligence["app_intelligence_catalog"]
     coverage = catalog["coverage"]
     assert coverage["file_count"] == registration.indexed_file_count

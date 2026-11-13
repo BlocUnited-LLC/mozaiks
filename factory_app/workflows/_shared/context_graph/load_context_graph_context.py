@@ -8,6 +8,10 @@ from factory_app.workflows._shared.context_graph.prompt_pack import (
     build_context_graph_unavailable_pack,
 )
 from factory_app.workflows._shared.platform.build_target import require_build_binding
+from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
+    revision_baseline_required,
+    revision_source_artifact_id,
+)
 from mozaiksai.control_plane.app_context import (
     get_current_app_context_graph,
     get_current_app_context_summary,
@@ -16,17 +20,104 @@ from mozaiksai.control_plane.app_context import (
 )
 from mozaiksai.control_plane.context_graph import build_context_graph_catalog
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
+from mozaiksai.control_plane.implementations.dependency_graph_agent import DependencyGraphAgent
 from mozaiksai.core.app_context import build_app_intelligence_catalog, build_source_corpus_catalog
+from mozaiksai.core.usage.context import AuxiliaryUsageContext
 
 
 async def load_context_graph_context(context_variables: Any = None) -> dict[str, Any]:
     """Load a compact Context Graph pack into workflow context before chat starts."""
     data = _context_data(context_variables)
-    app_id = require_build_binding(context_variables).target_app_id
+    binding = require_build_binding(context_variables)
+    app_id = binding.target_app_id
 
     request_text = _request_text(data)
-    artifact_version_id = _text(data.get("artifact_version_id"))
+    artifact_version_id = revision_source_artifact_id(data)
+    _set_context_value(context_variables, "app_context_summary", None)
+    _set_context_value(context_variables, "current_app_context_version_id", None)
+    _set_context_value(context_variables, "app_context_required", _requires_current_app_context(data))
+    _set_app_intelligence_unavailable(context_variables, reason="source_not_loaded", warnings=[])
+    _set_graph_unavailable(context_variables, reason="source_not_loaded", warnings=[])
+
+    if not artifact_version_id and (
+        data.get("artifact_version_id") or data.get("revision_source_artifact_version_id")
+        or revision_baseline_required(data)
+    ):
+        return _set_graph_unavailable(context_variables, reason="no_revision_baseline", warnings=[])
+
+    if artifact_version_id:
+        pinned = bool(data.get("revision_source_artifact_version_id"))
+        tool_context = ControlPlaneToolContext(
+            checkpoint="dependency_graph_requested",
+            app_id=_text(data.get("app_id")),
+            target_app_id=app_id,
+            user_id=_text(data.get("user_id")),
+            build_family="app_bundle" if pinned else _text(data.get("artifact_kind")),
+            build_key="app_bundle" if pinned else _text(data.get("artifact_key")),
+            build_record_id=artifact_version_id,
+            requested_workflow_id=_text(data.get("workflow_name")),
+            source_surface=_text(data.get("screen")),
+            raw_user_request=request_text,
+        )
+        loaded = await load_context_graph_for_tool(context=tool_context, require_verified=True)
+        if not loaded.get("present"):
+            return _set_graph_unavailable(
+                context_variables,
+                reason=loaded.get("reason") or "artifact_source_unavailable",
+                warnings=list(loaded.get("warnings") or []),
+            )
+        artifact = loaded["artifact"]
+        commit = artifact.commit_metadata
+        metadata = commit.metadata
+        if (
+            binding.phase != "refinement" or not tool_context.user_id
+            or commit.author_user_id != tool_context.user_id
+            or metadata.get("target_app_id") != binding.target_app_id
+            or metadata.get("build_registry_id") != binding.build_registry_id
+            or artifact.lifecycle_status in {"archived", "deleted"}
+        ):
+            return _set_graph_unavailable(context_variables, reason="artifact_owner_mismatch", warnings=[])
+        _set_artifact_workspace_intelligence_context(context_variables, loaded)
+        catalog = build_context_graph_catalog(
+            graph=loaded["graph"], raw_user_request=request_text, file_map=loaded["file_map"],
+        )
+        tool_context = tool_context.model_copy(update={"build_family": artifact.build_family, "build_key": artifact.build_key})
+        health = loaded["workspace"].get("scan_health") or {}
+        catalog.update({
+            "source": loaded["workspace"]["source"],
+            **loaded["provenance"],
+            "warnings": list(loaded.get("warnings") or []),
+            "scan_health": health,
+        })
+        pack = build_context_graph_prompt_pack(
+            catalog=catalog, source=loaded["workspace"]["source"],
+            warnings=list(loaded.get("warnings") or []),
+        )
+        if (
+            request_text and tool_context.app_id and tool_context.user_id
+            and data.get("workflow_name") in {"AppGenerator", "AgentGenerator"}
+        ):
+            assessment = await DependencyGraphAgent().analyze(
+                context=tool_context,
+                usage_context=AuxiliaryUsageContext(
+                    app_id=tool_context.app_id, user_id=tool_context.user_id,
+                    chat_id=_text(data.get("chat_id")),
+                    workflow_name=_text(data.get("workflow_name")),
+                    run_build_binding=binding,
+                ),
+                run_build_binding=binding,
+            )
+            if assessment is not None:
+                advisory = assessment.model_dump(mode="json")
+                identity = ("app_id", "build_record_id", "build_family", "build_key", "bundle_digest", "graph_hash")
+                if all(advisory.get(key) == pack.get(key) for key in identity):
+                    pack["dependency_graph"] = advisory
+        _set_graph_loaded(context_variables, catalog=catalog, pack=pack, health=health)
+        return {"present": True, "source": "artifact_workspace", "graph_id": pack.get("graph_id"), "build_record_id": artifact.id}
+
     current_summary = await get_current_app_context_summary(app_id=app_id)
+    if current_summary.app_id not in {None, app_id}:
+        return _set_graph_unavailable(context_variables, reason="current_context_target_mismatch", warnings=[])
     _set_context_value(context_variables, "app_context_summary", current_summary.model_dump(mode="json"))
     _set_context_value(context_variables, "current_app_context_version_id", current_summary.context_version_id)
     _set_context_value(
@@ -40,83 +131,15 @@ async def load_context_graph_context(context_variables: Any = None) -> dict[str,
         context_variables=context_variables,
     )
 
-    if artifact_version_id:
-        loaded = await load_context_graph_for_tool(
-            context=ControlPlaneToolContext(
-                checkpoint="workflow_startup",
-                app_id=app_id,
-                user_id=_text(data.get("user_id")),
-                build_family=_text(data.get("artifact_kind")),
-                build_key=_text(data.get("artifact_key")),
-                build_record_id=artifact_version_id,
-                requested_workflow_id=_text(data.get("workflow_name")),
-                source_surface=_text(data.get("screen")),
-                raw_user_request=request_text,
-            )
-        )
-        if loaded.get("present"):
-            _set_artifact_workspace_intelligence_context(context_variables, loaded)
-            catalog = build_context_graph_catalog(
-                graph=loaded["graph"],
-                raw_user_request=request_text,
-                file_map=loaded["file_map"],
-            )
-            artifact = loaded["artifact"]
-            health = loaded["workspace"].get("scan_health") or {
-                "source": loaded["workspace"]["source"],
-                "selected_file_count": len(loaded["file_map"]),
-                "node_count": catalog.get("node_count"),
-                "edge_count": catalog.get("edge_count"),
-                "warnings": list(loaded.get("warnings") or []),
-            }
-            catalog = {
-                **catalog,
-                "source": loaded["workspace"]["source"],
-                "artifact_version_id": artifact.id,
-                "artifact_kind": artifact.build_family,
-                "artifact_key": artifact.build_key,
-                "warnings": list(loaded.get("warnings") or []),
-                "scan_health": health,
-            }
-            pack = build_context_graph_prompt_pack(
-                catalog=catalog,
-                source=loaded["workspace"]["source"],
-                warnings=list(loaded.get("warnings") or []),
-            )
-            _set_context_value(context_variables, "context_graph_pack", pack)
-            _set_context_value(context_variables, "context_graph_catalog", catalog)
-            _set_context_value(context_variables, "context_graph_status", "loaded")
-            _set_context_value(context_variables, "context_graph_reason", None)
-            _set_context_value(context_variables, "context_graph_warnings", list(loaded.get("warnings") or []))
-            _set_context_value(context_variables, "context_graph_health", health)
-            return {"present": True, "source": "artifact_workspace", "graph_id": pack.get("graph_id")}
-
     lookup = await get_current_app_context_graph(app_id=app_id)
+    if lookup.graph is not None and lookup.graph.app_id != app_id:
+        _set_app_intelligence_unavailable(context_variables, reason="current_context_target_mismatch", warnings=[])
+        return _set_graph_unavailable(context_variables, reason="current_context_target_mismatch", warnings=[])
     if lookup.graph is None:
-        _set_context_value(
-            context_variables,
-            "context_graph_pack",
-            build_context_graph_unavailable_pack(
-                reason="current_app_context_graph_unavailable",
-                warnings=list(lookup.warnings),
-                source="current_app_context_graph",
-            ),
+        return _set_graph_unavailable(
+            context_variables, reason="current_app_context_graph_unavailable",
+            warnings=list(lookup.warnings), source="current_app_context_graph",
         )
-        _set_context_value(context_variables, "context_graph_catalog", None)
-        _set_context_value(context_variables, "context_graph_status", "unavailable")
-        _set_context_value(context_variables, "context_graph_reason", "current_app_context_graph_unavailable")
-        _set_context_value(context_variables, "context_graph_warnings", list(lookup.warnings))
-        _set_context_value(
-            context_variables,
-            "context_graph_health",
-            {
-                "source": "current_app_context_graph",
-                "status": "unavailable",
-                "reason": "current_app_context_graph_unavailable",
-                "warnings": list(lookup.warnings),
-            },
-        )
-        return {"present": False, "reason": "current_app_context_graph_unavailable", "warnings": list(lookup.warnings)}
 
     catalog = build_context_graph_catalog(
         graph=lookup.graph,
@@ -142,13 +165,29 @@ async def load_context_graph_context(context_variables: Any = None) -> dict[str,
         source="current_app_context_graph",
         warnings=list(lookup.warnings),
     )
-    _set_context_value(context_variables, "context_graph_pack", pack)
-    _set_context_value(context_variables, "context_graph_catalog", catalog)
-    _set_context_value(context_variables, "context_graph_status", "loaded")
-    _set_context_value(context_variables, "context_graph_reason", None)
-    _set_context_value(context_variables, "context_graph_warnings", list(lookup.warnings))
-    _set_context_value(context_variables, "context_graph_health", health)
+    _set_graph_loaded(context_variables, catalog=catalog, pack=pack, health=health)
     return {"present": True, "source": "current_app_context_graph", "graph_id": pack.get("graph_id")}
+
+
+def _set_graph_loaded(context_variables: Any, *, catalog: dict[str, Any], pack: dict[str, Any], health: dict[str, Any]) -> None:
+    for key, value in {
+        "context_graph_pack": pack, "context_graph_catalog": catalog,
+        "context_graph_status": "loaded", "context_graph_reason": None,
+        "context_graph_warnings": catalog.get("warnings", []), "context_graph_health": health,
+    }.items():
+        _set_context_value(context_variables, key, value)
+
+
+def _set_graph_unavailable(context_variables: Any, *, reason: str, warnings: list[str], source: str = "artifact_workspace") -> dict[str, Any]:
+    pack = build_context_graph_unavailable_pack(reason=reason, warnings=warnings, source=source)
+    for key, value in {
+        "context_graph_pack": pack, "context_graph_catalog": None,
+        "context_graph_status": "unavailable", "context_graph_reason": reason,
+        "context_graph_warnings": warnings,
+        "context_graph_health": {"source": source, "status": "unavailable", "reason": reason, "warnings": warnings},
+    }.items():
+        _set_context_value(context_variables, key, value)
+    return {"present": False, "reason": reason, "warnings": warnings}
 
 
 async def _load_current_app_intelligence_context(
@@ -165,6 +204,12 @@ async def _load_current_app_intelligence_context(
         app_id=app_id,
         app_context_summary=app_context_summary,
     )
+    if (
+        intelligence.snapshot is not None and intelligence.snapshot.app_id != app_id
+        or source.bundle is not None and source.bundle.app_id != app_id
+    ):
+        _set_app_intelligence_unavailable(context_variables, reason="current_context_target_mismatch", warnings=[])
+        return
     warnings = [*list(intelligence.warnings), *list(source.warnings)]
     if intelligence.snapshot is None:
         _set_app_intelligence_unavailable(
@@ -279,12 +324,9 @@ def _context_data(context_variables: Any) -> dict[str, Any]:
 def _set_context_value(context_variables: Any, key: str, value: Any) -> None:
     if context_variables is None:
         return
-    try:
-        if hasattr(context_variables, "set"):
-            context_variables.set(key, value)
-            return
-    except Exception:
-        pass
+    if hasattr(context_variables, "set"):
+        context_variables.set(key, value)
+        return
     data = getattr(context_variables, "data", None)
     if isinstance(data, dict):
         data[key] = value

@@ -259,17 +259,21 @@ async def test_context_graph_startup_reads_canonical_build_record_identity(monke
         assert kwargs["context"].build_record_id == "av_1"
         return {
             "present": True,
-            "artifact": SimpleNamespace(id="av_1", build_family="app_bundle", build_key="app_bundle"),
+            "artifact": SimpleNamespace(id="av_1", build_family="app_bundle", build_key="app_bundle", lifecycle_status="current", commit_metadata=SimpleNamespace(author_user_id="owner", metadata={"target_app_id": "app_1", "build_registry_id": "build-registry-test"})),
             "file_map": file_map, "graph": graph,
+            "provenance": {"app_id": "app_1", "build_record_id": "av_1", "build_family": "app_bundle", "build_key": "app_bundle", "bundle_digest": "sha256:" + "a" * 64, "verified": True},
             "workspace": {"source": "artifact_zip"}, "warnings": [],
         }
 
     monkeypatch.setattr(loader_mod, "load_context_graph_for_tool", load_artifact)
-    context = _Context(factory_context({"app_id": "app_1", "artifact_version_id": "av_1"}))
+    data = factory_context({"app_id": "app_1", "user_id": "owner", "artifact_version_id": "av_1", "build_mode": "revision"})
+    data["run_build_binding"]["phase"] = "refinement"
+    data["run_build_binding"]["build_registry_id"] = "build-registry-test"
+    context = _Context(data)
     result = await loader_mod.load_context_graph_context(context_variables=context)
     assert result["source"] == "artifact_workspace"
-    assert context.data["context_graph_catalog"]["artifact_kind"] == "app_bundle"
-    assert context.data["context_graph_catalog"]["artifact_key"] == "app_bundle"
+    assert context.data["context_graph_catalog"]["build_family"] == "app_bundle"
+    assert context.data["context_graph_catalog"]["build_key"] == "app_bundle"
 
 
 def test_app_and_agent_generators_declare_and_load_context_graph_packs() -> None:

@@ -10,6 +10,8 @@ content: |
 
   Context policy:
   - Treat the explicit scoped file inputs as the only editable files.
+  - Use `dependency_graph`, when supplied, as advisory evidence of paths and
+    relationships in the named build. It does not expand the editable scope.
   - When context tools are available, use `get_app_intelligence_context` for app
     shape and `get_context_graph_scope` for ownership and related source.
   - When available, use `read_app_source_file` for insufficient scoped file

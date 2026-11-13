@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from factory_app.refinement_harness.tools._bundle_workspace import (
-    load_bundle_workspace,
+from factory_app.refinement_harness.tools._artifact_workspace import (
+    load_artifact_workspace,
     safe_relpath,
 )
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
@@ -20,6 +20,7 @@ from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
 from mozaiksai.core.artifacts.store import get_artifact_store
 from mozaiksai.core.usage.context import resolve_auxiliary_usage_context
 
+from .dependency_graph_agent import DependencyGraphAgent
 from .refinement_router import RefinementRequest, RefinementRoutingDecision
 
 _CHECKPOINT_EVENT = "scope_requested"
@@ -42,6 +43,10 @@ class ArtifactScopeProposer:
         self._pack_loader = pack_loader
         self._tool_executor = tool_executor or ControlPlaneToolExecutor(pack_loader=pack_loader)
         self._artifact_store = artifact_store
+        self._dependency_graph_agent = DependencyGraphAgent(
+            agent_runner=self._agent_runner, config_loader=config_loader, pack_loader=pack_loader,
+            artifact_store=artifact_store,
+        )
 
     async def propose(
         self,
@@ -101,10 +106,12 @@ class ArtifactScopeProposer:
             return {}
 
         store = self._artifact_store or get_artifact_store()
-        workspace = await load_bundle_workspace(
-            record_store=store,
+        workspace = await load_artifact_workspace(
+            artifact_store=store,
             app_id=app_id,
             build_record_id=build_record_id,
+            build_family=refinement_request.build_family,
+            build_key=refinement_request.normalized_build_key(),
         )
         if not workspace.get("present"):
             return {}
@@ -146,7 +153,7 @@ class ArtifactScopeProposer:
     ) -> dict[str, Any]:
         pack = self._load_pack()
         checkpoint = pack.checkpoint_by_event(_CHECKPOINT_EVENT)
-        if checkpoint is None or not checkpoint.tool_ids:
+        if checkpoint is None:
             return {}
 
         context = ControlPlaneToolContext(
@@ -179,6 +186,13 @@ class ArtifactScopeProposer:
                     "error": result.error or "tool_execution_failed",
                     "metadata": dict(result.metadata or {}),
                 }
+        graph_context = await self._dependency_graph_agent.analyze(
+            context=context,
+            usage_context=refinement_request.usage_context,
+            selected_paths=context.extra["selected_file_paths"],
+        )
+        if graph_context is not None:
+            results["dependency_graph"] = graph_context.model_dump(mode="json")
         return results
 
     @staticmethod
@@ -284,10 +298,12 @@ class ArtifactScopeProposer:
             return set()
 
         store = self._artifact_store or get_artifact_store()
-        workspace = await load_bundle_workspace(
-            record_store=store,
+        workspace = await load_artifact_workspace(
+            artifact_store=store,
             app_id=app_id,
             build_record_id=build_record_id,
+            build_family=refinement_request.build_family,
+            build_key=refinement_request.normalized_build_key(),
         )
         if not workspace.get("present"):
             return set()

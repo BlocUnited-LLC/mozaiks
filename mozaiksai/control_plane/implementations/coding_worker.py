@@ -20,6 +20,7 @@ from mozaiksai.control_plane.contracts import (
     CodingWorkerPlan,
     CodingWorkerRequest,
     CodingWorkerResult,
+    ControlPlaneToolContext,
     FileUpdate,
     RegistryRunState,
     StagedPatchProposal,
@@ -33,6 +34,7 @@ from mozaiksai.control_plane.implementations.coding_provider_selection import (
     ACP_FALLBACK_STATUSES,
     select_coding_provider,
 )
+from mozaiksai.control_plane.implementations.dependency_graph_agent import DependencyGraphAgent
 from mozaiksai.control_plane.implementations.structured_coding_provider import (
     StructuredOutputCodingProvider,
 )
@@ -770,9 +772,9 @@ class ScopedRefinementCodingWorker:
         provider: CodingExecutionProvider | None = None,
         acp_provider: CodingExecutionProvider | None = None,
     ) -> None:
+        runner = agent_runner or AG2StructuredAgentRunner(agent_factory=agent_factory)
         self._structured_provider: CodingExecutionProvider = provider or StructuredOutputCodingProvider(
-            agent_factory=agent_factory,
-            agent_runner=agent_runner,
+            agent_runner=runner,
             config_loader=config_loader,
             pack_loader=pack_loader,
             tool_executor=tool_executor,
@@ -783,6 +785,10 @@ class ScopedRefinementCodingWorker:
         self._config_loader = config_loader
         self._candidate_validation_runner = candidate_validation_runner
         self._artifact_store = artifact_store
+        self._dependency_graph_agent = DependencyGraphAgent(
+            agent_runner=runner, config_loader=config_loader, pack_loader=pack_loader,
+            artifact_store=artifact_store,
+        )
         self._output_root = Path(output_root) if output_root is not None else Path("generated_refinements")
 
     def enabled(self) -> bool:
@@ -800,6 +806,22 @@ class ScopedRefinementCodingWorker:
             )
 
         selection = select_coding_provider(request, self._load_config(), acp_importable=acp_available())
+        dependency_graph = await self._dependency_graph_agent.analyze(
+            context=ControlPlaneToolContext(
+                checkpoint="coding_requested",
+                app_id=request.app_id,
+                target_app_id=request.target_app_id,
+                user_id=request.user_id,
+                build_family=request.build_family,
+                build_key=request.build_key or request.build_family,
+                build_record_id=request.build_record_id,
+                raw_user_request=request.raw_user_request,
+            ),
+            usage_context=request.usage_context,
+            run_build_binding=request.run_build_binding,
+            selected_paths=tuple(request.files),
+        )
+        request = request.model_copy(update={"dependency_graph": dependency_graph})
         provider_attempts: list[dict[str, str]] = []
 
         if selection.provider == "acp":

@@ -2,7 +2,7 @@
 
 Available at: contract_surface_requested
 
-Returns the merged context graph catalog — ranked candidate files, matched
+Returns the requested build's context graph catalog — ranked candidate files, matched
 nodes, and file tree — scoped for the ContractSurfacePlanner to use when
 resolving which workspace files exist for each classified surface.
 
@@ -17,8 +17,7 @@ from mozaiksai.control_plane.context_graph.query import build_context_graph_cata
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
 from mozaiksai.core.artifacts.store import ArtifactStore
 
-from ._context_graph import load_context_graph_for_tool
-from ._shared import normalize_context
+from ._context_graph import load_context_graph_for_tool, normalize_graph_context
 
 
 async def get_contract_surface_context(
@@ -27,12 +26,12 @@ async def get_contract_surface_context(
 ) -> dict[str, Any]:
     """Return a compact context graph catalog for contract surface resolution.
 
-    Loads the artifact workspace and the current AppContextGraph, then returns
+    Loads the exact artifact workspace, then returns
     a catalog the ContractSurfacePlanner uses to confirm which canonical paths
     actually exist in the workspace before resolving surface file lists.
     """
 
-    tool_context = normalize_context(context)
+    tool_context = normalize_graph_context(context)
     loaded = await load_context_graph_for_tool(context=tool_context, artifact_store=artifact_store)
     if not loaded.get("present"):
         return loaded
@@ -49,7 +48,8 @@ async def get_contract_surface_context(
 
     return {
         "present": True,
-        "app_id": tool_context.app_id,
+        "app_id": tool_context.artifact_app_id,
+        "provenance": loaded["provenance"],
         "build_record_id": artifact.id,
         "raw_user_request": raw_user_request,
         "context_graph": context_graph_catalog,

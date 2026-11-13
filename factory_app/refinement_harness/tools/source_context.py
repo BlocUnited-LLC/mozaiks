@@ -5,7 +5,6 @@ from typing import Any
 from mozaiksai.control_plane.app_context import get_current_source_context_bundle
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
 from mozaiksai.core.app_context import (
-    SourceCorpusBundle,
     build_source_corpus_catalog,
     get_related_source_files,
     read_source_file_from_bundle,
@@ -13,8 +12,7 @@ from mozaiksai.core.app_context import (
 )
 from mozaiksai.core.artifacts.store import ArtifactStore
 
-from ._context_graph import load_context_graph_for_tool
-from ._shared import normalize_context
+from ._context_graph import load_context_graph_for_tool, normalize_graph_context
 
 
 async def search_app_source_context(
@@ -24,8 +22,8 @@ async def search_app_source_context(
     context: ControlPlaneToolContext | dict[str, Any] | None = None,
     artifact_store: ArtifactStore | None = None,
 ) -> dict[str, Any]:
-    """Search the current AppContext source corpus for refinement planning."""
-    tool_context = normalize_context(context)
+    """Search the requested build, or current AppContext for standalone discovery."""
+    tool_context = normalize_graph_context(context)
     bundle_result = await _load_source_bundle(tool_context=tool_context, artifact_store=artifact_store)
     if not bundle_result.get("present"):
         return {**bundle_result, "results": []}
@@ -44,6 +42,7 @@ async def search_app_source_context(
         "present": True,
         "query": resolved_query,
         "source": bundle_result["source"],
+        "provenance": bundle_result.get("provenance"),
         "source_context_catalog": build_source_corpus_catalog(bundle, max_files=40, max_chunks=8),
         "results": results,
         "warnings": list(bundle_result.get("warnings") or []),
@@ -57,8 +56,8 @@ async def read_app_source_file(
     context: ControlPlaneToolContext | dict[str, Any] | None = None,
     artifact_store: ArtifactStore | None = None,
 ) -> dict[str, Any]:
-    """Read an exact indexed source file from the current AppContext corpus."""
-    tool_context = normalize_context(context)
+    """Read an indexed file from the requested build or standalone AppContext."""
+    tool_context = normalize_graph_context(context)
     resolved_path = str(path or tool_context.extra.get("source_path") or tool_context.extra.get("path") or "").strip()
     if not resolved_path:
         return {"present": False, "reason": "missing_path", "path": ""}
@@ -75,6 +74,7 @@ async def read_app_source_file(
     payload.update(
         {
             "source": bundle_result["source"],
+            "provenance": bundle_result.get("provenance"),
             "warnings": list(bundle_result.get("warnings") or []),
         }
     )
@@ -89,7 +89,7 @@ async def get_related_app_source_files(
     artifact_store: ArtifactStore | None = None,
 ) -> dict[str, Any]:
     """Return files related to an indexed source path for refinement context."""
-    tool_context = normalize_context(context)
+    tool_context = normalize_graph_context(context)
     resolved_path = str(path or tool_context.extra.get("source_path") or tool_context.extra.get("path") or "").strip()
     if not resolved_path:
         return {"present": False, "reason": "missing_path", "path": "", "files": []}
@@ -102,6 +102,7 @@ async def get_related_app_source_files(
         "present": True,
         "path": resolved_path,
         "source": bundle_result["source"],
+        "provenance": bundle_result.get("provenance"),
         "files": get_related_source_files(
             bundle_result["bundle"],
             resolved_path,
@@ -120,27 +121,31 @@ async def _load_source_bundle(
     if not app_id:
         return {"present": False, "reason": "missing_app_id", "warnings": []}
 
+    if tool_context.build_record_id is not None:
+        loaded = await load_context_graph_for_tool(context=tool_context, artifact_store=artifact_store)
+        if not loaded.get("present"):
+            return loaded
+        return {
+            "present": True,
+            "source": loaded["workspace"]["source"],
+            "bundle": loaded["source_context_bundle"],
+            "provenance": loaded["provenance"],
+            "warnings": list(loaded.get("warnings") or []),
+        }
+
     current = await get_current_source_context_bundle(
         app_id=app_id,
         artifact_store=artifact_store,
     )
     if current.bundle is not None:
+        if current.bundle.app_id != app_id:
+            return {"present": False, "reason": "source_context_identity_mismatch", "warnings": []}
         return {
             "present": True,
             "source": "current_app_context",
             "bundle": current.bundle,
             "warnings": list(current.warnings),
         }
-
-    if str(tool_context.build_record_id or "").strip():
-        loaded = await load_context_graph_for_tool(context=tool_context, artifact_store=artifact_store)
-        if loaded.get("present") and isinstance(loaded.get("source_context_bundle"), SourceCorpusBundle):
-            return {
-                "present": True,
-                "source": loaded["workspace"].get("source") or "artifact_workspace",
-                "bundle": loaded["source_context_bundle"],
-                "warnings": [*list(current.warnings), *list(loaded.get("warnings") or [])],
-            }
 
     return {
         "present": False,

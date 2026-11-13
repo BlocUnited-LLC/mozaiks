@@ -23,7 +23,7 @@ llm_profiles:
       api_type: google
       model: gemini-3.8-flash
   impact_analyzer:
-    purpose: Select scoped files and contract surfaces for a refinement.
+    purpose: Assess source dependencies and select scoped files and contract surfaces for a refinement.
     expected_behavior: deterministic structured planning
     llm_config:
       api_type: google
@@ -45,6 +45,9 @@ llm_profiles:
 classifier:
   enabled: true
   llm_profile: classifier
+dependency_graph:
+  enabled: true
+  llm_profile: impact_analyzer
 coding:
   enabled: true
   # Used by structured-output coding. ACP runs a separate coding agent and
