@@ -87,7 +87,7 @@ const ChatOverlay = ({
               <div className="w-20 h-20 mx-auto rounded-full bg-gradient-to-br from-[var(--color-primary)]/20 to-[var(--color-secondary)]/20 flex items-center justify-center">
                 <img
                   src={brandLogoSrc}
-                  alt="Mozaik"
+                  alt={`${theme?.branding?.name || 'App'} logo`}
                   className="w-12 h-12 opacity-50"
                   onError={event => applyBrandImageFallback(event, getBrandLogoSrc({ branding: { name: theme?.branding?.name } }))}
                 />
