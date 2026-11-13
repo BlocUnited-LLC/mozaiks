@@ -61,10 +61,12 @@ export function requirePassedDraft(artifacts, draftId, appId) {
 }
 
 export async function createNote(frame, title, body, timeout = 30000) {
-  const open = frame.getByRole('button', { name: /^(new|add|create)( a)? note$/i }).first();
-  if (await open.isVisible().catch(() => false)) await open.click();
   const titleField = frame.getByLabel(/title/i).or(frame.getByPlaceholder(/title/i)).first();
   const bodyField = frame.getByLabel(/body|content|note text/i).or(frame.getByPlaceholder(/body|content|note text/i)).first();
+  if (!await titleField.isVisible().catch(() => false)) {
+    const open = frame.getByRole('button', { name: /^(new|add|create)( a)? note$/i }).first();
+    if (await open.isVisible().catch(() => false)) await open.click();
+  }
   await titleField.waitFor({ state: 'visible', timeout });
   await bodyField.waitFor({ state: 'visible', timeout });
   await titleField.fill(title);

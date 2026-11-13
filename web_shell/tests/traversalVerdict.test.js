@@ -326,6 +326,51 @@ test('refined draft evidence must match identity, app, family and passed status'
   }
 });
 
+test('an always-visible Add Note submits exactly once per creation', async (t) => {
+  const browser = await chromium.launch({ headless: true, args: ['--disable-background-networking'] });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.route('**/*', route => route.abort());
+  await page.setContent(`
+    <label>Title <input id="title"></label><label>Body <input id="body"></label>
+    <button id="add">Add Note</button><ul id="notes"></ul>
+    <script>
+      document.querySelector('#add').onclick = () => {
+        const title = document.querySelector('#title').value;
+        if (!title) return;
+        const item = document.createElement('li');
+        item.textContent = title;
+        document.querySelector('#notes').append(item);
+      };
+    </script>`);
+  for (const title of ['First synthetic note', 'Second synthetic note']) {
+    const before = await page.locator('#notes li').count();
+    await createNote(page, title, 'Synthetic body');
+    assert.equal(await page.locator('#notes li').count(), before + 1);
+  }
+});
+
+test('a New Note opener still opens a hidden form', async (t) => {
+  const browser = await chromium.launch({ headless: true, args: ['--disable-background-networking'] });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.route('**/*', route => route.abort());
+  await page.setContent(`
+    <button id="open">New Note</button>
+    <div id="form" hidden><label>Title <input id="title"></label><label>Body <input id="body"></label>
+      <button id="save">Save Note</button></div><ul id="notes"></ul>
+    <script>
+      document.querySelector('#open').onclick = () => { document.querySelector('#form').hidden = false; };
+      document.querySelector('#save').onclick = () => {
+        const item = document.createElement('li');
+        item.textContent = document.querySelector('#title').value;
+        document.querySelector('#notes').append(item);
+      };
+    </script>`);
+  await createNote(page, 'Opened synthetic note', 'Synthetic body');
+  assert.equal(await page.locator('#notes li').count(), 1);
+});
+
 // Synthetic browser fixture proves these assertions, not app generation.
 test('notes journey checks creation, filtering and restoration after clearing', async (t) => {
   const { chromium } = await import('@playwright/test');
