@@ -400,6 +400,9 @@ This project follows a practical pre-1.0 changelog format:
   calls through source bindings, and keeps similarly named files separate
   when combining source and structural graphs.
 
+- First app builds no longer use an upstream workflow or design artifact as
+  their app-bundle parent. App revisions retain their existing baseline selection.
+
 - Scoped page refinements receive supported page contracts and linked
   server-query context, with guidance for selecting the query owner when server
   matching changes and for keeping presentation-only edits page-scoped.

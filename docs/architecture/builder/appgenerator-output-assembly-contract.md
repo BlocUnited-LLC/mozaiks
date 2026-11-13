@@ -55,6 +55,18 @@ without exposing that field as required form input. The service must enforce
 ownership and allowed state transitions before persistence; role grants alone do
 not enforce those business rules.
 
+## Genesis App Lineage
+
+A Genesis Build registers its first app bundle without an implementation parent.
+The shared `artifact_version_id` can still identify an upstream design or
+workflow bundle; it is not an app revision baseline outside revision mode.
+Upstream dependencies remain in `canonical_inputs_version`, separate
+from the app's version lineage. A carried `revision_source_artifact_version_id`
+also cannot turn a non-revision build into an app revision.
+
+This selection rule does not repair previously persisted lineage. Existing
+records and their acceptance evidence remain unchanged.
+
 ## Implementation Baseline After Design Revision
 
 `design_revision` can start from an owned DesignDocs artifact before the app has

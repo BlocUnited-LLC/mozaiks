@@ -51,6 +51,8 @@ def revision_baseline_required(context_variables: Any) -> bool:
 
 def revision_source_artifact_id(context_variables: Any) -> str | None:
     """Keep the selected source stable after artifact_version_id becomes the result."""
+    if context_variables.get("build_mode") != "revision":
+        return None
     if _first_generation(context_variables):
         return None
     source = context_variables.get("revision_source_artifact_version_id") or context_variables.get("artifact_version_id")
