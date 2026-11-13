@@ -147,6 +147,8 @@ After the patch, record what changed and which journeys were actually exercised.
 Canonical structure can evolve, but changes must update the producing schema,
 templates, consumers, guidance and acceptance together; a starter must not invent
 its own runtime convention.
+Register new shipped event/capability identifiers in `mozaiksai/core/taxonomy.py`;
+they must resolve in the canonical registry before qualification.
 
 ## Costs and evidence
 
@@ -161,7 +163,9 @@ rich-text rendering, multi-editor conflict merge or public upload mechanism.
 
 Owning checks live in `tests/test_content_pack_actions.py`,
 `tests/test_build_context_content_pack.py` and
-`tests/test_content_starter_materialization.py`. The generic shipped-pack suite
+`tests/test_content_starter_materialization.py`. Cross-pack checks include
+`tests/test_factory_build_context_contract.py` and `tests/test_semantic_taxonomy.py`.
+The generic shipped-pack suite
 also discovers the pack and has an explicit reviewed editor permission entry.
 Unit tests with persistence doubles, real Mongo tests, HTTP fixture checks,
 browser journeys and live-model builds are different evidence levels. Passing

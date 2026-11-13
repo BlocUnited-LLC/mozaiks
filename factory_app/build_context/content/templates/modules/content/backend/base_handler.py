@@ -1,3 +1,5 @@
+"""Template-owned content dispatch. DO NOT EDIT generated copies."""
+
 from .service import ContentService
 
 
