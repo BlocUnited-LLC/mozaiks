@@ -2,6 +2,13 @@
 
 Repository-level guidance for coding agents working in this repo.
 
+## CI And Linux Runner Costs
+
+Before any CI-triggering push, dispatch, rerun, or Linux/build workflow
+change, read [CI Cost Responsibility](docs/ci-cost-responsibility.md).
+It adds the execution-cost checklist to the existing coordination rules;
+it does not waive required checks or authorize paid infrastructure.
+
 ## Shared Engineering Contract
 
 Shared rules are canonical for every agent and live in one place:
