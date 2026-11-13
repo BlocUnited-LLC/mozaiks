@@ -138,6 +138,38 @@ def test_persist_pending_schema_migration_records_staged_history(monkeypatch, tm
     assert migration_file.read_bytes() == accepted_bytes
 
 
+@pytest.mark.parametrize("pinned_source", [None, "av_stale_app_bundle"])
+def test_initial_app_bundle_is_parentless_with_upstream_artifacts(monkeypatch, tmp_path: Path, pinned_source) -> None:
+    fake_artifact_store = _FakeArtifactStore()
+    artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
+    monkeypatch.setattr(artifacts_mod, "get_artifact_store", lambda: fake_artifact_store)
+    monkeypatch.setattr(
+        artifacts_mod,
+        "resolve_latest_artifact_version_refs",
+        AsyncMock(return_value={"workflow_bundle": "av_workflow_1"}),
+    )
+    zip_path = tmp_path / "GeneratedApp.zip"
+    zip_path.write_bytes(b"fake bundle bytes")
+    context = _Context({
+        "build_mode": "initial",
+        "app_id": "app_123",
+        "artifact_version_id": "av_workflow_1",
+        "revision_source_artifact_version_id": pinned_source,
+    })
+
+    asyncio.run(generate_and_download_module._register_app_bundle_artifact_version(
+        app_id="app_123", user_id="user_123", workflow_name="AppGenerator",
+        chat_id="chat_123", bundle_name="GeneratedApp", zip_path=zip_path,
+        context_variables=context,
+    ))
+
+    assert fake_artifact_store.calls[0]["parent_build_record_id"] is None
+    assert fake_artifact_store.calls[0]["canonical_inputs_version"] == {"workflow_bundle": "av_workflow_1"}
+    metadata = fake_artifact_store.calls[0]["commit_metadata"]["metadata"]
+    assert metadata["phase"] == "genesis"
+    assert metadata["target_app_id"] == "app_123"
+
+
 def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatch, tmp_path: Path) -> None:
     fake_artifact_store = _FakeArtifactStore()
     artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
@@ -158,6 +190,11 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     context = _Context(
         {
             "artifact_version_id": "av_parent_1",
+            "build_mode": "revision",
+            "run_build_binding": {
+                "phase": "refinement", "build_registry_id": "appreg_1",
+                "target_app_id": "app_123", "build_id": "build_1",
+            },
             "build_id": "build_1",
             "build_registry_id": "appreg_1",
             "app_build_plan": {"capability_packs": [{
