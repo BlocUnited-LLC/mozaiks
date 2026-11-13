@@ -12,6 +12,14 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- Factory planning distinguishes local template modules from managed services
+  and preserves file ownership so agents can plan app-specific work without
+  being instructed to regenerate supplied implementations.
+- App planning no longer reassigns a pack's event contract to an app-owned
+  fixture task after releasing template-owned files.
+
 ### Added
 
 - Factory refinement agents can receive advisory file and dependency evidence

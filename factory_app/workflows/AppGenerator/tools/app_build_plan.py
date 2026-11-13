@@ -2300,6 +2300,9 @@ def app_build_plan(
     # The cached plan never schedules model work for an output or facade module a selected pack owns,
     # including a pack only this plan selects (the build context selecting none).
     pack_selection = _pack_selection_context(context_variables, capability_packs)
+    # Reserve optional companions before releasing pack ownership so a surviving
+    # fixture task cannot reclaim an events contract supplied by its pack.
+    build_tasks = _reserve_module_event_contract_paths(build_tasks)
     released: dict[str, Any] = {"build_tasks": build_tasks, "generation_order": generation_order}
     for repair in (
         *release_pack_owned_paths(released, pack_selection),
@@ -2326,7 +2329,6 @@ def app_build_plan(
         managed_capability_ids=managed_capability_ids,
         context_variables=context_variables,
     )
-    build_tasks = _reserve_module_event_contract_paths(build_tasks)
     managed_capability_backing_module_ids = _managed_capability_backing_module_ids(
         capability_packs,
         context_variables=context_variables,

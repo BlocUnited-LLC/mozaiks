@@ -7,14 +7,10 @@ When ``capability_packs`` is present and non-empty in context_variables
 (populated by an operator at launch), this hook injects a compact
 [MANAGED CAPABILITIES CONTEXT] block into the AppPlanAgent system message.
 
-Capability source taxonomy injected into the block:
-  host_universal  — built-in platform features; never generate them
-  managed_capability     — operator-managed capability; use as-is, do not regenerate
-  generated_module — AppGenerator should generate full module contracts
-  external_adapter — generate adapter/client wiring only; backend is third-party
-
-In OSS mode (capability_packs is null or empty) this hook is a complete no-op.
-The block is never injected and factory workflow behaviour is unchanged.
+The existing header is retained for workflow integration. The body describes
+the supplied pack origins and declared output ownership; a generated_module
+pack can supply deterministic templates just as a managed pack can.
+When capability_packs is null or empty, this hook is a complete no-op.
 """
 
 from __future__ import annotations
@@ -30,27 +26,46 @@ logger = logging.getLogger(__name__)
 _MANAGED_CAP_HEADER = "[MANAGED CAPABILITIES CONTEXT]"
 
 # ---------------------------------------------------------------------------
-# Capability source taxonomy guidance (always included when packs are present)
+# Guidance for the existing AppCapabilityPack capability_source vocabulary.
 # ---------------------------------------------------------------------------
 
-_CAPABILITY_SOURCE_GUIDANCE = """\
-Capability source taxonomy:
-  host_universal  — Built-in platform feature already provided by the runtime host.
-                    Do NOT scaffold or generate code for these. Reference them in
-                    service_scope or external_integrations, never as capability packs.
-  managed_capability     — Operator-managed capability available in this deployment.
-                    Do NOT regenerate its internals. Include it as a capability pack
-                    entry with implementation_mode: external_integration and
-                    surface_kind: external_integration or module (as declared).
-                    The pack is already deployed; only wire it into the generated app.
-                    Never create modules/{capability_pack_id}/ for this source.
-                    For user-facing pages/actions, create an app-owned facade module
-                    with a different id, then bind pages to that facade.
-  framework_pack  — OSS or operator framework pack. Generate only the declared
-                    app-specific wiring; do not invent undeclared pack internals.
-  generated_module — AppGenerator must generate full module contracts and module backend files.
-  external_adapter — Generate adapter / client wiring only. The actual service is
-                    third-party or separately deployed."""
+_CAPABILITY_SOURCE_GUIDANCE = {
+    "config_file": "Registered pack supplying declarative app configuration; follow its declared outputs.",
+    "external_adapter": "Third-party service; author only declared adapter/client wiring, not its backend.",
+    "framework_pack": "Registered framework pack; author only declared app-specific wiring, not pack internals.",
+    "generated_module": (
+        "App-owned module. Preserve complete module/action contracts; author only outputs not supplied "
+        "by selected pack templates. This origin does not require regenerating a pack's backend."
+    ),
+    "host_universal": (
+        "Runtime-provided feature; no generated module or scaffold. Reference it in service_scope "
+        "or external_integrations, not as a selected capability pack."
+    ),
+    "managed_capability": "Hosted provider; retain its origin and use its declared app-owned facade boundary.",
+    "operator_extension": "Registered operator extension; preserve its declared origin and output contract.",
+    "operator_pack": "Registered operator build-context pack; preserve its declared origin and output contract.",
+}
+
+_OUTPUT_OWNERSHIP_GUIDANCE = """\
+Output ownership applies to every capability_source:
+- owner: templates — deterministic assembly supplies the pack's files; exclusive pack outputs are never model work.
+- owner: workspace — when the pack ships a seed, assembly supplies it at genesis; preserve the admitted workspace copy on revision. Changes use supported scoped refinement.
+- owner: generator — plan app-owned work for the exact declared path and instructions.
+- Shared composition roots retain app task ownership; assembly merges the declared pack contributions.
+Preserve the listed ids, origins, selection_rules, runtime_boundaries, facade ids, adapter paths and page routes. Source classification does not override file ownership; do not invent alternate contracts."""
+
+_MANAGED_PLANNING_GUIDANCE = """\
+Planning rules for managed_capability entries only:
+- Include each selected managed capability exactly once with capability_source: managed_capability, implementation_mode: external_integration and the declared surface_kind. Never generate modules/{capability_pack_id}/ for the hosted provider or reclassify it as generated_module.
+- For each selected active surface, follow its operator contract. If templates do not already supply the adapter, generate one api_surface task at ControllerAgent for services/integrations/{pack_id}_client.py with capability_pack_id set to the provider id.
+- App-owned facade module_contract tasks start at ConfigMiddlewareAgent and depend on the adapter when needed. Plan data_models, business_services and page_bundle work only for outputs not supplied by templates, with their declared dependencies.
+- Pages bind to declared app-owned facade module/action pairs, never directly to managed backing modules such as wallet, managed_billing, managed_usage or managed_entitlements. Code renders endpoint URLs; do not invent adapter paths, facade ids or page routes."""
+
+
+def _capability_source(pack: Any) -> str:
+    if isinstance(pack, dict):
+        return str(pack.get("capability_source") or "managed_capability").strip()
+    return "managed_capability"
 
 
 def _is_empty(value: Any) -> bool:
@@ -64,10 +79,8 @@ def _is_empty(value: Any) -> bool:
 
 def _format_managed_capabilities(packs: list[Any]) -> str:
     lines = [
-        "Managed capabilities available (do NOT regenerate internals):",
-        "For each listed capability, output capability_packs[].capability_pack_id exactly as the listed id.",
-        "Do not rename ids, add managed_ prefixes, or plan modules/{capability_pack_id}/ outputs.",
-        "If the managed capability backs pages or user actions, plan a separate app-owned facade module plus data_models, business_services, and page_bundle tasks.",
+        "Registered capability packs supplied to planning:",
+        "Use the exact listed capability_pack_id and capability_source in AppBuildPlan; follow approved scope and each pack's selection rules.",
     ]
     for pack in packs:
         if isinstance(pack, dict):
@@ -75,7 +88,7 @@ def _format_managed_capabilities(packs: list[Any]) -> str:
             label = pack.get("display_name") or pack.get("label") or pack_id
             description = pack.get("description") or ""
             caps = pack.get("capabilities") or []
-            cap_source = str(pack.get("capability_source") or "managed_capability").strip()
+            cap_source = _capability_source(pack)
             line = (
                 f"  - {pack_id} ({label}) "
                 f"[capability_pack_id: {pack_id}; capability_source: {cap_source}]"
@@ -105,9 +118,8 @@ def _format_pack_surfaces(packs: list[Any]) -> str | None:
 
     2. ``facades`` list (contract.yaml facade schema):
        Each entry has ``module_id``, ``provider_module``, and ``pages``.
-       Rendered as explicit facade-module instructions so the LLM knows
-       to generate a module_contract task for the facade rather than
-       generating the managed capability itself.
+       Rendered as facade identities and bindings. Declared output ownership
+       determines whether their implementation needs a model task.
 
     Returns None when neither key is declared on any pack.
     """
@@ -145,7 +157,7 @@ def _format_pack_surfaces(packs: list[Any]) -> str | None:
         # Shape 2: facades list from contract.yaml build_provider_values output
         facades = pack.get("facades") or []
         if facades and not surfaces:
-            surface_lines.append(f"{pack_id} ({label}) facade modules (do NOT regenerate {pack_id}/):")
+            surface_lines.append(f"{pack_id} ({label}) facade modules:")
             for facade in facades:
                 if not isinstance(facade, dict):
                     continue
@@ -154,8 +166,7 @@ def _format_pack_surfaces(packs: list[Any]) -> str | None:
                 pages = facade.get("pages") or []
                 actions = facade.get("provider_actions") or []
                 line = (
-                    f"  - Generate facade module '{module_id}' that wraps {provider}."
-                    f" Plan a module_contract task for '{module_id}', NOT for '{pack_id}'."
+                    f"  - Facade module '{module_id}' wraps {provider}; follow its declared output ownership."
                 )
                 if pages:
                     page_names = [
@@ -255,6 +266,22 @@ def _format_contract_list_items(items: Any, *, key: str) -> list[str]:
     return lines
 
 
+def _format_required_outputs(items: Any) -> list[str]:
+    """Keep each declared path's ownership and app-authoring instructions visible."""
+    lines: list[str] = []
+    if not isinstance(items, list):
+        return lines
+    for item in items:
+        if not isinstance(item, dict) or not item.get("path"):
+            continue
+        owner = str(item.get("owner") or "templates").strip()
+        lines.append(f"  - {item['path']} [owner: {owner}]")
+        notes = str(item.get("notes") or "").strip()
+        if notes:
+            lines.extend(f"      {line}" for line in ("notes: " + notes).splitlines())
+    return lines
+
+
 def _format_selection_rules(items: Any) -> list[str]:
     lines: list[str] = []
     if not isinstance(items, list):
@@ -311,7 +338,7 @@ def _format_operator_contracts(contracts: list[Any]) -> str | None:
         if selection:
             lines.append("  selection_rules:")
             lines.extend(selection)
-        required = _format_contract_list_items(contract.get("required_outputs"), key="path")
+        required = _format_required_outputs(contract.get("required_outputs"))
         if required:
             lines.append("  required_outputs:")
             lines.extend(required)
@@ -338,59 +365,17 @@ def _format_operator_contracts(contracts: list[Any]) -> str | None:
 
 
 def _build_managed_context_body(capability_packs: list[Any], operator_contracts: list[Any] | None = None) -> str:
-    parts: list[str] = [_CAPABILITY_SOURCE_GUIDANCE]
-
-    parts.append(_format_managed_capabilities(capability_packs))
-    parts.append(
-        "Planning rules for managed_capability entries:\n"
-        "1. Include each managed_capability in AppBuildPlan.capability_packs exactly once with\n"
-        "   these REQUIRED fields and values:\n"
-        "   - capability_pack_id: the managed capability id exactly as listed above\n"
-        "   - capability_source: managed_capability\n"
-        "   - implementation_mode: external_integration\n"
-        "   - surface_kind: external_integration\n"
-        "   The capability_source field MUST be present and MUST be \"managed_capability\".\n"
-        "   Do not substitute pack_type: managed_capability for capability_source.\n"
-        "   Do not mark the managed capability entry as generated_module.\n"
-        "2. Do NOT generate a module_contract build task for the managed_capability itself —\n"
-        "   the module is already deployed in the host.\n"
-        "3. Pack-owned outputs are never model work. Every path the operator contract lists in\n"
-        "   required_outputs (owner templates, and owner workspace in a genesis build) is\n"
-        "   written from the pack's templates: plan no task that owns one. The tasks below\n"
-        "   apply only to files the contract does not declare. For each managed_capability\n"
-        "   with surface_kind: external_integration, generate one api_surface adapter task\n"
-        "   for the managed capability. Then, for each selected active\n"
-        "   pack surface that needs app-owned actions or page endpoints, generate the\n"
-        "   corresponding app-owned facade module and page tasks declared by the typed\n"
-        "   operator contract:\n"
-        "   a) task_type: api_surface — surface_kind: external_integration\n"
-        "      capability_pack_id: {pack_id}  (REQUIRED — do NOT set to null)\n"
-        "      initial_agent: ControllerAgent\n"
-        "      owned_paths: [\"services/integrations/{pack_id}_client.py\"]\n"
-        "      This thin adapter is app-level service code and wraps calls to the managed capability API.\n"
-        "      Do not place it under modules/{facade_id}/services/ or modules/{pack_id}/services/.\n"
-        "      The capability_pack_id identifies which managed capability template to copy.\n"
-        "   b) task_type: module_contract — surface_kind: module  (NOT external_integration)\n"
-        "      initial_agent: ConfigMiddlewareAgent\n"
-        "      capability_pack_id: {app_owned_facade_id}  (e.g. {pack_id}_dashboard)\n"
-        "      This is an app-owned facade module that uses the adapter above.\n"
-        "      depends_on: [the api_surface task id above]\n"
-        "      The facade module is generated_module; the managed capability remains managed_capability.\n"
-        "      Also plan the matching data_models and business_services tasks for this\n"
-        "      facade module unless selected pack templates provide those outputs.\n"
-        "   c) task_type: page_bundle — surface_kind: ui_only\n"
-        "      initial_agent: AppSchemaAgent\n"
-        "      owned_paths: UI page yaml files for this feature\n"
-        "      depends_on: [the module_contract task id above]\n"
-        "4. Page bundles select data_source module/action pairs from the app-owned facade inventory.\n"
-        "5. Before emitting AppBuildPlan, verify each section data_source.module_id for\n"
-        "   managed-capability features is the declared app-owned facade module.\n"
-        "   Direct managed backing module, wallet, managed_billing, managed_usage, or\n"
-        "   managed_entitlements bindings are invalid. Code renders endpoint URLs.\n"
-        "6. If the operator contract declares required_outputs, forbidden_outputs, facades,\n"
-        "   or pages, treat those typed values as authoritative. Do not invent alternate\n"
-        "   facade ids, adapter paths, or page routes for the selected managed capability."
+    sources = {_capability_source(pack) for pack in capability_packs}
+    source_guidance = "\n".join(
+        f"  {source} — {guidance}" for source, guidance in _CAPABILITY_SOURCE_GUIDANCE.items() if source in sources
     )
+    parts = [
+        _format_managed_capabilities(capability_packs),
+        "Capability source guidance:\n" + source_guidance,
+        _OUTPUT_OWNERSHIP_GUIDANCE,
+    ]
+    if "managed_capability" in sources:
+        parts.append(_MANAGED_PLANNING_GUIDANCE)
 
     surfaces_block = _format_pack_surfaces(capability_packs)
     if surfaces_block is not None:
