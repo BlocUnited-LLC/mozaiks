@@ -58,7 +58,9 @@ runtime_boundaries:
     experience; this pack imposes no home route, navigation, layout, or page taxonomy.
 - id: editorial_records
   rule: content.entries stores app-owned editorial text, not personal drafts or user
-    account/profile data. No author identity is stored. All reads are scoped by runtime
+    account/profile data. The pack declares and returns no author identity field;
+    runtime-owned scope and audit metadata follow the existing persistence contract.
+    All reads are scoped by runtime
     app persistence; unprivileged reads expose published records only. Only the trusted
     content.manage permission admits drafts, writes, publication changes and archived
     records.
