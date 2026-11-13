@@ -611,6 +611,10 @@ Auth scaffolding uses an assembled
 `app.json` when present. A rejected or empty plan cannot fall through to standalone
 page generation.
 
+Task-local `context_variables` belong to individual `AppBuildPlan.build_tasks[]`
+entries, not to `AppBuildPlan` itself. The structured-output boundary rejects
+unknown plan-level fields before plan review.
+
 The workflow-owned `review_app_build_plan` tool validates the strict AppBuildPlan
 model, registered pack origins, approved app-owned module identities, page
 inventory, and complete genesis task ownership. Capability sources use the
@@ -1267,7 +1271,7 @@ Rules:
 
 Add new operator-only pages here when a managed capability context introduces a new operator surface. Do not add them to the standard inclusion rules.
 
-`AssemblyAgent` must include `admin/admin_registry.yaml` in the final bundle output.
+The assembly tool must include `admin/admin_registry.yaml` in the final bundle output.
 
 ### 3. save_app_schema
 
@@ -1311,7 +1315,16 @@ explicit promotion step.
 
 ### 4. AssemblyAgent
 
-When `app_schema_ready == true`, `AssemblyAgent` must emit those artifacts back out as `code_files` so downstream download/export tools can bundle them.
+`AssemblyAgent` emits a short `CodeFilesOutput` acknowledgement with empty
+`code_files` and `deleted_files` arrays. Those arrays belong to the reply; they
+do not clear the accumulated task outputs, repair overlays, or deletions in
+workflow context. After the reply passes structured-output validation,
+`assemble_app_tasks` runs automatically and builds the canonical `generated_files`
+map. It reads admitted schema and task output along with existing context
+overlays and deletions; the agent does not repeat file contents in its reply.
+
+When `app_schema_ready == true`, the tool reads the persisted schema artifacts
+from `generated_app_dir` and requires the UI quality gate to have passed.
 
 Required schema-driven outputs:
 
@@ -1325,8 +1338,8 @@ Required schema-driven outputs:
 - `config/shell.json` when `app_shell_config` exists
 - `config/asset_manifest.json` when `app_asset_manifest` exists
 
-When `app_schema_ready == false`, `AssemblyAgent` should use task batch outputs
-via `assemble_app_tasks` and must still preserve the page contract.
+When `app_schema_ready == false`, the tool assembles task batch outputs and
+must still preserve the page contract.
 Both assembly paths retain the captured theme's identity, assets, and visual
 tokens. A partial patch is not a replacement theme document. Explicit deltas
 override the corresponding base fields; null patch fields mean no change.

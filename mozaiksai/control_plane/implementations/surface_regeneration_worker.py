@@ -37,12 +37,16 @@ from mozaiksai.control_plane.contracts import (
     SurfaceExecutionRecord,
     SurfacePlanExecutionResult,
 )
+from mozaiksai.control_plane.file_contract_context import (
+    selected_file_contracts,
+    server_page_bindings,
+)
 from mozaiksai.control_plane.loader import load_selected_refinement_harness
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
 from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
 from mozaiksai.core.usage.context import resolve_auxiliary_usage_context
 
-from .contract_surface_planner import validate_contract_surface_plan
+from .contract_surface_planner import resolve_contract_surface_paths, validate_contract_surface_plan
 from .refinement_router import RefinementRequest, RefinementRoutingDecision
 
 _logger = logging.getLogger("mozaiksai.control_plane.implementations.surface_regeneration_worker")
@@ -233,10 +237,33 @@ class SurfaceRegenerationWorker:
             or (path.startswith("ui/pages/") and path.endswith((".yaml", ".yml"))
                 and len(path.split("/")) == 3)
         )
-        return {
+        result = {
             path: files[path] for path in sorted(paths)
             if path in files and path not in surface.affected_paths
         }
+        # Only source owned by a server table actually bound on the selected
+        # saved page is relevant. These excerpts are context, never write scope.
+        remaining = 80_000
+        for binding in server_page_bindings(file_map=files, selected_paths=surface.affected_paths)[:4]:
+            if not binding["action_declared"]:
+                continue
+            try:
+                related = resolve_contract_surface_paths(
+                    kind="module_action", target_kind="module", target_id=binding["module_id"],
+                    build_family="app_bundle", workspace_files=files,
+                )
+            except ValueError:
+                continue
+            for path in related:
+                if path in result or path in surface.affected_paths or "/backend/" not in path:
+                    continue
+                content = files[path]
+                if len(content) > 16_000 or len(content) > remaining:
+                    result[path] = "# Source omitted: exceeds the bounded read-only context.\n"
+                else:
+                    result[path] = content
+                    remaining -= len(content)
+        return result
 
     @staticmethod
     def _build_current_files(
@@ -357,6 +384,10 @@ class SurfaceRegenerationWorker:
             "affected_paths": surface.affected_paths,
             "current_files": current_files,
             "read_only_files": read_only_files,
+            "selected_file_contracts": selected_file_contracts(
+                file_map=current_files, selected_paths=surface.affected_paths,
+                build_family=refinement_request.build_family,
+            ),
         }
 
         lines = [
@@ -382,6 +413,8 @@ class SurfaceRegenerationWorker:
             "- Write the complete updated content for each affected path.",
             "- Do not write paths outside affected_paths.",
             "- read_only_files contains the app design, theme, routes, domain contracts and selected-pack provenance, including earlier surface updates in this plan; never rewrite it.",
+            "- This invocation has no context tools. Use only the supplied payload and selected_file_contracts; they describe structure, not write permission.",
+            "- For server-paginated DataTable, search uses the canonical page/page_size/search query; search_keys only filters client-loaded rows. Preserve server query semantics in the owning module.",
             "- Preserve pack-owned outputs and every file outside affected_paths. Installed pack identity comes from the saved provenance, not a newly selected pack.",
         ]
         return "\n".join(lines)

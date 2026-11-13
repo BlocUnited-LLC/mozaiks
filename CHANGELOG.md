@@ -14,6 +14,15 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Workflow operators can optionally select the Gemini thinking level without
+  changing the provider's default when the setting is omitted.
+
+- Docker sandbox callers can attach a validated allocation identity before
+  container creation, allowing an interrupted allocation to be identified for cleanup.
+
+- Factory validation reports bounded failed-gate and task-dependency diagnostics
+  without copying raw prompts or generated payloads into the diagnostic record.
+
 - Generated bundle validation can resolve approved compiler inputs from the exact
   owned build record. Factory saves actual design/subscription input identities,
   and coding/media children preserve those inputs while validating fresh bytes.
@@ -381,9 +390,22 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Scoped page refinements receive supported page contracts and linked
+  server-query context, with guidance for selecting the query owner when server
+  matching changes and for keeping presentation-only edits page-scoped.
+
+- AppGenerator planning guidance now identifies the supported task-local
+  location for build-task context variables.
+
+- AppGenerator requests a short assembly acknowledgement instead of repeating
+  generated files that its assembly tool already combines.
+
 - Module actions return a sanitized `DEPENDENCY_UNAVAILABLE` HTTP 503 when the
   generated Cloud or Pay client cannot resolve its required connector
   configuration. Permission denials still precede connector lookup and provider calls.
+
+- Module generation repair can see an independent missing read-fixture issue
+  alongside a rejected write contract, without relaxing either validation.
 
 - AppGenerator now tells module-contract generation to keep role-protected
   narrowed writes complete across create, update, and delete, matching the

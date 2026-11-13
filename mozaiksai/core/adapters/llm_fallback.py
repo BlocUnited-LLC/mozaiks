@@ -414,6 +414,9 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
     streaming = True if streaming_raw is None else bool(streaming_raw)
     timeout = llm_config.get("timeout")
 
+    if api_type != "google" and (entry.get("thinking_level") is not None or llm_config.get("thinking_level") is not None):
+        raise ValueError("thinking_level is only supported by the Gemini model configuration")
+
     if api_type == "google":
         from ag2.config import GeminiConfig  # type: ignore[attr-defined]
         kwargs: dict[str, Any] = {
@@ -423,6 +426,11 @@ def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
             "streaming": streaming,
             **_model_call_limits(llm_config, entry, ("max_output_tokens",)),
         }
+        thinking_level = entry["thinking_level"] if "thinking_level" in entry else llm_config.get("thinking_level")
+        if thinking_level is not None:
+            if not isinstance(thinking_level, str) or thinking_level not in {"low", "medium", "high"}:
+                raise ValueError("thinking_level must be low, medium, or high")
+            kwargs["thinking_level"] = thinking_level
         # AG2 1.3 exposes an httpx client for Gemini rather than a timeout
         # field. Caller-supplied clients remain caller-owned; workflow configs
         # get a client using the shared AG2 timeout's seconds unit.

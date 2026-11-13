@@ -191,6 +191,23 @@ content: |
 
 Do not copy the default prompt when the default behavior is sufficient.
 
+For selected schema pages, the workspace scope and surface-regeneration payload
+project the existing runtime page model and the configuration models for the
+page's declared primitives. These schemas describe structure; they do not grant
+write access. The surface worker also includes bounded, read-only backend source
+for declared module actions referenced by server-paginated tables on the selected
+page. Missing or omitted source is not permission to invent implementation details.
+
+Server table search sends the canonical `page`, `page_size`, and `search` query
+to its declared module action. `search_keys` filters client-loaded rows only.
+The surface planner shows the saved page-to-action binding and its existing
+write-scope availability. The classifier determines whether the request changes
+server matching or only the search control's presentation. It is instructed to
+select the linked module action for a server matching change, or use workflow
+re-entry if that owner is unavailable or outside the approved scope. The planner
+validates selected targets and write scope deterministically; classification can
+still misinterpret intent or omit a needed target.
+
 ### Multi-Artifact Routing
 
 For apps with non-default artifact kinds or product-specific route changes, add

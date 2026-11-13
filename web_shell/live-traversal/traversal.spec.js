@@ -18,10 +18,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { createNote, finishTraversal, prepareTraversalOutput, requirePassedDraft, validatedDraftId, verifyTitleSearch } from './notes-journey.js';
+import { isWorkflowReplyRequested } from './reply-policy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const OUT = path.join(__dirname, 'artifacts');
-fs.mkdirSync(OUT, { recursive: true });
+const notesMode = process.env.MOZAIKS_TRAVERSAL_NOTES === '1';
+let OUT;
 
 // Generated code lands in ChatSessions.generated_files in Mongo, not on disk.
 // A harness watching generated/apps reports a finished build as NO BUNDLE —
@@ -79,7 +81,7 @@ const myAcceptedAppBundle = () => {
   if (state === null) return undefined;
   return (state.artifacts || []).find(
     (a) => myChats.has(String(a.source_chat_id)) && a.build_family === 'app_bundle'
-      && a.lifecycle_status === 'current' && (a.file_count || 0) > 0,
+      && a.lifecycle_status === 'current' && a.app_validation_status === 'passed' && (a.file_count || 0) > 0,
   ) || null;
 };
 
@@ -151,11 +153,8 @@ const judge = ({ evidence, blocked, failedIn, chats }) => {
   const accepted = artifacts.filter(
     (a) => a.build_family === 'app_bundle' && a.lifecycle_status === 'current' && (a.file_count || 0) > 0,
   );
-  // Absent is not a pass. app_validation_status is only set when a validation
-  // actually ran, and "skipped" records that one deliberately did not.
-  const validated = accepted.filter(
-    (a) => a.app_validation_status && !['skipped', 'failed', 'error'].includes(String(a.app_validation_status)),
-  );
+  // Only the terminal passed state proves validation; pending and unknown do not.
+  const validated = accepted.filter((a) => a.app_validation_status === 'passed');
 
   const inventory = `bundles=${bundles.length} artifacts=${artifacts.length} `
     + `accepted=${accepted.length} validated=${validated.length}`;
@@ -196,10 +195,9 @@ function note(stage, detail) {
   fs.writeFileSync(path.join(OUT, 'traversal.log'), log.join('\n'), 'utf8');
 }
 
-const IDEA =
-  'A tool-lending library for a neighbourhood association. Members browse a '
-  + 'catalogue of tools, request to borrow one for a date range, an admin '
-  + 'approves or declines, and the app tracks due dates and flags overdue items.';
+const IDEA = notesMode
+  ? 'A simple personal notes app. I can add a note with a title and body and see a list of my notes with their creation dates. Version one needs no editing, deleting, payments, external integrations, or AI features.'
+  : 'A tool-lending library for a neighbourhood association. Members browse a catalogue of tools, request to borrow one for a date range, an admin approves or declines, and the app tracks due dates and flags overdue items.';
 
 // Substantive and non-repeating: a vague human is a different test, and an
 // interview that receives "looks good" five times cannot converge.
@@ -207,16 +205,18 @@ const IDEA =
 // "go ahead") are what let an interview drift: the agent proposes, the harness
 // agrees, and the concept walks away from the stated idea. A short decisive set
 // converges; a long agreeable one trips the convergence guard.
-const ANSWERS = [
+const ANSWERS = notesMode ? [
+  'A single user adds notes with a title and body, then sees their notes in a list with creation dates.',
+  'Keep version one small: add notes and view the notes list. No editing, deletion, payments or integrations.',
+  'Use a clean light theme with a calm blue accent and readable text.',
+  'That matches the notes app. Please proceed with this scope.',
+] : [
   'Members are neighbours who sign in with email. Admins are two volunteer coordinators.',
   'Start with the catalogue and the borrow-request approval flow. Reminders can come second.',
   'Due-date tracking with an overdue list for admins is essential for version one.',
   'Free for members, no payments. No AI workflows — ordinary modules and pages cover it.',
   'Light mode, soft teal #2F9C95 primary with a warm sand accent, clean humanist sans, rounded corners.',
   'That matches the tool-lending library I described. Please proceed.',
-  // Confirmations must re-anchor, not just agree. Bare assent lets the agent
-  // build on its own speculation; restating the scope keeps the concept fixed
-  // while still moving the interview forward.
   'Yes — catalogue, borrow requests with admin approval, due dates and an overdue list. Nothing beyond that for version one.',
   'Correct, that is the whole scope. Please produce the concept blueprint for it.',
   'Confirmed: a tool-lending library, no social features, no payments. Go ahead.',
@@ -227,7 +227,10 @@ const ANSWERS = [
 // starves partway through the journey. These cycle: because every line restates
 // the scope rather than merely agreeing, repeating them cannot drift the concept
 // the way bare assent did.
-const ANCHORS = [
+const ANCHORS = notesMode ? [
+  'Yes, proceed with the small personal notes app: add a title and body and view the list with dates.',
+  'Keep the scope to creating and viewing notes; no editing, deletion, payments or AI features.',
+] : [
   'Yes — a tool-lending library: catalogue, borrow requests with admin approval, due dates, overdue list. Nothing more for version one.',
   'Correct as described. Light mode, soft teal #2F9C95 with a warm sand accent, clean humanist sans. Please continue.',
   'Confirmed: no payments, no social features, no AI workflows. Ordinary modules and pages. Proceed.',
@@ -252,6 +255,7 @@ const GATES = [
 const REVERSING = new Set(['cancel', 'request_changes', 'reject', 'back']);
 
 test('traversal: idea to accepted, validated artifact', async ({ page }) => {
+  OUT = prepareTraversalOutput(path.join(__dirname, 'artifacts'), notesMode, process.env.MOZAIKS_TRAVERSAL_OUTPUT);
   recordProvenance();
   const baseline = bundleState();
   if (baseline === null) {
@@ -451,7 +455,8 @@ test('traversal: idea to accepted, validated artifact', async ({ page }) => {
     if (acted) { idle = 0; continue; }
 
     const composer = page.getByPlaceholder(/reply|message|ask|type/i).first();
-    if (await composer.count().catch(() => 0)
+    if (await isWorkflowReplyRequested(page)
+        && await composer.count().catch(() => 0)
         && await composer.isVisible().catch(() => false)
         && await composer.isEditable().catch(() => false)) {
       const text = idx === 0
@@ -497,17 +502,77 @@ test('traversal: idea to accepted, validated artifact', async ({ page }) => {
   note('WORKFLOWS_SEEN', [...seen].join(' -> '));
   note('CHATS', [...myChats].join(', ') || '(none)');
   note('FINAL_URL', page.url());
-  note('FINISHED_AT', new Date().toISOString());
-
   const evidence = runProbe();
-  const verdict = judge({ evidence, blocked, failedIn, chats: myChats });
+  const generation = judge({ evidence, blocked, failedIn, chats: myChats });
+  const exerciseNotes = notesMode ? async (journey) => {
+    const acceptedArtifact = myAcceptedAppBundle();
+    journey.accepted_artifact = acceptedArtifact?.artifact_version_id || null;
+    if (!acceptedArtifact) throw new Error('Accepted artifact evidence is no longer available');
+    const firstTitle = 'Cobalt acceptance note';
+    const secondTitle = 'Amber acceptance note';
+    const previewButton = page.getByRole('button', { name: 'Start draft preview', exact: true }).first();
+    await previewButton.waitFor({ state: 'visible', timeout: 300000 });
+    await previewButton.click();
+    const frameElement = page.locator('iframe[title="Draft app preview"]').first();
+    await frameElement.waitFor({ state: 'visible', timeout: 480000 });
+    let frame = await frameElement.contentFrame();
+    await frame.locator('body').waitFor({ state: 'visible', timeout: 180000 });
+    journey.preview_opened = true;
+    await createNote(frame, 'Baseline acceptance note', 'A synthetic note created before refinement.');
+    journey.baseline_note_created = true;
+
+    const request = page.getByRole('textbox', { name: 'App change request', exact: true }).first();
+    await request.fill('Add a visible search field to the notes list that filters notes by title as the user types. Preserve creating and viewing notes. Do not add payments, integrations, or an AI workflow.');
+    await page.getByRole('button', { name: 'Apply change', exact: true }).click();
+    journey.refinement_submitted = true;
+    const result = page.getByRole('status', { name: 'Refinement result', exact: true }).first();
+    const refinementDeadline = Date.now() + 20 * 60 * 1000;
+    let routeChosen = false;
+    while (Date.now() < refinementDeadline) {
+      if (await result.getByText('Draft validated and saved for review.', { exact: true }).isVisible().catch(() => false)) break;
+      if (await result.isVisible().catch(() => false)) {
+        const message = await result.innerText();
+        if (/validation failed|refinement failed|not eligible/i.test(message)) throw new Error(message.slice(0, 300));
+      }
+      const routing = page.getByText('Build Routing', { exact: true }).first();
+      if (!routeChosen && await routing.isVisible().catch(() => false)) {
+        const card = routing.locator('xpath=ancestor::div[contains(@class,"rounded-2xl")][1]');
+        const choices = [];
+        for (const action of await card.getByRole('button').all()) {
+          const label = (await action.innerText().catch(() => '')).trim();
+          if (/recommended|apply proposed scope/i.test(label) && !/cancel|reject|back/i.test(label)
+              && await action.isVisible().catch(() => false) && await action.isEnabled().catch(() => false)) choices.push(action);
+        }
+        if (choices.length !== 1) throw new Error('Refinement requires an unrecognized or ambiguous routing decision');
+        await choices[0].click();
+        routeChosen = true;
+      }
+      await page.waitForTimeout(3000);
+    }
+    await result.getByText('Draft validated and saved for review.', { exact: true }).waitFor({ state: 'visible', timeout: 1000 });
+    await result.getByText('Refinement details', { exact: true }).click();
+    const detail = await result.innerText();
+    const draftId = validatedDraftId(detail, journey.accepted_artifact);
+    requirePassedDraft(bundleState()?.artifacts, draftId, acceptedArtifact.app_id);
+    journey.refinement_draft_id = draftId;
+    await page.getByRole('button', { name: 'Update preview', exact: true }).click();
+    await page.getByTitle(draftId, { exact: true }).waitFor({ state: 'visible', timeout: 480000 });
+    await frameElement.waitFor({ state: 'visible', timeout: 180000 });
+    frame = await frameElement.contentFrame();
+    // Artifact previews own separate disposable databases; do not claim that a
+    // baseline preview record survives the new preview's database lifecycle.
+    journey.cross_version_data_continuity = 'not_proven_separate_preview_databases';
+    await createNote(frame, firstTitle, 'A synthetic note for title-search acceptance.');
+    await createNote(frame, secondTitle, 'Cobalt appears only in this note body; clearing search must restore it.');
+    await verifyTitleSearch(frame, firstTitle, secondTitle, 'Cobalt');
+    journey.refined_create_list_and_search = true;
+    await page.screenshot({ path: path.join(OUT, '96-refined-notes.png'), fullPage: true }).catch(() => {});
+    note('REFINEMENT_VERIFIED', `draft ${draftId}: create, list and title filtering work in the refined preview`);
+  } : null;
+  const verdict = await finishTraversal(path.join(OUT, 'verdict.json'), generation,
+    { provenance, chats: [...myChats], workflows: [...seen] }, exerciseNotes);
+  note('FINISHED_AT', new Date().toISOString());
   note('RESULT', verdict.summary);
   for (const line of verdict.notes) note('NOTE', line);
-  fs.writeFileSync(path.join(OUT, 'verdict.json'),
-    JSON.stringify({ ...verdict, provenance, chats: [...myChats], workflows: [...seen] }, null, 2), 'utf8');
-
-  // The whole point: a run that did not produce an accepted, validated artifact
-  // is a failing run. Reporting it in a log while exiting 0 is how four
-  // consecutive failed traversals were recorded as four passing tests.
   if (!verdict.ok) throw new Error(verdict.summary);
 });

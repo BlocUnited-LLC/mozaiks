@@ -108,6 +108,13 @@ def test_revision_worker_guidance_keeps_request_below_contract_and_owned_task_au
     assert "report conflicts" in prompt
 
 
+def test_planner_context_variables_are_scoped_to_build_tasks(contracts):
+    prompt = contracts.prompts["AppPlanAgent"]
+
+    assert "`AppBuildPlan.build_tasks[]`" in prompt
+    assert "never put it directly on `AppBuildPlan`" in prompt
+
+
 def test_planner_preserves_behavioral_qualifiers_in_each_relevant_task(contracts):
     prompt = contracts.prompts["AppPlanAgent"]
     for phrase in (

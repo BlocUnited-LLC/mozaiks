@@ -266,11 +266,13 @@ async def test_responses_rejects_incompatible_output_limit_before_http_call() ->
 
 
 @pytest.mark.asyncio
-async def test_google_default_uses_real_ag2_provider_with_mock_http(monkeypatch) -> None:
+@pytest.mark.parametrize(("thinking_level", "max_output_tokens"), [(None, 256), ("low", 8192)])
+async def test_google_default_uses_real_ag2_provider_with_mock_http(monkeypatch, thinking_level, max_output_tokens) -> None:
     async def fake_config(**kwargs):
         return None, {
             "config_list": [{"model": "gemini-3.8-flash", "api_type": "google", "api_key": "gemini-test-key"}],
-            "max_output_tokens": 256,
+            "max_output_tokens": max_output_tokens,
+            "thinking_level": thinking_level,
             "temperature": 0.2,
             "timeout": 13.0,
         }
@@ -328,9 +330,149 @@ async def test_google_default_uses_real_ag2_provider_with_mock_http(monkeypatch)
     payload = json.loads(request.content)
     assert payload["systemInstruction"]["parts"] == [{"text": "Return JSON"}]
     assert payload["contents"] == [{"parts": [{"text": "Hello"}], "role": "user"}]
-    assert payload["generationConfig"]["maxOutputTokens"] == 256
+    assert payload["generationConfig"]["maxOutputTokens"] == max_output_tokens
     assert payload["generationConfig"]["temperature"] == 0.2
+    if thinking_level is None:
+        assert "thinkingConfig" not in payload["generationConfig"]
+    else:
+        assert payload["generationConfig"]["thinkingConfig"]["thinking_level"] == "LOW"
     assert requests[1].extensions["timeout"]["read"] == 13.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selected_type", ["openai", "anthropic", "google"])
+async def test_mixed_default_provider_keeps_gemini_environment_provider_scoped(monkeypatch, selected_type) -> None:
+    from copy import deepcopy
+    from dataclasses import dataclass
+    from types import SimpleNamespace
+
+    import ag2.config
+
+    from mozaiksai.core.workflow import llm_config as workflow_config
+
+    selected = {
+        "openai": {"api_type": "openai", "model": "test-openai-model", "api_key": "fake-key"},
+        "anthropic": {"api_type": "anthropic", "model": "test-anthropic-model", "api_key": "fake-key"},
+        "google": {"api_type": "google", "model": "gemini-3.8-flash", "api_key": "fake-key"},
+    }[selected_type]
+    unused = ({"api_type": "openai", "model": "unused-model", "api_key": ""} if selected_type == "google"
+              else {"api_type": "google", "model": "unused-model", "api_key": ""})
+    providers = [unused, selected]
+    original = deepcopy(providers)
+
+    async def load():
+        return providers
+
+    monkeypatch.setattr(workflow_config, "_load_raw_config_list", load)
+    monkeypatch.setattr(simple_llm, "get_llm_config", workflow_config.get_llm_config)
+    monkeypatch.setenv("LLM_GEMINI_THINKING_LEVEL", "low")
+    monkeypatch.delenv("LLM_MAX_TOKENS", raising=False)
+    workflow_config.clear_llm_caches()
+    requests = []
+    anthropic_options = []
+
+    def handle(request):
+        requests.append(request)
+        if selected_type == "google":
+            return httpx.Response(200, json={
+                "candidates": [{"content": {"role": "model", "parts": [{"text": "Hello"}]}, "finishReason": "STOP"}],
+            })
+        return httpx.Response(200, json={"choices": [{"message": {"content": "Hello"}}]})
+
+    @dataclass
+    class Usage:
+        total_tokens: int = 1
+
+    class FakeAnthropicConfig:
+        http_client = None
+
+        def __init__(self, **kwargs):
+            anthropic_options.append(kwargs)
+
+        def create(self):
+            async def call(*args, **kwargs):
+                return SimpleNamespace(content="Hello", usage=Usage())
+            return call
+
+    monkeypatch.setattr(ag2.config, "AnthropicConfig", FakeAnthropicConfig)
+    service = SimpleLLMCapabilityService()
+    await service._client.aclose()
+    service._client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+    try:
+        result = await service.generate_chat_completion(
+            messages=[{"role": "user", "content": "Hi"}], app_id=None, user_id=None,
+        )
+    finally:
+        await service.aclose()
+        workflow_config.clear_llm_caches()
+
+    assert result["content"] == "Hello"
+    assert providers == original
+    if selected_type == "anthropic":
+        assert len(anthropic_options) == 1 and "thinking_level" not in anthropic_options[0]
+        assert not requests
+    else:
+        assert len(requests) == 1
+        payload = json.loads(requests[0].content)
+        if selected_type == "google":
+            assert payload["generationConfig"]["thinkingConfig"]["thinking_level"] == "LOW"
+        else:
+            assert requests[0].url.path == "/v1/chat/completions"
+            assert "thinking_level" not in payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selection", ["default", "explicit"])
+@pytest.mark.parametrize(
+    ("entry_thinking", "shared_thinking", "expected"),
+    [("low", "high", "LOW"), (None, "high", None), ("high", None, "HIGH"),
+     ("missing", "medium", "MEDIUM"), ("missing", None, None)],
+)
+async def test_simple_llm_preserves_provider_thinking_precedence(
+    monkeypatch, selection, entry_thinking, shared_thinking, expected,
+) -> None:
+    from mozaiksai.core.workflow import llm_config as workflow_config
+
+    provider = {"api_type": "google", "model": "gemini-3.8-flash", "api_key": "fake-key"}
+    if entry_thinking != "missing":
+        provider["thinking_level"] = entry_thinking
+
+    async def load():
+        return [provider]
+
+    async def config(**kwargs):
+        return await workflow_config.get_llm_config(extra_config={"thinking_level": shared_thinking})
+
+    monkeypatch.setattr(workflow_config, "_load_raw_config_list", load)
+    monkeypatch.setattr(simple_llm, "get_llm_config", config)
+    monkeypatch.setenv("LLM_GEMINI_THINKING_LEVEL", "low")
+    monkeypatch.delenv("LLM_MAX_TOKENS", raising=False)
+    workflow_config.clear_llm_caches()
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(200, json={
+            "candidates": [{"content": {"role": "model", "parts": [{"text": "Hello"}]}, "finishReason": "STOP"}],
+        })
+
+    service = SimpleLLMCapabilityService()
+    await service._client.aclose()
+    service._client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+    try:
+        selected_config = (await config())[1] if selection == "explicit" else None
+        result = await service.generate_chat_completion(
+            messages=[{"role": "user", "content": "Hi"}], llm_config=selected_config, app_id=None, user_id=None,
+        )
+    finally:
+        await service.aclose()
+        workflow_config.clear_llm_caches()
+    assert result["content"] == "Hello"
+    settings = json.loads(requests[0].content)["generationConfig"]
+    if expected is None:
+        assert "thinkingConfig" not in settings
+    else:
+        assert settings["thinkingConfig"]["thinking_level"] == expected
 
 
 @pytest.mark.asyncio

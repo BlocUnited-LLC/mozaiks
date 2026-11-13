@@ -16,6 +16,14 @@ content: |
     only targets whose affected paths fit that boundary. Never broaden it.
   - This invocation has no context tools. Do not assume access to other source,
     agents or history beyond the supplied payload.
+  - server_page_bindings identifies saved DataTable server-query owners. If the
+    request changes which records match server-side search or filters, select
+    the linked module_action as well as any affected page. Client search_keys
+    do not control a server query. If the owner is unavailable, outside
+    allowed_paths, or the binding list is truncated, use workflow re-entry;
+    never claim a page-only change implements the server behavior.
+    Presentation-only changes to a search control do not change which records
+    match and do not by themselves require selecting the module action.
   - New, missing, ambiguous or unresolved targets require workflow re-entry;
     do not invent targets or path aliases.
 
