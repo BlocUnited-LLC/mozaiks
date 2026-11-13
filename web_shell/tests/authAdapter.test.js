@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { beforeEach, test } from 'node:test';
 import { webcrypto } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -8,6 +10,42 @@ const chatUiRoot = process.env.MOZAIKS_CHAT_UI_PATH || fileURLToPath(new URL('..
 const { createAuthAdapter, loadShellAuth, safeReturnPath } = await import(
   pathToFileURL(resolve(chatUiRoot, 'src/auth/authAdapter.js')).href
 );
+
+test('the public auth entrypoint opens a socket with header credentials and an unchanged URL', async (t) => {
+  const { build } = createRequire(import.meta.url)('esbuild');
+  const pkg = JSON.parse(await readFile(resolve(chatUiRoot, 'package.json'), 'utf8'));
+  const bundled = await build({
+    stdin: {
+      contents: "export { openAuthenticatedWebSocket } from '@mozaiks/chat-ui/auth';",
+      resolveDir: chatUiRoot,
+    },
+    bundle: true, write: false, format: 'esm', jsx: 'automatic',
+    loader: { '.js': 'jsx', '.css': 'empty', '.png': 'dataurl' },
+    external: [...Object.keys(pkg.dependencies), ...Object.keys(pkg.peerDependencies), '@platform/*', '@studio/*', 'virtual:*'],
+    plugins: [{
+      name: 'transport-only-consumer',
+      setup(builder) {
+        // This consumer imports no auth pages; their React tree is outside this test.
+        builder.onResolve({ filter: /AuthPages\.jsx$/ }, args => ({ path: args.path, external: true, sideEffects: false }));
+      },
+    }],
+  });
+  const { openAuthenticatedWebSocket } = await import(
+    `data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`
+  );
+  const calls = [];
+  t.mock.method(globalThis, 'WebSocket', class {
+    constructor(...args) { calls.push(args); }
+  });
+  const url = 'wss://app.example/api/rooms/room-one/live?cursor=after-one';
+  const token = 'opaque+access/token=with?reserved&bytes';
+  openAuthenticatedWebSocket(url, token);
+  openAuthenticatedWebSocket(url, null);
+  assert.deepEqual(calls, [
+    [url, ['mozaiks.bearer.v1', Buffer.from(token).toString('base64url')]],
+    [url],
+  ]);
+});
 
 const issuer = 'https://identity.example';
 const discovery = {
