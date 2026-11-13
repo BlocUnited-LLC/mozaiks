@@ -73,6 +73,21 @@ Shared foundations:
 Use the same primitives where possible.
 Do not collapse the producers that use them.
 
+### Persistent page clearance
+
+`PageFrame` owns outer page padding, including bottom clearance for the visible
+minimized assistant. The launcher and frame share geometry in `mobile.css`:
+the current launcher height, safe-area bottom offset, and a gap for its unread
+badge. The reservation follows late appearance, viewport breakpoints, collapse,
+and route removal. It is absent while the assistant is expanded or the mobile
+bottom bar owns its action. Larger app theme padding is preserved.
+
+Custom pages that fill the viewport must consume the frame's current computed
+padding, including changes after mount. Prefer normal flex/grid layout; a page
+that calculates an explicit content height must observe its frame's geometry
+and clean up its observer on unmount. Do not copy launcher dimensions into app
+CSS or hide the assistant to keep page controls reachable.
+
 ### Form defaults and table search
 
 `Form.config.fields[].default_value` declares a literal scalar default: string,

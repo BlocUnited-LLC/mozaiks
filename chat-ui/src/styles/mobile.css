@@ -253,21 +253,49 @@
   margin: 12px auto 8px;
 }
 
+/* One geometry owner for the minimized assistant and PageFrame clearance.
+   The icon-only button has no wrapping text; its rem-sized contents and badge
+   scale with text size. The extra gap also clears the protruding unread badge. */
+:root {
+  --shell-assistant-launcher-height: 3.75rem;
+  --shell-assistant-anchor-bottom: calc(var(--safe-area-bottom, 0px) + 1rem);
+}
+
+@media (min-width: 768px) {
+  :root {
+    --shell-assistant-launcher-height: 6.5rem;
+  }
+}
+
+.widget-launcher-button {
+  height: var(--shell-assistant-launcher-height);
+}
+
+/* CSS ownership follows late mount, expansion and route unmount without a
+   second widget, document listeners, or stale inline padding on app pages. */
+body:has(.widget-floating-launcher) {
+  --shell-page-assistant-clearance: calc(var(--shell-assistant-launcher-height) + var(--shell-assistant-anchor-bottom) + 1rem);
+}
+
 /* Floating widget anchor with safe-area support (iOS notch/home indicator). */
 .widget-safe-bottom {
-  bottom: max(1rem, calc(env(safe-area-inset-bottom, 0px) + 1rem));
+  bottom: var(--shell-assistant-anchor-bottom);
 }
 
 /* The bottom bar owns the minimized assistant action on mobile app shells.
    Keep the expanded panel above the bar, and keep the floating launcher for
    routes without a bottom bar. */
 @media (max-width: 767px) {
+  body:has(.shell-mobile-bottom-bar) {
+    --shell-page-assistant-clearance: 0px;
+  }
+
   body:has(.shell-mobile-bottom-bar) .widget-floating-launcher {
     display: none;
   }
 
   body:has(.shell-mobile-bottom-bar) .widget-safe-bottom {
-    bottom: max(5.5rem, calc(env(safe-area-inset-bottom, 0px) + 5.5rem));
+    bottom: calc(var(--safe-area-bottom, 0px) + 5.5rem);
   }
 }
 
