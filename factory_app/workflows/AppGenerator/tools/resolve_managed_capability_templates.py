@@ -1542,8 +1542,9 @@ def verified_pack_template_inventory(
 def verified_template_module_ids(files: dict[str, str], inventory: list[dict[str, Any]]) -> frozenset[str]:
     """Keep only complete, declared, exact template implementations out of synthesis.
 
-    Workspace-owned handler extensions remain workspace code. They never grant
-    ownership to a policy, schema, service, repo, or undeclared backend helper.
+    Workspace-owned handler extensions remain workspace code. Declared
+    generator-owned smoke fixtures are validation metadata, checked separately
+    before execution. Neither grants ownership to backend implementation files.
     """
     result = set()
     required = {"module.yaml", "backend/service.py", "backend/repo.py", "backend/policy.py", "backend/schemas.py"}
@@ -1560,9 +1561,11 @@ def verified_template_module_ids(files: dict[str, str], inventory: list[dict[str
                     f"Pack '{pack['pack_id']}' complete backend requires a source the shipped catalog, verified "
                     "installed state, the workspace build-context registry or matching selection pins vouch for"
                 )
-            declared = {path: owner for path, owner in owners.items() if path.startswith(prefix)}
+            fixture = prefix + "contracts/fixtures.yaml"
+            app_metadata = {fixture} if owners.get(fixture) == "generator" else set()
+            declared = {path: owner for path, owner in owners.items() if path.startswith(prefix) and path not in app_metadata}
             template_paths = {path for path in rendered if path.startswith(prefix)}
-            candidate_paths = {path for path in files if path.startswith(prefix)}
+            candidate_paths = {path for path in files if path.startswith(prefix) and path not in app_metadata}
             handler = prefix + "backend/handler.py"
             if owners.get(handler) not in {"templates", "workspace"} or handler not in template_paths:
                 raise PackIntegrityError(f"Pack '{pack['pack_id']}' module '{module_id}' requires a declared handler template")

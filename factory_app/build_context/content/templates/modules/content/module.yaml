@@ -1,0 +1,373 @@
+schema_version: mozaiks.module.v1
+module:
+  id: content
+  display_name: Content
+  version: 0.1.0
+  description: App-owned editorial entries for articles, portfolio projects, and case
+    studies.
+  owner: app
+  visibility: app
+  type: standard
+  handler: backend.handler:ContentHandler
+  user_data_scope: false
+permissions:
+- id: content.manage
+  description: Create, read drafts, edit, publish, and archive app-owned editorial
+    entries.
+actions:
+- id: list_entries
+  description: List entries by ascending entry_id. Unprivileged readers see published
+    entries only; count is the current page size. List results omit body; get_entry
+    returns complete text.
+  api_surface: public_readonly
+  handler_method: list_entries
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      limit:
+        type: integer
+      after:
+        type: string
+      status:
+        type: string
+        enum:
+        - draft
+        - published
+        - archived
+  output_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      entries:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          properties:
+            entry_id:
+              type: string
+              pattern: ^ent_[0-9a-f]{32}$
+            title:
+              type: string
+              minLength: 1
+              maxLength: 200
+            slug:
+              type: string
+              minLength: 1
+              maxLength: 100
+              pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+            summary:
+              type: string
+              maxLength: 1000
+            status:
+              type: string
+              enum:
+              - draft
+              - published
+              - archived
+            created_at:
+              type: string
+            updated_at:
+              type: string
+          required:
+          - entry_id
+          - title
+          - slug
+          - summary
+          - status
+          - created_at
+          - updated_at
+      count:
+        type: integer
+      next_cursor:
+        type: string
+        nullable: true
+    required:
+    - entries
+    - count
+    - next_cursor
+  permissions: []
+- id: get_entry
+  description: Read one entry within the caller visibility policy.
+  api_surface: public_readonly
+  handler_method: get_entry
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      entry_id:
+        type: string
+    required:
+    - entry_id
+  output_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      entry:
+        type: object
+        additionalProperties: false
+        properties:
+          entry_id:
+            type: string
+            pattern: ^ent_[0-9a-f]{32}$
+          title:
+            type: string
+            minLength: 1
+            maxLength: 200
+          slug:
+            type: string
+            minLength: 1
+            maxLength: 100
+            pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+          summary:
+            type: string
+            maxLength: 1000
+          body:
+            type: string
+            maxLength: 100000
+          status:
+            type: string
+            enum:
+            - draft
+            - published
+            - archived
+          created_at:
+            type: string
+          updated_at:
+            type: string
+        required:
+        - entry_id
+        - title
+        - slug
+        - summary
+        - body
+        - status
+        - created_at
+        - updated_at
+    required:
+    - entry
+  permissions: []
+- id: create_entry
+  description: Create an app-owned editorial entry in draft status. An omitted slug
+    is generated from title and the server entry ID.
+  api_surface: public
+  handler_method: create_entry
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      title:
+        type: string
+      slug:
+        type: string
+      summary:
+        type: string
+      body:
+        type: string
+    required:
+    - title
+  output_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      entry:
+        type: object
+        additionalProperties: false
+        properties:
+          entry_id:
+            type: string
+            pattern: ^ent_[0-9a-f]{32}$
+          title:
+            type: string
+            minLength: 1
+            maxLength: 200
+          slug:
+            type: string
+            minLength: 1
+            maxLength: 100
+            pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+          summary:
+            type: string
+            maxLength: 1000
+          body:
+            type: string
+            maxLength: 100000
+          status:
+            type: string
+            enum:
+            - draft
+            - published
+            - archived
+          created_at:
+            type: string
+          updated_at:
+            type: string
+        required:
+        - entry_id
+        - title
+        - slug
+        - summary
+        - body
+        - status
+        - created_at
+        - updated_at
+    required:
+    - entry
+  permissions:
+  - content.manage
+  emits:
+  - domain.content.entry_created
+- id: update_entry
+  description: Edit only declared content fields and publication status. IDs and timestamps
+    remain server-owned.
+  api_surface: public
+  handler_method: update_entry
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      entry_id:
+        type: string
+      title:
+        type: string
+      slug:
+        type: string
+      summary:
+        type: string
+      body:
+        type: string
+      status:
+        type: string
+        enum:
+        - draft
+        - published
+        - archived
+    required:
+    - entry_id
+  output_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      entry:
+        type: object
+        additionalProperties: false
+        properties:
+          entry_id:
+            type: string
+            pattern: ^ent_[0-9a-f]{32}$
+          title:
+            type: string
+            minLength: 1
+            maxLength: 200
+          slug:
+            type: string
+            minLength: 1
+            maxLength: 100
+            pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+          summary:
+            type: string
+            maxLength: 1000
+          body:
+            type: string
+            maxLength: 100000
+          status:
+            type: string
+            enum:
+            - draft
+            - published
+            - archived
+          created_at:
+            type: string
+          updated_at:
+            type: string
+        required:
+        - entry_id
+        - title
+        - slug
+        - summary
+        - body
+        - status
+        - created_at
+        - updated_at
+    required:
+    - entry
+  permissions:
+  - content.manage
+  emits:
+  - domain.content.entry_updated
+- id: archive_entry
+  description: Set archived status without deleting the editorial record. Repeated
+    archives do not emit another event.
+  api_surface: public
+  handler_method: archive_entry
+  input_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      entry_id:
+        type: string
+    required:
+    - entry_id
+  output_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      entry:
+        type: object
+        additionalProperties: false
+        properties:
+          entry_id:
+            type: string
+            pattern: ^ent_[0-9a-f]{32}$
+          title:
+            type: string
+            minLength: 1
+            maxLength: 200
+          slug:
+            type: string
+            minLength: 1
+            maxLength: 100
+            pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+          summary:
+            type: string
+            maxLength: 1000
+          body:
+            type: string
+            maxLength: 100000
+          status:
+            type: string
+            enum:
+            - draft
+            - published
+            - archived
+          created_at:
+            type: string
+          updated_at:
+            type: string
+        required:
+        - entry_id
+        - title
+        - slug
+        - summary
+        - body
+        - status
+        - created_at
+        - updated_at
+    required:
+    - entry
+  permissions:
+  - content.manage
+  emits:
+  - domain.content.entry_archived
+capabilities:
+- capability_id: content.entries.read
+  kind: action
+  target: list_entries
+  title: Read published content
+- capability_id: content.entries.manage
+  kind: action
+  target: create_entry
+  title: Manage editorial content
+  permissions:
+  - content.manage

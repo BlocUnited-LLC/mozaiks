@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- A reusable content pack supplies permission-protected publishing records while
+  leaving app pages and branding customizable through canonical app contracts.
+
 - Workflow operators can optionally select the Gemini thinking level without
   changing the provider's default when the setting is omitted.
 
