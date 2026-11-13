@@ -194,10 +194,10 @@ async def test_verified_content_reference_uses_canonical_reader_bytes(tmp_path, 
 @pytest.mark.asyncio
 async def test_legacy_zip_is_readable_but_cannot_supply_verified_authority(tmp_path, no_current):
     record = _record(tmp_path, verified=False)
-    legacy = await load_context_graph_for_tool(context=_context(), artifact_store=_store(record))
-    assert legacy["present"] is True
-    assert legacy["provenance"]["verified"] is False
-    assert legacy["provenance"]["bundle_digest"] is None
+    unverified = await load_context_graph_for_tool(context=_context(), artifact_store=_store(record))
+    assert unverified["present"] is True
+    assert unverified["provenance"]["verified"] is False
+    assert unverified["provenance"]["bundle_digest"] is None
     strict = await load_context_graph_for_tool(context=_context(), artifact_store=_store(record), require_verified=True)
     assert strict["present"] is False
     assert strict["reason"] == "content_digest_unavailable_or_invalid"

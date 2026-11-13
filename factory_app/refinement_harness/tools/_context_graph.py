@@ -85,7 +85,7 @@ async def load_context_graph_for_tool(
 
 
 def normalize_graph_context(context: Any) -> ControlPlaneToolContext:
-    """Reject conflicting selectors before legacy aliases can erase evidence."""
+    """Reject conflicting selectors before alias normalization can erase evidence."""
     if isinstance(context, dict):
         for old, canonical in (
             ("artifact_version_id", "build_record_id"),

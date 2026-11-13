@@ -148,13 +148,14 @@ jobs:
             tests/test_canonical_app_build_validation.py::test_real_docker_build_includes_generated_tailwind_class \
             tests/test_app_acceptance_isolation.py::test_generated_acceptance_uses_local_docker_with_poisoned_client_settings \
             tests/test_app_acceptance_isolation.py::test_generated_gate_admits_only_pinned_contained_evidence \
-            tests/test_app_media_validation.py::test_media_candidate_passes_real_pinned_docker_acceptance_and_build
+            tests/test_app_media_validation.py::test_media_candidate_passes_real_pinned_docker_acceptance_and_build \
+            tests/test_dependency_graph_harness_cycle.py::test_graph_refinement_cycle_passes_real_pinned_docker_validation
           python - <<'PY'
           from xml.etree import ElementTree
 
           cases = ElementTree.parse('/tmp/generated-build-proof.xml').findall('.//testcase')
-          if len(cases) != 4 or any(case.find('skipped') is not None for case in cases):
-              raise SystemExit(f'Expected four executed generated Docker cases; found {len(cases)} cases')
+          if len(cases) != 5 or any(case.find('skipped') is not None for case in cases):
+              raise SystemExit(f'Expected five executed generated Docker cases; found {len(cases)} cases')
           PY
 
   test:

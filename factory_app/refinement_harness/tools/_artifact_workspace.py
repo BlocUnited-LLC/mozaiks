@@ -22,7 +22,7 @@ from mozaiksai.core.artifacts.content_store import (
 from mozaiksai.core.artifacts.models import resolve_canonical_bundle_entry
 from mozaiksai.core.artifacts.store import ArtifactStore
 
-_MAX_FILE_BYTES = 80_000
+_LEGACY_MAX_FILE_BYTES = 80_000
 _IMPORT_EXTENSIONS = (
     "",
     ".js",
@@ -76,7 +76,7 @@ async def load_artifact_workspace(
     coverage = {"artifact_source_incomplete": False}
 
     # Canonical bundles always use the one verified byte reader, including local
-    # ZIPs whose digest lives only in the manifest. Legacy callers may still
+    # ZIPs whose digest lives only in the manifest. Unverified callers may still
     # read workspaces without a canonical manifest, but cannot claim authority.
     canonical_bundle = artifact.build_family == artifact.build_key == "app_bundle" and (
         metadata.get("bundle_name") or any(entry.content_type == "application/zip" for entry in artifact.files_manifest)
@@ -105,7 +105,11 @@ async def load_artifact_workspace(
         file_map = read_workspace_dir(Path(str(workspace_dir)), coverage=coverage)
         source = "workspace_dir"
     elif artifact_path and Path(str(artifact_path)).exists():
-        file_map = read_artifact_zip(Path(str(artifact_path)), coverage=coverage)
+        file_map = read_artifact_zip(
+            Path(str(artifact_path)),
+            coverage=coverage,
+            workspace_index=metadata.get("bundle_mode") == "app_intelligence_workspace_index",
+        )
         source = "artifact_zip"
     elif content_ref:
         if content_store is None:
@@ -184,7 +188,7 @@ def read_workspace_dir(root: Path, *, coverage: dict[str, bool] | None = None) -
                 continue
             if not file_path.is_file():
                 continue
-            if file_path.stat().st_size > _MAX_FILE_BYTES:
+            if file_path.stat().st_size > _LEGACY_MAX_FILE_BYTES:
                 _mark_omitted_source(rel, coverage)
                 continue
             try:
@@ -195,7 +199,15 @@ def read_workspace_dir(root: Path, *, coverage: dict[str, bool] | None = None) -
     return file_map
 
 
-def _read_from_archive(archive: zipfile.ZipFile, *, coverage: dict[str, bool] | None = None) -> dict[str, str]:
+def _read_from_archive(
+    archive: zipfile.ZipFile,
+    *,
+    coverage: dict[str, bool] | None = None,
+    workspace_index: bool = False,
+) -> dict[str, str]:
+    max_file_bytes = (
+        default_context_graph_scan_policy().max_file_bytes if workspace_index else _LEGACY_MAX_FILE_BYTES
+    )
     raw_entries: list[tuple[str, str]] = []
     seen_paths: set[str] = set()
     for info in sorted(archive.infolist(), key=lambda item: item.filename):
@@ -206,7 +218,7 @@ def _read_from_archive(archive: zipfile.ZipFile, *, coverage: dict[str, bool] | 
             continue
         if _skip_artifact_workspace_path(safe_name):
             continue
-        if info.file_size > _MAX_FILE_BYTES:
+        if info.file_size > max_file_bytes:
             _mark_omitted_source(safe_name, coverage)
             continue
         if safe_name in seen_paths:
@@ -219,8 +231,9 @@ def _read_from_archive(archive: zipfile.ZipFile, *, coverage: dict[str, bool] | 
             continue
         raw_entries.append((safe_name, decoded))
 
-    if not raw_entries:
-        return {}
+    # The workspace index writes paths relative to the workspace without a wrapper.
+    if workspace_index:
+        return dict(raw_entries)
 
     split_paths = [path.split("/") for path, _ in raw_entries]
     if split_paths and all(len(parts) > 1 for parts in split_paths):
@@ -249,9 +262,14 @@ def _mark_omitted_source(path: str, coverage: dict[str, bool] | None) -> None:
         coverage["artifact_source_incomplete"] = True
 
 
-def read_artifact_zip(zip_path: Path, *, coverage: dict[str, bool] | None = None) -> dict[str, str]:
+def read_artifact_zip(
+    zip_path: Path,
+    *,
+    coverage: dict[str, bool] | None = None,
+    workspace_index: bool = False,
+) -> dict[str, str]:
     with zipfile.ZipFile(zip_path, "r") as archive:
-        return _read_from_archive(archive, coverage=coverage)
+        return _read_from_archive(archive, coverage=coverage, workspace_index=workspace_index)
 
 
 def read_artifact_zip_bytes(data: bytes, *, coverage: dict[str, bool] | None = None) -> dict[str, str]:
