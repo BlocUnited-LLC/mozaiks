@@ -7,7 +7,6 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
 from mozaiksai.core.app_context.scan_policy import (
     default_context_graph_scan_policy,
     is_excluded_source_directory_path,
@@ -83,6 +82,8 @@ async def load_artifact_workspace(
         metadata.get("bundle_name") or any(entry.content_type == "application/zip" for entry in artifact.files_manifest)
     )
     if require_verified or content_digest or canonical_bundle:
+        from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
+
         try:
             entry = resolve_canonical_bundle_entry(artifact)
             files, diagnostics = await read_artifact_bundle(artifact)

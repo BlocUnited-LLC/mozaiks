@@ -174,12 +174,13 @@ def _build_evidence(
     paths = {
         node.node_id: path for node in graph.nodes
         if isinstance(path := node.metadata.get("path"), str)
-        and path in file_map and len(path) <= _MAX_PATH_CHARS
+        and path in file_map
         and path != "." and safe_scan_relpath(path) == path
     }
     file_ids = {
         paths[node.node_id]: node.node_id for node in graph.nodes
         if node.node_type == GraphNodeType.FILE and node.node_id in paths
+        and len(paths[node.node_id]) <= _MAX_PATH_CHARS
     }
     requested_paths = dedupe_strings(selected_paths)
     selected = [path for path in requested_paths if path in file_ids][:8]
@@ -207,14 +208,18 @@ def _build_evidence(
     files = tuple(path for path in reachable if path in file_ids)[:_MAX_FILES]
     available = set(files)
     relations: set[tuple[str, str, GraphEdgeType]] = set()
+    outside_neighborhood = False
     for edge in graph.edges:
         source = paths.get(edge.source_node_id)
         target = paths.get(edge.target_node_id)
         if (
-            source is not None and source in available and target is not None and target in available
-            and source != target and edge.edge_type in _DEPENDENCY_EDGES
+            source is not None and target is not None and source != target
+            and edge.edge_type in _DEPENDENCY_EDGES
         ):
-            relations.add((source, target, edge.edge_type))
+            if source in available and target in available:
+                relations.add((source, target, edge.edge_type))
+            elif source in available or target in available:
+                outside_neighborhood = True
     dependencies = tuple(
         GraphDependency(source_path=source, target_path=target, kind=kind)
         for source, target, kind in sorted(relations)[:_MAX_EDGES]
@@ -226,7 +231,7 @@ def _build_evidence(
         bundle_digest=provenance["bundle_digest"], graph_hash=graph.graph_hash,
         files=files, dependencies=dependencies,
         coverage_incomplete=bool(
-            report.truncated or len(reachable) > _MAX_FILES or len(relations) > _MAX_EDGES
+            report.truncated or outside_neighborhood or len(reachable) > _MAX_FILES or len(relations) > _MAX_EDGES
             or len(requested_paths) > len(selected)
             or health.get("limit_reached") or health.get("skipped", {}).get("large_file")
             or health.get("artifact_source_incomplete")
