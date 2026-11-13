@@ -9,6 +9,9 @@ from typing import Any
 import pytest
 import yaml
 
+from mozaiksai.core.session.build_context import build_provider_values, load_build_context
+from mozaiksai.core.session.build_context_schema import VALID_CAPABILITY_SOURCES
+
 _APPGEN_DIR = (
     Path(__file__).parent.parent
     / "factory_app"
@@ -19,6 +22,17 @@ _HOOKS_YAML = _APPGEN_DIR / "middleware.yaml"
 _TOOLS_DIR = _APPGEN_DIR / "tools"
 _CONTEXT_VARS_PATH = _APPGEN_DIR / "context_variables.yaml"
 _STRUCTURED_OUTPUTS_PATH = _APPGEN_DIR / "structured_outputs.yaml"
+_BUILD_CONTEXT = _APPGEN_DIR.parents[1] / "build_context"
+
+
+def _pack_context(*pack_ids: str) -> dict[str, Any]:
+    context: dict[str, Any] = {"capability_packs": [], "operator_contracts": []}
+    for pack_id in pack_ids:
+        root = _BUILD_CONTEXT / pack_id
+        values = build_provider_values(root=root, config=load_build_context(root / "context.yaml"))
+        for key in context:
+            context[key].extend(values[key])
+    return context
 
 
 class _FakeAgent:
@@ -166,19 +180,19 @@ class TestHostedInjection:
         assert "[MANAGED CAPABILITIES CONTEXT]" in msg
         assert "wallet" in msg
         # Internal resolver path is not surfaced in the agent prompt
-        assert "/build_context/packs" not in msg
+        assert "/build_context/wallet" not in msg
 
-    def test_taxonomy_guidance_always_present_when_injected(self, hook):
+    @pytest.mark.parametrize("source", sorted(VALID_CAPABILITY_SOURCES | {"host_universal"}))
+    def test_source_guidance_is_scoped_to_the_supplied_origins(self, hook, source):
         agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [{"id": "module_execution"}],
+            "capability_packs": [{"id": "example_pack", "capability_source": source}],
         })
         hook.inject_managed_capabilities_context(agent, [])
         msg = agent.system_message
-        assert "host_universal" in msg
-        assert "framework_pack" in msg
-        assert "managed_capability" in msg
-        assert "generated_module" in msg
-        assert "external_adapter" in msg
+        assert hook._CAPABILITY_SOURCE_GUIDANCE[source] in msg
+        for other, guidance in hook._CAPABILITY_SOURCE_GUIDANCE.items():
+            if other != source:
+                assert guidance not in msg
 
     def test_managed_capability_planning_rule_injected(self, hook):
         agent = _FakeAgent("AppPlanAgent", context_variables={
@@ -223,6 +237,48 @@ class TestHostedInjection:
         assert "capability_source: managed_capability" in msg
 
 
+class TestDeclaredPackOwnership:
+    def test_content_only_guidance_preserves_contract_owners_without_managed_recipes(self, hook):
+        context = _pack_context("content")
+        agent = _FakeAgent("AppPlanAgent", context)
+        hook.inject_managed_capabilities_context(agent, [])
+        message = agent.system_message
+        assert "capability_pack_id: content; capability_source: generated_module" in message
+        assert "Planning rules for managed_capability" not in message
+        assert "services/integrations/{pack_id}_client.py" not in message
+        assert "AppGenerator must generate full module contracts and module backend files" not in message
+        [contract] = context["operator_contracts"]
+        for output in contract["required_outputs"]:
+            assert f"{output['path']} [owner: {output['owner']}]" in message
+            if output.get("notes"):
+                assert output["notes"] in message
+        for boundary in contract["runtime_boundaries"]:
+            assert boundary["rule"] in message
+        assert context["capability_packs"][0]["pack_source_path"] not in message
+        assert contract["source_path"] not in message
+        before = message
+        hook.inject_managed_capabilities_context(agent, [])
+        assert agent.system_message == before
+
+    def test_content_and_managed_pack_keep_distinct_origins_and_facade_boundaries(self, hook):
+        context = _pack_context("content", "mozaikspay")
+        agent = _FakeAgent("AppPlanAgent", context)
+        hook.inject_managed_capabilities_context(agent, [])
+        message = agent.system_message
+        for pack in context["capability_packs"]:
+            assert f"capability_pack_id: {pack['id']}; capability_source: {pack['capability_source']}" in message
+            assert pack["pack_source_path"] not in message
+        assert "Planning rules for managed_capability entries only:" in message
+        assert "Pages bind to declared app-owned facade module/action pairs" in message
+        assert "Never generate modules/{capability_pack_id}/ for the hosted provider" in message
+        for contract in context["operator_contracts"]:
+            for output in contract.get("required_outputs") or []:
+                assert f"{output['path']} [owner: {output.get('owner') or 'templates'}]" in message
+            for boundary in contract.get("runtime_boundaries") or []:
+                assert boundary["rule"] in message
+        assert "Generate facade module" not in message
+
+
 # ---------------------------------------------------------------------------
 # middleware.yaml registration
 # ---------------------------------------------------------------------------
@@ -255,6 +311,13 @@ class TestHooksYamlRegistration:
 # ---------------------------------------------------------------------------
 
 class TestStructuredOutputContract:
+    def test_hook_guidance_covers_exactly_the_existing_structured_source_vocabulary(self, hook):
+        data = yaml.safe_load(_STRUCTURED_OUTPUTS_PATH.read_text(encoding="utf-8"))
+        sources = data["models"]["AppCapabilityPack"]["fields"]["capability_source"]["values"]
+        assert set(hook._CAPABILITY_SOURCE_GUIDANCE) == set(sources)
+        # host_universal is a plan origin, not a selectable registered pack.
+        assert set(hook._CAPABILITY_SOURCE_GUIDANCE) - {"host_universal"} == VALID_CAPABILITY_SOURCES
+
     def test_appcapabilitypack_has_capability_source_field(self):
         data = yaml.safe_load(_STRUCTURED_OUTPUTS_PATH.read_text(encoding="utf-8"))
         models = data.get("models", {})

@@ -488,9 +488,10 @@ def _reserve_module_event_contract_paths(build_tasks: list[dict[str, Any]]) -> l
         if item.get("task_type") == "module_contract":
             module_id = _infer_module_id_from_owned_paths(item)
             event_path = f"modules/{module_id}/contracts/events.yaml"
-            if module_id and event_path not in owned:
+            manifest_path = f"modules/{module_id}/module.yaml"
+            if module_id and manifest_path in _normalized_owned_paths(item) and event_path not in owned:
                 # Actions are authored later. Reserving this optional companion
-                # grants one owner without inventing an event version or payload.
+                # extends the manifest owner's work, never a fixture-only task.
                 item["owned_paths"] = [*_normalized_owned_paths(item), event_path]
                 owned.add(event_path)
         normalized.append(item)
