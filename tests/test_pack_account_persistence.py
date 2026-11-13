@@ -126,6 +126,7 @@ async def host(monkeypatch):
     monkeypatch.setattr(account_routes, "account_data_registry", registry)
     monkeypatch.setattr(PlatformHookRegistry, "_instance", PlatformHookRegistry())
     app = FastAPI()
+    app.state.loaded_app_id = "app-one"
     app.state.data_contract = contract
     app.include_router(account_routes.router)
 

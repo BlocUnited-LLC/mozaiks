@@ -56,6 +56,7 @@ async def account_host(monkeypatch, request):
     loader.load("user_onboarding")
     assert registry.registered_module_ids() == ["user_onboarding"]
     host = FastAPI()
+    host.state.loaded_app_id = "app-one"
     host.include_router(account_routes.router)
 
     def authorization(app_id, user_id):
@@ -160,6 +161,7 @@ async def rendered_account_host(monkeypatch, tmp_path):
     ModuleLoader(str(tmp_path / "app")).load(MODULE)
     assert registry.registered_module_ids() == [MODULE]
     host = FastAPI()
+    host.state.loaded_app_id = "app-one"
     host.state.data_contract = contract
     host.include_router(account_routes.router)
 
@@ -212,3 +214,27 @@ async def test_rendered_account_handler_exports_and_deletes_only_the_owners_rows
     assert await bob.count({}) == 1 and await other_app.count({}) == 1
     again = await host.http.delete("/api/account", headers=headers)
     assert again.json()["results"] == {host.module: {"deleted_count": 0}}
+
+
+async def test_claimless_account_routes_preserve_other_users_and_apps(rendered_account_host):
+    host = rendered_account_host
+    alice, bob, other_app = host.tasks("app-one", "alice"), host.tasks("app-one", "bob"), host.tasks("app-two", "alice")
+    for collection, task_id in ((alice, "alice-owned"), (bob, "bob-private"), (other_app, "other-app-private")):
+        await collection.insert_one({"task_id": task_id, "title": task_id})
+
+    # The actual signed credential has no app binding; the loaded host supplies
+    # it. Request metadata cannot redirect either account operation.
+    headers = host.authorization(None, "alice")
+    exported = await host.http.get("/api/account/export?app_id=app-two&user_id=bob", headers=headers)
+    assert exported.status_code == 200
+    assert exported.json()["_meta"]["app_id"] == "app-one"
+    assert [row["task_id"] for row in exported.json()[f"{host.module}_tasks"]] == ["alice-owned"]
+    deleted = await host.http.request("DELETE", "/api/account?app_id=app-two", headers=headers,
+                                      json={"app_id": "app-two", "user_id": "bob"})
+    assert deleted.status_code == 200 and deleted.json()["results"][host.module]["deleted_count"] == 1
+    assert await alice.count({}) == 0 and await bob.count({}) == await other_app.count({}) == 1
+
+    foreign = host.authorization("app-two", "alice")
+    assert (await host.http.get("/api/account/export", headers=foreign)).status_code == 403
+    assert (await host.http.delete("/api/account", headers=foreign)).status_code == 403
+    assert await alice.count({}) == 0 and await bob.count({}) == await other_app.count({}) == 1
