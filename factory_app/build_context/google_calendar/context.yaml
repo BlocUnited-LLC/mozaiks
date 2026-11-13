@@ -1,0 +1,48 @@
+context_id: google_calendar
+applies_to_workflows:
+  - AppGenerator
+assets:
+  - path: contract.yaml
+    kind: contract
+  - path: templates/
+    kind: templates
+pack:
+  id: google_calendar
+  version: "0.1.0"
+  status: active
+  capability_source: generated_module
+  description: >
+    Lets each signed-in user connect their own Google Calendar and use it in the
+    app: list upcoming events and add events. Users connect from their profile
+    (Connected accounts); the app's admins choose whether the app offers it.
+  required_integrations:
+    - service: google_account_connections
+      provider: google
+      display_name: Google account connections
+      kind: oauth_client
+      purpose: >-
+        The app's own Google OAuth client (one per app), so each user can connect their own Google Calendar. Users see the connection as not available until it is configured.
+      required_at: runtime
+      required_fields:
+        - name: client_id
+          label: OAuth client ID
+          type: text
+          required: true
+          frontend_safe: false
+        - name: client_secret
+          label: OAuth client secret
+          type: secret
+          required: true
+          frontend_safe: false
+  deployment_env:
+    optional:
+      - GOOGLE_ACCOUNTS_CLIENT_ID
+      - GOOGLE_ACCOUNTS_CLIENT_SECRET
+      - MOZAIKS_CONNECTED_ACCOUNTS_REDIRECT_URI
+    secret:
+      - GOOGLE_ACCOUNTS_CLIENT_SECRET
+capabilities:
+  - capability_id: google_calendar.events.read
+    facade_recommended: google_calendar
+  - capability_id: google_calendar.events.create
+    facade_recommended: google_calendar

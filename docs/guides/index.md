@@ -36,6 +36,14 @@ Step-by-step guides for building and customizing Mozaiks apps.
 
     [:octicons-arrow-right-24: Integrations](integrations/01-overview.md)
 
+-   :material-account-key: **Connected Accounts**
+
+    ---
+
+    Let each user connect their own Google Calendar or Gmail for plugins.
+
+    [:octicons-arrow-right-24: Connected Accounts](connected-accounts.md)
+
 -   :material-puzzle-outline: **Add a Module**
 
     ---

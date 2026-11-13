@@ -1,0 +1,8 @@
+schema_version: mozaiks.account_connections.v1
+connections:
+  - id: google_calendar
+    provider: google
+    label: Google Calendar
+    description: See your upcoming events and add new events to your Google Calendar.
+    scopes:
+      - https://www.googleapis.com/auth/calendar.events

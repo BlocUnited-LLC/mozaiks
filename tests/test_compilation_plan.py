@@ -87,14 +87,16 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 # (config/targets.json). Aggregate identity moves because the registry digest
 # is part of it; test_service_package_markers_preserve_existing_units_and_gaps
 # proves all 61 unit bodies and all earlier gaps are still byte-identical.
-# Moved once since introduction, by registering config/profile.yaml as a
-# layout-registry family. The plan digest covers the registry, so any
-# deliberate family addition moves it; the property this test protects is
-# that a fresh interpreter derives the SAME digest, which is asserted below.
-# The optional module smoke-fixture companion adds exactly one registry row
-# and one reports-module input gap. The row-isolation proof below recovers
-# the preceding hash and preserves all 61 unit bodies and earlier gaps.
-_GOLDEN_PLAN_DIGEST = "da71c10a82922bbf0fce2fd4d570ada3223f3aa398f9b9eda84a25190ee49305"
+# Moved since introduction by registering config/profile.yaml, the optional
+# module smoke-fixture companion (one registry row, one reports-module input
+# gap; test_module_smoke_fixture_row_preserves_existing_units_and_gaps) and
+# the plugin account-connection contract (app and module scope; the
+# module-scope row adds one inapplicable scope-inactive unit, proven in
+# test_service_package_markers_preserve_existing_units_and_gaps). The plan
+# digest covers the registry, so any deliberate family addition moves it; the
+# property this test protects is that a fresh interpreter derives the SAME
+# digest, which is asserted below.
+_GOLDEN_PLAN_DIGEST = "6a4050f9cf538f2e3ee2936ef2c170dfdeed0c73f3a2cd8c4cf709d549849e91"
 
 
 def _registry():
@@ -173,18 +175,29 @@ def test_service_package_markers_preserve_existing_units_and_gaps() -> None:
         POST_BASELINE_FAMILY_PATHS,
         SERVICE_PACKAGE_MARKER_PATHS,
         corpus_plan_before_service_package_markers,
+        historical_units,
+        post_baseline_row_digests,
         registry_before_service_package_markers,
     )
 
     previous = corpus_plan_before_service_package_markers()
     current = _plan()
     assert previous.plan_digest == "9fe1d96e4c38fb8c6b061333deae1a9095626e4305b3ac8377b10ef0ae2b3737"
-    assert len(previous.units) == len(current.units) == 61
-    assert [unit.model_dump(mode="json") for unit in current.units] == [
+    # A module-scope family added after the baseline can only contribute an
+    # inapplicable scope-inactive unit to this app-scope corpus (asserted by
+    # historical_units). Every other unit is one of the historical 61.
+    post_baseline_rows = post_baseline_row_digests()
+    kept = historical_units(current)
+    assert len(previous.units) == len(kept) == 61
+    assert [unit.model_dump(mode="json") for unit in kept] == [
         unit.model_dump(mode="json") for unit in previous.units
     ]
     restored = current.canonical_payload(include_digest=False)
     restored["registry_digest"] = previous.registry_digest
+    restored["units"] = [
+        unit for unit in restored["units"]
+        if unit["family_identity_digest"] not in post_baseline_rows
+    ]
     added_gaps = [gap for gap in current.gaps if gap not in previous.gaps]
     marker_gaps = [gap for gap in added_gaps if gap.path_template in SERVICE_PACKAGE_MARKER_PATHS]
     assert len(marker_gaps) == 5
@@ -222,8 +235,8 @@ def test_module_smoke_fixture_row_preserves_existing_units_and_gaps() -> None:
     previous_rows = tuple(
         row for row in current_registry.families if row.path_template != path
     )
-    assert len(previous_rows) == 132
-    assert len(current_registry.families) == 133
+    assert len(previous_rows) == 134
+    assert len(current_registry.families) == 135
     previous_registry = AppLayoutRegistry(
         families=previous_rows,
         registry_digest=_stable_digest({
@@ -236,9 +249,11 @@ def test_module_smoke_fixture_row_preserves_existing_units_and_gaps() -> None:
         graph=graph, payloads=payloads, registry=previous_registry,
     )
     current = _plan()
-    assert previous.plan_digest == "fdc88e33746108a99f99db21707f69767e04b043180cf3d5487fe2223cb729be"
+    # Without this row the plan is the account-connection state, which carries
+    # its module-scope row's one empty scope-inactive unit (61 + 1).
+    assert previous.plan_digest == "2ae0f6cba45bc3567f0931ea6f30ce4ed29c722db7d6614cdfe6ec35318555ab"
     assert current.plan_digest == _GOLDEN_PLAN_DIGEST
-    assert len(previous.units) == len(current.units) == 61
+    assert len(previous.units) == len(current.units) == 62
     assert [unit.model_dump(mode="json") for unit in current.units] == [
         unit.model_dump(mode="json") for unit in previous.units
     ]
@@ -253,6 +268,41 @@ def test_module_smoke_fixture_row_preserves_existing_units_and_gaps() -> None:
     restored = current.canonical_payload(include_digest=False)
     restored["registry_digest"] = previous.registry_digest
     restored["gaps"] = [gap for gap in restored["gaps"] if gap["path_template"] != path]
+    assert restored == previous.canonical_payload(include_digest=False)
+    assert canonical_digest(restored) == previous.plan_digest
+
+
+def test_account_connection_rows_preserve_existing_units_and_gaps() -> None:
+    from mozaiksai.core.runtime.app.layout_registry import AppLayoutRegistry, _stable_digest
+
+    paths = {"modules/{module_id}/contracts/account_connections.yaml", "contracts/account_connections.yaml"}
+    current_registry = _registry()
+    previous_rows = tuple(row for row in current_registry.families if row.path_template not in paths)
+    assert len(current_registry.families) - len(previous_rows) == 2
+    previous_registry = AppLayoutRegistry(
+        families=previous_rows,
+        registry_digest=_stable_digest({
+            "schema_version": current_registry.schema_version,
+            "families": [row.identity_payload for row in previous_rows],
+        }),
+    )
+    graph, payloads = _corpus_graph()
+    previous = derive_compilation_plan(graph=graph, payloads=payloads, registry=previous_registry)
+    current = _plan()
+    # Without the two rows the plan is exactly the smoke-fixture state.
+    assert previous.plan_digest == "da71c10a82922bbf0fce2fd4d570ada3223f3aa398f9b9eda84a25190ee49305"
+    added = [unit for unit in current.units if unit not in previous.units]
+    assert len(previous.units) == 61 and len(added) == 1
+    [unit] = added
+    assert unit.family_kind == "module_contract" and "/scope_inactive/" in unit.unit_id
+    assert unit.disposition is PlanDisposition.INAPPLICABLE
+    assert unit.outputs == unit.placeholder_values == unit.sources == unit.edge_sources == ()
+    assert [u for u in current.units if u is not unit] == list(previous.units)
+    assert [gap for gap in current.gaps if gap.path_template not in paths] == list(previous.gaps)
+    restored = current.canonical_payload(include_digest=False)
+    restored["registry_digest"] = previous.registry_digest
+    restored["units"] = [u for u in restored["units"] if u["unit_id"] != unit.unit_id]
+    restored["gaps"] = [gap for gap in restored["gaps"] if gap["path_template"] not in paths]
     assert restored == previous.canonical_payload(include_digest=False)
     assert canonical_digest(restored) == previous.plan_digest
 

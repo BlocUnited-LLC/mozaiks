@@ -22,7 +22,8 @@ logger = get_core_logger("connector_vault")
 _VALID_SECRET_CHARS = re.compile(r"[^a-z0-9-]+")
 _backend_singleton: ConnectorVaultBackend | None = None
 _backend_signature: tuple[str, str, str] | None = None
-ConnectorScope = Literal["app", "workspace"]
+# ``user`` holds an end user's connected-account grant (scope_id "<app_id>:<user_id>").
+ConnectorScope = Literal["app", "workspace", "user"]
 
 
 class ConnectorVaultBackend(Protocol):
@@ -77,8 +78,8 @@ def _slug(value: str, *, default: str) -> str:
 
 
 def _connector_identity(scope: str, scope_id: str, service: str) -> tuple[ConnectorScope, str, str]:
-    if scope not in {"app", "workspace"}:
-        raise ValueError("connector scope must be 'app' or 'workspace'")
+    if scope not in {"app", "workspace", "user"}:
+        raise ValueError("connector scope must be 'app', 'workspace' or 'user'")
     identity_id = str(scope_id or "")
     if not identity_id.strip():
         raise ValueError("connector scope_id is required")

@@ -47,6 +47,11 @@ class PlatformCollections:
     BUILD_STATE = "BuildState"
     CONNECTORS = "Connectors"
     CONNECTOR_SECRETS = "ConnectorSecrets"
+    # End users' connected third-party accounts: non-secret records, flows in progress,
+    # and which declared connections each app's admins offer.
+    CONNECTED_ACCOUNTS = "ConnectedAccounts"
+    CONNECTED_ACCOUNT_FLOWS = "ConnectedAccountFlows"
+    CONNECTED_ACCOUNT_SETTINGS = "ConnectedAccountSettings"
     APP_CONTEXT_INDEX_JOBS = "AppContextIndexJobs"
 
 

@@ -170,6 +170,9 @@ APP_PERMISSIONS: dict[str, tuple[str, ...]] = {
     ),
     "entitlement_dispatch": (),
     "files": ("files.read", "files.write"),
+    # The user's own connected Google account is the authority; no module permission.
+    "gmail": (),
+    "google_calendar": (),
     "messaging": ("messages.read", "messages.write"),
     "mobile": (),
     "mozaiks_cloud": (

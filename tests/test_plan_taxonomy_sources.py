@@ -235,6 +235,8 @@ def test_empty_taxonomy_is_absent_from_serialization_identity_and_digest() -> No
 
 
 def test_every_preexisting_corpus_unit_keeps_exact_bytes_and_identity() -> None:
+    from tests.service_package_marker_migration_helpers import historical_units
+
     # Independently captured from exact base 36b33e021fb04b68c82a8b144ff4fef608ce9b15.
     # Pin every unit's serialized JSON, dump, identity payload and unit digest,
     # rather than relying solely on the aggregate plan's serialization digest.
@@ -246,7 +248,7 @@ def test_every_preexisting_corpus_unit_keeps_exact_bytes_and_identity() -> None:
             "serialized_json": unit.model_dump_json(),
             "unit_digest": unit.unit_digest,
         }
-        for unit in _corpus_plan().units
+        for unit in historical_units(_corpus_plan())
         if unit.family_kind != "workflow_module_interface"
     ]
     assert len(rows) == 59

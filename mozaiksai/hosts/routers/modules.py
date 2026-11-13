@@ -553,6 +553,9 @@ async def _execute_module_action(
         status_code = 402
     elif result.error_code in {"TOKEN_USAGE_SCOPE_MISSING", "TOKEN_USAGE_DENIED"}:
         status_code = 403
+    elif result.error_code == "ACCOUNT_CONNECTION_REQUIRED":
+        # Like OAuth's insufficient_scope: understood, but the user has not granted the access.
+        status_code = 403
     elif result.error_code == "INVALID_PARAMS":
         status_code = 400
     elif result.error_code == "DEPENDENCY_UNAVAILABLE":
@@ -578,7 +581,9 @@ async def _execute_module_action(
         "action": action_name,
     }
     if (
-        result.error_code in {"INSUFFICIENT_TOKENS", "TOKEN_USAGE_SCOPE_MISSING", "TOKEN_USAGE_DENIED"}
+        result.error_code in {
+            "INSUFFICIENT_TOKENS", "TOKEN_USAGE_SCOPE_MISSING", "TOKEN_USAGE_DENIED", "ACCOUNT_CONNECTION_REQUIRED",
+        }
         and isinstance(result.data, dict)
         and isinstance(result.data.get("extra_data"), dict)
     ):

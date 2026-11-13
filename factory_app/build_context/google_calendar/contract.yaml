@@ -1,0 +1,66 @@
+contract_id: google_calendar
+contract_type: build_pack_instructions
+
+selection_rules:
+  - id: select_for_user_google_calendar
+    when:
+      intent_any:
+        - google calendar
+        - connect google calendar
+        - my calendar
+        - calendar events
+        - upcoming events
+        - schedule events on my calendar
+        - add to calendar
+        - sync with google calendar
+    action: select_pack
+
+recommended_domains:
+  - calendar
+  - scheduling
+  - events
+
+required_outputs:
+  - path: modules/google_calendar/module.yaml
+    owner: templates
+  - path: modules/google_calendar/contracts/account_connections.yaml
+    owner: templates
+  - path: modules/google_calendar/backend/__init__.py
+    owner: templates
+  - path: modules/google_calendar/backend/base_handler.py
+    owner: templates
+  - path: modules/google_calendar/backend/handler.py
+    owner: workspace  # preserved across regeneration; subclasses base_handler.py
+  - path: modules/google_calendar/backend/service.py
+    owner: templates
+
+forbidden_outputs:
+  - path_prefix: services/integrations/google_calendar
+  - path_prefix: services/adapters/calendar/
+  - path_prefix: modules/google_oauth/
+
+runtime_boundaries:
+  - id: users_own_account
+    rule: >
+      Each user connects their own Google account from their profile (Connected
+      accounts). The module obtains a token only for the calling user with
+      account_access_token(ctx, "google_calendar"), never stores a token, and
+      never asks the user for a password, API key or token.
+  - id: no_oauth_code
+    rule: >
+      Do not generate OAuth routes, callback handlers, token storage or Google
+      client libraries. The platform runs the OAuth flow and refreshes tokens.
+  - id: connection_required_errors
+    rule: >
+      When the user has not connected, the action fails with
+      ACCOUNT_CONNECTION_REQUIRED. Custom pages show the message with a link to
+      accountConnectionPath(err) from ui/lib/moduleApi.js and do not retry.
+  - id: app_oauth_client
+    rule: >
+      Each app uses its own Google OAuth client, configured by the app's
+      operators as GOOGLE_ACCOUNTS_CLIENT_ID and GOOGLE_ACCOUNTS_CLIENT_SECRET
+      (environment or the app's declared Key Vault references), separate from
+      sign-in with Google. Never generate their values, and never reuse a
+      client secret that other apps hold.
+
+facades: []

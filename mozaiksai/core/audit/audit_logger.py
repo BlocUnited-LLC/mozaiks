@@ -31,6 +31,10 @@ class AuditEventKind(StrEnum):
     MODULE_ACTION_FAIL = "module.action.fail"
     ADMIN_ACCESS = "admin.access"
     ADMIN_WRITE = "admin.write"
+    # An end user connected or disconnected a third-party account (never the token itself).
+    ACCOUNT_CONNECTED = "account.connected"
+    ACCOUNT_DISCONNECTED = "account.disconnected"
+    ACCOUNT_CONNECTION_FAIL = "account.connection.fail"
     AUTH_FAIL = "auth.fail"
     ARTIFACT_PROMOTE = "artifact.promote"
     ARTIFACT_LOAD = "artifact.load"

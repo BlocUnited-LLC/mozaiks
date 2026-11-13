@@ -116,6 +116,7 @@ nav:
           - Extending AI Functionality: guides/extending-ai-functionality/01-overview.md
           - Workflow Registry: guides/extending-ai-functionality/05-workflow-sequences.md
           - Integrations: guides/integrations/01-overview.md
+          - Connected Accounts: guides/connected-accounts.md
       - Config Files:
           - Overview: guides/configs/index.md
           - App Provenance: guides/configs/provenance.md

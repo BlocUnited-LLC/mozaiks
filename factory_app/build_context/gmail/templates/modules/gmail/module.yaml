@@ -1,0 +1,47 @@
+schema_version: mozaiks.module.v1
+module:
+  id: gmail
+  display_name: Gmail
+  version: 1.0.0
+  description: Sends email from the signed-in user's own Gmail address, through the account they connect in their profile. Send-only; stores nothing.
+  owner: app
+  visibility: private
+  handler: backend.handler:GmailHandler
+
+actions:
+  - id: send_email
+    description: Send a plain-text email from the signed-in user's Gmail address. Only on the user's own request.
+    handler_method: send_email
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [to, subject, body]
+      properties:
+        # to / cc: email addresses, at most 20 recipients in all.
+        to:
+          type: array
+          items:
+            type: string
+        cc:
+          type: array
+          items:
+            type: string
+        # subject: one line, at most 250 characters. body: plain text, at most 50000.
+        subject:
+          type: string
+        body:
+          type: string
+    output_schema:
+      type: object
+      required: [success, message_id]
+      properties:
+        success:
+          type: boolean
+        message_id:
+          type: string
+
+capabilities:
+  - capability_id: gmail.send
+    kind: action
+    target: send_email
+    title: Send email from my Gmail
