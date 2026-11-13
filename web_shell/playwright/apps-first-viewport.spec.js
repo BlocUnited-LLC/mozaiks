@@ -20,6 +20,8 @@ const transitionRoutes = (extensionRegistry.entrypoints || []).map(entrypoint =>
   },
 }));
 const composedShellConfig = {
+  // The Studio fixture declares Ask and workflow entry points.
+  assistant_available: true,
   auth: localDevelopmentAuth,
   ...shellConfig,
   appId: appConfig.appId,
