@@ -340,7 +340,42 @@ async def test_gemini_thinking_environment_is_optional_and_cache_aware(monkeypat
     updated = llm_fallback.llm_config_to_ag2_config(high)
     assert updated.thinking_level == "high"
     await updated.http_client.aclose()
-    assert "thinking_level" not in low["config_list"][0]
+    assert low["config_list"][0]["thinking_level"] == "low"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("providers", "expected_provider", "expected_thinking"),
+    [
+        ([{"api_type": "google", "model": "gemini-3.8-flash", "api_key": ""},
+          {"api_type": "openai", "model": "test-openai-model", "api_key": "fake-key"}], "openai", None),
+        ([{"api_type": "openai", "model": "test-openai-model", "api_key": ""},
+          {"api_type": "google", "model": "gemini-3.8-flash", "api_key": "fake-key"}], "google", "low"),
+    ],
+)
+async def test_gemini_environment_tracks_selected_provider_without_mutating_raw_cache(
+    providers, expected_provider, expected_thinking, monkeypatch,
+):
+    from copy import deepcopy
+
+    from mozaiksai.core.capabilities.simple_llm import SimpleLLMCapabilityService
+
+    original = deepcopy(providers)
+
+    async def load():
+        return providers
+
+    monkeypatch.setattr(llm_config, "_load_raw_config_list", load)
+    monkeypatch.setenv("LLM_GEMINI_THINKING_LEVEL", "low")
+    selected = await SimpleLLMCapabilityService()._select_default_provider()
+    assert selected["api_type"] == expected_provider
+    assert selected.get("thinking_level") == expected_thinking
+    actual = llm_fallback.llm_config_to_ag2_config({"config_list": [selected]})
+    if expected_provider == "google":
+        assert actual.thinking_level == "low"
+        if actual.http_client is not None:
+            await actual.http_client.aclose()
+    assert providers == original
 
 
 @pytest.mark.asyncio
@@ -369,6 +404,30 @@ async def test_shared_gemini_thinking_overrides_environment(monkeypatch):
     actual = llm_fallback.llm_config_to_ag2_config(config)
     assert actual.thinking_level == "medium"
     await actual.http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_explicit_null_shared_thinking_suppresses_environment_and_keeps_inputs(monkeypatch):
+    supplied = [{"api_type": "google", "model": "gemini-3.8-flash", "api_key": "fake-key"}]
+    monkeypatch.setenv("LLM_GEMINI_THINKING_LEVEL", "low")
+    _, config = await llm_config.get_llm_config(extra_config={"config_list": supplied, "thinking_level": None})
+    actual = llm_fallback.llm_config_to_ag2_config(config)
+    assert actual.thinking_level is None
+    assert "thinking_level" not in supplied[0]
+    await actual.http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_environment_decoration_does_not_mutate_caller_list(monkeypatch):
+    supplied = [{"api_type": "google", "model": "gemini-3.8-flash", "api_key": "fake-key"}]
+    monkeypatch.setenv("LLM_GEMINI_THINKING_LEVEL", "low")
+    _, config = await llm_config.get_llm_config(extra_config={"config_list": supplied})
+    assert config["config_list"][0]["thinking_level"] == "low"
+    assert "thinking_level" not in supplied[0]
+    config["config_list"][0]["thinking_level"] = "high"
+    _, cached = await llm_config.get_llm_config(extra_config={"config_list": supplied})
+    assert cached["config_list"][0]["thinking_level"] == "low"
+    assert "thinking_level" not in supplied[0]
 
 
 @pytest.mark.asyncio

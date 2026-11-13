@@ -371,6 +371,53 @@ test('a New Note opener still opens a hidden form', async (t) => {
   assert.equal(await page.locator('#notes li').count(), 1);
 });
 
+test('notes traversal ignores hidden mobile copies before visible desktop rows', async (t) => {
+  const browser = await chromium.launch({ headless: true, args: ['--disable-background-networking'] });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.route('**/*', route => route.abort());
+  await page.setContent(`
+    <label>Title <input id="title"></label><label>Body <input id="body"></label>
+    <button id="save">Save Note</button><label>Search <input id="search" type="search"></label>
+    <div id="mobile" hidden></div><div id="desktop"></div>
+    <script>
+      document.querySelector('#save').onclick = () => {
+        for (const id of ['mobile', 'desktop']) {
+          const row = document.createElement('div');
+          row.textContent = document.querySelector('#title').value;
+          document.querySelector('#' + id).append(row);
+        }
+      };
+      document.querySelector('#search').oninput = event => {
+        for (const row of document.querySelectorAll('#desktop > div')) {
+          row.hidden = !row.textContent.toLowerCase().includes(event.target.value.toLowerCase());
+        }
+      };
+    </script>`);
+  await createNote(page, 'Cobalt desktop note', 'Synthetic body', 1000);
+  await createNote(page, 'Amber desktop note', 'Synthetic body', 1000);
+  await verifyTitleSearch(page, 'Cobalt desktop note', 'Amber desktop note', 'Cobalt', 1000);
+});
+
+test('title search finds visible rows after hidden copies', async (t) => {
+  const browser = await chromium.launch({ headless: true, args: ['--disable-background-networking'] });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.route('**/*', route => route.abort());
+  await page.setContent(`
+    <label>Search <input id="search" type="search"></label>
+    <div hidden><div>Cobalt note</div><div>Amber note</div></div>
+    <div id="desktop"><div>Cobalt note</div><div>Amber note</div></div>
+    <script>
+      document.querySelector('#search').oninput = event => {
+        for (const row of document.querySelectorAll('#desktop > div')) {
+          row.hidden = !row.textContent.toLowerCase().includes(event.target.value.toLowerCase());
+        }
+      };
+    </script>`);
+  await verifyTitleSearch(page, 'Cobalt note', 'Amber note', 'Cobalt', 1000);
+});
+
 // Synthetic browser fixture proves these assertions, not app generation.
 test('notes journey checks creation, filtering and restoration after clearing', async (t) => {
   const { chromium } = await import('@playwright/test');

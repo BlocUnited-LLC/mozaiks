@@ -290,15 +290,22 @@ async def get_llm_config(
     # Refresh raw providers before consulting derived variants so TTL and
     # explicit invalidation can replace a previously cached provider.
     config_list = await _load_raw_config_list()
-    selected = (extra_config.get("config_list") or config_list)[0]
+    effective_list = extra_config.get("config_list") or config_list
     thinking_level = os.getenv("LLM_GEMINI_THINKING_LEVEL", "").strip()
-    if (
-        thinking_level
-        and (selected.get("api_type") or "openai").lower() == "google"
-        and "thinking_level" not in extra_config
-        and "thinking_level" not in selected
-    ):
-        extra_config["thinking_level"] = thinking_level
+    if thinking_level and "thinking_level" not in extra_config:
+        # Keep the provider-specific default attached to each eligible entry:
+        # downstream consumers can choose a later usable provider.
+        decorated = [
+            {**entry, "thinking_level": thinking_level}
+            if isinstance(entry, dict) and (entry.get("api_type") or "openai").lower() == "google"
+            and "thinking_level" not in entry
+            else dict(entry) if isinstance(entry, dict) else entry
+            for entry in effective_list
+        ]
+        if decorated != effective_list:
+            extra_config["config_list"] = decorated
+            effective_list = decorated
+    selected = effective_list[0]
     if limit is not None and not {"max_tokens", "max_output_tokens", "max_completion_tokens"}.intersection(extra_config):
         api_type = selected.get("api_type", "openai")
         responses = extra_config.get(

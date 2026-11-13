@@ -72,12 +72,12 @@ export async function createNote(frame, title, body, timeout = 30000) {
   await titleField.fill(title);
   await bodyField.fill(body);
   await frame.getByRole('button', { name: /^(save|add|create)( a)?( note)?$/i }).first().click();
-  await frame.getByText(title, { exact: false }).first().waitFor({ state: 'visible', timeout });
+  await frame.getByText(title, { exact: false }).filter({ visible: true }).first().waitFor({ state: 'visible', timeout });
 }
 
 export async function verifyTitleSearch(frame, matchingTitle, otherTitle, query, timeout = 30000) {
-  const match = frame.getByText(matchingTitle, { exact: false }).first();
-  const other = frame.getByText(otherTitle, { exact: false }).first();
+  const match = frame.getByText(matchingTitle, { exact: false }).filter({ visible: true }).first();
+  const other = frame.getByText(otherTitle, { exact: false }).filter({ visible: true }).first();
   // Both records must be present before filtering and after clearing the query.
   await match.waitFor({ state: 'visible', timeout });
   await other.waitFor({ state: 'visible', timeout });

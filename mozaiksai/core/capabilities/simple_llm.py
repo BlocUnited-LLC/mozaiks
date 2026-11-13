@@ -449,6 +449,8 @@ class SimpleLLMCapabilityService:
             first = next((entry for entry in config_list if isinstance(entry, dict)), None)
             if isinstance(first, dict):
                 candidate = {**first, **candidate}
+                if "thinking_level" in first:
+                    candidate["thinking_level"] = first["thinking_level"]
 
         if candidate.get("api_type") and candidate.get("model"):
             from mozaiksai.core.adapters.llm_fallback import (
@@ -477,7 +479,10 @@ class SimpleLLMCapabilityService:
         for entry in config_list:
             if entry.get("model") and (entry.get("api_key") or entry.get("api_type") == "ollama"):
                 shared = {key: value for key, value in llm_config.items() if key != "config_list"}
-                return {**entry, **shared}
+                candidate = {**entry, **shared}
+                if "thinking_level" in entry:
+                    candidate["thinking_level"] = entry["thinking_level"]
+                return candidate
         raise RuntimeError("No LLM provider available for capability execution")
 
 
