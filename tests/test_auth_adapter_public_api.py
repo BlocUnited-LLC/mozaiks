@@ -88,6 +88,17 @@ def test_public_exports_are_the_existing_implementation():
         assert getattr(auth, name) is getattr(adapters, name) is getattr(implementation, name)
 
 
+@pytest.mark.parametrize("options,mode", [({}, "contains"), ({"audience_mode": "single"}, "single")])
+def test_audience_policy_preserves_existing_positional_configuration(options, mode):
+    config = JWTAdapterConfig("https://issuer.test/jwks", "https://issuer.test", "api", "token_use", "access", **options)
+    assert config.jwks_url == "https://issuer.test/jwks"
+    assert config.issuer == "https://issuer.test"
+    assert config.audience == "api"
+    assert config.access_token_type_claim == "token_use"
+    assert config.access_token_type_value == "access"
+    assert config.audience_mode == mode
+
+
 @pytest.mark.asyncio
 async def test_simultaneous_verifiers_keep_settings_and_global_factory(monkeypatch, offline_keys, signing_keys):
     global_settings = _settings("global")
@@ -134,6 +145,7 @@ async def test_simultaneous_verifiers_keep_settings_and_global_factory(monkeypat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("audience_mode", ["contains", "single"])
 @pytest.mark.parametrize(
     "overrides,typ,signer,reason",
     [
@@ -145,8 +157,8 @@ async def test_simultaneous_verifiers_keep_settings_and_global_factory(monkeypat
         ({"scope": "right.read"}, "at+jwt", None, "Missing required scope"),
     ],
 )
-async def test_public_verifier_rejects_invalid_signed_tokens(offline_keys, signing_keys, overrides, typ, signer, reason):
-    adapter = GenericJWTAdapter(config=JWTAdapterConfig.from_env(_settings("left")))
+async def test_public_verifier_rejects_invalid_signed_tokens(offline_keys, signing_keys, overrides, typ, signer, reason, audience_mode):
+    adapter = GenericJWTAdapter(config=JWTAdapterConfig.from_env({**_settings("left"), "AUTH_AUDIENCE_MODE": audience_mode}))
     with pytest.raises(AuthError, match=reason):
         await adapter.validate_token(_token(signing_keys, typ=typ, signer=signer, **overrides))
 
@@ -173,8 +185,8 @@ async def test_missing_configured_audience_fails_closed(offline_keys, signing_ke
 
 
 @pytest.mark.asyncio
-async def test_audience_check_remains_nonexclusive(offline_keys, signing_keys):
-    """Exporting the adapter does not add an exclusive/rejected-audience policy."""
+async def test_default_audience_check_remains_nonexclusive(offline_keys, signing_keys):
+    """The default accepts the configured resource among several audiences."""
     first = JWTAdapterConfig.from_env(_settings("left"))
     second = JWTAdapterConfig.from_env(_settings("left"))
     second.audience = "second-api"
@@ -184,3 +196,75 @@ async def test_audience_check_remains_nonexclusive(offline_keys, signing_keys):
         GenericJWTAdapter(config=second).validate_token(token),
     )
     assert [result.user_id for result in results] == ["left-user", "left-user"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("audience", ["left-api", ["left-api"]])
+async def test_single_audience_mode_accepts_one_matching_resource(offline_keys, signing_keys, audience):
+    config = JWTAdapterConfig.from_env({**_settings("left"), "AUTH_AUDIENCE_MODE": "single"})
+    assert config.audience_mode == "single"
+    assert (await GenericJWTAdapter(config=config).validate_token(_token(signing_keys, aud=audience))).user_id == "left-user"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("audience", [["left-api", "right-api"], ["right-api", "left-api"], ["left-api", "left-api"]])
+async def test_single_audience_mode_rejects_every_multi_entry_claim(offline_keys, signing_keys, audience):
+    config = JWTAdapterConfig.from_env({**_settings("left"), "AUTH_AUDIENCE_MODE": "single"})
+    with pytest.raises(AuthError, match="Invalid token audience"):
+        await GenericJWTAdapter(config=config).validate_token(_token(signing_keys, aud=audience))
+
+
+@pytest.mark.asyncio
+async def test_two_single_audience_resources_reject_shared_token_in_both_directions(offline_keys, signing_keys):
+    first = JWTAdapterConfig.from_env({**_settings("left"), "AUTH_AUDIENCE_MODE": "single"})
+    second = JWTAdapterConfig.from_env({**_settings("left"), "AUTH_AUDIENCE_MODE": "single", "AUTH_AUDIENCE": "second-api"})
+    left, right = GenericJWTAdapter(config=first), GenericJWTAdapter(config=second)
+    shared = _token(signing_keys, aud=["left-api", "second-api"])
+    for adapter, matching, wrong in ((left, "left-api", "second-api"), (right, "second-api", "left-api")):
+        assert (await adapter.validate_token(_token(signing_keys, aud=matching))).user_id == "left-user"
+        for token in (shared, _token(signing_keys, aud=wrong)):
+            with pytest.raises(AuthError, match="Invalid token audience"):
+                await adapter.validate_token(token)
+
+
+@pytest.mark.parametrize("mode", ["unknown", "", None, True, 1, ["single"]])
+def test_invalid_explicit_audience_mode_fails_configuration(mode):
+    with pytest.raises(ValueError, match="audience mode"):
+        JWTAdapterConfig(audience_mode=mode)
+
+
+@pytest.mark.parametrize("value,expected", [("", "contains"), ("  ", "contains"), ("contains", "contains"), (" single ", "single")])
+def test_audience_mode_reads_only_its_configuration_snapshot(monkeypatch, value, expected):
+    monkeypatch.setenv("AUTH_AUDIENCE_MODE", "unknown")
+    config = JWTAdapterConfig.from_env({**_settings("left"), "AUTH_AUDIENCE_MODE": value})
+    assert config.audience_mode == expected
+    assert JWTAdapterConfig.from_env(_settings("left")).audience_mode == "contains"
+
+
+@pytest.mark.asyncio
+async def test_factory_cache_tracks_audience_mode_and_does_not_mutate_existing_instances(monkeypatch, offline_keys, signing_keys):
+    for name, value in _settings("left").items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("AUTH_AUDIENCE_MODE", "contains")
+    auth.reset_auth_adapter()
+    try:
+        containing = auth.get_auth_adapter()
+        token = _token(signing_keys, aud=["left-api", "second-api"])
+        assert (await containing.validate_token(token)).user_id == "left-user"
+        monkeypatch.setenv("AUTH_AUDIENCE_MODE", "single")
+        single = auth.get_auth_adapter()
+        assert single is not containing and auth.get_auth_adapter() is single
+        with pytest.raises(AuthError, match="Invalid token audience"):
+            await single.validate_token(token)
+        assert (await containing.validate_token(token)).user_id == "left-user"
+    finally:
+        auth.reset_auth_adapter()
+
+
+@pytest.mark.asyncio
+async def test_invalid_mutated_audience_policy_cannot_silently_disable_the_constraint(offline_keys, signing_keys):
+    config = JWTAdapterConfig.from_env({**_settings("left"), "AUTH_AUDIENCE_MODE": "single"})
+    config.audience_mode = "unknown"
+    with pytest.raises(AuthError, match="audience policy"):
+        await GenericJWTAdapter(config=config).validate_token(_token(signing_keys))
+    assert not offline_keys

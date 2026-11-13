@@ -191,11 +191,19 @@ explicit settings mapping when environment-style names are convenient. Config
 objects are mutable: treat them as fixed after constructing a verifier.
 
 Signature, issuer, audience and access-token type checks are the same as for the
-process adapter. An audience is required. An audience list containing the
-configured value is accepted; this is not an exclusive-audience check, and there
-is no rejected-audience setting. Distinct configured audiences alone do not
-isolate a token listing both. Apply any stronger routing policy at every resource
-that might accept such a token.
+process adapter. An audience is required. The default `audience_mode="contains"`
+accepts an audience list containing the configured value. Distinct configured
+audiences alone do not isolate a token listing both.
+
+For a resource that requires its own token, set `audience_mode="single"` on its
+`JWTAdapterConfig`, or `AUTH_AUDIENCE_MODE=single` for the process JWT adapter.
+The signed `aud` must equal the configured audience as a string or a one-entry
+array. Additional entries, including duplicates, are refused. Apply this policy
+at every resource that might accept the token; tightening one verifier does not
+constrain another. Unknown modes fail configuration. The registry includes this
+setting in its configuration snapshot and cache identity; existing verifier
+instances retain their original configuration. This option belongs to the
+generic JWT adapter, not to every registered provider.
 
 The default clock skew is 120 seconds. Set `clock_skew_seconds=0` to reject an
 expired token without that allowance at validation time. This does not revoke
