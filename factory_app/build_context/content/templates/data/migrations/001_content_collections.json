@@ -1,0 +1,61 @@
+{
+  "schema_version": "mozaiks.data_migration.v1",
+  "migration_id": "content_001_collections",
+  "version": "1",
+  "description": "Ensure editorial entry storage and indexes without seeding or rewriting content.",
+  "operations": [
+    {
+      "type": "ensure_collection",
+      "module_id": "content",
+      "entity_name": "entries"
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "content",
+      "entity_name": "entries",
+      "index": {
+        "name": "entries_by_id",
+        "keys": [
+          [
+            "entry_id",
+            1
+          ]
+        ],
+        "unique": true
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "content",
+      "entity_name": "entries",
+      "index": {
+        "name": "entries_by_slug",
+        "keys": [
+          [
+            "slug",
+            1
+          ]
+        ],
+        "unique": true
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "content",
+      "entity_name": "entries",
+      "index": {
+        "name": "entries_by_status_id",
+        "keys": [
+          [
+            "status",
+            1
+          ],
+          [
+            "entry_id",
+            1
+          ]
+        ]
+      }
+    }
+  ]
+}

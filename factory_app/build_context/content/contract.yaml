@@ -1,0 +1,93 @@
+contract_id: content
+contract_type: build_pack_instructions
+selection_rules:
+- id: editorial_content
+  when:
+    intent_any:
+    - portfolio projects
+    - case studies
+    - articles
+    - editorial content
+    - blog entries
+  action: select_pack
+recommended_domains:
+- portfolio
+- publishing
+- editorial
+required_outputs:
+- path: data/contract.json
+  owner: templates
+- path: data/migrations/001_content_collections.json
+  owner: templates
+- path: modules/content/backend/__init__.py
+  owner: templates
+- path: modules/content/backend/base_handler.py
+  owner: templates
+- path: modules/content/backend/handler.py
+  owner: workspace
+- path: modules/content/backend/policy.py
+  owner: templates
+- path: modules/content/backend/repo.py
+  owner: templates
+- path: modules/content/backend/schemas.py
+  owner: templates
+- path: modules/content/backend/service.py
+  owner: templates
+- path: modules/content/contracts/events.yaml
+  owner: templates
+- path: modules/content/contracts/fixtures.yaml
+  owner: generator
+  notes: App-owned smoke inputs with exact approved editor roles, valid create inputs and observed entry identifiers. These test inputs never grant runtime permissions.
+- path: modules/content/module.yaml
+  owner: templates
+forbidden_outputs:
+- path_prefix: modules/blog/
+  reason: Use the content module for editorial records rather than duplicating its
+    ownership.
+- path_prefix: modules/posts/
+  reason: Editorial entries are content records; social posts remain a separately
+    selected Social capability.
+runtime_boundaries:
+- id: semantic_inputs
+  rule: Select from the approved brief, ExperienceSpec and supplied validated pack
+    selections. Reuse the pinned content contract; do not infer authority from an
+    agent name or an unavailable upstream artifact.
+- id: app_owned_presentation
+  rule: Generate presentation outside this pack through canonical app pages or registered
+    custom React routes and active-app semantic theme tokens. Respect the approved
+    experience; this pack imposes no home route, navigation, layout, or page taxonomy.
+- id: editorial_records
+  rule: content.entries stores app-owned editorial text, not personal drafts or user
+    account/profile data. No author identity is stored. All reads are scoped by runtime
+    app persistence; unprivileged reads expose published records only. Only the trusted
+    content.manage permission admits drafts, writes, publication changes and archived
+    records.
+- id: plain_text
+  rule: Body and summary are plain text. This pack does not parse HTML, MDX, executable
+    snippets or arbitrary embed code. Rendering and rich editor requirements need
+    explicit app-owned implementation and validation.
+- id: declared_implementation
+  rule: Keep service, repo, policy, schemas, module manifest and events template-owned.
+    The thin workspace handler extension is preserved from admitted or verified source;
+    ordinary generation tasks cannot replace it. Add helpers or separate modules/reactions
+    only through declared app contracts and supported refinement paths.
+- id: honest_empty_state
+  rule: Do not seed invented projects, testimonials, traffic, metrics or articles.
+    Apps start with no entries. Agents or authorized editors create actual app content
+    through declared actions; migration only ensures collections and indexes.
+- id: app_owned_acceptance
+  rule: Plan contracts/fixtures.yaml from the app's approved auth grants through the canonical module_smoke_fixtures contract. Include create, update and archive positive probes with valid inputs and observed record identifiers; setup may create a draft. Do not invent a role or copy a test-suite role name into an app. Fixture inputs do not replace anonymous visibility and unauthorized-write checks.
+- id: local_cost
+  rule: Requires the existing local Mongo persistence foundation only. No cloud provider,
+    external API, paid infrastructure, background worker or runtime model call is
+    required. Deterministic templates avoid repeatedly scheduling model work for this
+    backend.
+- id: publication_and_pagination
+  rule: Create starts draft; update may set draft, published or archived; archive
+    is a soft archive, never physical deletion. List order is ascending unique entry_id
+    with an optional after cursor and limit 1 through 50. count is page length, not
+    total matches. Public requests cannot widen visibility through status or identity
+    parameters. List results omit body; get_entry returns the full text. Concurrent
+    editorial updates use last acknowledged write; no optimistic conflict merge is
+    provided.
+facades: []
