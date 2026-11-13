@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
+import logging
 import socket
 import time
 from contextlib import asynccontextmanager
@@ -21,6 +23,7 @@ from fastapi import FastAPI
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 
+from logs.logging_config import PrettyConsoleFormatter, ProductionJSONFormatter
 from mozaiksai.core.auth import WS_BEARER_SUBPROTOCOL
 from mozaiksai.core.auth.adapters import AuthError, UserClaims
 from mozaiksai.core.auth.adapters.base import BaseAuthAdapter
@@ -35,6 +38,36 @@ from mozaiksai.core.transport import (
 
 ORIGIN = "https://replay.example.test"
 TOKEN = "synthetic-replay-credential"
+
+
+@pytest.fixture
+def formatted_logs(caplog, capsys):
+    """Capture the real handshake at both configured sink formats, at DEBUG."""
+    outputs = [io.StringIO(), io.StringIO()]
+    handlers = []
+    records = []
+    root = logging.getLogger()
+    for output, formatter in zip(outputs, [PrettyConsoleFormatter(no_color=True), ProductionJSONFormatter()], strict=True):
+        handler = logging.StreamHandler(output)
+        handler.setFormatter(formatter)
+        root.addHandler(handler)
+        handlers.append(handler)
+    handlers[0].addFilter(lambda record: records.append(record) or True)
+    try:
+        with caplog.at_level(logging.DEBUG):
+            yield outputs
+        fallback = capsys.readouterr().err
+        assert "--- Logging error ---" not in fallback
+        assert TOKEN not in fallback and protocols()[1] not in fallback and "synthetic-url-secret" not in fallback
+        # A formatter failure must not silently drop the sensitive record while
+        # the remaining successful JSON lines make a redaction check pass.
+        json_records = [json.loads(line) for line in outputs[1].getvalue().splitlines()]
+        assert len(json_records) == len(records) > 0
+        assert [entry["logger"] for entry in json_records] == [record.name for record in records]
+    finally:
+        for handler in handlers:
+            root.removeHandler(handler)
+            handler.close()
 
 
 class Issuer(BaseAuthAdapter):
@@ -190,7 +223,7 @@ async def closed(client, code):
 
 
 @pytest.mark.parametrize("case", ["missing", "invalid", "malformed", "url_token", "wrong_app", "chat_bound", "missing_exp", "nan_exp", "infinite_exp", "bool_exp", "expired", "bad_origin", "duplicate_cursor"])
-async def test_real_socket_refuses_invalid_auth_and_scope_before_source(case, caplog):
+async def test_real_socket_refuses_invalid_auth_and_scope_before_source(case, caplog, formatted_logs):
     journal = Journal()
     offered, suffix, origin = protocols(), "", ORIGIN
     if case == "missing":
@@ -225,7 +258,30 @@ async def test_real_socket_refuses_invalid_auth_and_scope_before_source(case, ca
                 pytest.fail("Unauthorized handshake accepted")
         assert error.value.response.status_code == 403
     assert journal.authorizations == 0 and journal.reads == []
-    assert TOKEN not in caplog.text and "synthetic-url-secret" not in caplog.text
+    # Third-party LogRecords contain raw request parameters before formatting.
+    # Check actual output from both canonical sinks, including encoded headers.
+    secrets = [TOKEN, "synthetic-url-secret", "invalid-synthetic-token", protocols()[1], protocols("invalid-synthetic-token")[1]]
+    for output in formatted_logs:
+        rendered = output.getvalue()
+        assert "uvicorn.error" in rendered and "403" in rendered
+        assert all(secret not in rendered for secret in secrets)
+    owned_records = "\n".join(record.getMessage() for record in caplog.records if record.name.startswith(("core.", "mozaiks.")))
+    assert all(secret not in owned_records for secret in secrets)
+
+
+async def test_split_protocol_headers_authenticate_without_exposing_credentials(formatted_logs):
+    journal = Journal()
+    encoded = protocols()[1]
+    async with server_for(app_for(journal)) as url:
+        async with connect(url, origin=ORIGIN, subprotocols=[WS_BEARER_SUBPROTOCOL],
+                           additional_headers={"Sec-WebSocket-Protocol": encoded}) as client:
+            assert (await frame(client, "ready"))["type"] == "ready"
+    assert journal.authorizations > 0
+    for output in formatted_logs:
+        rendered = output.getvalue()
+        assert "sec-websocket-protocol" in rendered.lower()
+        assert TOKEN not in rendered and encoded not in rendered
+        assert "***REDACTED***" in rendered
 
 
 async def test_real_socket_rejects_development_identity(monkeypatch):

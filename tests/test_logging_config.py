@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import io
+import json
 import logging
+import sys
+
+import pytest
 
 from logs import logging_config
-from logs.logging_config import PrettyConsoleFormatter, SafeRotatingFileHandler
+from logs.logging_config import (
+    PrettyConsoleFormatter,
+    ProductionJSONFormatter,
+    SafeRotatingFileHandler,
+)
 
 
 def test_safe_rotating_file_handler_writes_when_rollover_is_locked(tmp_path, monkeypatch) -> None:
@@ -119,3 +128,59 @@ def test_pretty_formatter_redacts_quoted_modern_api_keys() -> None:
 
     assert key not in rendered
     assert "***REDACTED***" in rendered
+
+
+@pytest.mark.parametrize("formatter", [PrettyConsoleFormatter(no_color=True), ProductionJSONFormatter()])
+@pytest.mark.parametrize("message", [
+    'WebSocket /stream?access_token=synthetic-credential&cursor=visible 403',
+    'GET /stream?%61ccess%5Ftoken=synthetic-credential&cursor=visible HTTP/1.1',
+    'GET /stream?cursor=visible&TOKEN=synthetic-credential HTTP/1.1',
+    'Sec-WebSocket-Protocol: mozaiks.bearer.v1, synthetic-credential',
+    'sec-websocket-protocol: other, mozaiks.bearer.v1, synthetic-credential',
+    'sec-websocket-protocol: synthetic-credential',
+    '{"access_token": "synthetic-credential", "cursor": "visible"}',
+])
+def test_formatters_redact_transport_credentials_and_preserve_context(formatter, message):
+    record = logging.LogRecord("uvicorn.error", logging.DEBUG, __file__, 1, "%s", (message,), None)
+    rendered = formatter.format(record)
+    assert "synthetic-credential" not in rendered
+    assert "***REDACTED***" in rendered
+    assert "uvicorn.error" in rendered
+    if "visible" in message:
+        assert "visible" in rendered
+    if isinstance(formatter, ProductionJSONFormatter):
+        assert json.loads(rendered)["logger"] == "uvicorn.error"
+
+
+@pytest.mark.parametrize("formatter", [PrettyConsoleFormatter(no_color=True), ProductionJSONFormatter()])
+def test_formatters_redact_credentials_in_exception_output(formatter):
+    try:
+        raise ValueError("rejected /stream?access_token=synthetic-credential")
+    except ValueError:
+        record = logging.LogRecord("uvicorn.error", logging.ERROR, __file__, 1, "Handshake failed", (), sys.exc_info())
+    rendered = formatter.format(record)
+    assert "synthetic-credential" not in rendered
+    assert "ValueError" in rendered and "Handshake failed" in rendered
+    assert "***REDACTED***" in rendered
+
+
+def test_json_formatter_handles_opaque_websocket_extra_without_raw_error_output(capsys):
+    class Connection:
+        def __repr__(self):
+            raise AssertionError("Opaque extras must not invoke user representation")
+
+    output = io.StringIO()
+    handler = logging.StreamHandler(output)
+    handler.setFormatter(ProductionJSONFormatter())
+    record = logging.LogRecord("websockets.client", logging.DEBUG, __file__, 1,
+                               "Sec-WebSocket-Protocol: %s", ("synthetic-credential",), None)
+    record.websocket = Connection()
+    try:
+        handler.handle(record)
+    finally:
+        handler.close()
+    assert capsys.readouterr().err == ""
+    rendered = json.loads(output.getvalue())
+    assert rendered["extra"]["websocket"] == "<Connection>"
+    assert "synthetic-credential" not in rendered["msg"]
+    assert "***REDACTED***" in rendered["msg"]

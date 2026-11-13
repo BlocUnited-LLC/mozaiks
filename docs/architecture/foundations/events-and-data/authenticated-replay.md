@@ -134,6 +134,15 @@ It avoids a lossy backfill/live queue handoff: every next page reads the journal
 Slow sends terminate with 1011 and retain recovery through the client's cursor.
 Expiry and access denial close with 1008. Unexpected source failures return only
 a fixed 1011 reason; this transport logs no payloads or source exception text.
+The canonical pretty and JSON log formatters redact token query parameters
+(including percent-encoded parameter names) and WebSocket protocol header values,
+including credentials split across repeated headers. Exception output uses the
+same redaction. JSON output renders opaque third-party extras as type-only markers
+without calling their string representation or falling back to raw stderr output.
+Third-party request log records still contain their original arguments
+before formatting; custom handlers and external access-log infrastructure must
+apply equivalent protection. The real-socket negative tests capture both canonical
+sink formats at DEBUG without suppressing handshake diagnostics.
 Clients send no application messages. Configure the ASGI server's inbound frame
 limit and connection/rate limits at the host boundary.
 
