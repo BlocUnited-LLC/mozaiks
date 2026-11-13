@@ -181,6 +181,18 @@ async def test_new_or_explicit_rebuild_does_not_copy_old_implementation(baseline
     baseline.store.get_build_record.assert_not_awaited()
 
 
+@pytest.mark.parametrize("sequence", ["conceptual_replan", "full_rebuild"])
+@pytest.mark.parametrize("pinned", [False, True])
+def test_explicit_rebuild_retains_revision_parent_selection(baseline, sequence, pinned):
+    baseline.context.update(
+        build_mode="revision", workflow_sequence=sequence, artifact_version_id="original_app",
+        revision_source_artifact_version_id="pinned_app" if pinned else None,
+    )
+    assert revision.revision_source_artifact_id(baseline.context) == (
+        "pinned_app" if pinned else "original_app"
+    )
+
+
 def _upstream_design_revision(baseline, *, bundles):
     baseline.artifact.validation_status = "passed"
     baseline.artifact.commit_metadata.metadata["acceptance"] = build_acceptance_evidence(
