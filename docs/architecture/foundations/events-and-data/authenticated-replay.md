@@ -48,6 +48,18 @@ They gain no app access from the route or cursor. The source must authorize the
 current principal for the exact requested app and stream before any read; denial
 closes the connection without reading. A present app binding must match the route.
 
+For module-backed sources, import `resolve_module_permissions` from
+`mozaiksai.core.runtime.app`. It applies the same loaded-app role and token-scope
+mapping to `UserPrincipal` and `WebSocketUser`. The resulting list is only the
+default for current host scope/permission hooks; it does not authenticate a
+caller, verify membership, select tenant/workspace ownership or bypass module
+policy. Capture socket identity through
+`PersistencePrincipal.from_websocket_user`, run the public hook registry's
+`call_module_scope(..., fail_closed=True)`, apply `identity.with_host_scope(scope)`,
+and dispatch through `dispatch_module_action` with concrete enforce-mode
+authority. Preserve the loaded app and authenticated user, and resolve the
+source's read-only scope without account bootstrap or invented membership.
+
 ## Source contract
 
 Public types are `ReplaySource`, `ReplayGrant`, `ReplayPage`, `ReplayEvent`,

@@ -17,6 +17,7 @@ from .definition import (
 from .entitlements import ConfiguredEntitlementAdapter
 from .loader import AppLoader, AppLoadError, AppLoadResult
 from .module_loader import ActionDef, LoadedModule, ModuleDefinition, ModuleLoader, ModuleLoadError
+from .module_permissions import resolve_module_permissions
 from .provenance import (
     DEFAULT_APP_CONTRACTS,
     PROVENANCE_SCHEMA_VERSION,
@@ -62,6 +63,7 @@ __all__ = [
     "LoadedModule",
     "ModuleDefinition",
     "ActionDef",
+    "resolve_module_permissions",
     "ConfiguredEntitlementAdapter",
     "DEFAULT_APP_CONTRACTS",
     "PROVENANCE_SCHEMA_VERSION",
