@@ -143,9 +143,11 @@ The agent returns the existing `AppBuildPlanOutput` structured output. Its
 finite source, surface and implementation choices remain the canonical schema;
 the prompt does not introduce another plan or template language. Plan admission
 resolves the selected pack, removes tasks for template-owned outputs and retains
-app-owned work such as pages and generator-owned smoke fixtures. Optional event
-companions are reserved before that ownership filter; a surviving fixture task
-cannot reclaim a template-owned `contracts/events.yaml`. Assembly
+app-owned work such as pages and generator-owned smoke fixtures. Only tasks
+that still own their module manifest reserve optional event companions; a
+fixture-only task cannot reclaim a template-owned `contracts/events.yaml`, and
+a fully supplied module does not acquire a new task for an unrequested event
+file. Assembly
 verifies the pack identity and materializes static files or strict Jinja
 templates locally. Worker copies cannot replace pack-owned files.
 
