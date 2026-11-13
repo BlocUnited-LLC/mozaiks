@@ -210,7 +210,7 @@ const Header = ({
   const profileMenu = useMemo(
     () => filterPersonalAccountItems(
       mergeProfileMenu([
-        ...(pages || []).filter((page) => page.path === landingSpot && isShellItemVisible(page, userRoles))
+        ...(isSignInAvailable(shellAuth) ? pages || [] : []).filter((page) => page.path === landingSpot && isShellItemVisible(page, userRoles))
           .map((page) => ({ id: 'app-home', label: page.label || 'Home', action: 'navigate', path: page.path })),
         ...getDefaultProfileMenu(currentUser),
       ], profileConfig.menu)

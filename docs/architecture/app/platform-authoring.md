@@ -512,8 +512,10 @@ That means:
 
 ## App home and assistant chrome
 
-The profile menu includes the declared `startup.landing_spot` when it resolves
-to a page the current user may view, using the existing page label.
+When sign-in is available, the profile menu includes the declared
+`startup.landing_spot` when it resolves to a page the current user may view,
+using the existing page label. Authentication-disabled apps retain their
+explicitly configured non-personal menu entries.
 
 The shell projects `assistant_available` from the active app's `config/ai.json`
 Ask or chat configuration, or a declared workflow entry point. Workflow-only
