@@ -13,12 +13,14 @@ ControlPlaneCheckpointEvent = Literal[
     "route_requested",
     "decision_requested",
     "scope_requested",
+    "dependency_graph_requested",
     "contract_surface_requested",
     "coding_requested",
 ]
 RefinementHarnessOutputContract = Literal[
     "ChangeClassifierResult",
     "ScopeProposal",
+    "DependencyGraphAssessment",
     "ContractSurfaceClassification",
     "CodingWorkerPlan",
 ]
@@ -26,6 +28,7 @@ RefinementHarnessOutputContract = Literal[
 AG2_CHECKPOINT_OUTPUT_CONTRACTS: dict[ControlPlaneCheckpointEvent, RefinementHarnessOutputContract] = {
     "request_submitted": "ChangeClassifierResult",
     "scope_requested": "ScopeProposal",
+    "dependency_graph_requested": "DependencyGraphAssessment",
     "contract_surface_requested": "ContractSurfaceClassification",
     "coding_requested": "CodingWorkerPlan",
 }
@@ -35,6 +38,7 @@ CHECKPOINT_IDS: dict[ControlPlaneCheckpointEvent, str] = {
     "route_requested": "refinement_route",
     "decision_requested": "decision",
     "scope_requested": "scope_selection",
+    "dependency_graph_requested": "dependency_graph_assessment",
     "contract_surface_requested": "contract_surface_planning",
     "coding_requested": "coding_refinement",
 }

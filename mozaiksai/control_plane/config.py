@@ -110,6 +110,7 @@ class ControlPlaneConfig(BaseModel):
         default_factory=ControlPlaneContractSurfaceCapabilityConfig
     )
     scope: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
+    dependency_graph: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
 
     @field_validator("llm_profiles", mode="before")
     @classmethod
@@ -127,7 +128,7 @@ class ControlPlaneConfig(BaseModel):
     @model_validator(mode="after")
     def _validate_enabled_checkpoint_profiles(self) -> ControlPlaneConfig:
         if self.enabled:
-            for capability in ("classifier", "scope", "contract_surface", "coding"):
+            for capability in ("classifier", "scope", "contract_surface", "coding", "dependency_graph"):
                 if getattr(self, capability).enabled:
                     self.resolve_capability_llm_config(capability)
             if self.contract_surface.enabled:

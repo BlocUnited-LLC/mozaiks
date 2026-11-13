@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from factory_app.refinement_harness.tools import _context_graph
 from factory_app.refinement_harness.tools.app_intelligence import get_app_intelligence_context
 from factory_app.refinement_harness.tools.get_artifact_workspace_catalog import (
     get_artifact_workspace_catalog,
@@ -36,6 +35,7 @@ from mozaiksai.control_plane import (
     ControlPlaneToolExecutor,
     ControlPlaneToolsManifest,
     LoadedControlPlanePack,
+    app_context,
 )
 from mozaiksai.control_plane.app_context import AppContextGraphLookupResult
 from mozaiksai.control_plane.tools.get_revision_context import get_revision_context
@@ -621,7 +621,7 @@ async def test_context_graph_scope_tool_returns_symbols_and_related_imports(
             )
         )
 
-    monkeypatch.setattr(_context_graph, "get_current_app_context_graph", current_graph)
+    monkeypatch.setattr(app_context, "get_current_app_context_graph", current_graph)
 
     class _ZipArtifactStore(_FakeArtifactStore):
         async def get_build_record(self, *, app_id: str, build_record_id: str):

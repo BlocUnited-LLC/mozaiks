@@ -18,7 +18,11 @@ from mozaiksai.core.adapters.ag2_task_batch_runner import (
     AG2TaskBatchRunnerResult,
 )
 from mozaiksai.core.ports.orchestration import RunStatus
-from mozaiksai.core.workflow.context.authority import ContextAuthorityPolicy
+from mozaiksai.core.workflow.context.authority import (
+    CALLER_INPUT_WRITER,
+    ContextAuthorityPolicy,
+    build_context_authority_policy,
+)
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
     resolve_design_access_policy,
@@ -1115,6 +1119,7 @@ async def _run_one_task(
         chat_id=chat_id,
         app_id=app_id,
         user_id=user_id,
+        context_authority_policy=context_authority_policy,
     )
     scoped_prompt = _build_scoped_worker_prompt(prompt, task_context)
 
@@ -1702,14 +1707,27 @@ def _build_task_context(
     chat_id: str | None,
     app_id: str | None,
     user_id: str | None,
+    context_authority_policy: ContextAuthorityPolicy | None = None,
 ) -> dict[str, Any]:
     task_context = copy.deepcopy(base_context)
     embedded_context = task.get("context_variables")
-    if isinstance(embedded_context, Mapping):
-        task_context.update(copy.deepcopy(dict(embedded_context)))
+    overrides = dict(embedded_context) if isinstance(embedded_context, Mapping) else {}
     for field_name in batch.worker.context_fields:
         if field_name in task:
-            task_context[field_name] = copy.deepcopy(task[field_name])
+            overrides[field_name] = task[field_name]
+    # Task-local inputs can be undeclared, but model-authored task data cannot
+    # replace runtime identity or fields owned by another workflow writer.
+    inferred_policy = build_context_authority_policy(
+        workflow_name=batch.id, definitions={key: {} for key in overrides},
+    )
+    for key in overrides:
+        policy = (
+            context_authority_policy
+            if context_authority_policy is not None and key in context_authority_policy.variables
+            else inferred_policy
+        )
+        policy.require_can_write(key, writer_id=CALLER_INPUT_WRITER, operation="task_context")
+    task_context.update(copy.deepcopy(overrides))
     task_context["task_run_mode"] = True
     task_context["current_task_batch_id"] = batch.id
     task_context["current_task_id"] = str(task["task_id"])

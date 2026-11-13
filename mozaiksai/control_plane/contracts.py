@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from mozaiksai.core.session.build_binding import BuildIdentity, RunBuildBinding
 from mozaiksai.core.usage.context import AuxiliaryUsageContext
 
+from .context_graph.assessment import DependencyGraphContext
+
 
 class RefinementLane(StrEnum):
     """Canonical refinement lanes — the second classification dimension.
@@ -249,6 +251,7 @@ class CodingWorkerRequest(BaseModel):
 
     app_id: str
     usage_context: AuxiliaryUsageContext | None = Field(default=None, exclude=True, repr=False)
+    dependency_graph: DependencyGraphContext | None = Field(default=None, exclude=True, repr=False)
     target_app_id: BuildIdentity | None = None
     run_build_binding: RunBuildBinding | None = None
     baseline_files: dict[str, str] | None = None

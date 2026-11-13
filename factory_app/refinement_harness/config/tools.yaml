@@ -31,7 +31,7 @@ tools:
       - scope_requested
   - id: get_context_graph_catalog
     kind: context_tool
-    description: Load the merged current AppContextGraph and artifact code graph for graph-aware scope selection, including candidate files, matched nodes, and relationship hints.
+    description: Load the requested build's code graph for scope selection, including candidate files, matched nodes, and relationship hints.
     entrypoint: factory_app.refinement_harness.tools.get_context_graph_catalog:get_context_graph_catalog
     available_to:
       - scope_requested
@@ -52,13 +52,13 @@ tools:
       - coding_requested
   - id: get_context_graph_scope
     kind: context_tool
-    description: Load graph-neighborhood context for explicitly scoped files, including related files, symbols, and edges from the current app/artifact Context Graph.
+    description: Load graph-neighborhood context for explicitly scoped files in the requested build, including related files, symbols, and edges.
     entrypoint: factory_app.refinement_harness.tools.get_context_graph_scope:get_context_graph_scope
     available_to:
       - coding_requested
   - id: search_app_source_context
     kind: context_tool
-    description: Search the current persisted SourceContextBundle, falling back to the selected artifact workspace when current app context is unavailable.
+    description: Search the requested build's redacted source corpus, or the current app corpus when no build is selected.
     entrypoint: factory_app.refinement_harness.tools.source_context:search_app_source_context
     available_to:
       - scope_requested
@@ -66,7 +66,7 @@ tools:
       - coding_requested
   - id: read_app_source_file
     kind: context_tool
-    description: Read one exact file from the current SourceContextBundle or selected artifact workspace source corpus by indexed path.
+    description: Read one indexed file from the requested build's redacted source corpus, or from the current app corpus when no build is selected.
     entrypoint: factory_app.refinement_harness.tools.source_context:read_app_source_file
     available_to:
       - scope_requested

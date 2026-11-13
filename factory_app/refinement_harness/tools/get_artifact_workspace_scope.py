@@ -4,6 +4,7 @@ from typing import Any
 
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
 from mozaiksai.control_plane.file_contract_context import selected_file_contracts
+from mozaiksai.core.app_context.source_corpus import redact_source_text
 from mozaiksai.core.artifacts.store import ArtifactStore, get_artifact_store
 
 from ._artifact_workspace import (
@@ -34,6 +35,8 @@ async def get_artifact_workspace_scope(
         artifact_store=store,
         app_id=app_id,
         build_record_id=build_record_id,
+        build_family=tool_context.build_family,
+        build_key=tool_context.build_key,
     )
     if not workspace.get("present"):
         return workspace
@@ -83,7 +86,7 @@ def _build_selected_scope(*, path: str, file_map: dict[str, str]) -> dict[str, A
     resolved_imports = resolve_related_imports(path=path, content=content or "", file_map=file_map)
     return {
         "present": content is not None,
-        "excerpt": text_excerpt(content, max_length=700) if content is not None else None,
+        "excerpt": text_excerpt(redact_source_text(path=path, content=content), max_length=700) if content is not None else None,
         "sibling_files": siblings,
         "resolved_related_files": resolved_imports,
     }
@@ -107,7 +110,9 @@ def _collect_related_previews(*, selected_paths: list[str], file_map: dict[str, 
             {
                 "path": candidate,
                 "reason": reason,
-                "excerpt": text_excerpt(file_map.get(candidate), max_length=500),
+                "excerpt": text_excerpt(
+                    redact_source_text(path=candidate, content=file_map[candidate]), max_length=500,
+                ),
             }
         )
         if len(previews) >= _MAX_PREVIEW_FILES:

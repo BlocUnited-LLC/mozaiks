@@ -14,6 +14,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Factory refinement agents can receive advisory file and dependency evidence
+  tied to the verified app build they are changing.
+
 - A reusable content pack supplies permission-protected publishing records while
   leaving app pages and branding customizable through canonical app contracts.
 

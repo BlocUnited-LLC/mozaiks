@@ -15,6 +15,7 @@ from mozaiksai.control_plane import (
     build_selected_control_plane_harness,
     load_refinement_harness,
 )
+from mozaiksai.control_plane.implementations.dependency_graph_agent import DependencyGraphAgent
 
 
 def test_checkpoint_runtime_binds_and_caches_handlers(tmp_path: Path, monkeypatch) -> None:
@@ -80,4 +81,5 @@ def test_build_selected_control_plane_harness_uses_checkpoint_runtime_for_defaul
     assert harness._checkpoint_runtime is not None
     assert harness._checkpoint_runtime.get_checkpoint("request_submitted") is harness._refinement_resolver._classifier
     assert harness._checkpoint_runtime.get_checkpoint("scope_requested") is harness._scope_proposer
+    assert isinstance(harness._checkpoint_runtime.get_checkpoint("dependency_graph_requested"), DependencyGraphAgent)
     assert harness._checkpoint_runtime.get_checkpoint("coding_requested") is harness._coding_worker

@@ -65,6 +65,8 @@ class _FakeArtifactStore:
     async def get_build_record(self, *, app_id: str, build_record_id: str):
         return SimpleNamespace(
             id=build_record_id,
+            app_id=app_id,
+            files_manifest=[],
             build_family="app_bundle",
             build_key="app_bundle",
             commit_metadata=SimpleNamespace(
@@ -201,6 +203,8 @@ async def test_scope_proposer_selects_paths_and_materializes_files(tmp_path: Pat
         async def get_build_record(self, *, app_id: str, build_record_id: str):
             return SimpleNamespace(
                 id=build_record_id,
+                app_id=app_id,
+                files_manifest=[],
                 build_family="app_bundle",
                 build_key="app_bundle",
                 commit_metadata=SimpleNamespace(
@@ -265,6 +269,8 @@ async def test_scope_proposer_clarifies_when_selected_paths_exceed_policy_limit(
         async def get_build_record(self, *, app_id: str, build_record_id: str):
             return SimpleNamespace(
                 id=build_record_id,
+                app_id=app_id,
+                files_manifest=[],
                 build_family="app_bundle",
                 build_key="app_bundle",
                 commit_metadata=SimpleNamespace(
@@ -318,6 +324,8 @@ async def test_scope_proposer_rejects_paths_missing_from_artifact_workspace(tmp_
         async def get_build_record(self, *, app_id: str, build_record_id: str):
             return SimpleNamespace(
                 id=build_record_id,
+                app_id=app_id,
+                files_manifest=[],
                 build_family="app_bundle",
                 build_key="app_bundle",
                 commit_metadata=SimpleNamespace(

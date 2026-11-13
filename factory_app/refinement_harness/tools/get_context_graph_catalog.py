@@ -6,8 +6,7 @@ from mozaiksai.control_plane.context_graph import build_context_graph_catalog
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
 from mozaiksai.core.artifacts.store import ArtifactStore
 
-from ._context_graph import load_context_graph_for_tool
-from ._shared import normalize_context
+from ._context_graph import load_context_graph_for_tool, normalize_graph_context
 
 
 async def get_context_graph_catalog(
@@ -16,7 +15,7 @@ async def get_context_graph_catalog(
     artifact_store: ArtifactStore | None = None,
 ) -> dict[str, Any]:
     """Return graph-aware candidates for refinement coding scope selection."""
-    tool_context = normalize_context(context)
+    tool_context = normalize_graph_context(context)
     loaded = await load_context_graph_for_tool(context=tool_context, artifact_store=artifact_store)
     if not loaded.get("present"):
         return loaded
@@ -33,6 +32,7 @@ async def get_context_graph_catalog(
             "build_family": artifact.build_family,
             "build_key": artifact.build_key,
             "source": loaded["workspace"]["source"],
+            "provenance": loaded["provenance"],
             "warnings": list(loaded.get("warnings") or []),
             "scan_health": loaded["workspace"].get("scan_health"),
         }

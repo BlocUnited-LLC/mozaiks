@@ -599,6 +599,7 @@ workflow re-entry        launch selected workflow_sequence from extension_regist
 | `refinement_route` | `route_requested` | Deterministic | Maps `{artifact_kind, change_class}` to a `workflow_sequence` name from the routing table. |
 | `decision` | `decision_requested` | Deterministic | Decides outcome: `auto_patch`, `workflow_reentry`, `core_restart`, `clarify_scope`, or `fallback_workflow`. |
 | `scope_selection` | `scope_requested` | LLM | Proposes which files to touch using context graph and artifact workspace catalog. |
+| `dependency_graph_assessment` | `dependency_graph_requested` | LLM | Ranks files from a bounded dependency neighborhood of a verified app build. The result advises scope, coding, and generator agents. |
 | `contract_surface_planning` | `contract_surface_requested` | LLM | Maps a broader request to specific Mozaiks contract surfaces before workflow re-entry. |
 | `coding_refinement` | `coding_requested` | LLM | Writes the scoped code change against the selected files. |
 
