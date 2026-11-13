@@ -70,6 +70,15 @@ ready, and every push re-runs CI. Keep the list short and every entry live.
   that exact head reviewed and merged. If a clean update from main is needed
   after a review, the reviewer re-confirms with `git range-diff` that the pull
   request's own commits are unchanged and clears the new SHA.
+- **Draft updates defer the full Linux matrix.** Draft pull requests run the
+  lightweight lint and secret checks while the long test shards, Docker proof,
+  dependency audit, frontend, package, and infrastructure jobs stay skipped.
+  Moving a pull request to ready for review starts the full required suite. For
+  an exact-head review that must remain draft, apply `full-ci` only after local
+  verification, freeze that head until CI and review finish, and remove the
+  label before further development. A skipped draft check is coordination
+  feedback, not merge or release evidence; the exact reviewed head must have a
+  successful full suite.
 - **Keep expensive optional checks scoped.** Emulator, native-acceptance,
   visual-regression, and paid-provider jobs run only when their relevant paths
   change or on explicit request. A required check must still report a status
