@@ -9,13 +9,47 @@ const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ui = path.resolve(shell, "../chat-ui/src");
 test("admin pages use declared metadata and preserve Studio section routing", async (t) => {
   const stubs = {
-    "../context/ChatUIContext": `export const useChatUI=()=>({user:{roles:['admin']}});`,
-    "../admin/components/AdminPrimitives.jsx": `import React from 'react';export const useAdminFetch=()=>({data:{pages:[{id:'notes',label:'Note Administration'}],module_panels:[{id:'notes-panel',label:'Notes panel',page:'notes'}]}});export const AdminExtensionPanels=({panels})=><div>{panels.map(panel=><p key={panel.id}>{panel.label}</p>)}</div>;`,
-    "../admin/components/AdminWorkspaceLayout.jsx": `export const AdminWorkspaceLayout=({children})=>children;`
+    "../context/ChatUIContext": `const useChatUI = () => ({ user: { roles: ["admin"] } });
+export {
+  useChatUI
+};
+`,
+    "../admin/components/AdminPrimitives.jsx": `import React from "react";
+const useAdminFetch = () => ({ data: { pages: [{ id: "notes", label: "Note Administration" }], module_panels: [{ id: "notes-panel", label: "Notes panel", page: "notes" }] } });
+const AdminExtensionPanels = ({ panels }) => <div>{panels.map((panel) => <p key={panel.id}>{panel.label}</p>)}</div>;
+export {
+  AdminExtensionPanels,
+  useAdminFetch
+};
+`,
+    "../admin/components/AdminWorkspaceLayout.jsx": `const AdminWorkspaceLayout = ({ children }) => children;
+export {
+  AdminWorkspaceLayout
+};
+`
   };
-  const sections = `import React from 'react';export const OverviewSection=()=> <h1>Overview</h1>;export const UsersSection=()=> <h1>Users</h1>;export const UsageSection=()=> <h1>Usage</h1>;export const OperationsSection=()=> <h1>Operations</h1>;export const SettingsSection=()=> <h1>Settings</h1>;`;
+  const sections = `import React from "react";
+const OverviewSection = () => <h1>Overview</h1>;
+const UsersSection = () => <h1>Users</h1>;
+const UsageSection = () => <h1>Usage</h1>;
+const OperationsSection = () => <h1>Operations</h1>;
+const SettingsSection = () => <h1>Settings</h1>;
+export {
+  OperationsSection,
+  OverviewSection,
+  SettingsSection,
+  UsageSection,
+  UsersSection
+};
+`;
   const bundle = await build({
-    stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import {BrowserRouter} from 'react-router-dom';import AdminPage from ${JSON.stringify(path.join(ui, "pages/AdminPage.jsx"))};const route=location.pathname==='/admin/notes'?{meta:{adminPage:'notes'}}:undefined;createRoot(document.getElementById('root')).render(<BrowserRouter><AdminPage route={route}/></BrowserRouter>);`, resolveDir: shell, loader: "jsx" },
+    stdin: { contents: `import React from "react";
+import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
+import AdminPage from ${JSON.stringify(path.join(ui, "pages/AdminPage.jsx"))};
+const route = location.pathname === "/admin/notes" ? { meta: { adminPage: "notes" } } : void 0;
+createRoot(document.getElementById("root")).render(<BrowserRouter><AdminPage route={route} /></BrowserRouter>);
+`, resolveDir: shell, loader: "jsx" },
     bundle: true,
     write: false,
     format: "esm",

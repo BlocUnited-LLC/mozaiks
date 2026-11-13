@@ -74,7 +74,8 @@ function buildAppPath(appId, templatePath) {
 /**
  * Build nav groups from the registry pages array.
  * When appId is present, show app-scope pages with appId substituted into paths.
- * Otherwise, show workspace-scope pages as the top-level Studio nav.
+ * Platform surfaces show app-scope pages at their declared paths.
+ * Studio without an app id shows workspace-scope pages.
  */
 function buildNavGroups(adminPages, appId, shellSurface = 'studio') {
   if (!adminPages?.length) {

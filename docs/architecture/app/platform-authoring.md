@@ -516,7 +516,9 @@ The profile menu includes the declared `startup.landing_spot` when it resolves
 to a page the current user may view, using the existing page label.
 
 The shell projects `assistant_available` from the active app's `config/ai.json`
-Ask or chat configuration. Floating assistants require this projection. The
+Ask or chat configuration, or a declared workflow entry point. Workflow-only
+apps retain the existing return-to-workflow controls. Floating assistants
+require this projection. The
 projection describes configuration, rather than provider health or permission
 to invoke a model. Apps without this configuration retain ordinary navigation.
 

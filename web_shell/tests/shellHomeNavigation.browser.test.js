@@ -9,17 +9,53 @@ const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ui = path.resolve(shell, "../chat-ui/src");
 test("profile menu returns from account and conversation to the app home", async (t) => {
   const stubs = {
-    "../../providers/NavigationProvider": `export const useNavigation=()=>window.shellNavigation;`,
-    "../../navigation/useNavigationActions": `import {useNavigate} from 'react-router-dom';export const useNavigationActions=()=>{const go=useNavigate();return item=>go(item.path||item.href);};`,
-    "../../context/ChatUIContext": `export const useChatUI=()=>({login:()=>{},logout:()=>{}});`,
-    "../../ui/hooks/useAppEventBus.js": `export const useAppEventBus=()=>{};`,
-    "./notificationApi.js": `export const fetchNotificationCount=async()=>null;export const clearNotifications=async()=>{};`
+    "../../providers/NavigationProvider": `const useNavigation = () => window.shellNavigation;
+export {
+  useNavigation
+};
+`,
+    "../../navigation/useNavigationActions": `import { useNavigate } from "react-router-dom";
+const useNavigationActions = () => {
+  const go = useNavigate();
+  return (item) => go(item.path || item.href);
+};
+export {
+  useNavigationActions
+};
+`,
+    "../../context/ChatUIContext": `const useChatUI = () => ({ login: () => {
+}, logout: () => {
+} });
+export {
+  useChatUI
+};
+`,
+    "../../ui/hooks/useAppEventBus.js": `const useAppEventBus = () => {
+};
+export {
+  useAppEventBus
+};
+`,
+    "./notificationApi.js": `const fetchNotificationCount = async () => null;
+const clearNotifications = async () => {
+};
+export {
+  clearNotifications,
+  fetchNotificationCount
+};
+`
   };
-  const bundle = await build({ stdin: { contents: `import React from 'react';import {createRoot} from 'react-dom/client';import {BrowserRouter,useLocation} from 'react-router-dom';
- import Header from ${JSON.stringify(path.join(ui, "components/layout/Header.js"))};
- window.shellNavigation={landing_spot:'/notes',pages:[{path:'/notes',label:'Personal Notes',meta:{requiresAuth:true}}],headerPages:[],header:{actions:[]},profile:{menu:[{id:'admin',label:'Admin',path:'/admin',requiresRole:'admin'}]},notifications:{show:false},auth:{runtime:{enabled:true}}};
- function App(){const location=useLocation();return <><Header user={{id:'reader',name:'Reader',roles:['user']}} chatTheme={{branding:{name:'Notes App'}}}/><h1>{location.pathname}</h1></>;}
- createRoot(document.getElementById('root')).render(<BrowserRouter><App/></BrowserRouter>);`, resolveDir: shell, loader: "jsx" }, alias: { react: path.join(shell, "node_modules/react"), "react-dom": path.join(shell, "node_modules/react-dom"), "react-router-dom": path.join(shell, "node_modules/react-router-dom") }, bundle: true, write: false, format: "esm", jsx: "automatic", loader: { ".js": "jsx", ".css": "empty" }, plugins: [{ name: "fixtures", setup(builder) {
+  const bundle = await build({ stdin: { contents: `import React from "react";
+import { createRoot } from "react-dom/client";
+import { BrowserRouter, useLocation } from "react-router-dom";
+import Header from ${JSON.stringify(path.join(ui, "components/layout/Header.js"))};
+window.shellNavigation = { landing_spot: "/notes", pages: [{ path: "/notes", label: "Personal Notes", meta: { requiresAuth: true } }], headerPages: [], header: { actions: [] }, profile: { menu: [{ id: "admin", label: "Admin", path: "/admin", requiresRole: "admin" }] }, notifications: { show: false }, auth: { runtime: { enabled: true } } };
+function App() {
+  const location = useLocation();
+  return <><Header user={{ id: "reader", name: "Reader", roles: ["user"] }} chatTheme={{ branding: { name: "Notes App" } }} /><h1>{location.pathname}</h1></>;
+}
+createRoot(document.getElementById("root")).render(<BrowserRouter><App /></BrowserRouter>);
+`, resolveDir: shell, loader: "jsx" }, alias: { react: path.join(shell, "node_modules/react"), "react-dom": path.join(shell, "node_modules/react-dom"), "react-router-dom": path.join(shell, "node_modules/react-router-dom") }, bundle: true, write: false, format: "esm", jsx: "automatic", loader: { ".js": "jsx", ".css": "empty" }, plugins: [{ name: "fixtures", setup(builder) {
     builder.onResolve({ filter: /.*/ }, (args) => args.path in stubs ? { path: args.path, namespace: "fixture" } : null);
     builder.onLoad({ filter: /.*/, namespace: "fixture" }, (args) => ({ contents: stubs[args.path], loader: "js", resolveDir: shell }));
   } }] });
