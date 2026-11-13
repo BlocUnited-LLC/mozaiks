@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from factory_app.refinement_harness.tools import _context_graph
 from factory_app.refinement_harness.tools.app_intelligence import get_app_intelligence_context
 from factory_app.refinement_harness.tools.get_artifact_workspace_catalog import (
     get_artifact_workspace_catalog,
@@ -36,7 +37,9 @@ from mozaiksai.control_plane import (
     ControlPlaneToolsManifest,
     LoadedControlPlanePack,
 )
+from mozaiksai.control_plane.app_context import AppContextGraphLookupResult
 from mozaiksai.control_plane.tools.get_revision_context import get_revision_context
+from mozaiksai.core.app_context.context_graph import build_context_graph_from_file_map
 from mozaiksai.core.artifacts.models import (
     ArtifactLifecycleStatus,
     ArtifactValidationStatus,
@@ -594,7 +597,9 @@ async def test_app_intelligence_tool_summarizes_artifact_zip(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
-async def test_context_graph_scope_tool_returns_symbols_and_related_imports(tmp_path: Path) -> None:
+async def test_context_graph_scope_tool_returns_symbols_and_related_imports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     zip_path = tmp_path / "artifact.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(
@@ -605,6 +610,18 @@ async def test_context_graph_scope_tool_returns_symbols_and_related_imports(tmp_
             "GeneratedApp/src/Header.jsx",
             "export default function Header() { return <h1>Header</h1>; }\n",
         )
+
+    async def current_graph(**_kwargs):
+        return AppContextGraphLookupResult(
+            graph=build_context_graph_from_file_map(
+                app_id="app_1",
+                artifact_version_id="av_other",
+                artifact_kind="app_bundle",
+                file_map={"src/App.jsx": "export function Obsolete() { return null; }"},
+            )
+        )
+
+    monkeypatch.setattr(_context_graph, "get_current_app_context_graph", current_graph)
 
     class _ZipArtifactStore(_FakeArtifactStore):
         async def get_build_record(self, *, app_id: str, build_record_id: str):
@@ -638,7 +655,7 @@ async def test_context_graph_scope_tool_returns_symbols_and_related_imports(tmp_
     )
 
     assert scope["present"] is True
-    assert scope["selected_scope"]["src/App.jsx"]["symbols"][0]["label"] == "App"
+    assert [symbol["label"] for symbol in scope["selected_scope"]["src/App.jsx"]["symbols"]] == ["App"]
     assert "src/Header.jsx" in scope["related_file_paths"]
     assert any(edge["edge_type"] == "imports" for edge in scope["related_edges"])
     assert scope["semantic_annotation_request"]["schema_version"] == "mozaiks.context_graph.semantic_annotations.v1"

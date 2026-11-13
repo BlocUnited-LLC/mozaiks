@@ -9,12 +9,10 @@ construction path.
 
 from __future__ import annotations
 
-import ast
 import hashlib
-import importlib
 import json
-import logging
 import re
+from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -23,10 +21,18 @@ from typing import Any
 
 import yaml
 
-logger = logging.getLogger(__name__)
-
 from mozaiksai.core.utils.sequences import dedupe_strings
 
+from ._source_syntax import (
+    ExtractedReference,
+    ExtractedSymbol,
+    SourceImport,
+    extract_source_syntax,
+    parser_status,
+)
+from ._source_syntax import (
+    _tree_sitter_parser as _tree_sitter_parser,
+)
 from .models import (
     AppContextGraph,
     AppContextGraphEdge,
@@ -37,15 +43,10 @@ from .models import (
     SourceRef,
     SourceRefKind,
 )
+from .scan_policy import safe_scan_relpath
 
-_JS_IMPORT_RE = re.compile(r"""(?:import\s+.*?\s+from\s+|require\()\s*['"]([^'"]+)['"]""")
-_JS_FUNCTION_RE = re.compile(
-    r"""(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)|(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>|(?:export\s+)?class\s+([A-Za-z_$][\w$]*)"""
-)
-_PY_IMPORT_RE = re.compile(r"""^\s*(?:from\s+([.\w]+)\s+import|import\s+([.\w]+))""", re.MULTILINE)
 _RELATIVE_IMPORT_EXTENSIONS = (
     "",
-    ".py",
     ".js",
     ".jsx",
     ".ts",
@@ -53,61 +54,18 @@ _RELATIVE_IMPORT_EXTENSIONS = (
     ".json",
     ".yaml",
     ".yml",
+    ".css",
     "/index.js",
     "/index.jsx",
     "/index.ts",
     "/index.tsx",
 )
-_TREE_SITTER_LANGUAGE_MODULES = {
-    "python": "tree_sitter_python",
-    "javascript": "tree_sitter_javascript",
-}
-_TREE_SITTER_LANGUAGES: dict[str, Any | None] = {}
-_JS_CALL_RE = re.compile(r"""\b([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?)\s*\(""")
-_NOISE_CALL_TARGETS = {
-    "bool",
-    "dict",
-    "float",
-    "int",
-    "len",
-    "list",
-    "print",
-    "set",
-    "str",
-    "tuple",
-    "super",
-    "return",
-    "if",
-    "for",
-    "while",
-    "switch",
-    "catch",
-    "function",
-    "console.log",
-    "useState",
-    "useEffect",
-}
+_NOISE_CALL_TARGETS = {"bool", "dict", "float", "int", "len", "list", "print", "set", "str", "tuple", "super"}
 _SEMANTIC_ANNOTATION_SCHEMA_VERSION = "mozaiks.context_graph.semantic_annotations.v1"
 
 
-@dataclass
-class ExtractedSymbol:
-    name: str
-    kind: str
-    line: int | None = None
-    end_line: int | None = None
-    qualified_name: str | None = None
-    parent: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass
-class ExtractedReference:
-    target: str
-    kind: str
-    line: int | None = None
-    caller: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -119,6 +77,12 @@ class ExtractedFileContext:
     imports: list[str] = field(default_factory=list)
     references: list[ExtractedReference] = field(default_factory=list)
     structured_metadata: dict[str, Any] = field(default_factory=dict)
+    parser: str | None = None
+    parse_status: str | None = None
+    parse_error_count: int | None = None
+    import_bindings: list[SourceImport] = field(default_factory=list, repr=False)
+    local_bindings: set[tuple[str | None, str]] = field(default_factory=set, repr=False)
+    exports: dict[str, str] = field(default_factory=dict, repr=False)
 
 
 def build_context_graph_from_file_map(
@@ -186,17 +150,19 @@ def build_context_graph_from_file_map(
     graph.add_edge(app_node_id, artifact_node_id, GraphEdgeType.CONTAINS)
     graph.add_edge(artifact_node_id, resolved_source_ref.source_ref_id, GraphEdgeType.GENERATED_FROM)
 
+    safe_file_map = _safe_file_map(file_map)
     extracted_by_path = {
         path: extract_file_context(path=path, content=content)
-        for path, content in sorted(_safe_file_map(file_map).items())
+        for path, content in sorted(safe_file_map.items())
     }
     module_action_ids_by_module = _module_action_ids_by_module(extracted_by_path)
     file_node_by_path: dict[str, str] = {}
     owner_node_by_key: dict[str, str] = {}
-    symbol_node_by_lookup: dict[tuple[str, str], str] = {}
+    symbol_nodes: dict[tuple[str, str], list[str]] = defaultdict(list)
+    exported_nodes: dict[tuple[str, str], list[str]] = defaultdict(list)
 
     for path, file_context in extracted_by_path.items():
-        file_node_id = _file_node_id(path)
+        file_node_id = context_graph_file_node_id(path)
         file_node_by_path[path] = file_node_id
         graph.add_node(
             file_node_id,
@@ -207,7 +173,10 @@ def build_context_graph_from_file_map(
                 "path": path,
                 "source_path": path,
                 "language": file_context.language,
-                "size_bytes": len(str(file_map.get(path, "")).encode("utf-8")),
+                "size_bytes": len(safe_file_map[path].encode("utf-8")),
+                "parser": file_context.parser,
+                "parse_status": file_context.parse_status,
+                "parse_error_count": file_context.parse_error_count,
                 **_file_contract_metadata(path=path, file_context=file_context),
             },
         )
@@ -222,9 +191,12 @@ def build_context_graph_from_file_map(
 
     for path, file_context in extracted_by_path.items():
         file_node_id = file_node_by_path[path]
+        symbol_occurrences: dict[tuple[str, str], int] = defaultdict(int)
         for symbol in file_context.symbols:
             symbol_key = symbol.qualified_name or symbol.name
-            symbol_node_id = _symbol_node_id(path, symbol_key, symbol.kind)
+            occurrence_key = (symbol_key, symbol.kind)
+            symbol_occurrences[occurrence_key] += 1
+            symbol_node_id = _symbol_node_id(path, symbol_key, symbol.kind, symbol_occurrences[occurrence_key])
             symbol_contract_metadata = _symbol_contract_metadata(
                 path=path,
                 symbol=symbol,
@@ -248,9 +220,7 @@ def build_context_graph_from_file_map(
                     **symbol_contract_metadata,
                 },
             )
-            symbol_node_by_lookup[(path, symbol.name)] = symbol_node_id
-            if symbol.qualified_name:
-                symbol_node_by_lookup[(path, symbol.qualified_name)] = symbol_node_id
+            symbol_nodes[(path, symbol_key)].append(symbol_node_id)
             graph.add_edge(
                 file_node_id,
                 symbol_node_id,
@@ -281,73 +251,82 @@ def build_context_graph_from_file_map(
                     GraphEdgeType.IMPLEMENTS_CAPABILITY,
                     metadata={"source_path": path, "module_id": module_id, "action_id": action_id},
                 )
-        for import_target in file_context.imports:
-            resolved_path = _resolve_import_path(path=path, import_target=import_target, file_map=file_map)
-            if resolved_path and resolved_path in file_node_by_path:
+    for path, file_context in extracted_by_path.items():
+        if file_context.language == "python":
+            continue
+        for export, local in file_context.exports.items():
+            if (None, local) not in file_context.local_bindings:
+                exported_nodes[(path, export)].extend(symbol_nodes.get((path, local), []))
+
+    for path, file_context in extracted_by_path.items():
+        file_node_id = file_node_by_path[path]
+        bindings = _resolve_imports(path, file_context, file_node_by_path, symbol_nodes)
+        for imported, resolved_path, _ in bindings:
+            import_metadata = {
+                "source_path": path,
+                "import_target": imported.target,
+                "line": imported.line,
+                "parser": file_context.parser,
+                "resolved": resolved_path is not None,
+            }
+            if resolved_path:
                 graph.add_edge(
                     file_node_id,
                     file_node_by_path[resolved_path],
                     GraphEdgeType.IMPORTS,
-                    metadata={"source_path": path, "import_target": import_target},
+                    metadata=import_metadata,
                 )
             else:
-                unknown_node_id = _stable_id("unknown_import", f"{path}:{import_target}")
+                unknown_node_id = _dependency_id("unknown_import", f"{path}:{imported.target}")
                 graph.add_node(
                     unknown_node_id,
                     GraphNodeType.UNKNOWN,
-                    label=import_target,
-                    metadata={"path": path, "source_path": path, "import_target": import_target},
+                    label=imported.target,
+                    metadata={"path": path, **import_metadata},
                 )
                 graph.add_edge(
                     file_node_id,
                     unknown_node_id,
                     GraphEdgeType.IMPORTS,
-                    metadata={"source_path": path, "import_target": import_target, "resolved": False},
+                    metadata=import_metadata,
                 )
 
-    for path, file_context in extracted_by_path.items():
-        file_node_id = file_node_by_path[path]
-        imported_paths = _resolved_import_paths(path=path, file_context=file_context, file_map=file_map)
+        bindings_by_scope: dict[tuple[str | None, str], list[_ResolvedImport]] = defaultdict(list)
+        for binding in bindings:
+            imported = binding[0]
+            if imported.local_name:
+                bindings_by_scope[(imported.scope, imported.local_name)].append(binding)
         for reference in file_context.references[:120]:
-            if _is_noise_reference(reference):
-                continue
-            source_node_id = _reference_source_node_id(
-                path=path,
-                reference=reference,
-                fallback_file_node_id=file_node_id,
-                symbol_node_by_lookup=symbol_node_by_lookup,
-            )
+            caller = _unique_node(symbol_nodes.get((path, reference.caller))) if reference.caller else None
+            source_node_id = caller or file_node_id
             target_node_id = _reference_target_node_id(
-                path=path,
-                reference=reference,
-                imported_paths=imported_paths,
-                symbol_node_by_lookup=symbol_node_by_lookup,
+                path, reference, bindings_by_scope, file_context.local_bindings, symbol_nodes,
+                symbol_nodes if file_context.language == "python" else exported_nodes, graph,
             )
+            if target_node_id is None and reference.target in _NOISE_CALL_TARGETS:
+                continue
+            reference_metadata = {
+                "source_path": path,
+                "reference_target": reference.target,
+                "reference_kind": reference.kind,
+                "line": reference.line,
+                "caller": reference.caller,
+                "resolved": target_node_id is not None,
+                **reference.metadata,
+            }
             if target_node_id is None:
-                target_node_id = _stable_id("unknown_call", f"{path}:{reference.target}")
+                target_node_id = _dependency_id("unknown_reference", f"{path}:{reference.kind}:{reference.target}")
                 graph.add_node(
                     target_node_id,
                     GraphNodeType.UNKNOWN,
                     label=reference.target,
-                    metadata={
-                        "path": path,
-                        "source_path": path,
-                        "reference_kind": reference.kind,
-                        "line": reference.line,
-                        "resolved": False,
-                    },
+                    metadata={"path": path, **reference_metadata},
                 )
             graph.add_edge(
                 source_node_id,
                 target_node_id,
                 GraphEdgeType.CALLS if reference.kind == "call" else GraphEdgeType.REFERENCES,
-                metadata={
-                    "source_path": path,
-                    "reference_target": reference.target,
-                    "reference_kind": reference.kind,
-                    "line": reference.line,
-                    "caller": reference.caller,
-                },
+                metadata=reference_metadata,
             )
 
     return graph.to_graph(indexed_at=resolved_indexed_at)
@@ -360,27 +339,75 @@ def merge_context_graphs(
     graphs: Iterable[AppContextGraph | None],
     indexed_at: datetime | None = None,
 ) -> AppContextGraph:
-    """Merge graph snapshots without mutating any input graph."""
+    """Merge ordered projections, dropping older graphs whose source changed.
+
+    A conflicting FILE checksum invalidates the earlier projection as a whole:
+    its symbols and relationships cannot safely be attached to the newer bytes.
+    Compatible structural/parser projections enrich the same FILE identities.
+    """
     source_refs: dict[str, SourceRef] = {}
     nodes: dict[str, AppContextGraphNode] = {}
     edges: dict[str, AppContextGraphEdge] = {}
+    aliases_by_graph: list[dict[str, str]] = []
     stale_status = AppContextStaleStatus.CURRENT
-
-    for graph in graphs:
-        if graph is None:
+    snapshots = []
+    checksums: dict[str, str] = {}
+    for graph in reversed([graph for graph in graphs if graph is not None]):
+        file_checksums = {
+            path: _normalized_file_checksum(node.checksum)
+            for node in graph.nodes
+            if node.node_type == GraphNodeType.FILE and node.checksum
+            and (path := safe_scan_relpath(node.metadata.get("path") or node.metadata.get("source_path") or ""))
+        }
+        if any(path in checksums and checksums[path] != checksum for path, checksum in file_checksums.items()):
             continue
+        snapshots.append(graph)
+        for path, checksum in file_checksums.items():
+            checksums.setdefault(path, checksum)
+    snapshots.reverse()
+
+    for graph in snapshots:
+        aliases: dict[str, str] = {}
+        aliases_by_graph.append(aliases)
         for ref in graph.source_refs:
             source_refs.setdefault(ref.source_ref_id, ref)
         for node in graph.nodes:
+            path = safe_scan_relpath(node.metadata.get("path") or node.metadata.get("source_path") or "")
+            if node.node_type == GraphNodeType.FILE and path:
+                canonical_id = context_graph_file_node_id(path)
+                if node.node_id in aliases and aliases[node.node_id] != canonical_id:
+                    raise ValueError("One graph contains conflicting FILE paths for the same node ID")
+                aliases[node.node_id] = canonical_id
+                existing = nodes.get(canonical_id)
+                if existing is not None:
+                    nodes[canonical_id] = existing.model_copy(update={
+                        "metadata": {**node.metadata, **existing.metadata, "path": path, "source_path": path},
+                        "checksum": existing.checksum or node.checksum,
+                        "artifact_version_id": existing.artifact_version_id or node.artifact_version_id,
+                        "source_ref_id": existing.source_ref_id or node.source_ref_id,
+                    })
+                else:
+                    nodes[canonical_id] = node.model_copy(update={
+                        "node_id": canonical_id,
+                        "label": path,
+                        "metadata": {**node.metadata, "path": path, "source_path": path},
+                    })
+                continue
             nodes.setdefault(node.node_id, node)
-        for edge in graph.edges:
-            key = edge.edge_id or _stable_id(
-                "edge",
-                f"{edge.edge_type.value}:{edge.source_node_id}:{edge.target_node_id}",
-            )
-            edges.setdefault(key, edge.model_copy(update={"edge_id": key}))
         if graph.stale_status != AppContextStaleStatus.CURRENT:
             stale_status = graph.stale_status
+
+    for graph, aliases in zip(snapshots, aliases_by_graph, strict=True):
+        for edge in graph.edges:
+            source_id = aliases.get(edge.source_node_id, edge.source_node_id)
+            target_id = aliases.get(edge.target_node_id, edge.target_node_id)
+            key = _stable_id(
+                "edge",
+                f"{edge.edge_type.value}:{source_id}:{target_id}",
+            )
+            edges.setdefault(key, edge.model_copy(update={
+                "edge_id": key, "source_node_id": source_id, "target_node_id": target_id,
+            }))
 
     payload = {
         "nodes": [node.model_dump(mode="json") for node in nodes.values()],
@@ -396,6 +423,12 @@ def merge_context_graphs(
         stale_status=stale_status,
         graph_hash=f"sha256:{_sha256_json(payload)}",
     )
+
+
+def _normalized_file_checksum(checksum: str) -> str:
+    value = checksum.strip()
+    digest = value[7:] if value.lower().startswith("sha256:") else value
+    return digest.lower() if re.fullmatch(r"[0-9a-fA-F]{64}", digest) else value
 
 
 def build_semantic_annotation_request(
@@ -480,38 +513,7 @@ def apply_semantic_annotations(
 
 def context_graph_parser_status() -> dict[str, Any]:
     """Report deterministic parser availability and fallback behavior."""
-    tree_sitter_available = _module_available("tree_sitter")
-    languages: dict[str, dict[str, Any]] = {}
-    for language in ("python", "javascript"):
-        module_name = _TREE_SITTER_LANGUAGE_MODULES.get(language)
-        module_available = bool(module_name and _module_available(module_name))
-        parser_available = bool(tree_sitter_available and module_available and _tree_sitter_parser(language))
-        languages[language] = {
-            "tree_sitter_module": module_name,
-            "tree_sitter_available": parser_available,
-            "fallback_parser": "python_ast" if language == "python" else "regex",
-            "active_parser": "tree_sitter" if parser_available else ("python_ast" if language == "python" else "regex"),
-        }
-    languages["typescript"] = {
-        "tree_sitter_module": None,
-        "tree_sitter_available": False,
-        "fallback_parser": "javascript_regex",
-        "active_parser": "javascript_tree_sitter_or_regex",
-    }
-    languages["yaml"] = {
-        "tree_sitter_module": None,
-        "tree_sitter_available": False,
-        "active_parser": "structured_yaml",
-    }
-    languages["json"] = {
-        "tree_sitter_module": None,
-        "tree_sitter_available": False,
-        "active_parser": "structured_json",
-    }
-    return {
-        "tree_sitter_package_available": tree_sitter_available,
-        "languages": languages,
-    }
+    return parser_status()
 
 
 def extract_file_context(*, path: str, content: str) -> ExtractedFileContext:
@@ -520,27 +522,25 @@ def extract_file_context(*, path: str, content: str) -> ExtractedFileContext:
         raise ValueError(f"unsafe path: {path!r}")
     text = str(content or "")
     language = _language_for_path(safe_path)
-    symbols: list[ExtractedSymbol] = []
-    imports: list[str] = []
-    references: list[ExtractedReference] = []
-    structured_metadata: dict[str, Any] = {}
-
-    if language == "python":
-        symbols, imports, references = _extract_python(text)
-    elif language in {"javascript", "typescript"}:
-        symbols, imports, references = _extract_javascript_like(text)
-    elif language in {"yaml", "json"}:
-        structured_metadata = _extract_structured_metadata(safe_path, text)
-
-    return ExtractedFileContext(
+    context = ExtractedFileContext(
         path=safe_path,
         language=language,
         checksum=f"sha256:{hashlib.sha256(text.encode('utf-8')).hexdigest()}",
-        symbols=symbols,
-        imports=imports,
-        references=references,
-        structured_metadata=structured_metadata,
     )
+    if language in {"python", "javascript", "typescript", "tsx", "css"}:
+        syntax = extract_source_syntax(language, text)
+        context.parser = syntax.parser
+        context.parse_status = syntax.parse_status
+        context.parse_error_count = syntax.parse_error_count
+        context.symbols = syntax.symbols
+        context.imports = list(dict.fromkeys(item.target for item in syntax.imports))
+        context.import_bindings = syntax.imports
+        context.references = syntax.references
+        context.local_bindings = syntax.local_bindings
+        context.exports = syntax.exports
+    elif language in {"yaml", "json"}:
+        context.structured_metadata = _extract_structured_metadata(safe_path, text)
+    return context
 
 
 class _GraphDraft:
@@ -560,6 +560,13 @@ class _GraphDraft:
         checksum: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
+        existing = self.nodes.get(node_id)
+        if existing is not None and node_type == GraphNodeType.FILE and existing.node_type == GraphNodeType.FILE:
+            self.nodes[node_id] = existing.model_copy(update={
+                "checksum": checksum or existing.checksum,
+                "metadata": {**existing.metadata, **_clean_metadata(metadata)},
+            })
+            return
         self.nodes.setdefault(
             node_id,
             AppContextGraphNode(
@@ -966,7 +973,7 @@ def _add_structural_nodes(
                 label=pack_id,
                 metadata={"capability_id": pack_id, "source_path": path, "authority": "authoritative"},
             )
-            output_file_node_id = _file_node_id(output_path)
+            output_file_node_id = context_graph_file_node_id(output_path)
             graph.add_node(
                 output_file_node_id,
                 GraphNodeType.FILE,
@@ -1144,316 +1151,6 @@ def _module_action_ids_by_module(extracted_by_path: dict[str, ExtractedFileConte
             continue
         module_id = str(file_context.structured_metadata.get("module_id") or parts[1])
         out[module_id] = list(file_context.structured_metadata.get("action_ids") or [])
-    return out
-
-
-def _extract_python(content: str) -> tuple[list[ExtractedSymbol], list[str], list[ExtractedReference]]:
-    symbols = _extract_tree_sitter_symbols(language="python", content=content)
-    references: list[ExtractedReference] = []
-    if symbols is None:
-        try:
-            visitor = _PythonAstVisitor()
-            visitor.visit(ast.parse(content))
-            symbols = visitor.symbols
-            references = visitor.references
-        except SyntaxError:
-            symbols = []
-    else:
-        references = _extract_python_references_with_ast(content)
-    imports = [
-        match[0] or match[1]
-        for match in _PY_IMPORT_RE.findall(content)
-        if (match[0] or match[1])
-    ]
-    return symbols, dedupe_strings(imports), references
-
-
-def _extract_javascript_like(content: str) -> tuple[list[ExtractedSymbol], list[str], list[ExtractedReference]]:
-    symbols = _extract_tree_sitter_symbols(language="javascript", content=content)
-    if symbols is None:
-        symbols = []
-        for match in _JS_FUNCTION_RE.finditer(content):
-            name = next((group for group in match.groups() if group), None)
-            if name:
-                symbols.append(
-                    ExtractedSymbol(
-                        name=name,
-                        kind="class" if match.group(3) else "function",
-                        line=content.count("\n", 0, match.start()) + 1,
-                        qualified_name=name,
-                        metadata={"parser": "regex"},
-                    )
-                )
-    imports = [match.strip() for match in _JS_IMPORT_RE.findall(content) if match.strip()]
-    return symbols, dedupe_strings(imports), _extract_javascript_references(content)
-
-
-class _PythonAstVisitor(ast.NodeVisitor):
-    def __init__(self) -> None:
-        self.symbols: list[ExtractedSymbol] = []
-        self.references: list[ExtractedReference] = []
-        self._scope_stack: list[str] = []
-
-    def visit_ClassDef(self, node: ast.ClassDef) -> Any:
-        parent = self._current_scope()
-        qualified_name = _qualified_symbol_name(parent=parent, name=node.name)
-        self.symbols.append(
-            ExtractedSymbol(
-                name=node.name,
-                kind="class",
-                line=node.lineno,
-                end_line=getattr(node, "end_lineno", None),
-                qualified_name=qualified_name,
-                parent=parent,
-                metadata={
-                    "parser": "python_ast",
-                    "decorators": _python_decorator_names(node.decorator_list),
-                },
-            )
-        )
-        self._scope_stack.append(node.name)
-        self.generic_visit(node)
-        self._scope_stack.pop()
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> Any:
-        self._visit_function(node=node, async_function=False)
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> Any:
-        self._visit_function(node=node, async_function=True)
-
-    def visit_Call(self, node: ast.Call) -> Any:
-        target = _python_call_target(node.func)
-        if target:
-            self.references.append(
-                ExtractedReference(
-                    target=target,
-                    kind="call",
-                    line=getattr(node, "lineno", None),
-                    caller=self._current_scope(),
-                    metadata={"parser": "python_ast"},
-                )
-            )
-        self.generic_visit(node)
-
-    def _visit_function(self, *, node: ast.FunctionDef | ast.AsyncFunctionDef, async_function: bool) -> None:
-        parent = self._current_scope()
-        qualified_name = _qualified_symbol_name(parent=parent, name=node.name)
-        self.symbols.append(
-            ExtractedSymbol(
-                name=node.name,
-                kind="method" if parent else "function",
-                line=node.lineno,
-                end_line=getattr(node, "end_lineno", None),
-                qualified_name=qualified_name,
-                parent=parent,
-                metadata={
-                    "parser": "python_ast",
-                    "async": async_function,
-                    "decorators": _python_decorator_names(node.decorator_list),
-                },
-            )
-        )
-        self._scope_stack.append(node.name)
-        self.generic_visit(node)
-        self._scope_stack.pop()
-
-    def _current_scope(self) -> str | None:
-        return ".".join(self._scope_stack) if self._scope_stack else None
-
-
-def _extract_python_references_with_ast(content: str) -> list[ExtractedReference]:
-    try:
-        visitor = _PythonAstVisitor()
-        visitor.visit(ast.parse(content))
-        return visitor.references
-    except SyntaxError:
-        return []
-
-
-def _python_decorator_names(decorators: list[ast.expr]) -> list[str]:
-    names: list[str] = []
-    for decorator in decorators:
-        name = _python_call_target(decorator)
-        if name and name not in names:
-            names.append(name)
-    return names
-
-
-def _python_call_target(node: ast.AST) -> str | None:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        parent = _python_call_target(node.value)
-        return f"{parent}.{node.attr}" if parent else node.attr
-    if isinstance(node, ast.Call):
-        return _python_call_target(node.func)
-    return None
-
-
-def _qualified_symbol_name(*, parent: str | None, name: str) -> str:
-    return f"{parent}.{name}" if parent else name
-
-
-def _extract_javascript_references(content: str) -> list[ExtractedReference]:
-    references: list[ExtractedReference] = []
-    for match in _JS_CALL_RE.finditer(content):
-        target = match.group(1)
-        if not target or target in _NOISE_CALL_TARGETS:
-            continue
-        references.append(
-            ExtractedReference(
-                target=target,
-                kind="call",
-                line=content.count("\n", 0, match.start()) + 1,
-                metadata={"parser": "regex"},
-            )
-        )
-    return references
-
-
-def _extract_tree_sitter_symbols(*, language: str, content: str) -> list[ExtractedSymbol] | None:
-    parser = _tree_sitter_parser(language)
-    if parser is None:
-        return None
-    try:
-        tree = parser.parse(content.encode("utf-8"))
-    except Exception:
-        return None
-
-    symbols: list[ExtractedSymbol] = []
-
-    def visit(node: Any) -> None:
-        symbol = _tree_sitter_symbol_for_node(language=language, node=node)
-        if symbol is not None:
-            symbols.append(symbol)
-        for child in getattr(node, "children", []) or []:
-            visit(child)
-
-    visit(tree.root_node)
-    return _dedupe_symbols(symbols)
-
-
-def _tree_sitter_parser(language: str) -> Any | None:
-    if language in _TREE_SITTER_LANGUAGES and _TREE_SITTER_LANGUAGES[language] is None:
-        return None
-    module_name = _TREE_SITTER_LANGUAGE_MODULES.get(language)
-    if not module_name:
-        _TREE_SITTER_LANGUAGES[language] = None
-        return None
-    try:
-        from tree_sitter import Language, Parser
-
-        language_obj = _TREE_SITTER_LANGUAGES.get(language)
-        if language_obj is None:
-            language_module = importlib.import_module(module_name)
-            raw_language = language_module.language()
-            language_obj = _coerce_tree_sitter_language(Language, raw_language)
-            _TREE_SITTER_LANGUAGES[language] = language_obj
-        parser = Parser()
-        if hasattr(parser, "set_language"):
-            parser.set_language(language_obj)
-        else:
-            parser.language = language_obj
-    except Exception as _ts_exc:
-        logger.warning("TREE_SITTER_PARSER_INIT_FAILED language=%s — disabling for this process: %s", language, _ts_exc)
-        _TREE_SITTER_LANGUAGES[language] = None
-        return None
-    return parser
-
-
-def _module_available(name: str) -> bool:
-    try:
-        return importlib.util.find_spec(name) is not None  # type: ignore[attr-defined]
-    except Exception:
-        return False
-
-
-def _coerce_tree_sitter_language(language_class: Any, raw_language: Any) -> Any:
-    try:
-        return language_class(raw_language)
-    except Exception:
-        return raw_language
-
-
-def _tree_sitter_symbol_for_node(
-    *,
-    language: str,
-    node: Any,
-) -> ExtractedSymbol | None:
-    node_type = str(getattr(node, "type", ""))
-    if language == "python":
-        kind_by_type = {
-            "function_definition": "function",
-            "class_definition": "class",
-        }
-        kind = kind_by_type.get(node_type)
-        if kind:
-            return _symbol_from_tree_sitter_node(node=node, kind=kind)
-        return None
-
-    if language == "javascript":
-        kind_by_type = {
-            "function_declaration": "function",
-            "class_declaration": "class",
-            "method_definition": "function",
-        }
-        kind = kind_by_type.get(node_type)
-        if kind:
-            return _symbol_from_tree_sitter_node(node=node, kind=kind)
-        if node_type == "variable_declarator":
-            value_node = _child_by_field_name(node, "value")
-            value_type = str(getattr(value_node, "type", ""))
-            if value_type in {"arrow_function", "function", "function_expression"}:
-                return _symbol_from_tree_sitter_node(node=node, kind="function")
-    return None
-
-
-def _symbol_from_tree_sitter_node(*, node: Any, kind: str) -> ExtractedSymbol | None:
-    name_node = _child_by_field_name(node, "name")
-    if name_node is None:
-        return None
-    name = _node_text(name_node)
-    if not name:
-        return None
-    start_point = getattr(node, "start_point", None)
-    line = int(start_point[0]) + 1 if isinstance(start_point, tuple) and start_point else None
-    end_point = getattr(node, "end_point", None)
-    end_line = int(end_point[0]) + 1 if isinstance(end_point, tuple) and end_point else None
-    return ExtractedSymbol(
-        name=name,
-        kind=kind,
-        line=line,
-        end_line=end_line,
-        qualified_name=name,
-        metadata={"parser": "tree_sitter"},
-    )
-
-
-def _child_by_field_name(node: Any, field_name: str) -> Any | None:
-    try:
-        return node.child_by_field_name(field_name)
-    except Exception:
-        return None
-
-
-def _node_text(node: Any) -> str | None:
-    text = getattr(node, "text", None)
-    if isinstance(text, bytes):
-        return text.decode("utf-8", errors="ignore").strip()
-    if isinstance(text, str):
-        return text.strip()
-    return None
-
-
-def _dedupe_symbols(symbols: list[ExtractedSymbol]) -> list[ExtractedSymbol]:
-    out: list[ExtractedSymbol] = []
-    seen: set[tuple[str, str, int | None]] = set()
-    for symbol in symbols:
-        key = (symbol.name, symbol.kind, symbol.line)
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(symbol)
     return out
 
 
@@ -1726,124 +1423,143 @@ def _extract_module_refs(data: dict[str, Any]) -> list[str]:
     return refs
 
 
-def _resolve_import_path(*, path: str, import_target: str, file_map: dict[str, str]) -> str | None:
-    raw = str(import_target or "").strip()
-    if not raw.startswith("."):
+_ResolvedImport = tuple[SourceImport, str | None, str | None]
+
+
+def _resolve_imports(
+    path: str,
+    context: ExtractedFileContext,
+    file_nodes: dict[str, str],
+    symbol_nodes: dict[tuple[str, str], list[str]],
+) -> list[_ResolvedImport]:
+    resolved: list[_ResolvedImport] = []
+    for imported in context.import_bindings:
+        member = imported.member
+        if context.language == "python":
+            target = _python_import_path(path, imported.target, file_nodes)
+            if member and not (target and symbol_nodes.get((target, member))):
+                separator = "" if imported.target.endswith(".") else "."
+                submodule = _python_import_path(path, f"{imported.target}{separator}{member}", file_nodes)
+                if submodule:
+                    target, member = submodule, None
+        else:
+            target = _relative_import_path(path, imported.target, file_nodes)
+        resolved.append((imported, target, member))
+    return resolved
+
+
+def _python_import_path(path: str, target: str, file_nodes: dict[str, str]) -> str | None:
+    name = target.lstrip(".")
+    relative = len(target) - len(name)
+    module_path = name.replace(".", "/")
+    if relative:
+        directory = PurePosixPath(path).parent
+        if relative > len(directory.parts) + 1:
+            return None
+        for _ in range(relative - 1):
+            directory = directory.parent
+        roots = [directory]
+    else:
+        roots = [PurePosixPath(root) for root in (".", "src", "app")]
+    candidates = []
+    for root in roots:
+        base = str(root / module_path)
+        if name and f"{base}.py" in file_nodes:
+            candidates.append(f"{base}.py")
+        package = str(PurePosixPath(base) / "__init__.py")
+        if package in file_nodes:
+            candidates.append(package)
+    return _unique_node(candidates)
+
+
+def _relative_import_path(path: str, target: str, file_nodes: dict[str, str]) -> str | None:
+    if not target.startswith(("./", "../")):
         return None
-    base_dir = PurePosixPath(path).parent
-    relative_target = raw
-    if raw.startswith(".") and not raw.startswith("./") and not raw.startswith("../"):
-        leading_dots = len(raw) - len(raw.lstrip("."))
-        base_dir = _ascend(base_dir, max(0, leading_dots - 1))
-        relative_target = raw[leading_dots:].replace(".", "/")
-    elif raw.startswith("./"):
-        relative_target = raw[2:]
-    elif raw.startswith("../"):
-        relative_target = raw
-    for suffix in _RELATIVE_IMPORT_EXTENSIONS:
-        safe = _safe_relpath(_join_relative(base_dir, f"{relative_target}{suffix}"))
-        if safe and safe in file_map:
-            return safe
-    return None
-
-
-def _resolved_import_paths(
-    *,
-    path: str,
-    file_context: ExtractedFileContext,
-    file_map: dict[str, str],
-) -> list[str]:
-    out: list[str] = []
-    for import_target in file_context.imports:
-        resolved = _resolve_import_path(path=path, import_target=import_target, file_map=file_map)
-        if resolved and resolved not in out:
-            out.append(resolved)
-    return out
-
-
-def _reference_source_node_id(
-    *,
-    path: str,
-    reference: ExtractedReference,
-    fallback_file_node_id: str,
-    symbol_node_by_lookup: dict[tuple[str, str], str],
-) -> str:
-    if reference.caller:
-        direct = symbol_node_by_lookup.get((path, reference.caller))
-        if direct:
-            return direct
-        tail = reference.caller.rsplit(".", 1)[-1]
-        tail_match = symbol_node_by_lookup.get((path, tail))
-        if tail_match:
-            return tail_match
-    return fallback_file_node_id
+    parts = list(PurePosixPath(path).parent.parts)
+    for part in PurePosixPath(target).parts:
+        if part == "..":
+            if not parts:
+                return None
+            parts.pop()
+        else:
+            parts.append(part)
+    base = "/".join(parts)
+    if base in file_nodes:
+        return base
+    return _unique_node([f"{base}{suffix}" for suffix in _RELATIVE_IMPORT_EXTENSIONS if f"{base}{suffix}" in file_nodes])
 
 
 def _reference_target_node_id(
-    *,
     path: str,
     reference: ExtractedReference,
-    imported_paths: list[str],
-    symbol_node_by_lookup: dict[tuple[str, str], str],
+    bindings_by_scope: dict[tuple[str | None, str], list[_ResolvedImport]],
+    local_bindings: set[tuple[str | None, str]],
+    symbol_nodes: dict[tuple[str, str], list[str]],
+    imported_nodes: dict[tuple[str, str], list[str]],
+    graph: _GraphDraft,
 ) -> str | None:
-    candidates = _reference_name_candidates(reference.target)
-    raw_target = str(reference.target or "").strip()
-    first_part = raw_target.split(".", 1)[0]
-    prefer_imported = "." in raw_target and first_part not in {"self", "this", "cls"}
-    if prefer_imported:
-        for imported_path in imported_paths:
-            for candidate in candidates:
-                node_id = symbol_node_by_lookup.get((imported_path, candidate))
-                if node_id:
-                    return node_id
-    for candidate in candidates:
-        node_id = symbol_node_by_lookup.get((path, candidate))
-        if node_id:
-            return node_id
-    for imported_path in imported_paths:
-        for candidate in candidates:
-            node_id = symbol_node_by_lookup.get((imported_path, candidate))
-            if node_id:
-                return node_id
-    return None
+    root, _, member_path = reference.target.partition(".")
+    scope = reference.caller
+    while scope:
+        scope_id = _unique_node(symbol_nodes.get((path, scope)))
+        kind = graph.nodes[scope_id].metadata.get("symbol_kind") if scope_id else None
+        if kind == "class":
+            if root in {"self", "this", "cls"} and member_path:
+                return _unique_node(symbol_nodes.get((path, f"{scope}.{member_path}")))
+        else:
+            if (scope, root) in local_bindings and root not in {"self", "this", "cls"}:
+                return None
+            candidate = f"{scope}.{reference.target}"
+            nodes = symbol_nodes.get((path, candidate))
+            bindings = bindings_by_scope.get((scope, root))
+            if nodes or bindings:
+                return _resolve_name(nodes, bindings, member_path, imported_nodes)
+        scope = scope.rpartition(".")[0]
+    if (None, root) in local_bindings:
+        return None
+    return _resolve_name(
+        symbol_nodes.get((path, reference.target)), bindings_by_scope.get((None, root)), member_path, imported_nodes,
+    )
 
 
-def _reference_name_candidates(target: str) -> list[str]:
-    raw = str(target or "").strip()
-    if not raw:
-        return []
-    parts = raw.split(".")
-    candidates = [raw]
-    if parts[-1] not in candidates:
-        candidates.append(parts[-1])
-    if len(parts) > 1 and parts[0] not in candidates:
-        candidates.append(parts[0])
-    return candidates
+def _resolve_name(
+    nodes: list[str] | None,
+    bindings: list[_ResolvedImport] | None,
+    member_path: str,
+    symbol_nodes: dict[tuple[str, str], list[str]],
+) -> str | None:
+    if bindings:
+        return None if nodes else _resolve_bound_reference(bindings, member_path, symbol_nodes)
+    return _unique_node(nodes)
 
 
-def _is_noise_reference(reference: ExtractedReference) -> bool:
-    target = str(reference.target or "").strip()
-    return not target or target in _NOISE_CALL_TARGETS or target.rsplit(".", 1)[-1] in _NOISE_CALL_TARGETS
+def _resolve_bound_reference(
+    bindings: list[_ResolvedImport],
+    member_path: str,
+    symbol_nodes: dict[tuple[str, str], list[str]],
+) -> str | None:
+    candidates = []
+    unresolved = False
+    for binding, path, member in bindings:
+        tail = member_path
+        if binding.module_tail:
+            if not tail.startswith(f"{binding.module_tail}."):
+                continue
+            tail = tail[len(binding.module_tail) + 1:]
+        name = ".".join(part for part in (member, tail) if part)
+        if not name and binding.commonjs:
+            name = "default"
+        nodes = symbol_nodes.get((path, name)) if path and name else None
+        if nodes:
+            candidates.extend(nodes)
+        else:
+            unresolved = True
+    return None if unresolved else _unique_node(candidates)
 
 
-def _ascend(path: PurePosixPath, count: int) -> PurePosixPath:
-    current = path
-    for _ in range(count):
-        current = current.parent
-    return current
-
-
-def _join_relative(base_dir: PurePosixPath, relative_target: str) -> str:
-    parts = [part for part in base_dir.parts if part not in {"", "."}]
-    for part in PurePosixPath(relative_target).parts:
-        if part in {"", "."}:
-            continue
-        if part == "..":
-            if parts:
-                parts.pop()
-            continue
-        parts.append(part)
-    return "/".join(parts)
+def _unique_node(candidates: list[str] | None) -> str | None:
+    unique = set(candidates or [])
+    return next(iter(unique)) if len(unique) == 1 else None
 
 
 def _safe_file_map(file_map: dict[str, str]) -> dict[str, str]:
@@ -1877,8 +1593,10 @@ def _language_for_path(path: str) -> str:
         return "python"
     if suffix in {".js", ".jsx"}:
         return "javascript"
-    if suffix in {".ts", ".tsx"}:
+    if suffix == ".ts":
         return "typescript"
+    if suffix == ".tsx":
+        return "tsx"
     if suffix in {".yaml", ".yml"}:
         return "yaml"
     if suffix == ".json":
@@ -1890,12 +1608,21 @@ def _language_for_path(path: str) -> str:
     return "text"
 
 
-def _file_node_id(path: str) -> str:
-    return _stable_id("file", path)
+def context_graph_file_node_id(path: str) -> str:
+    """Identify a file by its normalized, exact snapshot-relative path."""
+    normalized = safe_scan_relpath(path)
+    if normalized is None:
+        raise ValueError(f"unsafe path: {path!r}")
+    return _dependency_id("file", normalized)
 
 
-def _symbol_node_id(path: str, name: str, kind: str) -> str:
-    return _stable_id("symbol", f"{path}:{kind}:{name}")
+def _symbol_node_id(path: str, name: str, kind: str, occurrence: int) -> str:
+    return _dependency_id("symbol", f"{path}:{kind}:{name}:{occurrence}")
+
+
+def _dependency_id(prefix: str, raw: str) -> str:
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    return f"{prefix}:{_stable_token(raw)}_{digest}"
 
 
 def _event_node_id(event_type: str) -> str:
@@ -2079,6 +1806,7 @@ __all__ = [
     "apply_semantic_annotations",
     "build_context_graph_from_file_map",
     "build_semantic_annotation_request",
+    "context_graph_file_node_id",
     "context_graph_parser_status",
     "extract_file_context",
     "merge_context_graphs",
