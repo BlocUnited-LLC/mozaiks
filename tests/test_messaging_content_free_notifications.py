@@ -343,6 +343,7 @@ async def test_message_notification_reaches_recipient_without_the_message_text(h
     assert domain_event["payload"]["body_preview"] == f"meet at {MARKER}"
     assert record["source_event_id"] == domain_event["id"]
     assert record["source_event"] == {"id": domain_event["id"], "type": "domain.messages.message_sent"}
+    assert record["actor"] is None and domain_event["actor"]["id"] == "alice"
     assert [row["body"] for row in host.messages()] == [f"meet at {MARKER}"]
 
     # (b) The marker is absent from the whole persisted record and every delivered notification.
@@ -527,6 +528,7 @@ def test_factory_app_message_notification_is_content_free():
     }))
     (record,) = stored
     assert (record["title"], record["body"]) == (CONTENT_FREE_TITLE, CONTENT_FREE_BODY)
+    assert record["actor"] is None
     assert record["source_event"] == {
         "id": "evt_factory_reply", "type": "domain.messages.message_sent",
         "related_type": "workspace_support.request",

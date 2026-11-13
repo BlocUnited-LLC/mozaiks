@@ -27,6 +27,10 @@ This project follows a practical pre-1.0 changelog format:
 - Factory refinement agents can receive advisory file and dependency evidence
   tied to the verified app build they are changing.
 
+- Notification rules can explicitly select `audience.scope: app` for validated
+  direct recipients across workspaces. Event ownership remains the default;
+  broad audiences and malformed source ownership cannot use the new mode.
+
 - A reusable content pack supplies permission-protected publishing records while
   leaving app pages and branding customizable through canonical app contracts.
 
@@ -98,6 +102,10 @@ This project follows a practical pre-1.0 changelog format:
   remote HTTP(S) entries redirect through the configured backend origin.
 
 ### Changed
+
+- Notification `source_event: reference` also stores `actor: null`, retaining
+  the minimal origin reference without changing the original attributed event.
+  Existing records are not rewritten; envelope-mode retention stays unchanged.
 
 - Fresh OSS installs, generated workspaces, and refinement profiles default to
   Google `gemini-3.8-flash`. Its Gemini API free tier requires a Google key and
