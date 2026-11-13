@@ -379,10 +379,10 @@ class TestDictInts:
 # ---------------------------------------------------------------------------
 
 class TestParserFallbackWarning:
-    def _status(self, active_parser: str) -> dict:
+    def _status(self, active_parser: str, language: str = "javascript") -> dict:
         return {
             "languages": {
-                "javascript": {"active_parser": active_parser}
+                language: {"active_parser": active_parser}
             }
         }
 
@@ -416,10 +416,19 @@ class TestParserFallbackWarning:
 
     def test_tsx_counted_as_js_like(self):
         result = _parser_fallback_warning(
-            parser_status=self._status("regex"),
+            parser_status=self._status("regex", language="tsx"),
             selected_by_extension={".tsx": 10, ".py": 2},
         )
         assert result == "context_graph_javascript_parser_fallback"
+
+    def test_unused_javascript_fallback_does_not_warn_for_native_typescript(self):
+        status = self._status("regex")
+        status["languages"].update(self._status("tree_sitter", language="typescript")["languages"])
+        result = _parser_fallback_warning(
+            parser_status=status,
+            selected_by_extension={".ts": 10},
+        )
+        assert result is None
 
     def test_no_js_files_returns_none(self):
         result = _parser_fallback_warning(

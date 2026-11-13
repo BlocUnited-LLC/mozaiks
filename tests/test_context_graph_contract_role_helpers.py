@@ -1,5 +1,5 @@
 """
-Context graph contract role and AST pure helper unit tests.
+Context graph contract role pure helper unit tests.
 
 Covers:
   _module_file_contract_role:
@@ -27,36 +27,13 @@ Covers:
     - path containing /ui/ → "workflow_ui_code"
     - other → "workflow_support"
 
-  _python_call_target:
-    - ast.Name → id
-    - ast.Attribute → "parent.attr"
-    - ast.Call wrapping ast.Name → id
-    - ast.Call wrapping ast.Attribute → dotted name
-    - None-like node → None
-    - chained attributes → fully qualified
 
-  _python_decorator_names:
-    - empty list → []
-    - single Name decorator → [id]
-    - multiple decorators → deduplicated list
-    - Call decorator → name resolved
 
-  _resolve_import_path:
-    - non-relative target → None
-    - ./sibling.py in file_map → resolved path
-    - ../parent_module in file_map → resolved path
-    - target not in file_map → None
-    - .module (Python dot notation) → resolved as /
 """
 from __future__ import annotations
 
-import ast
-
 from mozaiksai.core.app_context.context_graph import (
     _module_file_contract_role,
-    _python_call_target,
-    _python_decorator_names,
-    _resolve_import_path,
     _workflow_file_contract_role,
 )
 
@@ -146,134 +123,3 @@ class TestWorkflowFileContractRole:
     def test_other_file_is_workflow_support(self):
         result = _workflow_file_contract_role("workflows/AppGenerator/utils.py")
         assert result == "workflow_support"
-
-
-# ---------------------------------------------------------------------------
-# 3. _python_call_target
-# ---------------------------------------------------------------------------
-
-def _name(id: str) -> ast.Name:
-    return ast.Name(id=id)
-
-
-def _attr(parent: ast.expr, attr: str) -> ast.Attribute:
-    return ast.Attribute(value=parent, attr=attr)
-
-
-def _call(func: ast.expr) -> ast.Call:
-    return ast.Call(func=func, args=[], keywords=[])
-
-
-class TestPythonCallTarget:
-    def test_name_node_returns_id(self):
-        assert _python_call_target(_name("my_func")) == "my_func"
-
-    def test_attribute_node_returns_dotted(self):
-        node = _attr(_name("module"), "function")
-        assert _python_call_target(node) == "module.function"
-
-    def test_call_wrapping_name_returns_id(self):
-        assert _python_call_target(_call(_name("decorator"))) == "decorator"
-
-    def test_call_wrapping_attribute_returns_dotted(self):
-        node = _call(_attr(_name("some_module"), "my_decorator"))
-        assert _python_call_target(node) == "some_module.my_decorator"
-
-    def test_unknown_node_returns_none(self):
-        assert _python_call_target(ast.Constant(value=42)) is None
-
-    def test_chained_attributes(self):
-        node = _attr(_attr(_name("a"), "b"), "c")
-        assert _python_call_target(node) == "a.b.c"
-
-
-# ---------------------------------------------------------------------------
-# 4. _python_decorator_names
-# ---------------------------------------------------------------------------
-
-class TestPythonDecoratorNames:
-    def test_empty_list_returns_empty(self):
-        assert _python_decorator_names([]) == []
-
-    def test_single_name_decorator(self):
-        result = _python_decorator_names([_name("staticmethod")])
-        assert result == ["staticmethod"]
-
-    def test_call_decorator_resolved(self):
-        result = _python_decorator_names([_call(_name("pytest.mark.skip"))])
-        # _python_call_target on ast.Call(func=ast.Name(id="pytest.mark.skip")) → "pytest.mark.skip"
-        assert result == ["pytest.mark.skip"]
-
-    def test_duplicates_deduplicated(self):
-        result = _python_decorator_names([_name("classmethod"), _name("classmethod")])
-        assert result == ["classmethod"]
-
-    def test_multiple_different_decorators(self):
-        result = _python_decorator_names([_name("classmethod"), _name("property")])
-        assert result == ["classmethod", "property"]
-
-    def test_attribute_decorator(self):
-        result = _python_decorator_names([_attr(_name("pytest"), "fixture")])
-        assert result == ["pytest.fixture"]
-
-    def test_unknown_node_skipped(self):
-        result = _python_decorator_names([ast.Constant(value="not_a_decorator"), _name("valid")])
-        assert result == ["valid"]
-
-
-# ---------------------------------------------------------------------------
-# 5. _resolve_import_path
-# ---------------------------------------------------------------------------
-
-class TestResolveImportPath:
-    def test_non_relative_target_returns_none(self):
-        result = _resolve_import_path(
-            path="modules/tasks/backend/service.py",
-            import_target="os",
-            file_map={"os.py": ""},
-        )
-        assert result is None
-
-    def test_relative_sibling_py_resolved(self):
-        file_map = {"modules/tasks/backend/schemas.py": "# schemas"}
-        result = _resolve_import_path(
-            path="modules/tasks/backend/service.py",
-            import_target="./schemas",
-            file_map=file_map,
-        )
-        assert result == "modules/tasks/backend/schemas.py"
-
-    def test_relative_parent_py_resolved(self):
-        file_map = {"modules/tasks/utils.py": "# utils"}
-        result = _resolve_import_path(
-            path="modules/tasks/backend/service.py",
-            import_target="../utils",
-            file_map=file_map,
-        )
-        assert result == "modules/tasks/utils.py"
-
-    def test_target_not_in_file_map_returns_none(self):
-        result = _resolve_import_path(
-            path="modules/tasks/backend/service.py",
-            import_target="./nonexistent",
-            file_map={},
-        )
-        assert result is None
-
-    def test_dot_module_notation_resolved(self):
-        # ".schemas" in Python relative import = same directory
-        file_map = {"modules/tasks/backend/schemas.py": ""}
-        result = _resolve_import_path(
-            path="modules/tasks/backend/service.py",
-            import_target=".schemas",
-            file_map=file_map,
-        )
-        assert result == "modules/tasks/backend/schemas.py"
-
-    def test_empty_target_returns_none(self):
-        result = _resolve_import_path(
-            path="modules/tasks/backend/service.py",
-            import_target="",
-            file_map={},
-        )
-        assert result is None

@@ -11,6 +11,7 @@ from mozaiksai.control_plane.context_graph import (
     build_context_graph_catalog,
     build_context_graph_scope,
 )
+from mozaiksai.core.app_context import _source_syntax
 from mozaiksai.core.app_context.context_graph import (
     apply_semantic_annotations,
     build_context_graph_from_file_map,
@@ -188,13 +189,16 @@ def test_context_graph_catalog_ranks_product_code_before_tests() -> None:
     assert candidate_paths.index("app/services/payments/entitlements.py") < candidate_paths.index("tests/test_wallet_checkout.py")
 
 
-def test_context_graph_parser_status_reports_fallbacks() -> None:
+def test_context_graph_parser_status_reports_fallbacks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_source_syntax, "_tree_sitter_parser", lambda language: None)
     status = context_graph_parser_status()
 
     assert status["tree_sitter_package_available"] in {True, False}
     assert status["languages"]["python"]["active_parser"] in {"tree_sitter", "python_ast"}
     assert status["languages"]["javascript"]["active_parser"] in {"tree_sitter", "regex"}
-    assert status["languages"]["typescript"]["active_parser"] == "javascript_tree_sitter_or_regex"
+    assert status["languages"]["typescript"]["active_parser"] == "regex"
+    assert status["languages"]["tsx"]["active_parser"] == "regex"
+    assert status["languages"]["css"]["active_parser"] == "regex"
 
 
 @pytest.mark.asyncio

@@ -393,6 +393,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Context Graph indexing uses native TypeScript, TSX, and CSS grammars, resolves
+  calls through source bindings, and keeps similarly named files separate
+  when combining source and structural graphs.
+
 - Scoped page refinements receive supported page contracts and linked
   server-query context, with guidance for selecting the query owner when server
   matching changes and for keeping presentation-only edits page-scoped.
