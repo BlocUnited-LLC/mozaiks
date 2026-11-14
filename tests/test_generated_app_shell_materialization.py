@@ -121,7 +121,7 @@ async def test_completed_typed_batch_passes_registry_assembly_scanner_and_runtim
         scaffold = await save_auth_scaffold(context_variables=context)
         files.update({item["filename"]: item["content"] for item in scaffold["code_files"]})
         app_root = tmp_path / "app"
-        # This legacy fixture aggregates two artifact planes. Host workflows beside app/.
+        # This fixture aggregates two artifact planes. Host workflows beside app/.
         for name, content in files.items():
             target = (tmp_path / name) if name.startswith("workflows/") else (app_root / name)
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -243,3 +243,87 @@ async def test_profile_identity_lookup_uses_the_shared_collection_and_exact_scop
     collection.find_one.assert_awaited_once_with(
         {"_id": "factory:owner", "app_id": "factory", "user_id": "owner"}, {"_id": 0, "email": 1}
     )
+
+
+def registry_repair_context():
+    files = {
+        "admin/admin_registry.yaml": yaml.safe_dump(registry("overview")),
+        "modules/billing_portal/contracts/admin.yaml": "panels: [{id: my-usage, page: usage}]",
+    }
+    return ContextVariablesBridge(factory_context({
+        "app_build_plan": {"build_tasks": []}, "app_task_batch_results": {},
+        "generated_files": files, "code_files": [],
+    }))
+
+
+def test_missing_pack_panel_page_repairs_only_the_registry_through_its_workflow_owner():
+    from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
+    from mozaiksai.core.workflow.context.frozen import detach
+
+    context = registry_repair_context()
+    before = {key: detach(context.get(key)) for key in ("app_build_plan", "app_task_batch_results", "generated_files")}
+    errors = _scan_admin_panel_pages(before["generated_files"])
+    repair = prepare_bundle_repair({"passed": False, "errors": errors}, context)
+    assert repair["target_agent"] == "AdminRegistryAgent"
+    assert repair["active"]["allowed_paths"] == ["admin/admin_registry.yaml"]
+    assert repair["diagnostics"][0]["path"] == "admin/admin_registry.yaml"
+    assert repair["diagnostics"][0]["owner_agent"] == "AdminRegistryAgent"
+    save_admin_registry(admin_registry=registry("overview", "usage"), context_variables=context)
+    assert context.get("bundle_repair_result")["active"]["status"] == "responded"
+    candidate = {**before["generated_files"], **{item["filename"]: item["content"] for item in context.get("code_files")}}
+    assert _scan_admin_panel_pages(candidate) == []
+    assert prepare_bundle_repair({"passed": True, "errors": []}, context)["status"] == "passed"
+    assert {key: detach(context.get(key)) for key in before} == before
+
+
+def test_registry_repair_rejects_pack_file_changes_atomically_and_is_bounded():
+    from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
+    from factory_app.workflows.AppGenerator.tools.task_integrity import RepairOwnershipError
+
+    context = registry_repair_context()
+    scan = {"passed": False, "errors": _scan_admin_panel_pages(context.get("generated_files"))}
+    prepare_bundle_repair(scan, context)
+    with pytest.raises(RepairOwnershipError, match="outside owned_paths"):
+        save_admin_registry(
+            admin_registry=registry("overview", "usage"),
+            code_files=[{"filename": "modules/billing_portal/contracts/admin.yaml", "content": "panels: []"}],
+            context_variables=context,
+        )
+    assert not context.get("code_files")
+    assert context.get("admin_registry") is None
+    repeated = prepare_bundle_repair(scan, context)
+    assert repeated["status"] == "blocked"
+    assert repeated["attempt"] == 1
+    assert repeated["no_progress"] is True
+
+
+def test_registry_repair_replay_cannot_replace_an_already_saved_registry():
+    from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
+    from factory_app.workflows.AppGenerator.tools.task_integrity import RepairOwnershipError
+    from mozaiksai.core.workflow.context.frozen import detach
+
+    context = registry_repair_context()
+    prepare_bundle_repair({"passed": False, "errors": _scan_admin_panel_pages(context.get("generated_files"))}, context)
+    save_admin_registry(admin_registry=registry("overview", "usage"), context_variables=context)
+    before = detach(context.get("code_files"))
+    with pytest.raises(RepairOwnershipError, match="not pending"):
+        save_admin_registry(admin_registry=registry("overview", "usage", "settings"), context_variables=context)
+    assert detach(context.get("code_files")) == before
+    assert [page["id"] for page in context.get("admin_registry")["pages"]] == ["overview", "usage"]
+
+
+def test_registry_repair_does_not_claim_other_paths_or_exceed_the_existing_budget():
+    from factory_app.workflows.AppGenerator.tools.repair_policy import prepare_bundle_repair
+
+    context = registry_repair_context()
+    unknown = prepare_bundle_repair({"passed": False, "diagnostics": [{
+        "path": "admin/other.yaml", "error": "admin/other.yaml: invalid", "owner_agent": "AdminRegistryAgent",
+    }]}, context)
+    assert unknown["status"] == "blocked"
+    assert unknown["diagnostics"][0]["owner_agent"] is None
+    assert unknown["target_agent"] is None
+    context.set("bundle_repair_attempt_count", 2)
+    exhausted = prepare_bundle_repair({"passed": False, "errors": _scan_admin_panel_pages(context.get("generated_files"))}, context)
+    assert exhausted["status"] == "blocked"
+    assert exhausted["attempt"] == 2
+    assert exhausted["target_agent"] is None

@@ -3003,6 +3003,9 @@ agents:
           outputs and retained app artifacts. Read module `contracts/admin.yaml` panel
           page references from these inputs and include their declared page ids.
           Preserve retained registry pages unless the approved change removes them.
+      - If bundle_repair_request is supplied, repair only its declared registry
+        path using bundle_repair_errors and the supplied panel references. Keep
+        unrelated registry entries and module/pack files unchanged.
 
       **Standard app-scope page inclusion rules** (apply per capability set):
       - `overview` — always include; path `/admin`; icon `dashboard`; order 0

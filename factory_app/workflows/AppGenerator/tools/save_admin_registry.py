@@ -22,6 +22,8 @@ from factory_app.workflows._shared.generated_ui_contract import audit_app_ui_bun
 from mozaiksai.core.admin.registry import AdminRegistry
 from mozaiksai.core.workflow.context.frozen import detach
 
+from .task_integrity import mark_repair_responded, validate_repair_candidate
+
 logger = logging.getLogger(__name__)
 
 
@@ -113,11 +115,19 @@ def save_admin_registry(
     registry = AdminRegistry.model_validate(submitted_registry).model_dump(mode="json", exclude_none=True)
     new_files[-1] = {"filename": registry_path, "content": yaml.safe_dump(registry, sort_keys=False)}
 
-    _context_set(context_variables, "admin_registry", registry)
-
     existing = _context_get(context_variables, "code_files", []) or []
     if not isinstance(existing, list):
         existing = []
+    repairing = _context_get(context_variables, "bundle_repair_target") == "AdminRegistryAgent"
+    if repairing:
+        baseline = _context_get(context_variables, "generated_files", {}) or {}
+        baseline.update({item["filename"]: item["content"] for item in existing if isinstance(item, dict) and item.get("filename")})
+        admitted = validate_repair_candidate(
+            context_variables,
+            {item["filename"]: item["content"] for item in new_files},
+            existing=baseline,
+        )
+        new_files = [{"filename": name, "content": content} for name, content in admitted.items()]
 
     merged = [item for item in existing if isinstance(item, dict) and item.get("filename") != registry_path]
     existing_names = {str(item.get("filename") or "") for item in merged}
@@ -131,7 +141,10 @@ def save_admin_registry(
             existing_names.add(fname)
             added += 1
 
+    _context_set(context_variables, "admin_registry", registry)
     _context_set(context_variables, "code_files", merged)
+    if repairing:
+        mark_repair_responded(context_variables, [item["filename"] for item in new_files])
 
     page_count = len(registry.get("pages") or [])
     logger.info(

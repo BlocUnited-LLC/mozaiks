@@ -29,7 +29,8 @@ description: >
   Final assembly emits app-owned config/ai.json and app identity branding even
   when task batches bypass full schema saves. Never copy Studio assistant prompts,
   provider credentials, or Factory workflow references into customer apps.
-  Genesis admin bootstrap uses authenticated runtime platform_user_email only;
+  Initial app admin bootstrap uses authenticated runtime platform_user_email only,
+  including a pre-app design revision verified by the revision baseline owner;
   refinement preserves baseline admins. Missing trusted email requires operator setup.
   AdminRegistryAgent owns admin/admin_registry.yaml after task materialization.
   Module panel page references must resolve to enabled registry pages. Registry

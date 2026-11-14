@@ -818,7 +818,7 @@ const PersistentChatWidget = ({
                   className="flex-1 resize-none rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-alt)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[rgba(var(--color-primary-light-rgb),0.4)] focus:outline-none"
                 />
                 {supportError && (
-                  <p className="text-xs leading-relaxed text-red-300">
+                  <p className="text-xs leading-relaxed text-[var(--color-error)]">
                     {supportError}
                   </p>
                 )}

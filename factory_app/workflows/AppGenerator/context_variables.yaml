@@ -2050,6 +2050,8 @@ agents:
     - dependency_task_outputs
   AdminRegistryAgent:
     variables:
+    - bundle_repair_request
+    - bundle_repair_errors
     - app_build_plan
     - capability_packs
     - admin_registry

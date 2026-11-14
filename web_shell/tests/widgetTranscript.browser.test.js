@@ -136,13 +136,14 @@ test('widget surfaces, support input and workflow picker follow light and dark a
     {chat_id:'first',workflow_name:'First workflow'},
     {chat_id:'second',workflow_name:'Second workflow'},
   ]);
-  for (const [surface,header,text,muted] of [
-    ['#fff7ed','#ffedd5','#431407','#9a3412'],
-    ['#111827','#1f2937','#f9fafb','#cbd5e1'],
+  await page.route('**/api/modules/workspace_support/create_support_request', route=>route.fulfill({status:503,contentType:'application/json',body:'{}'}));
+  for (const [surface,header,text,muted,error] of [
+    ['#fff7ed','#ffedd5','#431407','#9a3412','#b91c1c'],
+    ['#111827','#1f2937','#f9fafb','#cbd5e1','#fca5a5'],
   ]) {
-    await page.evaluate(({surface,header,text,muted}) => {
-      for(const [key,value] of Object.entries({'--color-surface':surface,'--color-surface-alt':header,'--color-text-primary':text,'--color-text-secondary':text,'--color-text-muted':muted,'--color-border-subtle':muted})) document.documentElement.style.setProperty(key,value);
-    }, {surface,header,text,muted});
+    await page.evaluate(({surface,header,text,muted,error}) => {
+      for(const [key,value] of Object.entries({'--color-surface':surface,'--color-surface-alt':header,'--color-text-primary':text,'--color-text-secondary':text,'--color-text-muted':muted,'--color-border-subtle':muted,'--color-error':error})) document.documentElement.style.setProperty(key,value);
+    }, {surface,header,text,muted,error});
     const actual = await page.evaluate(() => {
       const panel=document.querySelector('#mozaiks-assistant-panel');
       const title=panel.querySelector('[title="Open full Ask chat"] span.block');
@@ -161,6 +162,10 @@ test('widget surfaces, support input and workflow picker follow light and dark a
     await input.fill('Readable operator request');
     await expect(input).toHaveValue('Readable operator request');
     assert.deepEqual(await input.evaluate(el=>({text:getComputedStyle(el).color,background:getComputedStyle(el).backgroundColor})),{text:rgb(text),background:rgb(header)});
+    await page.getByRole('button',{name:'Send request',exact:true}).click();
+    const failure=page.getByText('Could not send the request. Open your profile support tab and try again.',{exact:true});
+    await expect(failure).toBeVisible();
+    assert.equal(await failure.evaluate(el=>getComputedStyle(el).color),rgb(error));
     await page.getByTitle('Back to chat',{exact:true}).click();
   }
 });

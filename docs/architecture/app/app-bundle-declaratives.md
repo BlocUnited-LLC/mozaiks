@@ -39,12 +39,18 @@ without a full schema save or ThemeCapture output. The assistant uses the app's
 purpose and only artifact-backed workflow references. A real model provider must
 be configured separately; customer apps do not inherit builder credentials.
 
-Genesis admin bootstrap reads `platform_user_email` from the authenticated user's
+Initial app admin bootstrap reads `platform_user_email` from the authenticated user's
 existing app-scoped backend profile. Caller/model context cannot supply this
 server-owned field. Missing profile email leaves bootstrap for operator setup;
-refinement retains the verified baseline admin list. The backend's authorized
+ordinary refinement retains the verified baseline admin list. A pre-app design
+revision uses initial bootstrap only when the existing revision baseline owner
+has verified its canonical first-generation exception. The backend's authorized
 role projection drives the shell's one Admin entry. Registry child pages remain
 in the portal sidebar, and module panel references must resolve before promotion.
+If a module panel names an omitted registry page, bounded Factory repair belongs
+to `AdminRegistryAgent` and permits only `admin/admin_registry.yaml`. The original
+build-task inventory and pack module files stay unchanged; existing repair
+budgets, replay guards and validation still apply.
 
 Runtime-facing app configuration, including AI provider settings, shell config,
 admin config, and theme config. When an app needs durable runtime secrets,

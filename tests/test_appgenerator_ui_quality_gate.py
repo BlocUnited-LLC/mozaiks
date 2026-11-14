@@ -417,6 +417,8 @@ async def test_assemble_app_tasks_merges_schema_artifacts_and_task_batch_outputs
     filenames = {item["filename"] for item in result["code_files"]}
     assert filenames == {
         "app.json",
+        "brand/theme_config.json",
+        "config/ai.json",
         "config/integrations.yaml",
         "config/targets.json",
         "ui/pages/Tickets.yaml",
@@ -425,7 +427,7 @@ async def test_assemble_app_tasks_merges_schema_artifacts_and_task_batch_outputs
     }
     assert context.snapshot()["assembled_source"] == "schema_and_task_batch_outputs"
     assert json.loads(context.snapshot()["generated_files"]["app.json"]) == {
-        "appName": "Support", "appId": "support",
+        "appName": "Support", "appId": "support", "admins": [],
     }
     assert context.snapshot()["app_task_batch_results"]["tickets_module"]["code_files"] == [
         {"filename": "modules/tickets/module.yaml", "content": "id: tickets\n"}

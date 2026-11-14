@@ -36,7 +36,9 @@ def build_app_ai_config(app_manifest: dict[str, Any], *, workflow_entry_point: s
 
 def app_admin_bootstrap(context_variables: Any, *, baseline_manifest: dict[str, Any] | None = None) -> list[str]:
     """Bootstrap a genesis owner from trusted launch context, retaining revision grants."""
-    if require_build_binding(context_variables).phase == "refinement":
+    from .hydrate_app_revision_context import _first_generation
+
+    if require_build_binding(context_variables).phase == "refinement" and not _first_generation(context_variables):
         return list((baseline_manifest or {}).get("admins") or [])
     email = context_variables.get("platform_user_email") if context_variables is not None else None
     return [email.strip()] if isinstance(email, str) and email.strip() and email.isascii() else []

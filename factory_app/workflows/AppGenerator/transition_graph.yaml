@@ -366,6 +366,13 @@ transition_rules:
   condition_value: DatabaseAgent
   transition_target: AgentTarget
 - source_agent: AppValidationAgent
+  target_agent: AdminRegistryAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: bundle_repair_target
+  condition_value: AdminRegistryAgent
+  transition_target: AgentTarget
+- source_agent: AppValidationAgent
   target_agent: AppSchemaAgent
   transition_type: condition
   condition_type: context_equals

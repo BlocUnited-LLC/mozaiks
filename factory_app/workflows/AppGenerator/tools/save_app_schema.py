@@ -1525,7 +1525,7 @@ def save_app_schema(
         theme_config_patch = _strip_none(_to_plain(theme_config_patch))
         resolved_theme_config = resolve_app_theme_config(
             _context_get(context_variables, "captured_theme_config"), theme_config_patch,
-            app_name=manifest_dict["app_name"],
+            app_name=None if (_context_get(context_variables, "bundle_repair_result") or {}).get("active") else manifest_dict["app_name"],
         )
         shell_config = _normalize_shell_config(shell_config)
         asset_manifest = _strip_none(_to_plain(asset_manifest))

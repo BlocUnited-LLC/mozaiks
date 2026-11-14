@@ -2313,7 +2313,7 @@ def _scan_admin_panel_pages(files_map: dict[str, str]) -> list[str]:
             continue
         for panel in (contract or {}).get("panels") or []:
             if isinstance(panel, dict) and panel.get("page") not in page_ids:
-                errors.append(f"{path}: panel {panel.get('id')!r} references undeclared admin page {panel.get('page')!r} in {registry_path}.")
+                errors.append(f"{registry_path}: missing enabled admin page {panel.get('page')!r} required by {path} panel {panel.get('id')!r}.")
     return errors
 
 
