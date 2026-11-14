@@ -239,7 +239,7 @@ async def _deliver(
         )
         _validate_page(page, grant, after, limits.page_size)
         if page.head < observed_head:
-            raise ValueError("Replay source head moved backwards")
+            raise ValueError("Replay source head decreased")
         # A successful old read is not current authorization. Invalidate its
         # payload if membership/consent OR the stream epoch changed while waiting.
         current = await authorize()

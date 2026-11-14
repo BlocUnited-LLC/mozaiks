@@ -36,7 +36,7 @@ global background worker and needs no separate shutdown hook.
 The route is `/{app_id}/{stream_id}` relative to its mounted prefix. Browsers
 use `openAuthenticatedWebSocket` from `@mozaiks/chat-ui/auth`. Bearer credentials
 travel in the existing subprotocol header. Only one optional `cursor` query is
-allowed; URL credentials are refused even when legacy query-token development
+allowed; URL credentials are refused even when the query-token development
 mode is enabled. Browser origins require an exact configured match. Clients
 without an Origin still require authentication. Development/anonymous identities,
 another app's bound identity and workflow-chat-bound tokens are refused. The

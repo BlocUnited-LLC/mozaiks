@@ -83,7 +83,7 @@ class _TransactionCollection:
     __slots__ = ("__collection", "__attempt")
 
     def __init__(self, collection: Any, attempt: _Attempt) -> None:
-        # Keep the canonical argument/pipeline boundary even when a legacy app's
+        # Keep the canonical argument/pipeline boundary even when an older app's
         # literal_collection returns a raw alias. The original resolver still
         # owns namespace and read/write permission.
         self.__collection = GuardedAliasCollection(collection)
