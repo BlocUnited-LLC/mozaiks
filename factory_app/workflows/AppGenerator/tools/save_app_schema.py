@@ -226,10 +226,9 @@ def resolve_app_theme_config(
         if not identity.get("name"):
             identity["name"] = app_name
         resolved["identity"] = identity
-    resolved = resolved or None
-    if resolved is not None:
+    if resolved:
         validate_page_title_theme(resolved)
-    return resolved
+    return resolved or None
 
 
 def _resolve_output_dir(

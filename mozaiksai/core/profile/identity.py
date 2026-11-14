@@ -18,7 +18,8 @@ async def read_account_profile_identity(*, app_id: str, user_id: str) -> dict[st
     """Read backend-owned identity for an exact authenticated execution scope."""
     if not app_id or not user_id:
         raise ValueError("Account identity requires app_id and user_id")
-    return await account_profile_collection(get_mongo_client()).find_one(
+    profile: dict[str, Any] | None = await account_profile_collection(get_mongo_client()).find_one(
         {"_id": account_profile_id(app_id, user_id), "app_id": app_id, "user_id": user_id},
         {"_id": 0, "email": 1},
     )
+    return profile
