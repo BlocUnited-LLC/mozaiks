@@ -281,10 +281,23 @@ async def test_real_socket_refuses_invalid_auth_and_scope_before_source(case, ca
     # Third-party LogRecords contain raw request parameters before formatting.
     # Check actual output from both canonical sinks, including encoded headers.
     secrets = [TOKEN, "synthetic-url-secret", "invalid-synthetic-token", protocols()[1], protocols("invalid-synthetic-token")[1]]
-    for output in formatted_logs:
-        rendered = output.getvalue()
-        assert "uvicorn.error" in rendered and "403" in rendered
+    pretty, structured = (output.getvalue() for output in formatted_logs)
+    for rendered in (pretty, structured):
         assert all(secret not in rendered for secret in secrets)
+    # The checks above only mean something if uvicorn's own rejected-handshake
+    # record, the one carrying the request path, reached both sinks. Require the
+    # logger and the 403 status on the same record, not anywhere in the output.
+    handshake_lines = [
+        line for line in pretty.splitlines()
+        if " uvicorn.error - " in line and '"WebSocket /' in line and '" 403  (' in line
+    ]
+    handshake_entries = [
+        entry["msg"] for entry in map(json.loads, structured.splitlines())
+        if entry["logger"] == "uvicorn.error" and '"WebSocket /' in entry["msg"] and entry["msg"].endswith('" 403')
+    ]
+    assert handshake_lines and handshake_entries
+    if case == "url_token":
+        assert all("access_token=***REDACTED***" in record for record in handshake_lines + handshake_entries)
     owned_records = "\n".join(record.getMessage() for record in caplog.records if record.name.startswith(("core.", "mozaiks.")))
     assert all(secret not in owned_records for secret in secrets)
 
