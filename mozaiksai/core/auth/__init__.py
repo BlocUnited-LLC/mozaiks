@@ -88,6 +88,8 @@ Custom Adapter Registration:
 from mozaiksai.core.auth.adapters import (
     AuthAdapter,
     AuthError,
+    GenericJWTAdapter,
+    JWTAdapterConfig,
     UserClaims,
     get_auth_adapter,
     list_adapters,
@@ -143,6 +145,8 @@ __all__ = [
     "AuthAdapter",
     "UserClaims",
     "AuthError",
+    "GenericJWTAdapter",
+    "JWTAdapterConfig",
     "get_auth_adapter",
     "register_adapter",
     "list_adapters",

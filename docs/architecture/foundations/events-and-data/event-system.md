@@ -113,14 +113,16 @@ Current implementation:
   originating event as `source_event`. A rule whose event carries content the
   notification must not retain (Messaging's `message_sent`) declares
   `source_event: reference`, which keeps only `id`, `type`, and `related_type`
-  when the event carries one. The rule's template renders the title and body,
+  when the event carries one, and stores `actor: null` on the notification.
+  The original event remains unchanged, including its actor and provenance.
+  The rule's template renders the title and body,
   and its `context_fields` choose the context (stored only when the event
   carries one of them). Every record also keeps its own `notification_id`,
   the `rule_id` and `module_id` of the rule that created it, the event's id
-  (`source_event_id`) and type, its actor, the rule's `audience` with the
+  (`source_event_id`) and type, its actor (null in reference mode), the rule's `audience` with the
   resolved recipients, the `channels`, its `status` (`unread`) and
   `created_at`, and the owning `app_id` (and `tenant_id` and `workspace_id`,
-  when the event names them); `notification.created` carries the same record,
+  in default event scope when the event names them); `notification.created` carries the same record,
   and the default store's saved copy also gets MongoDB's `_id`.
 - Capability targets resolve against workflow `orchestrator.yaml` trigger
   declarations by matching `capability_id`.
@@ -200,8 +202,31 @@ not change the adapter or stored notification's delivery outcome.
 - `contracts/subscriptions.yaml` is not supported. Runtime rejects it so
   modules have one reaction-routing source of truth.
 
-Platform notification records retain the workspace ID from their module event
-provenance. Every notification HTTP query uses the app ID loaded by the host;
+Notification `audience.scope` defaults to `event`: records retain tenant and
+workspace ownership from their module event provenance. Explicit `app` scope
+creates an ownerless target for exact recipients of the same canonical app;
+it requires a nonempty `audience.user_id_field` and rejects role, permission,
+resolver and broadcast audiences. The owning service must validate every
+recipient. An unresolved direct target never becomes a broadcast. Invalid or
+conflicting source app/owner fields still fail before target projection;
+neither the source event nor its validated producer is rewritten.
+
+| Audience scope | Source retention | Notification origin and ownership |
+| --- | --- | --- |
+| `event` (default) | `envelope` (default) | Original source envelope and actor, with event tenant/workspace owners. |
+| `event` | `reference` | Minimal event reference, actor null; event owners remain. |
+| `app` (direct targets only) | `envelope` | Original source envelope and actor; no target tenant/workspace owners. |
+| `app` (direct targets only) | `reference` | Minimal event reference, actor null; no target tenant/workspace owners. |
+
+Scope is a rule declaration, not a persisted audience grant. `source_event`
+controls origin retention independently of scope. Reference mode does not
+remove values explicitly selected by templates or `context_fields`; choose
+those fields deliberately when text or identity must not be retained.
+`notification.created` and count-change signals use target ownership. This
+does not authorize external delivery or change existing stored records;
+historical records keep their actor/source data until separately removed.
+
+Every notification HTTP query uses the app ID loaded by the host;
 token and optional request app IDs must match it. The routes require a
 matching host-verified membership before showing or changing first-party
 workspace support alerts, including messages linked to support requests.

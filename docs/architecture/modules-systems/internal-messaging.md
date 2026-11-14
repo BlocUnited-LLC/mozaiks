@@ -94,12 +94,17 @@ message text. Its title is "New message" and its body "Open the conversation to
 read it."; its context holds the event's `thread_id`, `message_id`,
 `related_type` and `related_id` when the event carries them; and, because the
 rule declares `source_event: reference`, its `source_event` holds only the
-event's id, type and related type. Like every notification record it also keeps
+event's id, type and related type, and its top-level actor is null. The source
+event remains attributed and unchanged. Like every notification record it also keeps
 its own `notification_id`, the `rule_id` and `module_id` of the rule that
-created it, the event's id and type, its actor, the rule's audience with the
+created it, the event's id and type, the rule's audience with the
 resolved recipients, the channels, its status and creation time, and the owning
 app (and tenant and workspace, when the event names them); the default store's
-saved copy also gets MongoDB's `_id`. Opening the
+saved copy also gets MongoDB's `_id`. Reference mode does not remove event
+ownership: the default audience scope remains `event`, preserving support
+workspace isolation. A separate explicit `app` target scope permits only
+service-validated direct recipients; it cannot be mixed with role, permission,
+resolver or broadcast audiences. Opening the
 conversation reads the message under the current participant check, so after a
 message is deleted or a participant is removed the notification still shows only
 its fixed title and body. Notifications stored before this change keep the

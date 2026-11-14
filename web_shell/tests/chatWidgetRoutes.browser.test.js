@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import test, { after, before } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { chromium, expect } from '@playwright/test';
+import postcss from 'postcss';
+import tailwindcss from '@tailwindcss/postcss';
 
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ui = path.resolve(shell, '../chat-ui/src');
@@ -22,8 +25,16 @@ before(async () => {
       export const useNavigation=()=>useContext(NavigationContext);`,
     componentRegistry: `import React from 'react';
       import {LoginPage,AuthCallbackPage} from ${JSON.stringify(path.join(ui, 'auth/AuthPages.jsx'))};
+      import {PageFrame} from ${JSON.stringify(path.join(ui, 'ui/page-renderer/PageFrame.jsx'))};
       const ChatPage=()=> <h1>Full chat</h1>;
-      const AppPage=({route})=> <h1>{route.component}</h1>;
+      const AppPage=({route})=> window.scenario.geometry
+        ? <PageFrame name="geometry-fixture" layout="sidebar" className="fixture-frame" bodyClassName="fixture-body">
+            <form className="fixture-content" onSubmit={event=>{event.preventDefault();window.submitted+=1;}}>
+              <h1>{route.component}</h1><div className="fixture-space"/>
+              <textarea aria-label="Draft"/><button type="submit">Send</button>
+            </form>
+          </PageFrame>
+        : <h1>{route.component}</h1>;
       export const hasComponent=name=>['ChatPage','Dashboard','Focus','Report','LoginPage','AuthCallbackPage','CustomLogin'].includes(name);
       export const getComponent=name=>name==='ChatPage'?ChatPage
         :name==='LoginPage'||name==='CustomLogin'?LoginPage:name==='AuthCallbackPage'?AuthCallbackPage:AppPage;`,
@@ -68,6 +79,7 @@ before(async () => {
         const [unreadChatCount,setUnreadChatCount]=useState(0);
         const navigate=useNavigate();
         window.updateNavigation=changes=>setNavigation(value=>({...value,...changes}));
+        window.setUnread=setUnreadChatCount;
         window.go=navigate;
         const noop=()=>{};
         const chat={isInWidgetMode,setIsInWidgetMode,isWidgetVisible,setIsWidgetVisible,
@@ -78,6 +90,9 @@ before(async () => {
           ...identity};
         return <ChatContext.Provider value={chat}><NavigationContext.Provider value={navigation}>
           <RouteRenderer isAuthenticated={navigation.authenticated!==false}/>
+          {navigation.bottomBar && <div className="shell-mobile-bottom-bar fixture-bottom-bar">
+            <button onClick={()=>setIsChatOverlayOpen(true)}>Bottom bar assistant</button>
+          </div>}
           <GlobalChatWidgetWrapper/>
         </NavigationContext.Provider></ChatContext.Provider>;
       }
@@ -85,6 +100,7 @@ before(async () => {
     `, loader: 'jsx', resolveDir: shell },
     bundle: true, write: false, format: 'esm', jsx: 'automatic', loader: { '.js': 'jsx' },
     alias: Object.fromEntries(['react', 'react-dom', 'react-router-dom'].map(name => [name, path.join(shell, 'node_modules', name)])),
+    nodePaths: [path.join(shell, 'node_modules')],
     define: { 'process.env.NODE_ENV': '"test"' },
     plugins: [{ name: 'host-boundaries', setup(builder) {
       builder.onResolve({ filter: /(?:ChatUIContext|NavigationProvider|componentRegistry|TransitionScreen|useTheme|brandAssets|useWidgetAskWS|ChatInterface|adapters\/api|layout\/(?:Header|Footer|MobileBottomBar))(?:\.[jt]sx?)?$/ }, args => {
@@ -94,10 +110,29 @@ before(async () => {
       builder.onLoad({ filter: /.*/, namespace: 'fixture-boundary' }, args => ({ contents: stubs[args.path], loader: 'jsx', resolveDir: shell }));
     } }],
   });
+  // Real shared CSS and real components. The fixture only supplies a flex-filled
+  // custom page and synthetic identity/transport; it is not live-host acceptance.
+  const styles = await postcss([tailwindcss()]).process(
+    await fs.readFile(path.join(shell, 'styles.css'), 'utf8')
+      + `\n@source "${ui.replaceAll('\\', '/')}";`,
+    { from: path.join(shell, 'styles.css') },
+  );
+  const mobileStyles = await fs.readFile(path.join(ui, 'styles/mobile.css'), 'utf8');
+  const fixtureStyles = `
+    .fixture-frame { height: 100dvh; }
+    .fixture-frame > div { height: 100%; }
+    .fixture-body { display: flex; flex: 1; }
+    .fixture-content { display: flex; flex-direction: column; gap: .5rem; width: 100%; min-height: 0; }
+    .fixture-space { flex: 1; }
+    .fixture-content textarea { height: 4rem; flex-shrink: 0; border: 1px solid; }
+    .fixture-content button { align-self: flex-end; min-height: 44px; padding: .5rem 1rem; border: 1px solid; }
+    .fixture-bottom-bar { position: fixed; bottom: 0; width: 100%; height: 4.5rem; }
+    @media (min-width: 768px) { .fixture-bottom-bar { display: none; } }
+  `;
   server = http.createServer((request, response) => {
     response.setHeader('Content-Type', request.url === '/fixture.js' ? 'text/javascript' : 'text/html');
     response.end(request.url === '/fixture.js' ? bundle.outputFiles[0].text
-      : '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><div id="root"></div><script type="module" src="/fixture.js"></script>');
+      : `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>${styles.css}\n${mobileStyles}\n${fixtureStyles}</style><div id="root"></div><script type="module" src="/fixture.js"></script>`);
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${server.address().port}`;
@@ -117,12 +152,129 @@ async function fixture(t, scenario, pathname = '/', width = 1280) {
   page.on('pageerror', error => errors.push(error.message));
   t.after(async () => { await page.close(); assert.deepEqual(errors, []); });
   await page.addInitScript(scenario => {
-    window.scenario = scenario; window.apiRequests = [];
+    window.scenario = scenario; window.apiRequests = []; window.submitted = 0;
     for (const [key, value] of Object.entries(scenario.storage || {})) localStorage.setItem(key, value);
   }, { pages: [], navigation: { assistant_available: true }, appName: 'Sample App', ...scenario });
   await page.goto(origin + pathname);
   return page;
 }
+
+async function framePadding(page) {
+  return page.locator('[data-page="geometry-fixture"] > div').evaluate(element =>
+    parseFloat(getComputedStyle(element).paddingBottom));
+}
+
+async function assertClearControls(page, label) {
+  const geometry = await page.evaluate(() => {
+    const launcher = document.querySelector('.widget-floating-launcher');
+    const button = launcher.querySelector('button');
+    const rect = element => {
+      const { left, top, right, bottom, width, height } = element.getBoundingClientRect();
+      return { left, top, right, bottom, width, height };
+    };
+    // Include the unread badge, which deliberately extends above the tab.
+    const obstacles = [button, ...button.querySelectorAll('span')].map(rect);
+    const controls = [...document.querySelectorAll('.fixture-content textarea, .fixture-content button')].map(element => {
+      const bounds = rect(element);
+      const uncovered = [.02, .5, .98].every(x => [.02, .5, .98].every(y =>
+        element.contains(document.elementFromPoint(bounds.left + x * bounds.width, bounds.top + y * bounds.height))));
+      const overlaps = obstacles.some(other => bounds.left < other.right && bounds.right > other.left
+        && bounds.top < other.bottom && bounds.bottom > other.top);
+      return { bounds, uncovered, overlaps };
+    });
+    return { controls, launcher: rect(button),
+      launcherSize: [button.clientWidth, button.scrollWidth, button.clientHeight, button.scrollHeight],
+      overflow: document.documentElement.scrollWidth > innerWidth || document.documentElement.scrollHeight > innerHeight,
+      launcherContentFits: button.scrollHeight <= button.clientHeight && button.scrollWidth <= button.clientWidth };
+  });
+  assert.equal(geometry.controls.length, 2);
+  for (const control of geometry.controls) {
+    assert.equal(control.overlaps, false, `${label}: full rectangle intersects launcher: ${JSON.stringify(geometry)}`);
+    assert.equal(control.uncovered, true, `${label}: control edge/interior is covered: ${JSON.stringify(geometry)}`);
+  }
+  assert.equal(geometry.overflow, false, `${label}: viewport overflow`);
+  assert.equal(geometry.launcherContentFits, true, `${label}: launcher content overflows: ${JSON.stringify(geometry)}`);
+  assert.ok(geometry.launcher.width >= 44 && geometry.launcher.height >= 44, `${label}: touch target`);
+  await expect(page.getByRole('button', { name: 'Open assistant', exact: true })).toHaveCount(1);
+  return geometry;
+}
+
+for (const width of [390, 1280]) {
+  test(`PageFrame clears the entire composer and launcher lifecycle (${width}px)`, async t => {
+    const page = await fixture(t, { geometry: true, authLoading: true, pages: [appPage('/')] }, '/', width);
+    await expect(page.getByLabel('Draft')).toBeVisible();
+    const baseline = await framePadding(page);
+    await expect(page.getByRole('button', { name: 'Open assistant' })).toHaveCount(0);
+    await page.getByLabel('Draft').fill('Preserve this draft across assistant transitions');
+    await page.evaluate(() => window.updateNavigation({ authLoading: false }));
+    await expect(page.getByRole('button', { name: 'Open assistant' })).toBeVisible();
+    if (process.env.MOZAIKS_TEST_SCREENSHOTS) {
+      await fs.mkdir(process.env.MOZAIKS_TEST_SCREENSHOTS, { recursive: true });
+      await page.screenshot({ path: path.join(process.env.MOZAIKS_TEST_SCREENSHOTS, `widget-clearance-${width}.png`) });
+    }
+    const initial = await assertClearControls(page, `${width}px late mount`);
+    assert.ok(await framePadding(page) > baseline, 'late launcher must reserve space');
+    assert.equal(initial.launcher.height, width < 768 ? 60 : 104, 'default visual height preserved');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    assert.equal(await page.evaluate(() => window.submitted), 1);
+    await page.evaluate(() => window.setUnread(9));
+    await assertClearControls(page, `${width}px unread badge`);
+    await page.getByRole('button', { name: 'Open assistant' }).click();
+    await expect(page.getByText('Ask conversation', { exact: true })).toBeVisible();
+    assert.equal(await framePadding(page), baseline, 'expanded overlay does not leave launcher padding');
+    await page.getByTitle('Minimize', { exact: true }).click();
+    await assertClearControls(page, `${width}px collapsed`);
+    await expect(page.getByLabel('Draft')).toHaveValue('Preserve this draft across assistant transitions');
+    await expect.poll(() => page.evaluate(() => window.widgetOptions.enabled)).toBe(true);
+    await page.evaluate(() => window.go('/chat'));
+    await expect(page.getByRole('heading', { name: 'Full chat', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open assistant' })).toHaveCount(0);
+    assert.equal(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue('--shell-page-assistant-clearance').trim()), '');
+    await page.evaluate(() => window.go('/'));
+    await expect(page.getByRole('button', { name: 'Open assistant' })).toBeVisible();
+    await assertClearControls(page, `${width}px route return`);
+  });
+}
+
+test('PageFrame clearance follows breakpoints, bottom-bar ownership, safe areas and 200% text size', async t => {
+  const page = await fixture(t, { geometry: true, pages: [appPage('/')] }, '/', 390);
+  await expect(page.getByRole('button', { name: 'Open assistant' })).toBeVisible();
+  for (const width of [390, 767, 768, 1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await assertClearControls(page, `${width}px resize`);
+  }
+  await page.evaluate(() => window.updateNavigation({ bottomBar: true }));
+  await expect(page.getByRole('button', { name: 'Open assistant' })).toBeHidden();
+  assert.equal(await framePadding(page), 32, 'mobile bottom bar removes the floating reservation');
+  await page.getByRole('button', { name: 'Bottom bar assistant' }).click();
+  await expect(page.getByTitle('Minimize', { exact: true })).toBeVisible();
+  await page.getByTitle('Minimize', { exact: true }).click();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await assertClearControls(page, 'desktop bottom bar hidden by media query');
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.evaluate(() => window.updateNavigation({ bottomBar: false }));
+  await assertClearControls(page, 'mobile bottom bar removed');
+  const beforeInset = await framePadding(page);
+  await page.evaluate(() => document.documentElement.style.setProperty('--safe-area-bottom', '24px'));
+  await assertClearControls(page, '24px safe-area inset');
+  assert.equal(await framePadding(page), beforeInset + 24);
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(() => { document.documentElement.style.fontSize = '32px'; window.setUnread(99); });
+    await assertClearControls(page, `${width}px 200% text size`);
+  }
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = '';
+    document.documentElement.style.setProperty('--shell-page-padding-y-base', '12rem');
+    document.documentElement.style.setProperty('--shell-page-padding-y-md', '12rem');
+  });
+  assert.equal(await framePadding(page), 192, 'larger app theme padding remains authoritative');
+  await assertClearControls(page, 'larger theme padding');
+  const stable = await framePadding(page);
+  // Several frames without a mutation prove the clearance is not accumulating.
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await framePadding(page), stable);
+});
 
 for (const width of [390, 1280]) {
   test(`custom root renders its page and one working launcher without a workflow (${width}px)`, async t => {

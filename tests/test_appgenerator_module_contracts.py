@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from mozaiksai.core.workflow.declarative.contracts import parse_structured_outputs_config
@@ -17,6 +18,41 @@ def _read(relative_path: str) -> str:
 
 def _read_yaml(relative_path: str):
     return yaml.safe_load(_read(relative_path))
+
+
+def test_generated_notification_scope_and_retention_round_trip_to_runtime():
+    from mozaiksai.core.runtime.app.module_loader import ModuleNotificationsManifest
+    from mozaiksai.core.workflow.generator_support.code_files import (
+        extract_code_file_map_from_payload,
+    )
+    from mozaiksai.core.workflow.outputs.structured import build_models_from_config
+
+    definitions = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")["models"]
+    names = ("ModuleNotificationAudience", "ModuleNotification", "ModuleNotificationsManifest")
+    models = build_models_from_config({name: definitions[name] for name in names}, exact_model_ids=frozenset(names))
+    generated = models["ModuleNotificationsManifest"].model_validate({
+        "schema_version": "mozaiks.notifications.v1", "notifications": [{
+            "id": "ready", "event_type": "domain.tasks.ready", "title": "Task ready", "body": "Open it to read.",
+            "channels": ["in_app"], "audience": {"scope": "app", "user_id_field": "recipient_id"},
+            "source_event": "reference", "context_fields": ["task_id"],
+            "preference_key": "tasks", "default_enabled": True, "renderer": None,
+        }],
+    })
+    materialized = extract_code_file_map_from_payload({"module_contract": {
+        "module_id": "tasks", "notifications_yaml": generated.model_dump(mode="json", exclude_none=True),
+    }})
+    document = yaml.safe_load(materialized["modules/tasks/contracts/notifications.yaml"])
+    rule = ModuleNotificationsManifest.model_validate(document).notifications[0]
+    assert rule.audience.scope == "app" and rule.audience.user_id_field == "recipient_id"
+    assert rule.source_event == "reference" and rule.context_fields == ["task_id"]
+    document["notifications"][0]["audience"]["roles"] = ["operator"]
+    with pytest.raises(ValueError, match="app notification scope"):
+        ModuleNotificationsManifest.model_validate(document)
+    audience_model = models["ModuleNotificationAudience"]
+    assert audience_model.model_validate({"user_id_field": "recipient_id"}).scope == "event"
+    with pytest.raises(ValueError):
+        audience_model.model_validate({"scope": "workspace", "user_id_field": "recipient_id"})
+    assert definitions["ModuleNotification"]["fields"]["source_event"]["values"] == ["envelope", "reference"]
 
 
 def test_appgenerator_structured_outputs_parse_with_runtime_contract_validator() -> None:
