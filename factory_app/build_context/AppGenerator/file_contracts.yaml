@@ -21,7 +21,20 @@ description: >
   auth contract validates against the shared mozaiks.auth.v2 model;
   ui/auth/authAdapter.js
   delegates to @mozaiks/chat-ui/auth. Do not generate OIDC, token storage, or
-  local demo identity implementations. Backend configuration selects auth mode.
+  local demo identity implementations. Approved AppBuildPlan.auth_mode uses the
+  runtime AuthMode vocabulary. Null preserves existing access intent; an explicit
+  mode updates signup intent without replacing provider handles or routes.
+  Provider registration and real signup availability remain deployment prerequisites.
+
+  Final assembly emits app-owned config/ai.json and app identity branding even
+  when task batches bypass full schema saves. Never copy Studio assistant prompts,
+  provider credentials, or Factory workflow references into customer apps.
+  Genesis admin bootstrap uses authenticated runtime platform_user_email only;
+  refinement preserves baseline admins. Missing trusted email requires operator setup.
+  AdminRegistryAgent owns admin/admin_registry.yaml after task materialization.
+  Module panel page references must resolve to enabled registry pages. Registry
+  navigation belongs inside the portal; the platform injects one authorized Admin
+  menu entry rather than app-declared shortcuts to individual admin pages.
   The optional Android client uses the canonical frontend.android env handles;
   never replace the browser client, issuer, or API audience to enable mobile.
   Native client registration belongs to the host/operator, not generated code.

@@ -141,6 +141,7 @@ def _context_authority_policy_for_workflow(workflow_name: str):
 # (model/tool-authored context), so an injected value can never reach the
 # session document through a generic API.
 SERVER_OWNED_SESSION_FIELDS = frozenset({
+    "platform_user_email",
     "build_terminal_receipt",
     "run_build_binding",
     "workflow_run_id",

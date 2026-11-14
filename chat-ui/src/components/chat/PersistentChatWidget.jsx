@@ -651,10 +651,10 @@ const PersistentChatWidget = ({
       </button>
 
       {/* Chat panel */}
-      <div id="mozaiks-assistant-panel" className="pointer-events-auto w-[26rem] max-w-[calc(100vw-2.5rem)] h-[50vh] md:h-[70vh] min-h-[360px] bg-gradient-to-br from-gray-900/95 via-slate-900/95 to-black/95 backdrop-blur-xl border border-[rgba(var(--color-primary-light-rgb),0.3)] rounded-2xl rounded-tr-none shadow-2xl overflow-hidden flex flex-col">
+      <div id="mozaiks-assistant-panel" className="pointer-events-auto w-[26rem] max-w-[calc(100vw-2.5rem)] h-[50vh] md:h-[70vh] min-h-[360px] bg-[var(--color-surface)] text-[var(--color-text-primary)] backdrop-blur-xl border border-[rgba(var(--color-primary-light-rgb),0.3)] rounded-2xl rounded-tr-none shadow-2xl overflow-hidden flex flex-col">
 
         {/* Header */}
-        <div className="flex-shrink-0 bg-[rgba(0,0,0,0.6)] border-b border-[rgba(var(--color-primary-light-rgb),0.2)] backdrop-blur-xl">
+        <div className="flex-shrink-0 bg-[var(--color-surface-alt)] border-b border-[rgba(var(--color-primary-light-rgb),0.2)] backdrop-blur-xl">
           <div className="flex flex-row items-center justify-between px-3 py-2.5 sm:px-4 sm:py-3 gap-2">
 
             {/* Left: Ask mode label / support label */}
@@ -670,10 +670,10 @@ const PersistentChatWidget = ({
                 </span>
               </span>
               <span className="text-left min-w-0 flex-1">
-                <span className="block text-sm sm:text-lg font-bold text-white tracking-tight truncate">
+                <span className="block text-sm sm:text-lg font-bold text-[var(--color-text-primary)] tracking-tight truncate">
                   {inSupportMode ? 'Help & Support' : assistantName}
                 </span>
-                <span className="block text-[10px] sm:text-xs text-gray-400 truncate flex items-center gap-1.5">
+                <span className="block text-[10px] sm:text-xs text-[var(--color-text-muted)] truncate flex items-center gap-1.5">
                   {inSupportMode ? 'Talk to an operator' : (
                     <>
                       <span className={`inline-block w-1.5 h-1.5 rounded-full ${connectionDot}`} />
@@ -694,7 +694,7 @@ const PersistentChatWidget = ({
                 className={`flex h-9 w-9 items-center justify-center rounded-lg border text-base transition-all duration-200 ${
                   inSupportMode
                     ? 'border-warning/60 bg-warning/20 text-warning'
-                    : 'border-[rgba(var(--color-primary-light-rgb),0.25)] bg-[rgba(var(--color-primary-rgb),0.08)] text-gray-300 hover:border-[rgba(var(--color-primary-light-rgb),0.5)] hover:text-white'
+                    : 'border-[rgba(var(--color-primary-light-rgb),0.25)] bg-[rgba(var(--color-primary-rgb),0.08)] text-[var(--color-text-secondary)] hover:border-[rgba(var(--color-primary-light-rgb),0.5)] hover:text-white'
                 }`}
               >
                 <span role="img" aria-label="Get help from an operator">🛟</span>
@@ -735,7 +735,7 @@ const PersistentChatWidget = ({
         {/* Workflow picker — shown when several builds are running */}
         {showWorkflowPicker && !inSupportMode && workflowSessions.length > 1 && (
           <div className="flex-shrink-0 max-h-44 overflow-y-auto border-b border-[rgba(var(--color-primary-light-rgb),0.15)] bg-[rgba(0,0,0,0.35)] px-2 py-2">
-            <div className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">
+            <div className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
               Your running workflows
             </div>
             {workflowSessions.map((session) => (
@@ -748,7 +748,7 @@ const PersistentChatWidget = ({
                 <span className="min-w-0 truncate text-xs font-semibold text-white">
                   {session.workflow_name}
                 </span>
-                <span className="flex-shrink-0 text-[10px] text-gray-400">Resume</span>
+                <span className="flex-shrink-0 text-[10px] text-[var(--color-text-muted)]">Resume</span>
               </button>
             ))}
           </div>
@@ -768,7 +768,7 @@ const PersistentChatWidget = ({
                 <span>New conversation</span>
               </button>
               {pageContext && (
-                <span className="text-[10px] text-gray-500 truncate max-w-[8rem]" title={pageContext}>
+                <span className="text-[10px] text-[var(--color-text-muted)] truncate max-w-[8rem]" title={pageContext}>
                   📍 {pageContext}
                 </span>
               )}
@@ -778,13 +778,13 @@ const PersistentChatWidget = ({
 
         {/* Body */}
         {!inSupportMode && wsEnabled && ['error', 'disconnected'].includes(wsStatus) && (
-          <div role="status" className="flex-shrink-0 px-3 py-2 text-xs text-gray-200">
+          <div role="status" className="flex-shrink-0 px-3 py-2 text-xs text-[var(--color-text-secondary)]">
             The assistant is disconnected.{hasPendingCurrentSends ? ' Your messages are waiting.' : ''}
             <button type="button" onClick={retryConnection} className="ml-2 underline">Retry connection</button>
           </div>
         )}
         {!inSupportMode && wsStatus === 'connected' && historyStatus === 'error' && (
-          <div role="status" className="flex-shrink-0 px-3 py-2 text-xs text-gray-200">
+          <div role="status" className="flex-shrink-0 px-3 py-2 text-xs text-[var(--color-text-secondary)]">
             Couldn’t load this conversation. Your messages will wait until it’s available.
             <button type="button" onClick={retryHistory} className="ml-2 underline">Retry history</button>
           </div>
@@ -794,20 +794,20 @@ const PersistentChatWidget = ({
             {supportSent ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 py-8 text-center">
                 <span className="flex h-14 w-14 items-center justify-center rounded-full bg-success/20 text-3xl">✓</span>
-                <p className="text-sm leading-relaxed text-gray-300">
+                <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
                   Got it — your request has been received. An operator will review it and follow up shortly.
                 </p>
                 <button
                   type="button"
                   onClick={() => { setInSupportMode(false); setSupportSent(false); setSupportError(null); setSupportMessage(''); }}
-                  className="mt-2 rounded-xl border border-[rgba(var(--color-primary-light-rgb),0.3)] px-4 py-2 text-sm text-gray-300 transition-colors hover:border-[rgba(var(--color-primary-light-rgb),0.6)] hover:text-white"
+                  className="mt-2 rounded-xl border border-[rgba(var(--color-primary-light-rgb),0.3)] px-4 py-2 text-sm text-[var(--color-text-secondary)] transition-colors hover:border-[rgba(var(--color-primary-light-rgb),0.6)] hover:text-white"
                 >
                   Back to chat
                 </button>
               </div>
             ) : (
               <div className="flex flex-1 flex-col gap-3 overflow-hidden px-4 py-4">
-                <p className="text-[11px] text-gray-400">
+                <p className="text-[11px] text-[var(--color-text-muted)]">
                   Describe what you need help with and an operator will follow up shortly.
                 </p>
                 <textarea
@@ -815,7 +815,7 @@ const PersistentChatWidget = ({
                   onChange={(e) => setSupportMessage(e.target.value)}
                   placeholder="What do you need help with?"
                   rows={5}
-                  className="flex-1 resize-none rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-gray-500 focus:border-[rgba(var(--color-primary-light-rgb),0.4)] focus:outline-none"
+                  className="flex-1 resize-none rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-[var(--color-text-muted)] focus:border-[rgba(var(--color-primary-light-rgb),0.4)] focus:outline-none"
                 />
                 {supportError && (
                   <p className="text-xs leading-relaxed text-red-300">

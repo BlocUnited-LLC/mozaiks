@@ -579,3 +579,89 @@ test('logout during native token exchange cannot restore a cancelled session', a
   await assert.rejects(login, /cancelled/);
   assert.equal(adapter.getAccessToken(), null);
 });
+
+
+test('backend app roles hydrate callback and session reload through the configured API origin', async () => {
+  const originalFetch = globalThis.fetch;
+  let roles = ['user', 'admin'];
+  globalThis.fetch = async (url, options) => {
+    if (url !== 'https://api.example/api/me') return originalFetch(url, options);
+    assert.equal(options.headers.Authorization, 'Bearer opaque-access-token');
+    return {ok:true, json:async () => ({user_id:'user-1', roles})};
+  };
+  const adapter = createAuthAdapter({authConfig:config(), appId:'app-one', apiBaseUrl:'https://api.example'});
+  await begin(adapter);
+  await adapter.handleCallback();
+  assert.deepEqual((await adapter.getCurrentUser()).roles, ['user','admin']);
+  roles = ['user'];
+  const resumed = createAuthAdapter({authConfig:config(), appId:'app-one', apiBaseUrl:'https://api.example'});
+  assert.deepEqual((await resumed.getCurrentUser()).roles, ['user']);
+});
+
+test('a profile for another subject cannot grant frontend admin access', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => url === '/api/me'
+    ? {ok:true, json:async () => ({user_id:'someone-else', roles:['admin']})}
+    : originalFetch(url, options);
+  const adapter = createAuthAdapter({authConfig:config(), appId:'app-one', apiBaseUrl:''});
+  await begin(adapter);
+  await adapter.handleCallback();
+  assert.deepEqual((await adapter.getCurrentUser()).roles, ['user']);
+});
+
+test('a stalled optional app role projection is aborted while sign-in completes', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalTimeout = globalThis.setTimeout;
+  t.mock.method(globalThis, 'setTimeout', (callback, milliseconds) => originalTimeout(callback, Math.min(milliseconds, 5)));
+  let aborted = false;
+  globalThis.fetch = async (url, options) => {
+    if(url !== '/api/me') return originalFetch(url, options);
+    return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => {
+      aborted = true;
+      reject(new DOMException('Aborted','AbortError'));
+    }, {once:true}));
+  };
+  const adapter = createAuthAdapter({authConfig:config(), appId:'app-one', apiBaseUrl:''});
+  await begin(adapter);
+  await adapter.handleCallback();
+  assert.equal(aborted, true);
+  assert.equal(adapter.getAccessToken(), 'opaque-access-token');
+});
+
+test('logout during app role hydration cannot restore the old account', async () => {
+  const originalFetch = globalThis.fetch;
+  let completeProfile;
+  globalThis.fetch = async (url, options) => url === '/api/me'
+    ? {ok:true, json:async () => ({user_id:'user-1', roles:['admin']})}
+    : originalFetch(url, options);
+  const adapter = createAuthAdapter({authConfig:config(), appId:'app-one', apiBaseUrl:''});
+  await begin(adapter);
+  await adapter.handleCallback();
+  globalThis.fetch = async (url, options) => url === '/api/me'
+    ? new Promise(resolve => { completeProfile = () => resolve({ok:true, json:async () => ({user_id:'user-1', roles:['admin']})}); })
+    : originalFetch(url, options);
+  const pending = adapter.getCurrentUser();
+  await adapter.logout();
+  completeProfile();
+  assert.equal(await pending, null);
+  assert.equal(adapter.getAccessToken(), null);
+});
+
+test('an account change during app role hydration cannot overwrite the new session', async () => {
+  const originalFetch = globalThis.fetch;
+  const adapter = createAuthAdapter({authConfig:config(), appId:'app-one', apiBaseUrl:''});
+  await begin(adapter);
+  await adapter.handleCallback();
+  const key = [...storage.keys()].find(key => key.endsWith(':session'));
+  const previous = JSON.parse(storage.get(key));
+  let completeProfile;
+  globalThis.fetch = async (url, options) => url === '/api/me'
+    ? new Promise(resolve => { completeProfile = () => resolve({ok:true, json:async () => ({user_id:'user-1', roles:['admin']})}); })
+    : originalFetch(url, options);
+  const pending = adapter.getCurrentUser();
+  const replacement = {...previous, accessToken:'new-account-token', user:{...previous.user, id:'user-2', roles:['user']}};
+  storage.set(key, JSON.stringify(replacement));
+  completeProfile();
+  assert.equal(await pending, null);
+  assert.deepEqual(JSON.parse(storage.get(key)), replacement);
+});

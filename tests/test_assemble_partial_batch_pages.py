@@ -6,7 +6,8 @@ when a batch ran `failure_policy: fail_batch` and a partial batch could never
 reach assembly at all.
 
 #648 changed that. The batch now runs `continue_with_available`, and
-`AppGenerator/transition_graph.yaml` routes a partial batch into AssemblyAgent
+`AppGenerator/transition_graph.yaml` routes a partial batch through the admin
+registry owner into AssemblyAgent
 deliberately -- "so acceptance can judge what was produced and the bundle
 repair loop can act on it". The two halves moved apart: assembly kept the old
 invariant and killed the exact path the router was built to support.

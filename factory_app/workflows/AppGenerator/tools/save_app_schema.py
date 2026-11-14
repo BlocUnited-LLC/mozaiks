@@ -26,7 +26,8 @@ from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     extract_code_file_map_from_payload,
 )
 from factory_app.workflows.AppGenerator.tools.default_runtime_configs import (
-    load_default_ai_config,
+    app_admin_bootstrap,
+    build_app_ai_config,
 )
 from factory_app.workflows.AppGenerator.tools.task_integrity import (
     RepairOwnershipError,
@@ -206,7 +207,9 @@ def _deep_merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str
     return merged
 
 
-def resolve_app_theme_config(captured_theme_config: Any, theme_config_patch: Any) -> dict[str, Any] | None:
+def resolve_app_theme_config(
+    captured_theme_config: Any, theme_config_patch: Any, *, app_name: str | None = None,
+) -> dict[str, Any] | None:
     """Apply explicit visual deltas without losing the approved ThemeCapture base."""
     captured = detach(captured_theme_config)
     patch = _strip_none(_to_plain(theme_config_patch))
@@ -214,7 +217,16 @@ def resolve_app_theme_config(captured_theme_config: Any, theme_config_patch: Any
         raise ValueError("captured_theme_config must be an object or null")
     if patch is not None and not isinstance(patch, dict):
         raise ValueError("theme_config_patch must be an object or null")
-    resolved = _deep_merge_dicts(captured or {}, patch or {}) or None
+    resolved = _deep_merge_dicts(captured or {}, patch or {})
+    if app_name:
+        identity = resolved.get("identity") or {}
+        if not isinstance(identity, dict):
+            raise ValueError("theme identity must be an object")
+        identity = dict(identity)
+        if not identity.get("name"):
+            identity["name"] = app_name
+        resolved["identity"] = identity
+    resolved = resolved or None
     if resolved is not None:
         validate_page_title_theme(resolved)
     return resolved
@@ -1178,7 +1190,10 @@ def _persist_to_filesystem(
         "authRequired": auth_required or data_contract_requires_auth(
             data_contract if data_contract is not None else auth_data_contract
         ),
-        "admins": [],
+        "admins": app_admin_bootstrap(
+            context_variables,
+            baseline_manifest=json.loads((_context_get(context_variables, "generated_files") or {}).get("app.json", "{}")),
+        ),
     }
     for manifest_key, app_json_key in (
         ("description", "description"),
@@ -1227,11 +1242,19 @@ def _persist_to_filesystem(
     )
     written.append("provenance.yaml")
 
-    # config/ai.json — runtime startup contract seeded from the current factory default.
+    # config/ai.json — app-owned behavior, retaining explicit revision configuration.
     ai_config_path = output_dir / "config" / "ai.json"
     ai_config_path.parent.mkdir(parents=True, exist_ok=True)
+    entry_point = _context_text(context_variables, "generated_workflow_name")
+    existing_ai = (_context_get(context_variables, "generated_files") or {}).get("config/ai.json")
+    ai = json.loads(existing_ai) if isinstance(existing_ai, str) else build_app_ai_config(app_json, workflow_entry_point=entry_point)
+    if not isinstance(ai, dict):
+        raise ValueError("config/ai.json must be a JSON object")
+    entry_point = (ai.get("workflows") or {}).get("entry_point")
+    if entry_point and entry_point not in workflow_names_from_context(context_variables):
+        raise ValueError(f"config/ai.json references unavailable workflow {entry_point!r}")
     ai_config_path.write_text(
-        json.dumps(load_default_ai_config(), indent=2, ensure_ascii=False),
+        existing_ai if isinstance(existing_ai, str) else json.dumps(ai, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
     written.append("config/ai.json")
@@ -1502,6 +1525,7 @@ def save_app_schema(
         theme_config_patch = _strip_none(_to_plain(theme_config_patch))
         resolved_theme_config = resolve_app_theme_config(
             _context_get(context_variables, "captured_theme_config"), theme_config_patch,
+            app_name=manifest_dict["app_name"],
         )
         shell_config = _normalize_shell_config(shell_config)
         asset_manifest = _strip_none(_to_plain(asset_manifest))

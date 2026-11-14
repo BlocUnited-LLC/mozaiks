@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { DEFAULT_HEADER_CONFIG } from "../../styles/themeProvider";
+import { applyBrandImageFallback, getBrandLogoSrc } from "../../styles/brandAssets";
 import { useNavigation } from "../../providers/NavigationProvider";
 import { useNavigationActions } from "../../navigation/useNavigationActions";
 import {
@@ -339,7 +340,8 @@ const Header = ({
   };
 
   const brandName = brandConfig.name || "MozaiksAI";
-  const logoSrc = resolveAssetSource(logoConfig.src) || brandConfig.logo || null;
+  const logoSrc = resolveAssetSource(logoConfig.src) || getBrandLogoSrc({ branding: brandConfig });
+  const logoFallback = getBrandLogoSrc({ branding: { ...brandConfig, logo: null } });
   const wordmarkSrc = resolveAssetSource(logoConfig.wordmark) || brandConfig.wordmark || null;
   const profileIconSrc = resolveAssetSource(profileConfig.icon);
   const notificationsIconSrc = resolveAssetSource(notificationsConfig.icon);
@@ -416,6 +418,7 @@ const Header = ({
             src={logoSrc}
             className="h-7 w-7 object-contain"
             alt={logoConfig.alt || brandName || "Logo"}
+            onError={(event) => applyBrandImageFallback(event, logoFallback)}
           />
         )}
         <span className="min-w-0">

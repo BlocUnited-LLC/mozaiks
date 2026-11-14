@@ -132,6 +132,7 @@ _IMMUTABLE_EXACT = {
     "entitlement_state",
     "entitlements",
     "build_registry_id",
+    "platform_user_email",
     "run_build_binding",
     "workflow_run_id",
     "build_terminal_receipt",

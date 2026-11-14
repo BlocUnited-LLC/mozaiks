@@ -44,6 +44,8 @@ from mozaiksai.core.profile.discovery import (
     load_profile_panels,
     load_profile_tabs,
 )
+from mozaiksai.core.profile.identity import account_profile_collection
+from mozaiksai.core.profile.identity import account_profile_id as _profile_doc_id
 from mozaiksai.core.relationships.discovery import load_relationship_providers
 from mozaiksai.core.runtime.app.ai_config import resolve_runtime_ai_config
 from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
@@ -127,7 +129,6 @@ async def add_api_version_header(request: Request, call_next):
 
 
 _DEFAULT_PROFILE_USER_ID = development_default_user_id()
-_ACCOUNT_PROFILE_COLLECTION = "UserProfiles"
 _ACCOUNT_PREFERENCES_COLLECTION = "UserPreferences"
 _USER_SETTINGS_COLLECTION = "UserSettings"
 
@@ -666,7 +667,13 @@ async def get_current_user_profile(
     principal: UserPrincipal = Depends(require_any_auth),
 ):
     resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
-    return await _ensure_account_profile(principal, app_id=resolved_app_id, user_id=user_id)
+    from mozaiksai.core.admin.email_promotion import is_app_admin
+
+    profile = await _ensure_account_profile(principal, app_id=resolved_app_id, user_id=user_id)
+    roles = list(principal.roles or [])
+    if is_app_admin(principal) and "admin" not in roles:
+        roles.append("admin")
+    return {**profile, "roles": roles}
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -1674,10 +1681,6 @@ def _resolve_default_app_id() -> str:
     return "default"
 
 
-def _profile_doc_id(app_id: str, user_id: str) -> str:
-    return f"{app_id}:{user_id}"
-
-
 def _default_username(principal: UserPrincipal, user_id: str) -> str:
     email = str(principal.email or "").strip()
     if email and "@" in email:
@@ -1693,7 +1696,7 @@ async def _account_profile_collection():
     client = persistence_manager.persistence.client
     if client is None:
         raise RuntimeError("Mongo client not initialized")
-    return client["mozaiksai"][_ACCOUNT_PROFILE_COLLECTION]
+    return account_profile_collection(client)
 
 
 async def _account_preferences_collection():

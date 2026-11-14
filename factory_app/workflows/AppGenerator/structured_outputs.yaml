@@ -1207,6 +1207,11 @@ models:
     - third-party
     description: Provider-neutral auth intent. Public has no sign-in or roles; role-based requires at least one role.
 
+  AppAuthMode:
+    type: literal
+    values: [brokered_oidc, public_self_signup, private_workspace, enterprise_sso, multi_provider]
+    description: Canonical mozaiksai.core.runtime.app.auth_contract.AuthMode values.
+
   AppBuildPlan:
     type: model
     fields:
@@ -1240,6 +1245,13 @@ models:
         - AppAuthStrategy
         - 'null'
         description: Auth intent; public means no sign-in, null means not declared. Both require empty roles; role-based requires at least one role.
+      auth_mode:
+        type: union
+        variants:
+        - AppAuthMode
+        - 'null'
+        default: null
+        description: Choose the existing runtime auth mode from approved access requirements. public_self_signup permits account creation, private_workspace keeps access private. Null retains explicit auth configuration or the brokered default. Never infer signup from app category.
       service_scope:
         type: optional_list
         items: str

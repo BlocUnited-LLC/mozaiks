@@ -14,8 +14,8 @@
 #   2. Verified email matches app.json admins                   (default path)
 #   3. AUTH_ANON_ROLES=admin,user in .env                        (dev/no-auth)
 #
-# This module only answers "is this address on the list"; the verified-email
-# requirement is enforced by the admin gate in admin/router.py.
+# is_app_admin is shared by the admin gate and the authenticated profile's role
+# projection so backend access and frontend navigation use the same decision.
 #
 # Matching is ASCII-only. Case folding non-ASCII text can turn one address into
 # another (the Kelvin sign U+212A lowercases to "k"), so a non-ASCII address,
@@ -26,6 +26,10 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from mozaiksai.core.auth import UserPrincipal
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.admin.paths import resolve_admin_app_root
@@ -71,3 +75,11 @@ def is_admin_by_email(email: str | None, *, admin_emails: Iterable[str] | None =
 def _resolve_app_config_path() -> Path:
     """Find app.json from the active platform root."""
     return resolve_admin_app_root() / "app.json"
+
+
+def is_app_admin(principal: UserPrincipal) -> bool:
+    """Evaluate app admin access using the authenticated runtime principal."""
+    return principal.has_role("admin") or (
+        (principal.email_verified or principal.has_local_development_access)
+        and is_admin_by_email(principal.email)
+    )

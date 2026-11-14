@@ -155,12 +155,11 @@ definitions:
     type: string
     description: >
       Email address of the authenticated platform user who started this AppGenerator
-      session. Injected by the hosted platform at workflow start from the session JWT.
+      session. Projected from the backend-owned account profile for the authenticated execution app and user.
       Used by scaffold/config agents to populate `app/app.json` `admins` without
-      prompting the user. Falls back to null in OSS / unauthenticated contexts, in
-      which case InterviewAgent captures the email during the intake interview.
+      prompting the user. Missing profiles yield null and require operator bootstrap setup.
     source:
-      type: state
+      type: runtime
       default: null
   coding_participation:
     type: string
@@ -2054,6 +2053,9 @@ agents:
     - app_build_plan
     - capability_packs
     - admin_registry
+    - app_task_batch_results
+    - generated_files
+    - code_files
   ModuleContractQualityAgent:
     variables:
     - admin_registry

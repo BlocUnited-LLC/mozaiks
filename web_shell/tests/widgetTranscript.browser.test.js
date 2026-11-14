@@ -4,6 +4,9 @@ import path from 'node:path';
 import test, { before, after } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
+import fs from 'node:fs/promises';
+import postcss from 'postcss';
+import tailwindcss from '@tailwindcss/postcss';
 import { chromium, expect } from '@playwright/test';
 
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -76,10 +79,15 @@ before(async () => {
         ({ contents: stubs[args.path], loader: 'jsx', resolveDir: shell }));
     } }],
   });
+  const styles = await postcss([tailwindcss()]).process(
+    await fs.readFile(path.join(shell, 'styles.css'), 'utf8')
+      + `\n@source "${ui.replaceAll('\\', '/')}";`,
+    {from:path.join(shell,'styles.css')},
+  );
   server = http.createServer((request, response) => {
     response.setHeader('Content-Type', request.url === '/fixture.js' ? 'text/javascript' : 'text/html');
     response.end(request.url === '/fixture.js' ? bundle.outputFiles[0].text
-      : '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><div id="root"></div><script type="module" src="/fixture.js"></script>');
+      : `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>${styles.css}</style><div id="root"></div><script type="module" src="/fixture.js"></script>`);
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${server.address().port}`;
@@ -121,6 +129,25 @@ async function send(page, text) {
   await page.getByRole('button', { name: 'Send', exact: true }).click();
 }
 const submissions = page => page.evaluate(() => window.sent.filter(event => event.type === 'user.input.submit'));
+
+test('the actual widget surface and title follow light and dark app tokens', async t => {
+  const page = await fixture(t);
+  for (const [surface,header,text,muted] of [
+    ['#fff7ed','#ffedd5','#431407','#9a3412'],
+    ['#111827','#1f2937','#f9fafb','#cbd5e1'],
+  ]) {
+    await page.evaluate(({surface,header,text,muted}) => {
+      for(const [key,value] of Object.entries({'--color-surface':surface,'--color-surface-alt':header,'--color-text-primary':text,'--color-text-muted':muted})) document.documentElement.style.setProperty(key,value);
+    }, {surface,header,text,muted});
+    const actual = await page.evaluate(() => {
+      const panel=document.querySelector('#mozaiks-assistant-panel');
+      const title=panel.querySelector('[title="Open full Ask chat"] span.block');
+      return {surface:getComputedStyle(panel).backgroundColor,image:getComputedStyle(panel).backgroundImage,title:getComputedStyle(title).color,header:getComputedStyle(panel.firstElementChild).backgroundColor};
+    });
+    const rgb = hex => `rgb(${[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)).join(', ')})`;
+    assert.deepEqual(actual,{surface:rgb(surface),image:'none',title:rgb(text),header:rgb(header)});
+  }
+});
 
 test('usage deltas count only for the acknowledged Ask conversation', async t => {
   const page = await fixture(t);

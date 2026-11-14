@@ -88,7 +88,7 @@ transition_rules:
   transition_target: TerminateTarget
   termination_reason: workflow_failed
 - source_agent: AppPlanAgent
-  target_agent: AssemblyAgent
+  target_agent: AdminRegistryAgent
   transition_type: condition
   condition_type: context_equals
   condition_key: app_task_batch_status
@@ -96,10 +96,9 @@ transition_rules:
   transition_target: AgentTarget
 # continue_with_available reports 'partial' when some task failed. Without this
 # rule the batch would finish and match nothing, turning a loud crash into a
-# silent stall. A partial build goes to assembly so acceptance can judge what
-# was produced and the bundle repair loop can act on it.
+# silent stall. The registry owner closes admin pages before assembly and acceptance.
 - source_agent: AppPlanAgent
-  target_agent: AssemblyAgent
+  target_agent: AdminRegistryAgent
   transition_type: condition
   condition_type: context_equals
   condition_key: app_task_batch_status
@@ -325,14 +324,14 @@ transition_rules:
   condition_value: true
   transition_target: TerminateTarget
 - source_agent: AppValidationAgent
-  target_agent: AssemblyAgent
+  target_agent: AdminRegistryAgent
   transition_type: condition
   condition_type: context_equals
   condition_key: app_task_recovery_status
   condition_value: completed
   transition_target: AgentTarget
 - source_agent: AppValidationAgent
-  target_agent: AssemblyAgent
+  target_agent: AdminRegistryAgent
   transition_type: condition
   condition_type: context_equals
   condition_key: app_task_recovery_status

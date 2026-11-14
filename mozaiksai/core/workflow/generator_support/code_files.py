@@ -290,6 +290,9 @@ def _materialize_app_schema_file_map(
             "authRequired": auth_required,
             "admins": [],
         }
+        for field in ("description", "tagline", "value_proposition"):
+            if isinstance(manifest.get(field), str) and manifest[field].strip():
+                app_json[field] = manifest[field].strip()
         file_map["app.json"] = json.dumps(app_json, indent=2, ensure_ascii=False)
         file_map["provenance.yaml"] = dump_app_provenance_yaml(
             build_default_app_provenance(
