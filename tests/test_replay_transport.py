@@ -38,6 +38,7 @@ from mozaiksai.core.transport import (
 
 ORIGIN = "https://replay.example.test"
 TOKEN = "synthetic-replay-credential"
+_UVICORN_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access")
 
 
 @pytest.fixture
@@ -46,14 +47,28 @@ def formatted_logs(caplog, capsys):
     outputs = [io.StringIO(), io.StringIO()]
     handlers = []
     records = []
+    saved = []
     root = logging.getLogger()
-    for output, formatter in zip(outputs, [PrettyConsoleFormatter(no_color=True), ProductionJSONFormatter()], strict=True):
-        handler = logging.StreamHandler(output)
-        handler.setFormatter(formatter)
-        root.addHandler(handler)
-        handlers.append(handler)
-    handlers[0].addFilter(lambda record: records.append(record) or True)
     try:
+        # Any earlier uvicorn.Config built with the default log_config leaves the
+        # uvicorn loggers non-propagating, above INFO and writing to stderr for
+        # the rest of the process. Start from the state a canonical host has, so
+        # the result does not depend on which tests ran first.
+        for name in _UVICORN_LOGGERS:
+            logger = logging.getLogger(name)
+            saved.append((logger, logger.level, logger.propagate, logger.disabled, logger.handlers[:]))
+            logger.handlers.clear()
+            logger.setLevel(logging.NOTSET)
+            logger.propagate = True
+            logger.disabled = False
+        for output, formatter in zip(
+            outputs, [PrettyConsoleFormatter(no_color=True), ProductionJSONFormatter()], strict=True,
+        ):
+            handler = logging.StreamHandler(output)
+            handler.setFormatter(formatter)
+            root.addHandler(handler)
+            handlers.append(handler)
+        handlers[0].addFilter(lambda record: records.append(record) or True)
         with caplog.at_level(logging.DEBUG):
             yield outputs
         fallback = capsys.readouterr().err
@@ -68,6 +83,11 @@ def formatted_logs(caplog, capsys):
         for handler in handlers:
             root.removeHandler(handler)
             handler.close()
+        for logger, level, propagate, disabled, previous in saved:
+            logger.handlers[:] = previous
+            logger.setLevel(level)
+            logger.propagate = propagate
+            logger.disabled = disabled
 
 
 class Issuer(BaseAuthAdapter):
