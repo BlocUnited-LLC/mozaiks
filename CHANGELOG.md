@@ -99,6 +99,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Factory design agents receive verified selected-pack capabilities, action
+  identities and ownership boundaries while retaining app-specific design intent.
+
 - Fresh OSS installs, generated workspaces, and refinement profiles default to
   Google `gemini-3.8-flash`. Its Gemini API free tier requires a Google key and
   remains subject to account quotas and Google's data terms. Explicit runtime
