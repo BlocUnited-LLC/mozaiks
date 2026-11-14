@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from pymongo import ReadPreference
 from pymongo.read_concern import ReadConcern
@@ -165,13 +165,13 @@ async def run_app_data_transaction(
                 finally:
                     attempt.active = False
 
-            return await session.with_transaction(
+            return cast(_Result, await session.with_transaction(
                 execute,
                 read_concern=ReadConcern("snapshot"),
                 write_concern=WriteConcern("majority"),
                 read_preference=ReadPreference.PRIMARY,
                 max_commit_time_ms=10_000,
-            )  # type: ignore[no-any-return]
+            ))
     finally:
         _active_transaction.reset(active_token)
 

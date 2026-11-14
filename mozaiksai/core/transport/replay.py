@@ -9,13 +9,14 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import functools
 import json
 import math
 import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Protocol, TypeVar
+from typing import Any, Protocol, TypeVar, cast
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -133,11 +134,11 @@ def _parse_cursor(value: str, app_id: str, stream_id: str) -> tuple[str, int]:
 
 
 def _expiry(principal: WebSocketUser) -> float:
-    value = principal.raw_claims.get("exp")
-    if (
-        type(value) not in (int, float) or not 0 < value <= _MAX_SEQUENCE
-        or not math.isfinite(value) or value <= time.time()
-    ):
+    raw = principal.raw_claims.get("exp")
+    if type(raw) not in (int, float):
+        raise _Refusal(1008, "Valid token expiry required")
+    value = cast("int | float", raw)
+    if not 0 < value <= _MAX_SEQUENCE or not math.isfinite(value) or value <= time.time():
         raise _Refusal(1008, "Valid token expiry required")
     return float(value)
 
@@ -181,7 +182,7 @@ def _validate_page(page: ReplayPage, grant: ReplayGrant, after: int | None, limi
     for index, event in enumerate(page.events):
         if (
             type(event) is not ReplayEvent or not _position(event.sequence)
-            or event.sequence != after + index + 1 or not _identifier(event.event_id)
+            or event.sequence != (after or 0) + index + 1 or not _identifier(event.event_id)
             or event.event_id in seen or type(event.data) is not dict
         ):
             raise ValueError("Invalid replay source event")
@@ -234,7 +235,7 @@ async def _deliver(
             raise _Refusal(1008, "Replay authorization changed")
         authorization_version = grant.authorization_version
         page = await _bounded(
-            lambda grant=grant, after=after: source.read_page(principal, grant=grant, after=after, limit=limits.page_size),
+            functools.partial(source.read_page, principal, grant=grant, after=after, limit=limits.page_size),
             limits.source_timeout, expiry,
         )
         _validate_page(page, grant, after, limits.page_size)
