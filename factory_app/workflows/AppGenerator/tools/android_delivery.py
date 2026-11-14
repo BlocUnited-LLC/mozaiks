@@ -54,7 +54,7 @@ _MAX_SOURCE_BYTES = 64_000_000
 _PACKAGE_ID = re.compile(r"[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 _EXCLUDED_PARTS = {".git", ".local", "__pycache__", "node_modules", ".pytest_cache"}
-_WEB_ROOT_FILES = {"App.jsx", "main.jsx", "styles.css", "index.html", "package.json", "package-lock.json", "postcss.config.js", "tailwind.config.js", "vite.config.js", "workflowUi.js"}
+_WEB_ROOT_FILES = {"App.jsx", "main.jsx", "styles.css", "index.html", "package.json", "package-lock.json", "postcss.config.js", "tailwind.config.js", "vite.config.js", "workflowUi.js", "moduleUi.js", "moduleUiRegistration.js"}
 _UI_ROOT_FILES = {"package.json", "package-lock.json", "postcss.config.js", "tailwind.config.js", "tsconfig.json"}
 _TEXT_RESOURCE_SUFFIXES = frozenset({
     ".css", ".html", ".js", ".jsx", ".json", ".md",

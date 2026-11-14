@@ -95,6 +95,31 @@ def _validate_dependency_block(raw: Any, *, field: str) -> dict[str, list[dict[s
     }
 
 
+def _canonical_host_requirements(raw: Any) -> dict[str, Any]:
+    """Persist execution-relevant host requirements with the immutable pack pin."""
+    if not isinstance(raw, dict) or set(raw) - {"modules", "imports"}:
+        raise InstalledComponentStateError("host_requirements must contain only modules and imports")
+    modules = raw.get("modules") or []
+    imports = raw.get("imports") or []
+    if not isinstance(modules, list) or not isinstance(imports, list):
+        raise InstalledComponentStateError("host_requirements modules and imports must be arrays")
+    normalized = []
+    for item in modules:
+        if not isinstance(item, dict) or set(item) - {"module_id", "actions"}:
+            raise InstalledComponentStateError("host_requirements.modules entries require module_id and actions")
+        module_id = item.get("module_id")
+        actions = item.get("actions") or []
+        if (not isinstance(module_id, str) or not module_id or module_id != module_id.strip()
+                or "/" in module_id.replace("\\", "/") or ".." in module_id):
+            raise InstalledComponentStateError("host_requirements module_id is invalid")
+        if not isinstance(actions, list) or not all(isinstance(action, str) and action for action in actions):
+            raise InstalledComponentStateError("host_requirements actions must be action ids")
+        normalized.append({"module_id": module_id, "actions": sorted(set(actions))})
+    if not all(isinstance(name, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+", name) for name in imports):
+        raise InstalledComponentStateError("host_requirements imports must be dotted module paths")
+    return {"modules": sorted(normalized, key=lambda item: item["module_id"]), "imports": sorted(set(imports))}
+
+
 def canonical_component_entry(entry: dict[str, Any]) -> dict[str, Any]:
     pack_id = str(entry.get("pack_id") or "").strip()
     version = str(entry.get("version") or "").strip()
@@ -124,7 +149,7 @@ def canonical_component_entry(entry: dict[str, Any]) -> dict[str, Any]:
         if capability_id:
             capabilities.append({"capability_id": capability_id})
 
-    return {
+    result = {
         "pack_id": pack_id,
         "version": version,
         "digest": digest,
@@ -132,6 +157,9 @@ def canonical_component_entry(entry: dict[str, Any]) -> dict[str, Any]:
         "dependencies": dependencies,
         "capabilities": sorted(capabilities, key=lambda item: item["capability_id"]),
     }
+    if "host_requirements" in entry:
+        result["host_requirements"] = _canonical_host_requirements(entry["host_requirements"])
+    return result
 
 
 def canonical_installed_state(components: list[dict[str, Any]]) -> dict[str, Any]:
@@ -169,11 +197,17 @@ def load_installed_components(build_context_root: Path) -> dict[str, Any]:
     return canonical_installed_state(components)
 
 
-def write_installed_components(build_context_root: Path, state: dict[str, Any]) -> Path:
+def installed_components_text(state: dict[str, Any]) -> str:
+    """The canonical serialized installed state, as :func:`write_installed_components` writes it."""
     canonical = canonical_installed_state(list(state.get("components") or []))
+    return json.dumps(canonical, indent=2, sort_keys=True) + "\n"
+
+
+def write_installed_components(build_context_root: Path, state: dict[str, Any]) -> Path:
+    text = installed_components_text(state)
     path = installed_components_path(build_context_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(canonical, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(text, encoding="utf-8")
     return path
 
 
@@ -209,9 +243,8 @@ def load_installed_component_sources(build_context_root: Path) -> dict[str, str]
     return result
 
 
-def write_installed_component_sources(build_context_root: Path, sources: dict[str, str]) -> Path:
-    path = installed_component_sources_path(build_context_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
+def installed_component_sources_text(sources: dict[str, str]) -> str:
+    """The serialized source sidecar, as :func:`write_installed_component_sources` writes it."""
     payload = {
         "schema_version": _SOURCES_SCHEMA_VERSION,
         "sources": [
@@ -219,7 +252,13 @@ def write_installed_component_sources(build_context_root: Path, sources: dict[st
             for pack_id in sorted(sources)
         ],
     }
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+
+def write_installed_component_sources(build_context_root: Path, sources: dict[str, str]) -> Path:
+    path = installed_component_sources_path(build_context_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(installed_component_sources_text(sources), encoding="utf-8")
     return path
 
 
@@ -233,7 +272,9 @@ __all__ = [
     "canonical_installed_state",
     "component_by_id",
     "installed_component_sources_path",
+    "installed_component_sources_text",
     "installed_components_path",
+    "installed_components_text",
     "load_installed_component_sources",
     "load_installed_components",
     "write_installed_component_sources",
