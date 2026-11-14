@@ -160,6 +160,8 @@ const Header = ({
     profile: navProfile,
     notifications: navNotifications,
     auth: shellAuth,
+    landing_spot: landingSpot,
+    pages,
   } = useNavigation();
   const handleNavigationItem = useNavigationActions();
   const { login, logout } = useChatUI();
@@ -207,11 +209,15 @@ const Header = ({
   );
   const profileMenu = useMemo(
     () => filterPersonalAccountItems(
-      mergeProfileMenu(getDefaultProfileMenu(currentUser), profileConfig.menu)
+      mergeProfileMenu([
+        ...(isSignInAvailable(shellAuth) ? pages || [] : []).filter((page) => page.path === landingSpot && isShellItemVisible(page, userRoles))
+          .map((page) => ({ id: 'app-home', label: page.label || 'Home', action: 'navigate', path: page.path })),
+        ...getDefaultProfileMenu(currentUser),
+      ], profileConfig.menu)
         .filter((item) => isShellItemVisible(item, userRoles)),
       shellAuth,
     ),
-    [currentUser, profileConfig.menu, userRoles, shellAuth]
+    [currentUser, profileConfig.menu, userRoles, shellAuth, pages, landingSpot]
   );
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);

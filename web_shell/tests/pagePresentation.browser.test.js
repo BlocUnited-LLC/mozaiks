@@ -62,7 +62,11 @@ test('shared page presentation preserves app typography, layout and interactive 
   const bundle = await build({
     stdin: { contents: entry, resolveDir: shell, loader: 'jsx' },
     bundle: true, write: false, format: 'esm', jsx: 'automatic', loader: { '.js': 'jsx', '.png': 'dataurl' },
-    alias: { react: path.join(shell, 'node_modules/react'), 'react-dom': path.join(shell, 'node_modules/react-dom') },
+    alias: {
+      react: path.join(shell, 'node_modules/react'),
+      'react-dom': path.join(shell, 'node_modules/react-dom'),
+      'react-router-dom': path.join(shell, 'node_modules/react-router-dom'),
+    },
     nodePaths: [path.join(shell, 'node_modules')],
     define: { 'process.env.NODE_ENV': '"test"', 'process.env': '{}', 'import.meta.env': '{}' },
   });

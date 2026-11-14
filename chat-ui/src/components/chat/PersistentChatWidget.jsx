@@ -611,7 +611,7 @@ const PersistentChatWidget = ({
             alt=""
             aria-hidden="true"
             className="h-5 w-5 transition-transform group-hover:scale-110 md:h-9 md:w-9"
-            onError={applyBrandImageFallback}
+            onError={event => applyBrandImageFallback(event, getBrandLogoSrc({ branding: { name: chatTheme?.branding?.name } }))}
           />
           <svg
             className="h-4 w-4 text-primary transition-colors group-hover:text-foreground"
@@ -719,7 +719,7 @@ const PersistentChatWidget = ({
                     className="w-8 h-8 opacity-70 group-hover:opacity-100 transition-all duration-300 group-hover:scale-105"
                     alt=""
                     aria-hidden="true"
-                    onError={applyBrandImageFallback}
+                    onError={event => applyBrandImageFallback(event, getBrandLogoSrc({ branding: { name: chatTheme?.branding?.name } }))}
                   />
                   {workflowSessions.length > 1 && (
                     <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">

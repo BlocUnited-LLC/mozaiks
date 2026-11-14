@@ -45,9 +45,9 @@ Canonical target:
 
 Working modes:
 
-1. **Framework/platform mode** — work on runtime, platform host, app shell contracts, package/install flows, and repo-local infrastructure
+1. **Framework/platform mode** — work on runtime, platform host, app shell contracts and shared `chat-ui/src/admin/` surfaces, package/install flows, and repo-local infrastructure
 2. **Factory mode** — work on `factory_app/workflows/`, `factory_app/refinement_harness/` — builder/generator workflows, agent configs, structured outputs, refinement harness
-3. **Studio mode** — work on `mozaiksai/hosts/studio.py`, `factory_app/app/ui/pages/custom/studio/`, `factory_app/app/admin/`, `factory_app/app/modules/factory_control_plane/`, `chat-ui/src/admin/` — the management interface that surfaces Factory capabilities
+3. **Studio mode** — work on `mozaiksai/hosts/studio.py`, `factory_app/app/ui/pages/custom/studio/`, `factory_app/app/admin/`, `factory_app/app/modules/factory_control_plane/` — the management interface that surfaces Factory capabilities
 4. **Hosted product contract mode** — work on contracts that external hosted product workspaces consume; concrete hosted-product hosts live in those product workspaces
 
 ## Pre-Production Cleanup Policy

@@ -279,6 +279,7 @@ export const NavigationProvider = ({
             ...(shellConfig.appName ? { appName: shellConfig.appName } : {}),
             ...(shellConfig.appId ? { appId: shellConfig.appId } : {}),
             entry_point: shellConfig.entry_point,
+            assistant_available: shellConfig.assistant_available === true,
             chat_startup_mode: shellConfig.chat_startup_mode || 'ask',
             ...(shellConfig.auth ? { auth: shellConfig.auth } : {}),
             ...(shellConfig.pages?.length ? { pages: shellConfig.pages } : {}),

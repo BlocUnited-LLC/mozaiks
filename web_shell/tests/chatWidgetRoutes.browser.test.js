@@ -119,7 +119,7 @@ async function fixture(t, scenario, pathname = '/', width = 1280) {
   await page.addInitScript(scenario => {
     window.scenario = scenario; window.apiRequests = [];
     for (const [key, value] of Object.entries(scenario.storage || {})) localStorage.setItem(key, value);
-  }, { pages: [], navigation: {}, appName: 'Sample App', ...scenario });
+  }, { pages: [], navigation: { assistant_available: true }, appName: 'Sample App', ...scenario });
   await page.goto(origin + pathname);
   return page;
 }
@@ -316,5 +316,13 @@ for (const owner of ['alice', 'bob']) {
     }
     await page.getByRole('button', { name: 'Go to workflows', exact: true }).click();
     await expect(page).toHaveURL(origin + '/chat?mode=workflow&chat_id=saved-chat&workflow=Example');
+  });
+}
+
+for (const available of [false, undefined]) {
+  test(`app without configured assistant hides launcher (${available})`, async t => {
+    const page = await fixture(t, { pages: [appPage('/notes')], navigation: { assistant_available: available } }, '/notes');
+    await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open assistant' })).toHaveCount(0);
   });
 }
