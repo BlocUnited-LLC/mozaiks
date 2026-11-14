@@ -68,6 +68,12 @@ what must be reviewed.
 - `external_system`: external API, provider, database, hosted capability, or
   third-party dependency.
 
+DesignDocs guidance keeps protected discovered sources in `ownership_boundary`
+and its backend design context and asks the agent to omit them from the
+generated `surface_map`. An approved app-owned adapter is represented separately
+under its own surface. This prompt guidance alone does not prove deterministic
+enforcement at design save or during a generated-app build.
+
 Allowed operations are explicit: `inspect`, `index`, `explain`,
 `stage_patch`, `generate_overlay`, `generate_adapter`, `propose_migration`,
 `promote`, `open_pr`, and `ignore`.
