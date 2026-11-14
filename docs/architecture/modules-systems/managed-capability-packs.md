@@ -156,15 +156,23 @@ assembly, not just catalog suggestions. Do not project an entire catalog into
 that field to offer choices. Use the catalog projections for discovery and the
 existing trusted selection path for actual packs.
 
-The formatted planning block does not contain template implementations. That
-does not establish a token or spend cap: raw descriptor exposure and later
-revision/dependency context can still include additional data or generated
-source. DesignDocs' declared pack context currently serves deterministic
-ownership consumers; declaring a context variable alone does not supply its
-contract to the DesignDocs agent prompt. Qualify each workflow's actual input
-projection before claiming complete model-driven generation.
+DesignDocs projects verified selected-pack capabilities, runtime boundaries,
+surface ownership, facades and static module action identities into its agent
+prompt through its workflow middleware. The action projection uses the same
+verified pack module contracts used by page binding; Jinja module manifests
+are not included in that static projection. Unverified pack claims and bare
+app-owned `generated_module` ids do not provide pack guidance. The projection
+does not select a pack, grant permissions, or constrain app-wide visual
+identity. Template implementations stay in the deterministic materializer.
 
-The integration checks in `tests/test_pack_planning_structured_outputs.py`
+The formatted planning and design blocks do not establish a token or spend
+cap: raw descriptor exposure and later revision/dependency context can still
+include additional data or generated source. Qualify each workflow's actual
+input projection before claiming complete model-driven generation.
+
+The integration checks in `tests/test_designdocs_selected_pack_context.py`
+exercise trusted selected-pack guidance through the DesignDocs prompt
+middleware. `tests/test_pack_planning_structured_outputs.py`
 exercise typed plan admission and ownership with the real Content pack.
 `tests/test_pack_outputs_are_not_model_work.py` and
 `tests/test_content_starter_materialization.py` cover local assembly and runtime
