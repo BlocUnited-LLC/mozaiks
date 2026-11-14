@@ -644,7 +644,7 @@ const PersistentChatWidget = ({
         title="Minimize"
       >
         <div className="w-32 h-8 rounded-t-2xl bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.4)] to-[rgba(var(--color-secondary-rgb),0.4)] border-t border-l border-r border-[rgba(var(--color-primary-light-rgb),0.4)] backdrop-blur-sm flex items-center justify-center group-hover:from-[rgba(var(--color-primary-rgb),0.6)] group-hover:to-[rgba(var(--color-secondary-rgb),0.6)] transition-all">
-          <svg className="w-5 h-5 text-[var(--color-primary-light)] group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+          <svg className="w-5 h-5 text-[var(--color-primary-light)] group-hover:text-[var(--color-text-primary)] transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
         </div>
@@ -694,7 +694,7 @@ const PersistentChatWidget = ({
                 className={`flex h-9 w-9 items-center justify-center rounded-lg border text-base transition-all duration-200 ${
                   inSupportMode
                     ? 'border-warning/60 bg-warning/20 text-warning'
-                    : 'border-[rgba(var(--color-primary-light-rgb),0.25)] bg-[rgba(var(--color-primary-rgb),0.08)] text-[var(--color-text-secondary)] hover:border-[rgba(var(--color-primary-light-rgb),0.5)] hover:text-white'
+                    : 'border-[rgba(var(--color-primary-light-rgb),0.25)] bg-[rgba(var(--color-primary-rgb),0.08)] text-[var(--color-text-secondary)] hover:border-[rgba(var(--color-primary-light-rgb),0.5)] hover:text-[var(--color-text-primary)]'
                 }`}
               >
                 <span role="img" aria-label="Get help from an operator">🛟</span>
@@ -734,7 +734,7 @@ const PersistentChatWidget = ({
 
         {/* Workflow picker — shown when several builds are running */}
         {showWorkflowPicker && !inSupportMode && workflowSessions.length > 1 && (
-          <div className="flex-shrink-0 max-h-44 overflow-y-auto border-b border-[rgba(var(--color-primary-light-rgb),0.15)] bg-[rgba(0,0,0,0.35)] px-2 py-2">
+          <div className="flex-shrink-0 max-h-44 overflow-y-auto border-b border-[rgba(var(--color-primary-light-rgb),0.15)] bg-[var(--color-surface-alt)] px-2 py-2">
             <div className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
               Your running workflows
             </div>
@@ -745,7 +745,7 @@ const PersistentChatWidget = ({
                 onClick={() => handleBackToWorkspace(session)}
                 className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-[rgba(var(--color-primary-rgb),0.12)]"
               >
-                <span className="min-w-0 truncate text-xs font-semibold text-white">
+                <span className="min-w-0 truncate text-xs font-semibold text-[var(--color-text-primary)]">
                   {session.workflow_name}
                 </span>
                 <span className="flex-shrink-0 text-[10px] text-[var(--color-text-muted)]">Resume</span>
@@ -762,7 +762,7 @@ const PersistentChatWidget = ({
                 type="button"
                 onClick={handleNewConversation}
                 disabled={wsStatus !== 'connected' || selectingNew || hasPendingCurrentSends}
-                className="text-[11px] text-[var(--color-primary-light)] hover:text-white transition-colors opacity-60 hover:opacity-100 flex items-center gap-1"
+                className="text-[11px] text-[var(--color-primary-light)] hover:text-[var(--color-text-primary)] transition-colors opacity-60 hover:opacity-100 flex items-center gap-1"
               >
                 <span>+</span>
                 <span>New conversation</span>
@@ -800,7 +800,7 @@ const PersistentChatWidget = ({
                 <button
                   type="button"
                   onClick={() => { setInSupportMode(false); setSupportSent(false); setSupportError(null); setSupportMessage(''); }}
-                  className="mt-2 rounded-xl border border-[rgba(var(--color-primary-light-rgb),0.3)] px-4 py-2 text-sm text-[var(--color-text-secondary)] transition-colors hover:border-[rgba(var(--color-primary-light-rgb),0.6)] hover:text-white"
+                  className="mt-2 rounded-xl border border-[rgba(var(--color-primary-light-rgb),0.3)] px-4 py-2 text-sm text-[var(--color-text-secondary)] transition-colors hover:border-[rgba(var(--color-primary-light-rgb),0.6)] hover:text-[var(--color-text-primary)]"
                 >
                   Back to chat
                 </button>
@@ -815,7 +815,7 @@ const PersistentChatWidget = ({
                   onChange={(e) => setSupportMessage(e.target.value)}
                   placeholder="What do you need help with?"
                   rows={5}
-                  className="flex-1 resize-none rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-[var(--color-text-muted)] focus:border-[rgba(var(--color-primary-light-rgb),0.4)] focus:outline-none"
+                  className="flex-1 resize-none rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-alt)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[rgba(var(--color-primary-light-rgb),0.4)] focus:outline-none"
                 />
                 {supportError && (
                   <p className="text-xs leading-relaxed text-red-300">

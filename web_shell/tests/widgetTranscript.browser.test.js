@@ -30,7 +30,7 @@ before(async () => {
             <button>Send</button>
           </form></>;
       }`,
-    api: `export const authFetch=async()=>({ok:true,json:async()=>({sessions:[],session_state:null})});`,
+    api: `export const authFetch=async()=>({ok:true,json:async()=>({sessions:window.initialWorkflowSessions||[],session_state:null})});`,
   };
   const bundle = await build({
     stdin: { contents: `
@@ -103,12 +103,13 @@ const transcript = (gid = 'saved', messages = [
   { event_id: 'answer-1', sequence: 2, role: 'assistant', content: 'A saved answer' },
 ], changes = {}) => ({ app_id: 'sample-app', user_id: 'alice', chat_id: gid, found: true, messages, ...changes });
 
-async function fixture(t, width = 1280, initialGeneralId = 'saved') {
+async function fixture(t, width = 1280, initialGeneralId = 'saved', workflows = []) {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   t.after(async () => { await page.close(); assert.deepEqual(errors, []); });
   await page.addInitScript(id => { window.initialGeneralId = id; }, initialGeneralId);
+  await page.addInitScript(sessions => { window.initialWorkflowSessions = sessions; }, workflows);
   await page.goto(origin);
   await page.getByRole('button', { name: 'Open assistant', exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.connections.length)).toBe(1);
@@ -130,14 +131,17 @@ async function send(page, text) {
 }
 const submissions = page => page.evaluate(() => window.sent.filter(event => event.type === 'user.input.submit'));
 
-test('the actual widget surface and title follow light and dark app tokens', async t => {
-  const page = await fixture(t);
+test('widget surfaces, support input and workflow picker follow light and dark app tokens', async t => {
+  const page = await fixture(t, 1280, 'saved', [
+    {chat_id:'first',workflow_name:'First workflow'},
+    {chat_id:'second',workflow_name:'Second workflow'},
+  ]);
   for (const [surface,header,text,muted] of [
     ['#fff7ed','#ffedd5','#431407','#9a3412'],
     ['#111827','#1f2937','#f9fafb','#cbd5e1'],
   ]) {
     await page.evaluate(({surface,header,text,muted}) => {
-      for(const [key,value] of Object.entries({'--color-surface':surface,'--color-surface-alt':header,'--color-text-primary':text,'--color-text-muted':muted})) document.documentElement.style.setProperty(key,value);
+      for(const [key,value] of Object.entries({'--color-surface':surface,'--color-surface-alt':header,'--color-text-primary':text,'--color-text-secondary':text,'--color-text-muted':muted,'--color-border-subtle':muted})) document.documentElement.style.setProperty(key,value);
     }, {surface,header,text,muted});
     const actual = await page.evaluate(() => {
       const panel=document.querySelector('#mozaiks-assistant-panel');
@@ -146,6 +150,18 @@ test('the actual widget surface and title follow light and dark app tokens', asy
     });
     const rgb = hex => `rgb(${[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)).join(', ')})`;
     assert.deepEqual(actual,{surface:rgb(surface),image:'none',title:rgb(text),header:rgb(header)});
+    await page.getByRole('button',{name:'Go to a workflow (2 running)',exact:true}).click();
+    const workflow = page.getByRole('button',{name:'First workflow Resume',exact:true});
+    await expect(workflow).toBeVisible();
+    assert.equal(await workflow.locator('span').first().evaluate(el=>getComputedStyle(el).color),rgb(text));
+    assert.equal(await workflow.evaluate(el=>getComputedStyle(el.parentElement).backgroundColor),rgb(header));
+    await page.getByRole('button',{name:'Go to a workflow (2 running)',exact:true}).click();
+    await page.getByTitle('Get help from an operator',{exact:true}).click();
+    const input=page.getByPlaceholder('What do you need help with?');
+    await input.fill('Readable operator request');
+    await expect(input).toHaveValue('Readable operator request');
+    assert.deepEqual(await input.evaluate(el=>({text:getComputedStyle(el).color,background:getComputedStyle(el).backgroundColor})),{text:rgb(text),background:rgb(header)});
+    await page.getByTitle('Back to chat',{exact:true}).click();
   }
 });
 
