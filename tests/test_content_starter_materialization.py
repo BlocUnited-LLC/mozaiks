@@ -201,7 +201,8 @@ async def test_content_starter_materializes_and_serves_public_content(variant, t
     files = await _assemble(context)
     assert await _assemble(_context(variant)) == files
     assert files[PAGE] == _presentation(variant)
-    assert json.loads(files["brand/theme_config.json"]) == THEMES[variant]
+    expected_theme = {**THEMES[variant], "identity": {"name": json.loads(files["app.json"])["appName"]}}
+    assert json.loads(files["brand/theme_config.json"]) == expected_theme
     assert detach(context.get("captured_theme_config")) == THEMES[variant]
     assert detach(context.get("data_contract")) == APPROVED_DATA
     assert detach(context.get("capability_packs")) == original_selection
@@ -241,7 +242,7 @@ async def test_content_starter_materializes_and_serves_public_content(variant, t
     app = _http_app(loaded, collection)
     with TestClient(app) as client:
         assert client.get("/api/pages/entries").json()["sections"][0]["config"]["data_key"] == "entries"
-        assert client.get("/api/theme-config").json() == THEMES[variant]
+        assert client.get("/api/theme-config").json() == expected_theme
         listed = client.post("/api/modules/content/list_entries", json={"params": {}})
         assert listed.status_code == 200, listed.text
         assert [entry["entry_id"] for entry in listed.json()["entries"]] == [_record(1, "published")["entry_id"]]

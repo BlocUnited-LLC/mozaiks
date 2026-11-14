@@ -33,6 +33,7 @@ _APP_ID = "app-server-owned"
 _WORKFLOW = "AppGenerator"
 
 _INJECTED = {
+    "platform_user_email": "forged@example.test",
     "workflow_run_id": "wfrun_attacker",
     "run_build_binding": {"build_id": "stolen", "forged": True},
     "build_terminal_receipt": {"kind": "success", "forged": True},
@@ -423,8 +424,9 @@ async def test_privileged_setter_is_lease_fenced_real_mongo() -> None:
         client.close()
 
 
-def test_reserved_key_set_is_exactly_the_lifecycle_authority_fields() -> None:
+def test_reserved_key_set_is_exactly_the_server_authority_fields() -> None:
     assert SERVER_OWNED_SESSION_FIELDS == {
+        "platform_user_email",
         "build_terminal_receipt",
         "run_build_binding",
         "workflow_run_id",

@@ -6,6 +6,7 @@ import pytest
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import _apply_app_config_contracts
 from factory_app.workflows.AppGenerator.tools.save_app_schema import resolve_app_theme_config
 from mozaiksai.core.workflow.context.adapter import create_context_container
+from tests.factory_context import factory_context
 
 
 @pytest.mark.parametrize("patch", [None, {}, {"theme": {"density": "comfortable", "font": None}, "identity": None}])
@@ -18,7 +19,7 @@ def test_captured_theme_survives_task_assembly_and_partial_deltas(patch):
         "ui": {"page": {"sectionGap": "16px"}},
     }
     original = deepcopy(captured)
-    context = create_context_container(initial={"captured_theme_config": captured})
+    context = create_context_container(initial=factory_context({"app_id": "support-desk", "captured_theme_config": captured}))
     code_files = [{"filename": "app.json", "content": '{"appName":"Support Desk"}'}]
     if patch is not None:
         code_files.append({"filename": "brand/theme_config.json", "content": json.dumps(patch)})
@@ -34,7 +35,7 @@ def test_captured_theme_survives_task_assembly_and_partial_deltas(patch):
     assert resolve_app_theme_config(context.get("captured_theme_config"), patch) == expected
     assert context.snapshot()["captured_theme_config"] == original
     assert json.loads(files["app.json"]) == {
-        "appName": "Support Desk", "appId": "support-desk",
+        "appName": "Support Desk", "appId": "support-desk", "admins": [],
     }
 
 

@@ -29,6 +29,7 @@ from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     pack_template_page_errors,
     validate_planned_custom_routes,
     validate_planned_page,
+    workflow_names_from_context,
 )
 from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
     compose_ui_registry,
@@ -45,6 +46,7 @@ from .code_file_utils import (
     task_batch_outputs,
     without_auth_route_projection,
 )
+from .default_runtime_configs import app_admin_bootstrap, build_app_ai_config
 from .hydrate_app_revision_context import (
     hydrate_app_revision_context,
     read_bound_revision_files,
@@ -294,7 +296,7 @@ def _selected_capability_packs(app_build_plan: Any, context_variables: Any) -> l
 
 
 async def _verified_revision_source(app_build_plan: Any, context_variables: Any) -> dict[str, str] | None:
-    """Text files of the verified revision source a pack revision is bound to, else None.
+    """Text files of the selected verified revision source, else None.
 
     App-owned (``owner: workspace``) pack code comes only from verified
     source: this bound revision source (the authorized patch-lane child once it
@@ -307,7 +309,6 @@ async def _verified_revision_source(app_build_plan: Any, context_variables: Any)
         context_variables is None
         or context_variables.get("build_mode") != "revision"
         or not revision_source_artifact_id(context_variables)
-        or not _selected_capability_packs(app_build_plan, context_variables)
     ):
         return None
     from factory_app.workflows._shared.platform.build_target import require_build_binding
@@ -401,21 +402,38 @@ def _apply_app_config_contracts(
     app_id: str,
     app_build_plan: Any,
     context_variables: Any,
+    baseline_files: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
     file_map = {str(f["filename"]): str(f["content"]) for f in code_files if f.get("filename")}
+    app_manifest = None
     if "app.json" in file_map:
         app_manifest = json.loads(file_map["app.json"])
         if not isinstance(app_manifest, dict):
             raise ValueError("app.json must be a JSON object")
-        if app_manifest.get("appId") != app_id:
-            app_manifest["appId"] = app_id
-            file_map["app.json"] = json.dumps(app_manifest, indent=2, ensure_ascii=False) + "\n"
+        app_manifest["appId"] = app_id
+        app_manifest["admins"] = app_admin_bootstrap(
+            context_variables, baseline_manifest=json.loads((baseline_files or {}).get("app.json", "{}")),
+        )
+        file_map["app.json"] = json.dumps(app_manifest, indent=2, ensure_ascii=False) + "\n"
+        ai_path = "config/ai.json"
+        entry_point = context_variables.get("generated_workflow_name") if context_variables is not None else None
+        existing_ai = file_map.get(ai_path) or (baseline_files or {}).get(ai_path)
+        ai = json.loads(existing_ai) if existing_ai else build_app_ai_config(app_manifest, workflow_entry_point=entry_point)
+        if not isinstance(ai, dict):
+            raise ValueError("config/ai.json must be a JSON object")
+        entry_point = (ai.get("workflows") or {}).get("entry_point")
+        if entry_point and entry_point not in workflow_names_from_context(context_variables):
+            raise ValueError(f"config/ai.json references unavailable workflow {entry_point!r}")
+        file_map[ai_path] = existing_ai or json.dumps(ai, indent=2, ensure_ascii=False) + "\n"
     captured_theme = (
         context_variables.get("captured_theme_config") if context_variables is not None else None
     )
     theme_path = "brand/theme_config.json"
     theme_patch = json.loads(file_map[theme_path]) if theme_path in file_map else None
-    resolved_theme = resolve_app_theme_config(captured_theme, theme_patch)
+    resolved_theme = resolve_app_theme_config(
+        captured_theme, theme_patch,
+        app_name=(app_manifest.get("appName") or app_manifest["appId"]) if app_manifest else None,
+    )
     if resolved_theme is not None:
         file_map[theme_path] = json.dumps(resolved_theme, indent=2, ensure_ascii=False)
     for file in materialize_app_config_contracts(
@@ -686,6 +704,7 @@ async def _assemble_app_tasks(
         app_id=str(app_id),
         app_build_plan=app_build_plan,
         context_variables=context_variables,
+        baseline_files=verified_source,
     )
 
     # Write the assembled flat file map to context so the carry-forward

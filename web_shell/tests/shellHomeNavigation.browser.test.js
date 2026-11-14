@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import { chromium } from "@playwright/test";
+import { chromium, expect } from "@playwright/test";
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ui = path.resolve(shell, "../chat-ui/src");
 test("profile menu returns from account and conversation to the app home", async (t) => {
@@ -55,7 +55,7 @@ function App() {
   return <><Header user={{ id: "reader", name: "Reader", roles: ["user"] }} chatTheme={{ branding: { name: "Notes App" } }} /><h1>{location.pathname}</h1></>;
 }
 createRoot(document.getElementById("root")).render(<BrowserRouter><App /></BrowserRouter>);
-`, resolveDir: shell, loader: "jsx" }, alias: { react: path.join(shell, "node_modules/react"), "react-dom": path.join(shell, "node_modules/react-dom"), "react-router-dom": path.join(shell, "node_modules/react-router-dom") }, bundle: true, write: false, format: "esm", jsx: "automatic", loader: { ".js": "jsx", ".css": "empty" }, plugins: [{ name: "fixtures", setup(builder) {
+`, resolveDir: shell, loader: "jsx" }, alias: { react: path.join(shell, "node_modules/react"), "react-dom": path.join(shell, "node_modules/react-dom"), "react-router-dom": path.join(shell, "node_modules/react-router-dom") }, bundle: true, write: false, format: "esm", jsx: "automatic", loader: { ".js": "jsx", ".css": "empty", ".png": "dataurl" }, plugins: [{ name: "fixtures", setup(builder) {
     builder.onResolve({ filter: /.*/ }, (args) => args.path in stubs ? { path: args.path, namespace: "fixture" } : null);
     builder.onLoad({ filter: /.*/, namespace: "fixture" }, (args) => ({ contents: stubs[args.path], loader: "js", resolveDir: shell }));
   } }] });
@@ -73,6 +73,7 @@ createRoot(document.getElementById("root")).render(<BrowserRouter><App /></Brows
     page.setDefaultTimeout(5e3);
     page.on("pageerror", (error) => console.log(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}${route}`);
+    await expect(page.getByRole("img", { name: "App", exact: true })).toBeVisible();
     await page.getByTitle("Reader", { exact: true }).click();
     assert.equal(await page.getByText("Admin", { exact: true }).count(), 0);
     await page.getByText("Personal Notes", { exact: true }).click();

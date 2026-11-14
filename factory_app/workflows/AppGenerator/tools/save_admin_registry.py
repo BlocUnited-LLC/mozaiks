@@ -12,14 +12,17 @@ Persists AdminRegistryOutput to context_variables:
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Annotated, Any
 
+import yaml
 from pydantic import Field
 
 from factory_app.workflows._shared.generated_ui_contract import audit_app_ui_bundle_integrity
+from mozaiksai.core.admin.registry import AdminRegistry
 from mozaiksai.core.workflow.context.frozen import detach
+
+from .task_integrity import mark_repair_responded, validate_repair_candidate
 
 logger = logging.getLogger(__name__)
 
@@ -92,22 +95,15 @@ def save_admin_registry(
     Merges ``code_files`` into the running accumulator so AssemblyAgent picks
     up admin/admin_registry.yaml without a separate assembly step.
     """
-    registry = admin_registry or {}
-    new_files = code_files or []
-    validation_files = list(new_files)
-    if registry and not any(
-        isinstance(item, dict)
-        and str(item.get("filename") or item.get("path") or "") == "admin/admin_registry.yaml"
-        for item in validation_files
-    ):
-        validation_files.append(
-            {
-                "filename": "admin/admin_registry.yaml",
-                "content": json.dumps(registry),
-            }
-        )
+    submitted_registry = detach(admin_registry) or {}
+    registry_path = "admin/admin_registry.yaml"
+    new_files = [
+        item for item in detach(code_files or [])
+        if isinstance(item, dict) and str(item.get("filename") or item.get("path") or "") != registry_path
+    ]
+    new_files.append({"filename": registry_path, "content": yaml.safe_dump(submitted_registry, sort_keys=False)})
     registry_warnings = audit_app_ui_bundle_integrity(
-        validation_files,
+        new_files,
         source_label="admin registry output",
     )
     if registry_warnings:
@@ -116,16 +112,25 @@ def save_admin_registry(
             + "\n- ".join(registry_warnings)
         )
 
-    _context_set(context_variables, "admin_registry", registry)
+    registry = AdminRegistry.model_validate(submitted_registry).model_dump(mode="json", exclude_none=True)
+    new_files[-1] = {"filename": registry_path, "content": yaml.safe_dump(registry, sort_keys=False)}
 
     existing = _context_get(context_variables, "code_files", []) or []
     if not isinstance(existing, list):
         existing = []
+    repairing = _context_get(context_variables, "bundle_repair_target") == "AdminRegistryAgent"
+    if repairing:
+        baseline = _context_get(context_variables, "generated_files", {}) or {}
+        baseline.update({item["filename"]: item["content"] for item in existing if isinstance(item, dict) and item.get("filename")})
+        admitted = validate_repair_candidate(
+            context_variables,
+            {item["filename"]: item["content"] for item in new_files},
+            existing=baseline,
+        )
+        new_files = [{"filename": name, "content": content} for name, content in admitted.items()]
 
-    existing_names = {
-        str(f.get("filename") or "") for f in existing if isinstance(f, dict)
-    }
-    merged = list(existing)
+    merged = [item for item in existing if isinstance(item, dict) and item.get("filename") != registry_path]
+    existing_names = {str(item.get("filename") or "") for item in merged}
     added = 0
     for f in new_files:
         if not isinstance(f, dict):
@@ -136,7 +141,10 @@ def save_admin_registry(
             existing_names.add(fname)
             added += 1
 
+    _context_set(context_variables, "admin_registry", registry)
     _context_set(context_variables, "code_files", merged)
+    if repairing:
+        mark_repair_responded(context_variables, [item["filename"] for item in new_files])
 
     page_count = len(registry.get("pages") or [])
     logger.info(

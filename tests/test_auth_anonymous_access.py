@@ -837,9 +837,9 @@ def test_admin_gate_has_no_pass_through_for_auth_off(monkeypatch) -> None:
 
 
 def test_admin_email_allowlist_never_promotes_a_visitor(monkeypatch) -> None:
-    from mozaiksai.core.admin import router as admin_router
+    from mozaiksai.core.admin import email_promotion
 
-    monkeypatch.setattr(admin_router, "is_admin_by_email", lambda email: email == "boss@example.com")
+    monkeypatch.setattr(email_promotion, "is_admin_by_email", lambda email: email == "boss@example.com")
 
     _off(monkeypatch, AUTH_ANON_EMAIL="boss@example.com")
     assert _client(LOCAL).get("/admin").status_code == 200

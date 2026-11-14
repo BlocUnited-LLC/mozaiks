@@ -47,6 +47,7 @@ from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     verify_pack_integrity,
 )
+from factory_app.workflows.AppGenerator.tools.save_admin_registry import save_admin_registry
 from mozaiksai.core.workflow.context.adapter import create_context_container
 from mozaiksai.core.workflow.outcome_feedback import WorkflowFeedbackEvidence
 from mozaiksai.version import __version__ as FRAMEWORK_VERSION
@@ -163,6 +164,8 @@ PLAN_INPUTS: dict[str, dict[str, Any]] = {
         "primary_entities": {"outcome_feedback": ["WorkflowFeedback"]},
     },
 }
+
+APP_ADMIN_PAGES = {"commerce": ("commerce",), "mozaikspay": ("usage",)}
 
 
 # Explicit authorization for the test app, reviewed against the shipped pack
@@ -298,6 +301,11 @@ async def _assemble(pack_id: str) -> tuple[dict[str, str], Any, list[dict[str, s
             "data/contract.json": json.dumps(approved),
         },
     }))
+    page_ids = ["overview", *sorted({page for member in _required_packs(pack_id) for page in APP_ADMIN_PAGES.get(member, ())})]
+    save_admin_registry(admin_registry={"pages": [
+        {"id": page, "label": page.title(), "path": "/admin" if page == "overview" else "/admin/" + page}
+        for page in page_ids
+    ]}, context_variables=context)
     result = await assemble_app_tasks(context_variables=context)
     assert result["success"], f"{pack_id} cannot be assembled alone: {result.get('error')}"
     return {file["filename"]: file["content"] for file in result["code_files"]}, context, identities

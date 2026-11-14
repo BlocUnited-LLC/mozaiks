@@ -3,10 +3,11 @@ import logging
 import re
 from collections.abc import Callable, Iterable
 from pathlib import PurePosixPath
-from typing import Annotated, Any
+from typing import Annotated, Any, get_args
 
 from pydantic import Field
 
+from mozaiksai.core.runtime.app.auth_contract import AuthMode
 from mozaiksai.core.runtime.app.paths import (
     APP_AUTH_CONFIG_PATH,
     APP_PROVENANCE_PATH,
@@ -2219,6 +2220,11 @@ def app_build_plan(
     roles = _normalize_string_list(AppBuildPlan.get("roles"))
     auth_strategy = AppBuildPlan.get("auth_strategy")
     auth_required_from_strategy(auth_strategy, roles=roles, field="AppBuildPlan.auth_strategy")
+    auth_mode = AppBuildPlan.get("auth_mode")
+    if auth_mode is not None and auth_mode not in get_args(AuthMode):
+        raise ValueError("AppBuildPlan.auth_mode must use a canonical runtime auth mode")
+    if auth_mode is not None and auth_strategy in (None, "public"):
+        raise ValueError("AppBuildPlan.auth_mode requires a sign-in auth_strategy")
     service_scope = _normalize_string_list(AppBuildPlan.get("service_scope"))
     frontend_scope = _normalize_string_list(AppBuildPlan.get("frontend_scope"))
     theme_preferences = AppBuildPlan.get("theme_preferences")
@@ -2391,6 +2397,7 @@ def app_build_plan(
         "entities": entities,
         "roles": roles,
         "auth_strategy": auth_strategy,
+        "auth_mode": auth_mode,
         "service_scope": service_scope,
         "frontend_scope": frontend_scope,
         "theme_preferences": theme_preferences,

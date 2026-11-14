@@ -670,7 +670,7 @@ def test_appgenerator_validation_routes_repair_context_before_user_fallback():
     assert route({"app_validation_ends_run": True, "app_validation_status": "skipped"}) == "terminate"
     assert route({"app_validation_ends_run": True, "integration_tests_passed": True}) == "terminate"
     assert route({"app_validation_ends_run": True, "bundle_repair_target": "ServiceAgent"}) == "ServiceAgent"
-    assert route({"app_validation_ends_run": True, "app_task_recovery_status": "completed"}) == "AssemblyAgent"
+    assert route({"app_validation_ends_run": True, "app_task_recovery_status": "completed"}) == "AdminRegistryAgent"
     assert route({"app_validation_status": "failed"}) == "user"
     assert route({"integration_tests_passed": True}) == "DownloadAgent"
     assert route({}) == "user"

@@ -222,6 +222,13 @@ agents:
       - If `task_run_mode` is true, the task context is already scoped by the AppGenerator task batch executor.
       - Use the existing context instead of re-interviewing.
 
+      Choose `AppBuildPlan.auth_mode` from the approved access requirements supplied in
+      the concept/design inputs. Use `public_self_signup` for explicitly approved self
+      registration, `private_workspace` for private/invite access, or another declared
+      runtime AuthMode when required. Use null when the requirements do not settle it.
+      Preserve explicit retained auth configuration during refinement. App category
+      alone never authorizes public registration.
+
       Your output becomes the shared contract for downstream generation agents. Decompose into product capability packs first, not arbitrary code tasks first.
       In revision mode, AppBuildPlan still describes the complete retained app architecture; only build_tasks is a delta. Preserve every existing module capability, surface_id, operation, page, and data ownership entry from generated_files and app intelligence even when the requested edit touches one file. "Do not change modules/pages" means retain their declarations and omit unnecessary generation tasks, not clear capability_packs/pages. A service-only patch still resolves its capability_pack_id to a declared retained module capability.
   - id: industry_defaults
@@ -559,9 +566,12 @@ agents:
           - The api_surface task must emit the typed `ControllerOutput.app_backend_admin_config` object as the canonical source of truth for that surface.
           - `backend/admin_config.py` must return the canonical `mozaiks.admin.app_backend.v1` config as a plain dict (validated at codegen time).
           - `services/routes/admin.py` must expose `GET /api/admin/config` as a self-contained FastAPI `APIRouter` — no external mozaiksai imports required.
-        - **admin bootstrap population**: Use `platform_user_email` from context as the initial `admins` entry in the bundle-root `app.json`.
-          If `platform_user_email` is null or empty, use the email captured from the user during the interview.
-          Never leave `admins` empty — if both are null, use `"admin@example.com"` as a placeholder and note it in the scaffold context.
+        - **admin bootstrap population**: The materializer reads trusted runtime `platform_user_email`
+          for the initial app.json admins allowlist. Emit app identity through AppManifest.
+          Preserve existing grants on refinement. When the trusted identity is absent, report
+          operator setup as required. Do not invent placeholder emails or model-authored grants.
+          The materializer also renders app-owned Ask configuration from this app's identity
+          and available workflow artifacts. Provider credentials remain deployment inputs.
         - Do NOT include an `admin_config` build task.
         - Do NOT include admin pages in `pages[]`, generated page routes, or admin tasks targeting React files.
       12b. **surface realization rule**:
@@ -2989,6 +2999,13 @@ agents:
         for this build. Null or empty in OSS contexts without workspace build context.
         Use this to include provider-backed/operator pages that are not part of the
         standard framework admin surface.
+        - `app_task_batch_results`, `generated_files`, and `code_files`: current typed task
+          outputs and retained app artifacts. Read module `contracts/admin.yaml` panel
+          page references from these inputs and include their declared page ids.
+          Preserve retained registry pages unless the approved change removes them.
+      - If bundle_repair_request is supplied, repair only its declared registry
+        path using bundle_repair_errors and the supplied panel references. Keep
+        unrelated registry entries and module/pack files unchanged.
 
       **Standard app-scope page inclusion rules** (apply per capability set):
       - `overview` — always include; path `/admin`; icon `dashboard`; order 0
@@ -3051,6 +3068,9 @@ agents:
       8. Set `enabled: true` for all pages.
       9. Output a typed `admin_registry` object matching the `AdminRegistry` model.
       10. Serialize `admin/admin_registry.yaml` as a YAML string in `code_files`.
+        The typed registry is authoritative. The save tool serializes it and replaces
+        its previous file. `show_in_navigation` controls links inside the portal.
+        The platform projects the single authorized Admin menu entry automatically.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-

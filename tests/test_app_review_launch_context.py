@@ -24,6 +24,11 @@ from mozaiksai.core.workflow.context.authority import build_context_authority_po
 from mozaiksai.core.workflow.pack.schema import parse_global_pack_graph
 
 
+@pytest.fixture(autouse=True)
+def account_profile_identity(monkeypatch):
+    monkeypatch.setattr("mozaiksai.core.profile.identity.read_account_profile_identity", AsyncMock(return_value=None))
+
+
 @pytest.fixture
 def review_launch(monkeypatch):
     binding = RunBuildBinding(
@@ -123,7 +128,8 @@ async def test_resume_and_other_workflows_keep_the_existing_binding_contract(rev
         app_id="factory", user_id="owner", workflow_name=workflow, chat_id="existing",
         phase=phase, session_fields=fields,
     )
-    assert result == fields
+    expected = {**fields, **({"platform_user_email": None} if workflow == "AppGenerator" and phase == "prepare" else {})}
+    assert result == expected
     assert review_launch.registry.resolve_build_binding.await_args.kwargs["allow_current_build"] is False
     review_launch.registry.get_app_record.assert_not_awaited()
     review_launch.store.get_build_record.assert_not_awaited()

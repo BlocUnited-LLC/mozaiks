@@ -399,3 +399,48 @@ async def test_missing_binding_stops_before_artifact_lookup(monkeypatch):
     with pytest.raises(ValueError, match="Required runtime context"):
         await variables._load_context_async("BindingSmoke", "factory")
     loader.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("email", [None, "owner@example.test"])
+async def test_factory_owner_email_uses_exact_backend_profile_scope(monkeypatch, email):
+    from factory_app.workflows._shared.platform import build_target
+    from mozaiksai.core.profile import identity
+    from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+    service = AsyncMock()
+    service.resolve_build_binding.return_value = binding()
+    monkeypatch.setattr(build_target, "AppRegistryService", lambda: service)
+    monkeypatch.setattr(workflow_manager, "get_config", lambda _: {"context_variables": {"definitions": {
+        "run_build_binding": {"source": {"type": "runtime"}},
+        "platform_user_email": {"source": {"type": "runtime"}},
+    }}})
+    lookup = AsyncMock(return_value={"email": email} if email else None)
+    monkeypatch.setattr(identity, "read_account_profile_identity", lookup)
+    fields = await bind_factory_session(
+        app_id="factory", user_id="owner", workflow_name="AppGenerator", chat_id="new",
+        phase="prepare", trigger_source="chat", build_registry_id="appreg_tracker",
+        source_chat_id=None, session_fields={},
+    )
+    assert fields["platform_user_email"] == email
+    lookup.assert_awaited_once_with(app_id="factory", user_id="owner")
+    lookup.reset_mock()
+    for persisted in ({"platform_user_email": email}, {}):
+        resumed = await bind_factory_session(
+            app_id="factory", user_id="owner", workflow_name="AppGenerator", chat_id="new",
+            phase="resume", trigger_source="chat", build_registry_id="appreg_tracker",
+            source_chat_id=None, session_fields=persisted,
+        )
+        assert ("platform_user_email" in resumed) == ("platform_user_email" in persisted)
+        if persisted:
+            assert resumed["platform_user_email"] == email
+    lookup.assert_not_awaited()
+
+
+@pytest.mark.parametrize("writer", ["caller_input", "transition_router", "lifecycle_tool", "tool_writeback", "persisted_replay"])
+def test_factory_owner_email_is_runtime_authority(writer):
+    policy = build_context_authority_policy(workflow_name="AppGenerator", definitions={
+        "platform_user_email": {"type": "string", "source": {"type": "runtime"}},
+    })
+    with pytest.raises(ContextAuthorityError):
+        policy.require_can_write("platform_user_email", writer_id=writer)

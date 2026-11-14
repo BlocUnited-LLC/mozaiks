@@ -4,6 +4,9 @@ import path from 'node:path';
 import test, { before, after } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
+import fs from 'node:fs/promises';
+import postcss from 'postcss';
+import tailwindcss from '@tailwindcss/postcss';
 import { chromium, expect } from '@playwright/test';
 
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -27,7 +30,7 @@ before(async () => {
             <button>Send</button>
           </form></>;
       }`,
-    api: `export const authFetch=async()=>({ok:true,json:async()=>({sessions:[],session_state:null})});`,
+    api: `export const authFetch=async()=>({ok:true,json:async()=>({sessions:window.initialWorkflowSessions||[],session_state:null})});`,
   };
   const bundle = await build({
     stdin: { contents: `
@@ -76,10 +79,15 @@ before(async () => {
         ({ contents: stubs[args.path], loader: 'jsx', resolveDir: shell }));
     } }],
   });
+  const styles = await postcss([tailwindcss()]).process(
+    await fs.readFile(path.join(shell, 'styles.css'), 'utf8')
+      + `\n@source "${ui.replaceAll('\\', '/')}";`,
+    {from:path.join(shell,'styles.css')},
+  );
   server = http.createServer((request, response) => {
     response.setHeader('Content-Type', request.url === '/fixture.js' ? 'text/javascript' : 'text/html');
     response.end(request.url === '/fixture.js' ? bundle.outputFiles[0].text
-      : '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><div id="root"></div><script type="module" src="/fixture.js"></script>');
+      : `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>${styles.css}</style><div id="root"></div><script type="module" src="/fixture.js"></script>`);
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${server.address().port}`;
@@ -95,12 +103,13 @@ const transcript = (gid = 'saved', messages = [
   { event_id: 'answer-1', sequence: 2, role: 'assistant', content: 'A saved answer' },
 ], changes = {}) => ({ app_id: 'sample-app', user_id: 'alice', chat_id: gid, found: true, messages, ...changes });
 
-async function fixture(t, width = 1280, initialGeneralId = 'saved') {
+async function fixture(t, width = 1280, initialGeneralId = 'saved', workflows = []) {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   t.after(async () => { await page.close(); assert.deepEqual(errors, []); });
   await page.addInitScript(id => { window.initialGeneralId = id; }, initialGeneralId);
+  await page.addInitScript(sessions => { window.initialWorkflowSessions = sessions; }, workflows);
   await page.goto(origin);
   await page.getByRole('button', { name: 'Open assistant', exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.connections.length)).toBe(1);
@@ -121,6 +130,45 @@ async function send(page, text) {
   await page.getByRole('button', { name: 'Send', exact: true }).click();
 }
 const submissions = page => page.evaluate(() => window.sent.filter(event => event.type === 'user.input.submit'));
+
+test('widget surfaces, support input and workflow picker follow light and dark app tokens', async t => {
+  const page = await fixture(t, 1280, 'saved', [
+    {chat_id:'first',workflow_name:'First workflow'},
+    {chat_id:'second',workflow_name:'Second workflow'},
+  ]);
+  await page.route('**/api/modules/workspace_support/create_support_request', route=>route.fulfill({status:503,contentType:'application/json',body:'{}'}));
+  for (const [surface,header,text,muted,error] of [
+    ['#fff7ed','#ffedd5','#431407','#9a3412','#b91c1c'],
+    ['#111827','#1f2937','#f9fafb','#cbd5e1','#fca5a5'],
+  ]) {
+    await page.evaluate(({surface,header,text,muted,error}) => {
+      for(const [key,value] of Object.entries({'--color-surface':surface,'--color-surface-alt':header,'--color-text-primary':text,'--color-text-secondary':text,'--color-text-muted':muted,'--color-border-subtle':muted,'--color-error':error})) document.documentElement.style.setProperty(key,value);
+    }, {surface,header,text,muted,error});
+    const actual = await page.evaluate(() => {
+      const panel=document.querySelector('#mozaiks-assistant-panel');
+      const title=panel.querySelector('[title="Open full Ask chat"] span.block');
+      return {surface:getComputedStyle(panel).backgroundColor,image:getComputedStyle(panel).backgroundImage,title:getComputedStyle(title).color,header:getComputedStyle(panel.firstElementChild).backgroundColor};
+    });
+    const rgb = hex => `rgb(${[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)).join(', ')})`;
+    assert.deepEqual(actual,{surface:rgb(surface),image:'none',title:rgb(text),header:rgb(header)});
+    await page.getByRole('button',{name:'Go to a workflow (2 running)',exact:true}).click();
+    const workflow = page.getByRole('button',{name:'First workflow Resume',exact:true});
+    await expect(workflow).toBeVisible();
+    assert.equal(await workflow.locator('span').first().evaluate(el=>getComputedStyle(el).color),rgb(text));
+    assert.equal(await workflow.evaluate(el=>getComputedStyle(el.parentElement).backgroundColor),rgb(header));
+    await page.getByRole('button',{name:'Go to a workflow (2 running)',exact:true}).click();
+    await page.getByTitle('Get help from an operator',{exact:true}).click();
+    const input=page.getByPlaceholder('What do you need help with?');
+    await input.fill('Readable operator request');
+    await expect(input).toHaveValue('Readable operator request');
+    assert.deepEqual(await input.evaluate(el=>({text:getComputedStyle(el).color,background:getComputedStyle(el).backgroundColor})),{text:rgb(text),background:rgb(header)});
+    await page.getByRole('button',{name:'Send request',exact:true}).click();
+    const failure=page.getByText('Could not send the request. Open your profile support tab and try again.',{exact:true});
+    await expect(failure).toBeVisible();
+    assert.equal(await failure.evaluate(el=>getComputedStyle(el).color),rgb(error));
+    await page.getByTitle('Back to chat',{exact:true}).click();
+  }
+});
 
 test('usage deltas count only for the acknowledged Ask conversation', async t => {
   const page = await fixture(t);

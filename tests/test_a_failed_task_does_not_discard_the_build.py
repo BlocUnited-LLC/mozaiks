@@ -35,8 +35,14 @@ def test_a_partial_batch_still_reaches_assembly() -> None:
         and rule.get("condition_key") == "app_task_batch_status"
     }
 
-    assert targets.get("completed") == "AssemblyAgent"
-    assert targets.get("partial") == "AssemblyAgent"
+    assert targets.get("completed") == "AdminRegistryAgent"
+    assert targets.get("partial") == "AdminRegistryAgent"
+    assert any(
+        rule.get("source_agent") == "AdminRegistryAgent"
+        and rule.get("target_agent") == "AssemblyAgent"
+        and rule.get("transition_type") == "after_turn"
+        for rule in _rules()
+    )
 
 
 @pytest.mark.asyncio

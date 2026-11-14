@@ -13,7 +13,7 @@ function AuthCard({ title, children }) {
     <main id="main-content" className="flex min-h-screen items-center justify-center bg-background px-6 py-12 text-foreground">
       <section className="w-full max-w-md rounded-xl border border-border bg-card p-8 shadow-sm" aria-labelledby="auth-title">
         <p className="mb-3 text-sm text-muted-foreground">{appName}</p>
-        <h1 id="auth-title" className="mb-6 text-2xl font-semibold">{title}</h1>
+        <h1 id="auth-title" className="mb-6 text-2xl font-semibold heading-font">{title}</h1>
         {children}
       </section>
     </main>
@@ -49,7 +49,7 @@ export function LoginPage() {
 
   return (
     <AuthCard title="Sign in">
-      <p className="mb-6 text-sm text-muted-foreground">Continue with your account to access this app.</p>
+      <p className="mb-6 text-sm text-muted-foreground">{contract?.signup_enabled ? 'Sign in or create an account to use this app.' : 'Continue with your account to access this app.'}</p>
       {error && <p role="alert" className="mb-4 text-sm text-destructive">{error}</p>}
       <Button className="w-full" onClick={signIn} disabled={loading || pending}>{pending ? 'Redirecting…' : label}</Button>
     </AuthCard>

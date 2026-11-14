@@ -53,6 +53,7 @@ from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templat
     verified_pack_template_inventory,
     verified_selected_pack_sources,
 )
+from mozaiksai.core.admin.registry import AdminRegistry
 from mozaiksai.core.runtime.app.asset_manifest import asset_manifest_index
 from mozaiksai.core.runtime.app.auth_contract import (
     APP_AUTH_COMPONENTS,
@@ -2292,6 +2293,30 @@ def _scan_declared_pack_repo_support_outputs(
     ]
 
 
+def _scan_admin_panel_pages(files_map: dict[str, str]) -> list[str]:
+    registry_path = "admin/admin_registry.yaml"
+    registry, error = _load_yaml_mapping_from_file(files_map, registry_path)
+    if error:
+        return [error]
+    try:
+        page_ids = AdminRegistry.model_validate(registry or {}).page_ids()
+    except PydanticValidationError as exc:
+        return [f"{registry_path}: {exc}"]
+    errors = []
+    for path in files_map:
+        parts = path.split("/")
+        if len(parts) != 4 or parts[0] != "modules" or parts[2:] != ["contracts", "admin.yaml"]:
+            continue
+        contract, error = _load_yaml_mapping_from_file(files_map, path)
+        if error:
+            errors.append(error)
+            continue
+        for panel in (contract or {}).get("panels") or []:
+            if isinstance(panel, dict) and panel.get("page") not in page_ids:
+                errors.append(f"{registry_path}: missing enabled admin page {panel.get('page')!r} required by {path} panel {panel.get('id')!r}.")
+    return errors
+
+
 def scan_app_contracts(files_map: dict[str, str]) -> list[str]:
     """Validate shared app declarations, independent of generation output policy."""
     errors: list[str] = []
@@ -2305,6 +2330,7 @@ def scan_app_contracts(files_map: dict[str, str]) -> list[str]:
         _scan_event_reaction_closure,
         _scan_data_contract_module_alignment,
         _scan_entitlement_gate_capability_alignment,
+        _scan_admin_panel_pages,
     ):
         errors.extend(scan(files_map))
     errors.extend(_scan_auth_app_contract(files_map, require_generated_adapter=False))

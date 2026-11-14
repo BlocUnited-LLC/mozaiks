@@ -24,6 +24,7 @@ from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templat
     resolve_managed_capability_templates,
     verify_pack_integrity,
 )
+from factory_app.workflows.AppGenerator.tools.save_admin_registry import save_admin_registry
 from mozaiksai.core.billing.fulfillment import BillingFulfillmentCommand, BillingFulfillmentService
 from mozaiksai.core.capabilities.simple_llm import SimpleLLMCapabilityService
 from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
@@ -775,6 +776,11 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     accepted = await execute_file_replay(replay_context, candidates)
     for key, value in replay_context.items():
         ctx.set(key, value)
+    save_admin_registry(admin_registry={"pages": [
+        {"id": "overview", "label": "Overview", "path": "/admin"},
+        {"id": "usage", "label": "Usage", "path": "/admin/usage"},
+        {"id": "billing", "label": "Billing", "path": "/admin/billing"},
+    ]}, context_variables=ctx)
     assembled = await assemble_app_tasks(context_variables=ctx)
     assert detach(ctx.get("app_task_batch_results")) == accepted
     files = _file_map(assembled)

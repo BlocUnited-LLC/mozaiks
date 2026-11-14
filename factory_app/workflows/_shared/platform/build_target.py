@@ -64,6 +64,15 @@ async def bind_factory_session(
         allow_current_build=(workflow_name == "AppReview" and phase == "prepare" and trigger_source != "refinement"),
     )
     fields: dict[str, Any] = {"run_build_binding": binding.model_dump()}
+    if "platform_user_email" in definitions:
+        if phase == "resume":
+            if "platform_user_email" in session_fields:
+                fields["platform_user_email"] = session_fields["platform_user_email"]
+        else:
+            from mozaiksai.core.profile.identity import read_account_profile_identity
+
+            identity = await read_account_profile_identity(app_id=app_id, user_id=user_id)
+            fields["platform_user_email"] = identity.get("email") if identity else None
     if workflow_name == "AppReview" and phase == "prepare":
         from factory_app.workflows.AppReview.tools.review_context import (
             load_registered_review_context,

@@ -120,11 +120,13 @@ async def test_scoped_assembly_hydrates_verified_archive_and_preserves_baseline(
     })
     result = await assemble_app_tasks(context_variables=context)
     files = {entry["filename"]: entry["content"] for entry in result["code_files"]}
-    baseline.content.get_bundle.assert_awaited_once_with("immutable-archive")
+    assert baseline.content.get_bundle.await_args_list == [call("immutable-archive"), call("immutable-archive")]
     assert yaml.safe_load(files["ui/pages/records.yaml"]) == page
-    for path in baseline.files.keys() - {"ui/pages/records.yaml"}:
+    for path in baseline.files.keys() - {"ui/pages/records.yaml", "app.json"}:
         assert files[path] == baseline.files[path]
-    assert context.get("generated_files")["app.json"] == baseline.files["app.json"]
+    expected_manifest = {**json.loads(baseline.files["app.json"]), "admins": []}
+    assert json.loads(files["app.json"]) == expected_manifest
+    assert json.loads(context.get("generated_files")["app.json"]) == expected_manifest
 
 
 @pytest.mark.asyncio
@@ -215,11 +217,15 @@ def _upstream_design_revision(baseline, *, bundles):
 
 @pytest.mark.asyncio
 async def test_pre_app_design_revision_selects_first_generation_without_reading_design_as_zip(baseline):
+    from factory_app.workflows.AppGenerator.tools.default_runtime_configs import app_admin_bootstrap
+
     _upstream_design_revision(baseline, bundles=[])
+    baseline.context["platform_user_email"] = "owner@example.test"
 
     result = await revision.hydrate_app_revision_context(baseline.context)
 
     assert result == {"status": "skipped", "reason": "first_generation"}
+    assert app_admin_bootstrap(baseline.context) == ["owner@example.test"]
     assert not revision.revision_baseline_required(baseline.context)
     assert revision.revision_source_artifact_id(baseline.context) is None
     assert baseline.context["artifact_version_id"] == "design_1"
@@ -366,10 +372,15 @@ async def test_design_revision_cannot_turn_bad_or_existing_baseline_into_first_g
 @pytest.mark.asyncio
 @pytest.mark.parametrize("sequence", ["app_revision", "feature_revision", "unknown_revision"])
 async def test_carried_first_generation_flag_does_not_exempt_other_revisions(baseline, sequence):
-    baseline.context.update(workflow_sequence=sequence, revision_first_generation=True)
+    from factory_app.workflows.AppGenerator.tools.default_runtime_configs import app_admin_bootstrap
+
+    baseline.context.update(workflow_sequence=sequence, revision_first_generation=True, platform_user_email="editor@example.test")
+    grants = {"admins": ["owner@example.test"]}
+    assert app_admin_bootstrap(baseline.context, baseline_manifest=grants) == grants["admins"]
     assert revision.revision_baseline_required(baseline.context)
     await revision.hydrate_app_revision_context(baseline.context)
     assert baseline.context["revision_first_generation"] is False
+    assert app_admin_bootstrap(baseline.context, baseline_manifest=grants) == grants["admins"]
     baseline.content.get_bundle.assert_awaited_once()
 
 

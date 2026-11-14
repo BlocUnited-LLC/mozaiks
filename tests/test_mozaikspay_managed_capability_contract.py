@@ -167,6 +167,7 @@ def _golden_mozaikspay_saas_bundle() -> tuple[dict[str, str], list[dict]]:
     }
     files["app.json"] = '{"name":"Golden MozaiksPay SaaS","version":"1.0.0"}\n'
     files["config/subscriptions.yaml"] = _golden_subscriptions_yaml()
+    files["admin/admin_registry.yaml"] = "pages: [{id: overview, label: Overview, path: /admin}, {id: usage, label: Usage, path: /admin/usage}]\n"
     # A real SaaS bundle gates at least one feature action behind a sold
     # capability; the scanner rejects capability catalogs with zero gates.
     files["modules/reports/module.yaml"] = _golden_gated_reports_module_yaml()

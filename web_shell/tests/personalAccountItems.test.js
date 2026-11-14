@@ -89,6 +89,7 @@ function renderShellComponent(file, navigation, props = {}) {
       DEFAULT_HEADER_CONFIG: { logo: { src: null, wordmark: null, alt: 'App', href: '/' }, actions: [] },
       DEFAULT_FOOTER_CONFIG: { links: [], visible: true },
     },
+    '../../styles/brandAssets': {getBrandLogoSrc: () => '/app-logo.png', applyBrandImageFallback: () => {}},
     '../../providers/NavigationProvider': { useNavigation: () => navigation },
     '../../navigation/useNavigationActions': { useNavigationActions: () => () => {} },
     '../../navigation/shellActions': shellActions,

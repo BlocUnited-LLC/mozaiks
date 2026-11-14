@@ -616,8 +616,8 @@ def _shell_shortcut_catalog(pages: list[dict], shortcuts: dict[str, Any]) -> dic
     return catalog
 
 
-def _inject_admin_portal(result: dict) -> None:
-    """Guarantee Admin Portal appears in the Studio profile menu for admin users.
+def _inject_admin_portal(result: dict, *, path: str = "/apps", label: str = "Admin Portal") -> None:
+    """Project one authorized portal entry after shell navigation composition.
 
     Called after the full shell config pipeline so nothing can suppress it.
     Inserts before signout, or appends if signout is absent.
@@ -632,8 +632,12 @@ def _inject_admin_portal(result: dict) -> None:
         menu = []
         profile["menu"] = menu
 
-    if any(isinstance(item, dict) and item.get("id") == "admin-portal" for item in menu):
-        return
+    menu[:] = [
+        item for item in menu
+        if not isinstance(item, dict)
+        or (item.get("id") != "admin-portal" and item.get("path") != path)
+    ]
+    portal_item = {**_ADMIN_PORTAL_MENU_ITEM, "path": path, "label": label}
 
     signout_idx = next(
         (
@@ -645,9 +649,9 @@ def _inject_admin_portal(result: dict) -> None:
         None,
     )
     if signout_idx is not None:
-        menu.insert(signout_idx, dict(_ADMIN_PORTAL_MENU_ITEM))
+        menu.insert(signout_idx, portal_item)
     else:
-        menu.append(dict(_ADMIN_PORTAL_MENU_ITEM))
+        menu.append(portal_item)
 
 
 def _page_targets_surface(page: dict, *, surface: str) -> bool:
@@ -858,6 +862,20 @@ def _apply_dynamic_shell_navigation(
         *_navigation_items_from_config(navigation, catalog),
         *_shortcut_navigation_items(shortcuts, catalog),
     ])
+    portal_paths = {
+        page["path"] for page in pages
+        if page.get("component") == "AdminPortal" and page.get("meta", {}).get("adminPage")
+    }
+    all_items = [item for item in all_items if item.get("path") not in portal_paths]
+    for owner, key in ((result.get("header"), "pages"), (result.get("header"), "actions"),
+                       (result.get("profile"), "menu"), (result.get("footer"), "links"),
+                       ((result.get("mobile") or {}).get("bottomBar"), "items")):
+        if isinstance(owner, dict) and isinstance(owner.get(key), list):
+            owner[key] = [
+                item for item in owner[key]
+                if not isinstance(item, dict)
+                or (item.get("path") not in portal_paths and item.get("href") not in portal_paths)
+            ]
     # The public profile path is a ``:username`` template, so no entry can link to it.
     all_items = [item for item in all_items if item.get("path") != PUBLIC_PROFILE_SHELL_ROUTE["path"]]
 
@@ -1101,10 +1119,13 @@ async def build_shell_config(
 
     pages = result.get("pages", [])
     _admin_registry = load_admin_registry(resolve_active_app_root())
+    admin_entries = []
     for route in build_admin_shell_routes(_admin_registry):
         route_surfaces = route.get("surfaces")
         if isinstance(route_surfaces, list) and shell_surface not in route_surfaces:
             continue
+        if route["show_in_navigation"]:
+            admin_entries.append(route)
         _append_page_once(pages, {
             "path": route["path"],
             "component": "AdminPortal",
@@ -1118,7 +1139,7 @@ async def build_shell_config(
                 "adminPage": route["admin_page"],
                 "shellMode": "workspace",
                 "navigation": {
-                    "include": route["show_in_navigation"],
+                    "include": False,
                     "scope": "profile",
                 },
                 **({"surfaces": route_surfaces} if isinstance(route_surfaces, list) else {}),
@@ -1137,6 +1158,8 @@ async def build_shell_config(
     # Admin Portal is a Studio guarantee — not injected into app or user surfaces.
     if is_studio:
         _inject_admin_portal(result)
+    elif not is_user and admin_entries:
+        _inject_admin_portal(result, path=admin_entries[0]["path"], label="Admin")
 
     result["surface"] = shell_surface
 
