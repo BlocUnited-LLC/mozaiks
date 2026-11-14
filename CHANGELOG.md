@@ -14,7 +14,7 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
-- Standalone app administration uses the shared core renderer and authenticated configuration reads.
+- Standalone app administration uses the shared core renderer, authenticated configuration reads, and module panels on the overview.
 - App profile menus offer the declared app home, floating assistants follow app AI configuration, and chat surfaces use the app brand.
 
 

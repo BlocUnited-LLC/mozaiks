@@ -510,6 +510,9 @@ That means:
 
 
 
+Admin overview renders module panels assigned to `overview` alongside the
+runtime summary. Each page renders only its assigned module panels.
+
 ## App home and assistant chrome
 
 When sign-in is available, the profile menu includes the declared

@@ -15,7 +15,7 @@ export {
 };
 `,
     "../admin/components/AdminPrimitives.jsx": `import React from "react";
-const useAdminFetch = () => ({ data: { pages: [{ id: "notes", label: "Note Administration" }], module_panels: [{ id: "notes-panel", label: "Notes panel", page: "notes" }] } });
+const useAdminFetch = () => ({ data: { pages: [{ id: "notes", label: "Note Administration" }], module_panels: [{ id: "notes-panel", label: "Notes panel", page: "notes" }, { id: "overview-panel", label: "Overview notes panel", page: "overview" }] } });
 const AdminExtensionPanels = ({ panels }) => <div>{panels.map((panel) => <p key={panel.id}>{panel.label}</p>)}</div>;
 export {
   AdminExtensionPanels,
@@ -75,6 +75,11 @@ createRoot(document.getElementById("root")).render(<BrowserRouter><AdminPage rou
   await expect(page.getByRole("heading", { name: "Note Administration", exact: true })).toBeVisible();
   await expect(page.getByText("Notes panel", { exact: true })).toBeVisible();
   assert.equal(await page.getByRole("heading", { name: "Overview", exact: true }).count(), 0);
+  await expect(page.getByText("Overview notes panel", { exact: true })).toHaveCount(0);
+  await page.goto(`http://127.0.0.1:${server.address().port}/admin`);
+  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+  await expect(page.getByText("Overview notes panel", { exact: true })).toBeVisible();
+  await expect(page.getByText("Notes panel", { exact: true })).toHaveCount(0);
   await page.goto(`http://127.0.0.1:${server.address().port}/apps/customer/usage`);
   await expect(page.getByRole("heading", { name: "Usage", exact: true })).toBeVisible();
 });

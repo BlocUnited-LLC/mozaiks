@@ -106,10 +106,13 @@ export default function AdminPage({ route } = {}) {
   const BuiltinPage = BUILTIN_PAGES[activePage]
   if (activePage === 'overview') {
     content = (
-      <AdminOverviewPanel
-        runtimePanels={allRuntimePanels}
-        extensionPanels={allModulePanels}
-      />
+      <>
+        <AdminOverviewPanel
+          runtimePanels={allRuntimePanels}
+          extensionPanels={allModulePanels}
+        />
+        <AdminExtensionPanels panels={extensionPanels} />
+      </>
     )
   } else if (BuiltinPage) {
     content = <BuiltinPage runtimePanels={runtimePanels} extensionPanels={extensionPanels} />
