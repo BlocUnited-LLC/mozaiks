@@ -7,6 +7,13 @@ mozaiks-app platform track their own consumption.
 
 These are three distinct concerns. Do not conflate them.
 
+The local live journey driver resolves redacted chat usage events against the
+admin-only usage ledger by event ID. It verifies the registered build target,
+owner, chat and token counts before pricing a receipt; it stops if a receipt
+cannot be matched or priced. This does not expose model or agent identity in
+the public chat event. Driver limits are estimates based on best-effort,
+post-response usage and do not stop server-side work or enforce provider spend.
+
 ---
 
 ## Background: What the OSS Runtime Tracks

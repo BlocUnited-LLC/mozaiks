@@ -30,6 +30,13 @@ The pricing file uses the ``mozaiks.usage_pricing.v1`` catalog shape
 installed package). Usage from a model it cannot price stops the run, because
 the spend limit could not be enforced.
 
+The socket's usage delta intentionally omits model identity. The driver uses
+its operator credentials to match the event ID against ``/api/admin/usage``
+and checks the registered build target, user, chat and token counts. Missing,
+ambiguous or unpriceable receipts stop the driver. Usage is best effort and
+arrives after a response: this is an estimated limit, not a hard provider
+spending cap. Stopping the driver does not stop the server-side run.
+
 Prompt file (JSON, schema ``mozaiks.journey_script.v1``)::
 
     {
@@ -660,6 +667,7 @@ class JourneyDriver:
         self.last_poll = 0.0
         self.completed_chats: set[str] = set()
         self.pause_agent: str | None = None
+        self.usage_target_app_id: str | None = None
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -1027,7 +1035,7 @@ class JourneyDriver:
         elif frame_type in {"chat.text", "chat.stream_end", "chat.print"}:
             self._on_text(data)
         elif frame_type == "chat.usage_delta":
-            self._on_usage(data)
+            await self._on_usage(data)
         elif frame_type == "chat.tool_call":
             await self._on_tool_call(data)
         elif frame_type == "ack.tool_call_response":
@@ -1076,7 +1084,9 @@ class JourneyDriver:
         if isinstance(content, str) and content.strip():
             step.last_agent_message[agent] = content.strip()[:2000]
 
-    def _on_usage(self, data: Mapping[str, Any]) -> None:
+    async def _on_usage(self, data: Mapping[str, Any]) -> None:
+        if not data.get("model_name"):
+            data = await self._usage_receipt(data)
         cost = self.meter.add(data)
         self._step_for(data.get("chat_id")).usage_usd += cost
         if self.meter.over_limit():
@@ -1086,6 +1096,58 @@ class JourneyDriver:
                 f"Estimated spend ${self.meter.usd:.4f} passed the ${self.config.max_usd:g} limit "
                 f"during {self.step.workflow}.",
             )
+
+    async def _usage_receipt(self, delta: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Resolve a redacted socket event through the operator-only ledger."""
+        event_id = str(delta.get("event_id") or "").strip()
+        chat_id = str(delta.get("chat_id") or "").strip()
+        if not event_id or not chat_id or not any(step.chat_id == chat_id for step in self.steps):
+            raise JourneyStop(EXIT_INVALID, "spend_unpriceable", "Usage event lacks a known chat or receipt ID.")
+        if self.usage_target_app_id is None:
+            try:
+                response = await self.http.get("/api/studio/apps")
+                response.raise_for_status()
+                registry = response.json()
+            except (httpx.HTTPError, ValueError):
+                raise JourneyStop(EXIT_INVALID, "spend_unpriceable", "The build target registry is unavailable.") from None
+            apps = registry.get("apps") if isinstance(registry, dict) else None
+            targets = [row for row in apps if isinstance(row, dict) and row.get("build_registry_id") == self.config.build_registry_id] if isinstance(apps, list) else []
+            if len(targets) != 1 or targets[0].get("chat_app_id") != self.config.app_id or not targets[0].get("app_id"):
+                raise JourneyStop(EXIT_INVALID, "spend_unpriceable", "The build target cannot be resolved for usage accounting.")
+            self.usage_target_app_id = str(targets[0]["app_id"])
+        for attempt in range(5):
+            try:
+                response = await self.http.get(
+                    "/api/admin/usage",
+                    params={"app_id": self.config.app_id, "user_id": self.config.user_id, "limit": 1000},
+                )
+                response.raise_for_status()
+                payload = response.json()
+            except (httpx.HTTPError, ValueError):
+                raise JourneyStop(EXIT_INVALID, "spend_unpriceable", "The operator usage ledger is unavailable.") from None
+            events = payload.get("events") if isinstance(payload, dict) else None
+            matches = [row for row in events if isinstance(row, dict) and row.get("event_id") == event_id] if isinstance(events, list) else []
+            if matches:
+                if len(matches) != 1:
+                    break
+                receipt = matches[0]
+                if (
+                    receipt.get("app_id") != self.usage_target_app_id
+                    or receipt.get("user_id") != self.config.user_id
+                    or receipt.get("chat_id") != chat_id
+                    or any(
+                        type(receipt.get(key)) is not int or receipt[key] < 0
+                        or type(delta.get(key)) is not int or delta[key] != receipt[key]
+                        for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+                    )
+                    or type(receipt.get("cached_prompt_tokens")) is not int
+                    or not 0 <= receipt["cached_prompt_tokens"] <= receipt["prompt_tokens"]
+                ):
+                    break
+                return receipt
+            if attempt < 4:
+                await asyncio.sleep(0.2)
+        raise JourneyStop(EXIT_INVALID, "spend_unpriceable", "Usage receipt is missing or does not match the current run.")
 
     def _human_assist(self, kind: str, detail: str, **extra: Any) -> JourneyStop:
         step = self.steps[-1] if self.steps else None

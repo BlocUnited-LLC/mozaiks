@@ -229,6 +229,11 @@ class FakeHost:
     })
     accept: tuple[int, dict[str, Any]] = (200, ACCEPTED)
     promote: tuple[int, dict[str, Any]] = (200, PROMOTED)
+    usage_events: list[dict[str, Any]] = field(default_factory=list)
+    usage_status: int = 200
+    apps: list[dict[str, Any]] = field(default_factory=lambda: [
+        {"build_registry_id": BUILD, "app_id": "target-app", "chat_app_id": APP}
+    ])
     transitions: dict[str, dict[str, Any]] = field(default_factory=lambda: {
         "app_review": {"id": "app_review", "transition_type": "chat_session", "route_to": "AppReview"},
     })
@@ -266,6 +271,15 @@ class FakeHost:
         async def session_state(request: Request) -> Any:
             self.log.append({"event": "session_state", "params": dict(request.query_params)})
             return {"session_state": dict(self.session_state)}
+
+        @app.get("/api/admin/usage")
+        async def admin_usage(request: Request) -> Any:
+            self.log.append({"event": "admin_usage", "params": dict(request.query_params)})
+            return JSONResponse({"events": self.usage_events}, status_code=self.usage_status)
+
+        @app.get("/api/studio/apps")
+        async def studio_apps() -> Any:
+            return {"apps": self.apps}
 
         @app.post("/api/studio/build/artifacts/{artifact_version_id}/accept")
         async def accept(artifact_version_id: str, request: Request) -> Any:
@@ -616,6 +630,43 @@ async def test_usage_the_pricing_file_cannot_price_stops_the_driver(tmp_path: Pa
 
     assert (run.exit_code, run.report["reason"]) == (driver.EXIT_INVALID, "spend_unpriceable")
     assert run.elapsed < 60
+
+
+@pytest.mark.parametrize("wrong_owner", [False, True])
+async def test_redacted_usage_is_matched_to_the_operator_ledger(tmp_path: Path, wrong_owner: bool) -> None:
+    raw = {"kind": "usage_delta", "event_id": "receipt-1", "chat_id": "c-1",
+           "prompt_tokens": 1000, "completion_tokens": 100, "total_tokens": 1100}
+    host = single_step("c-1", "ValueEngine", Send(envelope(raw)))
+    host.usage_events = [{**raw, "app_id": "target-app", "user_id": "other" if wrong_owner else USER,
+                          "model_name": "gpt-4o-mini", "cached_prompt_tokens": 200}]
+    run = await drive(host, tmp_path, max_usd=0.00001)
+    assert run.report["reason"] == ("spend_unpriceable" if wrong_owner else "spend_limit")
+    assert host.events("admin_usage")[0]["params"] == {"app_id": APP, "user_id": USER, "limit": "1000"}
+    if not wrong_owner:
+        assert run.report["spend"]["cached_prompt_tokens"] == 200
+        assert run.report["spend"]["usd"] == pytest.approx(0.000195)
+
+
+@pytest.mark.parametrize("problem", ["target", "chat", "count", "cache", "duplicate", "missing", "forbidden"])
+async def test_redacted_usage_fails_closed_for_unmatched_receipts(tmp_path: Path, problem: str) -> None:
+    raw = {"kind": "usage_delta", "event_id": "receipt-1", "chat_id": "c-1",
+           "prompt_tokens": 1000, "completion_tokens": 100, "total_tokens": 1100}
+    host = single_step("c-1", "ValueEngine", Send(envelope(raw)))
+    receipt = {**raw, "app_id": "target-app", "user_id": USER,
+               "model_name": "gpt-4o-mini", "cached_prompt_tokens": 0}
+    if problem == "target":
+        host.apps = []
+    elif problem == "forbidden":
+        host.usage_status = 403
+    elif problem == "chat":
+        receipt["chat_id"] = "other-chat"
+    elif problem == "count":
+        receipt["prompt_tokens"] = 999
+    elif problem == "cache":
+        receipt["cached_prompt_tokens"] = None
+    host.usage_events = [] if problem == "missing" else [receipt] * (2 if problem == "duplicate" else 1)
+    run = await drive(host, tmp_path)
+    assert run.report["reason"] == "spend_unpriceable"
 
 
 async def test_the_fresh_session_resume_defect_is_named_not_worked_around(tmp_path: Path) -> None:
