@@ -331,3 +331,11 @@ Mongo container. It requires local Docker with the test's pinned Mongo image,
 Node, and installed web_shell dependencies. The fixture stops its own container
 and HTTP server and removes its temporary synthetic bearer-token file. Other
 accounts, databases, and services are outside that fixture's scope.
+
+
+Acceptance stores its event identity and acceptance timestamp in the same atomic
+transition. Retrying the acceptance replays that identity and payload through
+`ModuleContext.emit`, including after a fresh service/router starts. Both first
+acceptance and retry return the accepting user's friendship view. Recovery after
+a stopped process requires an acceptance-action retry. The acceptance notification
+uses the existing declared notification reaction and durable idempotency ledger.

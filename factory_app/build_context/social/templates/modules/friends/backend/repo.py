@@ -41,7 +41,7 @@ class FriendRequestRepo:
         try:
             await collection.update_one(
                 {"_id": pair_id, "status": {"$nin": ["pending", "accepted"]}},
-                {"$set": dict(doc)}, upsert=True,
+                {"$set": dict(doc), "$unset": {"acceptance_event_id": "", "accepted_at": ""}}, upsert=True,
             )
         except Exception:
             # A simultaneous request or an uncertain write is reconciled by the
@@ -62,10 +62,15 @@ class FriendRequestRepo:
         row = await _collection(ctx, "requests").find_one({"requester_id": requester_id, "recipient_id": recipient_id, "status": "pending"})
         return dict(row) if isinstance(row, Mapping) else None
 
-    async def update_status(self, ctx, *, request_id: str, status: str, updated_at: str) -> bool:
+    async def update_status(self, ctx, *, request_id: str, status: str, updated_at: str, event_id: str | None = None) -> bool:
+        changes = {"status": status, "updated_at": updated_at}
+        if status == "accepted":
+            if not event_id:
+                raise ValueError("Acceptance requires a durable event identity")
+            changes.update(acceptance_event_id=event_id, accepted_at=updated_at)
         result = await _collection(ctx, "requests").update_one(
             {"request_id": request_id, "status": "pending"},
-            {"$set": {"status": status, "updated_at": updated_at}},
+            {"$set": changes},
         )
         return bool(getattr(result, "modified_count", 0))
 

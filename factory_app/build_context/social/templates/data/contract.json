@@ -53,6 +53,16 @@
               "name": "updated_at",
               "type": "string",
               "required": true
+            },
+            {
+              "name": "acceptance_event_id",
+              "type": "string",
+              "required": false
+            },
+            {
+              "name": "accepted_at",
+              "type": "string",
+              "required": false
             }
           ],
           "lifecycle": {

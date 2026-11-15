@@ -70,29 +70,36 @@ class FriendsService:
         if req.get("recipient_id") != user_id:
             return {"success": False, "error": "You can only accept requests addressed to you."}
         if req.get("status") == REQUEST_STATUS_ACCEPTED:
-            return {"success": True, "friendship": friendship_view(req, user_id)}
+            return await self._accepted_result(ctx, req)
         if req.get("status") != REQUEST_STATUS_PENDING:
             return {"success": False, "error": f"Request is already {req.get('status')}."}
         now = timestamp_now()
-        transitioned = await self._requests.update_status(ctx, request_id=request_id, status=REQUEST_STATUS_ACCEPTED, updated_at=now)
+        event_id = str(uuid4())
+        transitioned = await self._requests.update_status(ctx, request_id=request_id, status=REQUEST_STATUS_ACCEPTED,
+                                                         updated_at=now, event_id=event_id)
         if not transitioned:
             current = await self._requests.get(ctx, request_id=request_id)
             if current and current.get("status") == REQUEST_STATUS_ACCEPTED:
-                return {"success": True, "friendship": friendship_view(current, user_id)}
+                return await self._accepted_result(ctx, current)
             return {"success": False, "error": "The request changed before it could be accepted."}
-        friendship_id = f"fs_{request_id}"
-        doc_a = friendship_view({**req, "updated_at": now}, req["requester_id"])
+        return await self._accepted_result(ctx, {**req, "status": REQUEST_STATUS_ACCEPTED,
+                                                "acceptance_event_id": event_id, "accepted_at": now, "updated_at": now})
 
-        await ctx.emit("domain.social.friendship.created", {
-            "friendship_id": friendship_id,
-            "user_a_id": req["requester_id"],
-            "user_b_id": user_id,
-            "requester_id": req["requester_id"],
-            "request_id": request_id,
-            "created_at": now,
-        })
+    async def _accepted_result(self, ctx, request: dict) -> dict:
+        from mozaiksai.core.events.unified_event_dispatcher import EventDispatchOutcome
+        from mozaiksai.core.runtime.composition.module_event_provenance import ModuleEventRejection
 
-        return {"success": True, "friendship": doc_a}
+        outcome = await ctx.emit("domain.social.friendship.created", {
+            "friendship_id": f"fs_{request['request_id']}",
+            "user_a_id": request["requester_id"],
+            "user_b_id": request["recipient_id"],
+            "requester_id": request["requester_id"],
+            "request_id": request["request_id"],
+            "created_at": request["accepted_at"],
+        }, event_id=request["acceptance_event_id"])
+        if isinstance(outcome, ModuleEventRejection) or (isinstance(outcome, EventDispatchOutcome) and not outcome.success):
+            raise RuntimeError("Friendship accepted; its notification delivery needs a retry.")
+        return {"success": True, "friendship": friendship_view(request, actor_id(ctx))}
 
     async def decline_friend_request(self, ctx, *, request_id: str) -> dict:
         user_id = actor_id(ctx)

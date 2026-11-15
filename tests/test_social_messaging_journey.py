@@ -86,6 +86,35 @@ def test_two_users_friend_request_accept_dm_reply_and_reload(runtime, mongo_jour
     for route in platform.app.routes:
         if getattr(route, "path", "").startswith(("/api/me/media/", "/api/users/{user_id}/media/")):
             runtime.client.app.add_api_route(route.path, route.endpoint, methods=list(route.methods))
+    from mozaiksai.core import core_config
+    from mozaiksai.core.events.unified_event_dispatcher import UnifiedEventDispatcher
+    from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
+    from mozaiksai.core.runtime.composition.reaction_idempotency_store import (
+        ReactionIdempotencyStore,
+    )
+
+    monkeypatch.setattr(core_config, "get_mongo_client", lambda: executor._persistence_client)
+
+    def wire_events(mongo_client):
+        dispatcher = UnifiedEventDispatcher()
+        router = ModuleEventRouter([loaded], idempotency_store=ReactionIdempotencyStore(
+            client=mongo_client, database_name="social_messaging_journey"))
+        router.register(dispatcher)
+        executor._event_emitter = dispatcher.emit
+        return router
+
+    event_router = wire_events(client)
+    original_store = event_router._store_notification
+    interrupted = False
+
+    async def interrupt_first_acceptance(record):
+        nonlocal interrupted
+        if record["event_type"] == "domain.social.friendship.created" and not interrupted:
+            interrupted = True
+            return False
+        return await original_store(record)
+
+    monkeypatch.setattr(event_router, "_store_notification", interrupt_first_acceptance)
     scopes = "messages.read messages.write friends.read friends.manage"
 
     def action(user, module, name, **params):
@@ -146,7 +175,21 @@ def test_two_users_friend_request_accept_dm_reply_and_reload(runtime, mongo_jour
             assert request["success"] is True
             request_id = request["request"]["request_id"]
             assert action("mallory", "friends", "accept_friend_request", request_id=request_id)["success"] is False
-            assert action("bob", "friends", "accept_friend_request", request_id=request_id)["success"] is True
+            failed_delivery = runtime.client.post("/api/modules/friends/accept_friend_request",
+                json={"params": {"request_id": request_id}}, headers=runtime.token(user="bob", scopes=scopes))
+            assert failed_delivery.status_code == 500
+            # Fresh router memory and the persisted acceptance record recover the event.
+            wire_events(client)
+            accepted = action("bob", "friends", "accept_friend_request", request_id=request_id)
+            assert accepted["success"] is True
+            assert accepted["friendship"]["friend_user_id"] == "alice"
+            assert action("bob", "friends", "accept_friend_request", request_id=request_id) == accepted
+
+            async def accepted_alerts():
+                return await client["mozaiks"]["platform_notifications"].count_documents({
+                    "event_type": "domain.social.friendship.created", "audience.user_ids": "alice"})
+
+            assert runtime.client.portal.call(accepted_alerts) == 1
             for user, friend in [("alice", "bob"), ("bob", "alice")]:
                 assert action(user, "friends", "list_friends")["friends"][0]["friend_user_id"] == friend
             created = action("alice", "messages", "create_thread", participant_ids=["alice", "bob"], thread_type="direct")
@@ -211,6 +254,7 @@ def test_two_users_friend_request_accept_dm_reply_and_reload(runtime, mongo_jour
             api_app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
             browser_client = AsyncIOMotorClient(mongo_journey)
             executor._persistence_client = browser_client
+            wire_events(browser_client)
             listener = socket.socket()
             listener.bind(("127.0.0.1", 0))
             listener.listen()

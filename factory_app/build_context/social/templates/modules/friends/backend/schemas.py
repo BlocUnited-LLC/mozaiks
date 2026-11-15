@@ -27,6 +27,8 @@ class FriendRequest(TypedDict, total=False):
     status: str          # pending | accepted | declined | withdrawn | removed
     created_at: str
     updated_at: str
+    acceptance_event_id: str
+    accepted_at: str
 
 
 class Friendship(TypedDict, total=False):
