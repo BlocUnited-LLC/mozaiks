@@ -193,8 +193,18 @@ def test_two_users_friend_request_accept_dm_reply_and_reload(runtime, mongo_jour
                     "event_type": "domain.social.friendship.created", "source_event_id": committed["acceptance_event_id"]})
 
             assert runtime.client.portal.call(accepted_alerts) == 0
+            # Newer accepted connections put the interrupted acceptance beyond page one.
+            for index in range(21):
+                filler = action(f"paging-peer-{index}", "friends", "send_friend_request", recipient_id="bob")["request"]
+                assert action("bob", "friends", "accept_friend_request", request_id=filler["request_id"])["success"] is True
+            first_page = action("bob", "friends", "list_friends")
+            assert first_page["next_cursor"]
+            assert all(friend["friend_user_id"] != "alice" for friend in first_page["friends"])
+            second_page = action("bob", "friends", "list_friends", before=first_page["next_cursor"])
+            assert any(friend["friend_user_id"] == "alice" for friend in second_page["friends"])
+            assert len({friend["friendship_id"] for friend in first_page["friends"] + second_page["friends"]}) == 22
             for user, friend in [("alice", "bob"), ("bob", "alice")]:
-                assert action(user, "friends", "list_friends")["friends"][0]["friend_user_id"] == friend
+                assert any(row["friend_user_id"] == friend for row in action(user, "friends", "list_friends", limit=99)["friends"])
             created = action("alice", "messages", "create_thread", participant_ids=["alice", "bob"], thread_type="direct")
             thread_id = created["thread"]["thread_id"]
             assert action("alice", "messages", "send_message", thread_id=thread_id, body="Hello Bob")["success"] is True

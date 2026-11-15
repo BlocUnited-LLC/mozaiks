@@ -1,6 +1,7 @@
 """Pack account handlers address the same declared storage as module actions."""
 from __future__ import annotations
 
+import json
 import os
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
@@ -57,6 +58,7 @@ async def test_social_maximum_page_keeps_cursor_and_all_rows(
     if module == "friends":
         for record in rows:
             record["request_id"] = record.pop("friendship_id")
+            record["updated_at"] = "2026-01-01T00:00:00+00:00"
     for record in rows:
         await persistence.collection(module, collection).insert_one(record)
     await host.persistence(app_id="app-two").collection(module, collection).insert_one(
@@ -73,7 +75,10 @@ async def test_social_maximum_page_keeps_cursor_and_all_rows(
     call = getattr(service, action)
     first = await call(ctx, **params)
     assert first["count"] == 99
-    assert first["next_cursor"] == first[key][-1]["created_at"]
+    if module == "friends":
+        assert json.loads(first["next_cursor"]) == [first[key][-1]["created_at"], first[key][-1]["request_id"]]
+    else:
+        assert first["next_cursor"] == first[key][-1]["created_at"]
     second = await call(ctx, **params, before=first["next_cursor"])
     assert second["count"] == 6 and second["next_cursor"] is None
     assert [record[identifier] for page in (first, second) for record in page[key]] == [

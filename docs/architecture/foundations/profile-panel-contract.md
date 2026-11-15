@@ -339,5 +339,7 @@ transition. Retrying the acceptance replays that identity and payload through
 acceptance and retry return the accepting user's friendship view. Recovery after
 a stopped process leaves a persisted confirmation-pending flag. The accepting
 user can reopen their Friends tab and select Send confirmation to retry the
-existing acceptance action. Successful dispatch clears that flag. The acceptance notification
+existing acceptance action. Load more friends makes older confirmations reachable
+beyond the first page. Friend cursors include the timestamp and request identity
+so equal timestamps retain every connection. Successful dispatch clears that flag. The acceptance notification
 uses the existing declared notification reaction and durable idempotency ledger.

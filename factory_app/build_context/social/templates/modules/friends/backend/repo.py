@@ -112,8 +112,12 @@ class FriendshipRepo:
     async def list(self, ctx, *, user_id: str, limit: int, before: str | None = None) -> list[Document]:
         query = {"status": "accepted", **_parties(user_id)}
         if before:
-            query["updated_at"] = {"$lt": before}
-        rows = await _collection(ctx, "requests").find_many(query, limit=limit, sort=[("updated_at", -1)])
+            updated_at, request_id = json.loads(before)
+            query = {"$and": [query, {"$or": [
+                {"updated_at": {"$lt": updated_at}},
+                {"updated_at": updated_at, "request_id": {"$lt": request_id}},
+            ]}]}
+        rows = await _collection(ctx, "requests").find_many(query, limit=limit, sort=[("updated_at", -1), ("request_id", -1)])
         return [friendship_view(row, user_id) for row in rows or []]
 
     async def count(self, ctx, *, user_id: str) -> int:

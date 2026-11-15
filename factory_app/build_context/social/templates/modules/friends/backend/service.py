@@ -1,6 +1,7 @@
 """Business logic for the friends module."""
 from __future__ import annotations
 
+import json
 from uuid import uuid4
 
 from .policy import actor_id
@@ -179,7 +180,7 @@ class FriendsService:
         return {
             "friends": page,
             "count": len(page),
-            "next_cursor": page[-1]["created_at"] if has_more and page else None,
+            "next_cursor": json.dumps([page[-1]["created_at"], page[-1]["request_id"]]) if has_more and page else None,
         }
 
     async def list_friends_of(self, ctx, *, user_id: str, limit: int | None = None, before: str | None = None) -> dict:
@@ -190,7 +191,7 @@ class FriendsService:
         return {
             "friends": page,
             "count": len(page),
-            "next_cursor": page[-1]["created_at"] if has_more and page else None,
+            "next_cursor": json.dumps([page[-1]["created_at"], page[-1]["request_id"]]) if has_more and page else None,
         }
 
     async def list_friend_requests(

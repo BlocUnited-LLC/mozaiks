@@ -72,13 +72,14 @@ function EmptyState({ label }) {
 export function FriendListTab({ data, isOwner = false }) {
   const [friends, setFriends] = useState(Array.isArray(data?.friends) ? data.friends : []);
   const [requests, setRequests] = useState([]);
+  const [nextCursor, setNextCursor] = useState(data?.next_cursor || null);
   const [recipient, setRecipient] = useState("");
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { setFriends(Array.isArray(data?.friends) ? data.friends : []); }, [data]);
+  useEffect(() => { setFriends(Array.isArray(data?.friends) ? data.friends : []); setNextCursor(data?.next_cursor || null); }, [data]);
   useEffect(() => {
     if (!isOwner) return undefined;
     let active = true;
@@ -87,6 +88,24 @@ export function FriendListTab({ data, isOwner = false }) {
       .catch(() => { if (active) setError("Could not load friend requests."); });
     return () => { active = false; };
   }, [isOwner]);
+
+  async function loadMoreFriends() {
+    if (pending.current || !nextCursor) return;
+    pending.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await moduleAction("friends", "list_friends", { before: nextCursor });
+      if (!mounted.current) return;
+      setFriends(current => [...current, ...(result.friends || []).filter(friend => !current.some(existing => existing.friendship_id === friend.friendship_id))]);
+      setNextCursor(result.next_cursor || null);
+    } catch (failure) {
+      if (mounted.current) setError(failure.message);
+    } finally {
+      pending.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  }
 
   async function act(action, params) {
     if (pending.current) return;
@@ -112,6 +131,7 @@ export function FriendListTab({ data, isOwner = false }) {
       ]);
       if (!mounted.current) return;
       setFriends(updatedFriends.friends || []);
+      setNextCursor(updatedFriends.next_cursor || null);
       setRequests(updatedRequests.requests || []);
       if (action === "send_friend_request") setRecipient(current => current.trim() === submittedUsername ? "" : current);
     } catch (failure) {
@@ -147,6 +167,7 @@ export function FriendListTab({ data, isOwner = false }) {
           {isOwner && <button type="button" disabled={busy} onClick={() => act("remove_friend", {friend_user_id: friend.friend_user_id})}>Remove friend</button>}
         </article>)}
       </div>
+      {isOwner && nextCursor && <button type="button" disabled={busy} onClick={loadMoreFriends}>Load more friends</button>}
     </Section>
   );
 }

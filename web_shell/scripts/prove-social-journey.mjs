@@ -65,10 +65,13 @@ try {
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page.getByRole("button", { name: "View bob", exact: true }).click();
   await page.getByRole("heading", { name: "bob", exact: true }).waitFor();
+  await expect(page.getByRole("button", { name: "Send confirmation", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Load more friends", exact: true }).click();
   await page.getByRole("button", { name: "Send confirmation", exact: true }).waitFor();
   await page.reload();
   await page.getByRole("button", { name: "View bob", exact: true }).click();
   await page.getByRole("heading", { name: "bob", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Load more friends", exact: true }).click();
   await page.getByRole("button", { name: "Send confirmation", exact: true }).click();
   await expect(page.getByRole("button", { name: "Send confirmation", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "View alice", exact: true }).click();
