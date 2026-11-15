@@ -529,6 +529,19 @@ python -m mozaiks studio --dir . --open
 The local scripts run this app against the installed `mozaiks` package. They do
 not require a sibling checkout of the framework repository.
 
+## Owner Account Setup
+
+For an authenticated app, configure your OIDC provider through `.env`, including
+its issuer, API audience, public browser client, and the app's exact callback URL.
+Self-hosters choose their own provider. The included Mozaiks Compose stack offers
+Keycloak for local development. Hosted deployments can reuse the builder's
+identity-provider session through SSO.
+
+Set the owner's email in `app/app.json` `admins`. Create or invite that account
+through your provider, choose its password there, and verify its email. Open the
+login route declared in `app/config/auth.yaml` with `?owner=1` to confirm Admin
+access. The app checks its admin API before showing owner setup as confirmed.
+
 ## Coding Agent Guidance
 
 This workspace includes app-local guidance for coding agents:
