@@ -12,7 +12,7 @@ def actor_id(ctx) -> str:
 
 def friendship_query(ctx, *, user_id: str) -> dict[str, Any]:
     """Query scoped to a specific user's friendship records."""
-    return {"user_id": user_id}
+    return {"member_user_id": user_id}
 
 
 def request_query_as_requester(ctx, *, requester_id: str, status: str | None = None) -> dict[str, Any]:

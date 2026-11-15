@@ -3,7 +3,7 @@
 GDPR deletion and export for friend requests and friendship records.
 
 Deletion policy:
-  - Friendship records where user_id == deleted user: hard-deleted.
+  - Friendship records where member_user_id == deleted user: hard-deleted.
   - Friendship records where friend_user_id == deleted user: hard-deleted.
     (Both sides of the symmetric pair are removed so the peer also loses
     the connection, which is correct — the user's consent to the
@@ -50,7 +50,7 @@ class AccountDataHandler:
         requests = self._collection(app_id, user_id, "requests")
 
         # Remove all friendship records involving this user (both directions).
-        fs_as_user = await friendships.delete_many({"user_id": user_id})
+        fs_as_user = await friendships.delete_many({"member_user_id": user_id})
         fs_as_friend = await friendships.delete_many({"friend_user_id": user_id})
 
         # Remove all friend requests involving this user (sent or received).
@@ -71,7 +71,7 @@ class AccountDataHandler:
 
     async def export_user_data(self, *, app_id: str, user_id: str) -> dict[str, Any]:
         return json_safe_bson({
-            "friendships": await self._records(app_id, user_id, "friendships", "user_id"),
+            "friendships": await self._records(app_id, user_id, "friendships", "member_user_id"),
             "friend_requests_sent": await self._records(app_id, user_id, "requests", "requester_id"),
             "friend_requests_received": await self._records(app_id, user_id, "requests", "recipient_id"),
         })

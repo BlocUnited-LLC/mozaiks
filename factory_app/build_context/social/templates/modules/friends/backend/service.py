@@ -72,13 +72,13 @@ class FriendsService:
             return {"success": False, "error": f"Request is already {req.get('status')}."}
 
         now = timestamp_now()
-        await self._requests.update_status(ctx, request_id=request_id, status=REQUEST_STATUS_ACCEPTED, updated_at=now)
 
-        friendship_id = f"fs_{uuid4().hex}"
+        friendship_id = f"fs_{request_id}"
         base = {"friendship_id": friendship_id, "since": now, "created_at": now}
-        doc_a = {**base, "user_id": req["requester_id"], "friend_user_id": user_id}
-        doc_b = {**base, "user_id": user_id, "friend_user_id": req["requester_id"]}
+        doc_a = {**base, "member_user_id": req["requester_id"], "friend_user_id": user_id}
+        doc_b = {**base, "member_user_id": user_id, "friend_user_id": req["requester_id"]}
         await self._friendships.create_pair(ctx, doc_a, doc_b)
+        await self._requests.update_status(ctx, request_id=request_id, status=REQUEST_STATUS_ACCEPTED, updated_at=now)
 
         await ctx.emit("domain.social.friendship.created", {
             "friendship_id": friendship_id,
@@ -148,7 +148,7 @@ class FriendsService:
 
         now = timestamp_now()
         await ctx.emit("domain.social.friendship.removed", {
-            "user_id": user_id,
+            "member_user_id": user_id,
             "friend_user_id": friend_user_id,
             "removed_at": now,
         })

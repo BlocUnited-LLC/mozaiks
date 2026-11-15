@@ -156,7 +156,7 @@ actions:
           enum: [text, system]
     output_schema:
       type: object
-      required: [success, message]
+      required: [success]
       properties:
         success:
           type: boolean

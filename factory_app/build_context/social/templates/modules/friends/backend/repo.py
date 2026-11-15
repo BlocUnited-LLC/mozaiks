@@ -69,18 +69,22 @@ class FriendRequestRepo:
 class FriendshipRepo:
     async def create_pair(self, ctx, doc_a: Document, doc_b: Document) -> None:
         col = _collection(ctx, "friendships")
-        await col.insert_one({**doc_a})
-        await col.insert_one({**doc_b})
+        for document in (doc_a, doc_b):
+            await col.update_one(
+                {"member_user_id": document["member_user_id"], "friend_user_id": document["friend_user_id"]},
+                {"$setOnInsert": dict(document)},
+                upsert=True,
+            )
 
     async def find(self, ctx, *, user_id: str, friend_user_id: str) -> Document | None:
-        q: dict[str, Any] = {"user_id": user_id, "friend_user_id": friend_user_id}
+        q: dict[str, Any] = {"member_user_id": user_id, "friend_user_id": friend_user_id}
         return _norm(await _collection(ctx, "friendships").find_one(q))
 
     async def delete_pair(self, ctx, *, user_id: str, friend_user_id: str) -> int:
         q: dict[str, Any] = {
             "$or": [
-                {"user_id": user_id, "friend_user_id": friend_user_id},
-                {"user_id": friend_user_id, "friend_user_id": user_id},
+                {"member_user_id": user_id, "friend_user_id": friend_user_id},
+                {"member_user_id": friend_user_id, "friend_user_id": user_id},
             ]
         }
         result = await _collection(ctx, "friendships").delete_many(q)
@@ -94,7 +98,7 @@ class FriendshipRepo:
         limit: int,
         before: str | None = None,
     ) -> list[Document]:
-        q: dict[str, Any] = {"user_id": user_id}
+        q: dict[str, Any] = {"member_user_id": user_id}
         if before:
             q["created_at"] = {"$lt": before}
         return _norms(
@@ -106,4 +110,4 @@ class FriendshipRepo:
         )
 
     async def count(self, ctx, *, user_id: str) -> int:
-        return int(await _collection(ctx, "friendships").count({"user_id": user_id}))
+        return int(await _collection(ctx, "friendships").count({"member_user_id": user_id}))

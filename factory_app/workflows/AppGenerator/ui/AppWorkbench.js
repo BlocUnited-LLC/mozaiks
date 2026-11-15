@@ -15,6 +15,7 @@ import BuildStatusPane from './BuildStatusPane';
 import CodeEditorPane from './CodeEditorPane';
 import PreviewPane from '../../_shared/ui/app_preview/PreviewPane';
 import ExportActions from './ExportActions';
+import OwnerAccessCard from './OwnerAccessCard.jsx';
 import FileTreePane from './FileTreePane';
 import HarnessDecisionCard from '../../../app/ui/components/HarnessDecisionCard.jsx';
 import { studioFetch } from '../../../app/admin/pages/studioApi.js';
@@ -460,6 +461,7 @@ const AppWorkbench = ({
       </div>
 
       <div className="p-4 space-y-4">
+        <OwnerAccessCard files={filesMap} />
         <BuildStatusPane
           config={config}
           validationResult={validationResult}

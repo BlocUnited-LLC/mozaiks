@@ -132,7 +132,7 @@ actions:
       properties:
         friends: { type: array }
         count: { type: integer }
-        next_cursor: { type: string }
+        next_cursor: { type: [string, "null"] }
     permissions: [friends.read]
 
   - id: list_friends_of
@@ -153,7 +153,7 @@ actions:
       properties:
         friends: { type: array }
         count: { type: integer }
-        next_cursor: { type: string }
+        next_cursor: { type: [string, "null"] }
     permissions: [friends.read]
 
   - id: list_friend_requests
@@ -174,7 +174,7 @@ actions:
       properties:
         requests: { type: array }
         count: { type: integer }
-        next_cursor: { type: string }
+        next_cursor: { type: [string, "null"] }
     permissions: [friends.read]
 
   - id: get_friendship_status

@@ -131,9 +131,9 @@ def runtime(tmp_path, monkeypatch):
     app.state.executor_registry = SimpleNamespace(module_executor=executor)
     app.include_router(module_router.router)
 
-    def token(*, workspace=None, tenant=None, user="alice"):
+    def token(*, workspace=None, tenant=None, user="alice", scopes="messages.read messages.write"):
         claims = {"sub": user, "iss": "https://auth.test", "aud": "generated-messaging-test",
-                  "app_id": APP_ID, "scp": "messages.read messages.write", "exp": int(time.time()) + 300}
+                  "app_id": APP_ID, "scp": scopes, "exp": int(time.time()) + 300}
         if workspace:
             claims["workspace_id"] = workspace
         if tenant:

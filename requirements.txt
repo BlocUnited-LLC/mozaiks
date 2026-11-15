@@ -23,6 +23,7 @@ dnspython>=2.4.0
 # Auth
 PyJWT[crypto]>=2.8.0
 python-multipart>=0.0.6
+Pillow>=12.0.0
 
 # Azure (optional — used when AZURE_KEYVAULT_URL is set)
 azure-identity>=1.15.0

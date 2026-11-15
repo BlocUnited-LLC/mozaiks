@@ -60,7 +60,7 @@ async def test_social_maximum_page_keeps_cursor_and_all_rows(
         {**rows[-1], identifier: "foreign-app"}
     )
     await host.persistence(user_id="bob").collection(module, collection).insert_one(
-        {**rows[-1], "user_id": "bob", "actor_id": "bob", "feed_user_ids": ["bob"],
+        {**rows[-1], "member_user_id": "bob", "user_id": "bob", "actor_id": "bob", "feed_user_ids": ["bob"],
          identifier: "other-user"}
     )
     params = {"limit": requested_limit}
@@ -161,7 +161,7 @@ def row(module, index=0, user="alice"):
     if module == "commerce":
         return {**common, "actor_id": user}
     if module == "friends":
-        return {**common, "user_id": user, "friend_user_id": "carol", "requester_id": user, "recipient_id": "carol"}
+        return {**common, "member_user_id": user, "friend_user_id": "carol", "requester_id": user, "recipient_id": "carol"}
     if module == "activity_feed":
         return {**common, "actor_id": user, "feed_user_ids": [user, "carol"]}
     if module == "notification_settings":

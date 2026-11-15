@@ -18,7 +18,7 @@
               "required": true
             },
             {
-              "name": "user_id",
+              "name": "member_user_id",
               "type": "string",
               "required": true
             },
@@ -48,6 +48,10 @@
                 {
                   "field": "friendship_id",
                   "order": 1
+                },
+                {
+                  "field": "member_user_id",
+                  "order": 1
                 }
               ],
               "unique": true
@@ -56,7 +60,7 @@
               "name": "friendships_by_user",
               "keys": [
                 {
-                  "field": "user_id",
+                  "field": "member_user_id",
                   "order": 1
                 },
                 {
@@ -69,7 +73,7 @@
               "name": "friendships_by_user_friend",
               "keys": [
                 {
-                  "field": "user_id",
+                  "field": "member_user_id",
                   "order": 1
                 },
                 {

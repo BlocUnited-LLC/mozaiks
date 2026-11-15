@@ -494,6 +494,20 @@ def get_media_content_store() -> MediaContentStore:
     return _content_store
 
 
+def resolve_media_content_store(backend_name: str | None, *, default: MediaContentStore | None = None) -> MediaContentStore:
+    store = default or get_media_content_store()
+    normalized = str(backend_name or "").strip().lower()
+    if not normalized or normalized == store.backend_name:
+        return store
+    if normalized == "gridfs":
+        return GridFSMediaContentStore()
+    if normalized == "azure_blob":
+        return AzureBlobMediaContentStore()
+    if normalized == "local":
+        return LocalMediaContentStore()
+    raise ValueError(f"Unsupported media content backend: {backend_name!r}")
+
+
 class MediaAssetStore:
     """Mongo metadata store for generated media assets."""
 
@@ -625,20 +639,8 @@ class MediaAssetStore:
             return None
         return GeneratedMediaAsset.model_validate(doc)
 
-    def _content_store_for_backend(self, backend_name: str | None) -> MediaContentStore:
-        normalized = str(backend_name or "").strip().lower()
-        if not normalized or normalized == self.content_store.backend_name:
-            return self.content_store
-        if normalized == "gridfs":
-            return GridFSMediaContentStore()
-        if normalized == "azure_blob":
-            return AzureBlobMediaContentStore()
-        if normalized == "local":
-            return LocalMediaContentStore()
-        raise ValueError(f"Unsupported media content backend: {backend_name!r}")
-
     async def get_asset_content(self, asset: GeneratedMediaAsset) -> bytes:
-        store = self._content_store_for_backend(asset.content_backend)
+        store = resolve_media_content_store(asset.content_backend, default=self.content_store)
         return await store.get_media(asset.content_ref)
 
     async def mark_asset_promoted(
@@ -775,4 +777,5 @@ __all__ = [
     "MediaContentStore",
     "get_media_asset_store",
     "get_media_content_store",
+    "resolve_media_content_store",
 ]
