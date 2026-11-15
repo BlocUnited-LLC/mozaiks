@@ -253,6 +253,8 @@ test('PageFrame clearance follows breakpoints, bottom-bar ownership, safe areas 
   await assertClearControls(page, 'desktop bottom bar hidden by media query');
   await page.setViewportSize({ width: 390, height: 900 });
   await page.evaluate(() => window.updateNavigation({ bottomBar: false }));
+  await expect(page.locator('.shell-mobile-bottom-bar')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Open assistant', exact: true })).toBeVisible();
   await assertClearControls(page, 'mobile bottom bar removed');
   const beforeInset = await framePadding(page);
   await page.evaluate(() => document.documentElement.style.setProperty('--safe-area-bottom', '24px'));
