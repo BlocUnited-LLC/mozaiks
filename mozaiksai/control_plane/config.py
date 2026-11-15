@@ -97,6 +97,17 @@ class ControlPlaneContractSurfaceCapabilityConfig(ControlPlaneCapabilityConfig):
     regeneration_llm_profile: ControlPlaneLLMProfileId | None = None
 
 
+class ControlPlaneClassifierConfig(ControlPlaneCapabilityConfig):
+    typo_decisions_enabled: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_capability_config(cls, value: Any) -> Any:
+        if isinstance(value, ControlPlaneCapabilityConfig) and not isinstance(value, cls):
+            return value.model_dump()
+        return value
+
+
 class ControlPlaneConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -104,7 +115,7 @@ class ControlPlaneConfig(BaseModel):
     enabled: bool = False
     profile: str | None = None
     llm_profiles: dict[ControlPlaneLLMProfileId, ControlPlaneLLMProfileConfig] = Field(default_factory=dict)
-    classifier: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
+    classifier: ControlPlaneClassifierConfig = Field(default_factory=ControlPlaneClassifierConfig)
     coding: ControlPlaneCodingCapabilityConfig = Field(default_factory=ControlPlaneCodingCapabilityConfig)
     contract_surface: ControlPlaneContractSurfaceCapabilityConfig = Field(
         default_factory=ControlPlaneContractSurfaceCapabilityConfig
