@@ -4,12 +4,12 @@ import {
   WebSocketApiAdapter,
   componentRegistry,
   loadShellAuth,
+  safeReturnPath,
   LoginPage,
   AuthCallbackPage,
   themeProvider,
 } from '@mozaiks/chat-ui';
 import * as platformExtensions from '@platform/extensions';
-import { safeReturnPath } from '@mozaiks/chat-ui/auth/authAdapter.js';
 
 const apiBaseUrl = import.meta.env.VITE_API_URL ?? '';
 const wsBaseUrl = import.meta.env.VITE_WS_URL || (apiBaseUrl ? apiBaseUrl.replace(/^http/, 'ws') : undefined);
