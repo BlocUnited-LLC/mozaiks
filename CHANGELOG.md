@@ -12,7 +12,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+
 ### Fixed
+
+- Retried friendship acceptance replays its stored event identity and returns the accepting user’s view. Default notification storage keeps one alert per scoped source event across retries.
+
+- Social friendships derive from atomic request states, fencing competing accept, decline, withdrawal, and removal actions. Profile tabs expose friend requests and messaging, with nullable pagination cursors and failed message sends preserving drafts.
 
 - Generated task-based apps retain admin registries, app-owned assistant settings,
   brand identity and approved signup intent; app menus show one authorized Admin entry.
@@ -23,6 +28,8 @@ This project follows a practical pre-1.0 changelog format:
 
 
 ### Added
+
+- Authenticated profile photo and banner uploads reuse the configured media content store. Factory app workbenches show the owner account and sign-in setup guidance.
 
 - Factory refinement agents can receive advisory file and dependency evidence
   tied to the verified app build they are changing.

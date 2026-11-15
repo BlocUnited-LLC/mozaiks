@@ -16,7 +16,7 @@ from uuid import uuid4
 
 import yaml
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from logs.logging_config import get_workflow_logger
@@ -729,6 +729,74 @@ async def update_current_user_profile(
         profile = await _ensure_account_profile(principal, app_id=resolved_app_id, user_id=user_id)
 
     return profile
+
+
+@app.put("/api/me/media/{kind}")
+async def upload_profile_image(
+    kind: str,
+    request: Request,
+    principal: UserPrincipal = Depends(require_any_auth),
+):
+    from hashlib import sha256
+    from urllib.parse import quote
+
+    from mozaiksai.core.media.store import get_media_content_store
+    from mozaiksai.core.profile.media import MAX_UPLOAD_BYTES, normalize_profile_image
+
+    if kind not in {"avatar", "cover"}:
+        raise HTTPException(status_code=404, detail="Unknown profile image")
+    app_id, user_id = _resolve_profile_scope(principal)
+    chunks = bytearray()
+    async for chunk in request.stream():
+        if len(chunks) + len(chunk) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="Choose an image smaller than 5 MB")
+        chunks.extend(chunk)
+    try:
+        image = await asyncio.to_thread(normalize_profile_image, bytes(chunks), kind)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await _ensure_account_profile(principal, app_id=app_id, user_id=user_id)
+    store = get_media_content_store()
+    content_ref = await store.put_media(image, app_id=app_id, media_id=uuid4().hex,
+                                        filename=f"{kind}.jpg", media_type="image/jpeg")
+    digest = sha256(image).hexdigest()
+    url = f"/api/users/{quote(user_id, safe='')}/media/{kind}/{digest}"
+    collection = await _account_profile_collection()
+    await collection.update_one(
+        {"_id": _profile_doc_id(app_id, user_id)},
+        {"$set": {f"media_{kind}": {"content_ref": content_ref, "backend": store.backend_name, "digest": digest}, f"{kind}_url": url, "updated_at": datetime.now(UTC)}},
+    )
+    return await _ensure_account_profile(principal, app_id=app_id, user_id=user_id)
+
+
+@app.get("/api/users/{user_id}/media/{kind}/{digest}")
+async def get_profile_image(
+    user_id: str,
+    kind: str,
+    digest: str,
+    principal: UserPrincipal = Depends(require_any_auth),
+):
+    from hashlib import sha256
+
+    if kind not in {"avatar", "cover"}:
+        raise HTTPException(status_code=404, detail="Unknown profile image")
+    app_id, _ = _resolve_profile_scope(principal)
+    collection = await _account_profile_collection()
+    doc = await collection.find_one({"_id": _profile_doc_id(app_id, user_id)})
+    from mozaiksai.core.media.store import MediaContentNotFoundError, resolve_media_content_store
+
+    media = (doc or {}).get(f"media_{kind}")
+    if not isinstance(media, dict) or media.get("digest") != digest:
+        raise HTTPException(status_code=404, detail="Profile image not found")
+    try:
+        image = await resolve_media_content_store(media["backend"]).get_media(media["content_ref"])
+    except MediaContentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Profile image not found") from exc
+    if sha256(image).hexdigest() != digest:
+        raise HTTPException(status_code=404, detail="Profile image not found")
+    return Response(image, media_type="image/jpeg", headers={
+        "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+    })
 
 
 @app.get("/api/me/preferences")
@@ -1773,6 +1841,7 @@ def _public_profile_from_doc(doc: dict[str, Any]) -> dict[str, Any]:
         "username": doc.get("username"),
         "display_name": doc.get("display_name") or doc.get("username"),
         "avatar_url": doc.get("avatar_url"),
+        "cover_url": doc.get("cover_url"),
         "bio": doc.get("bio"),
         "created_at": doc.get("created_at"),
         "updated_at": doc.get("updated_at"),
@@ -2006,6 +2075,7 @@ async def _ensure_account_profile(
         "username": doc.get("username") or username,
         "display_name": doc.get("display_name") or default_display_name,
         "avatar_url": doc.get("avatar_url"),
+        "cover_url": doc.get("cover_url"),
         "bio": doc.get("bio"),
         "subscription_tier": doc.get("subscription_tier"),
         "roles": doc.get("roles") or list(principal.roles or []),

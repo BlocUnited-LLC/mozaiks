@@ -16,7 +16,7 @@ notifications:
       - requester_name
 
   - id: friend_request_accepted
-    description: Notify a user when their friend request is accepted.
+    description: Notify a user when their friend request is accepted; acceptance retries replay the persisted event identity.
     "on": domain.social.friendship.created
     template:
       title: "You and another user are now friends"

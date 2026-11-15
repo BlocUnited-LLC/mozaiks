@@ -11,8 +11,10 @@ manifests loaded by the platform host:
 This keeps module event meaning above the runtime kernel.
 """
 
+import hashlib
 import importlib
 import inspect
+import json
 import re
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -1562,17 +1564,30 @@ class ModuleEventRouter:
         return True
 
     async def _store_notification(self, record: dict[str, Any]) -> bool:
+        identity_fields = ("app_id", "module_id", "rule_id", "event_type", "source_event_id", "tenant_id", "workspace_id")
+        if isinstance(record.get("source_event_id"), str) and record["source_event_id"]:
+            identity = json.dumps([record.get(field) for field in identity_fields], separators=(",", ":"))
+            record["notification_id"] = "ntf_" + hashlib.sha256(identity.encode()).hexdigest()
         try:
             if self._notification_store is not None:
                 result = await self._maybe_await(self._notification_store(record))
                 return not _reaction_result_failed(result)
 
+            from pymongo.errors import DuplicateKeyError
+
             from mozaiksai.core.core_config import get_mongo_client
 
-            result = await get_mongo_client()["mozaiks"]["platform_notifications"].insert_one(
-                dict(record)
-            )
-            return result.acknowledged is not False
+            collection = get_mongo_client()["mozaiks"]["platform_notifications"]
+            try:
+                result = await collection.insert_one({**record, "_id": record["notification_id"]})
+                return result.acknowledged is not False
+            except DuplicateKeyError:
+                existing = await collection.find_one({"_id": record["notification_id"]})
+                if not existing or any(existing.get(field) != record.get(field) for field in identity_fields):
+                    return False
+                record.clear()
+                record.update({key: value for key, value in existing.items() if key != "_id"})
+                return True
         except Exception as exc:
             logger.warning("NOTIFICATION_STORE_FAILED: %s", type(exc).__name__)
             return False

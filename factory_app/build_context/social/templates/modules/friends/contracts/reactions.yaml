@@ -1,5 +1,9 @@
 schema_version: mozaiks.reactions.v1
-reactions: []
-# No inbound reactions in the friends module.
-# The activity_feed module subscribes to domain.social.friendship.created
-# and domain.social.friend_request.sent via its own reactions.yaml.
+reactions:
+  - id: friendship_acceptance_notification
+    event_type: domain.social.friendship.created
+    idempotency_key: friendship_acceptance
+    target:
+      kind: notification
+      notification_id: friend_request_accepted
+    description: Persist the acceptance notification with replay-safe event identity.

@@ -32,6 +32,10 @@ description: >
   Initial app admin bootstrap uses authenticated runtime platform_user_email only,
   including a pre-app design revision verified by the revision baseline owner;
   refinement preserves baseline admins. Missing trusted email requires operator setup.
+  Shared profile photo and banner uploads use the platform profile media endpoints
+  and its configured media content store. Do not generate duplicate profile upload
+  modules, browser-local profile records, or storage credentials. The Factory
+  workbench displays the materialized app owner allowlist and account setup guidance.
   AdminRegistryAgent owns admin/admin_registry.yaml after task materialization.
   Module panel page references must resolve to enabled registry pages. Registry
   navigation belongs inside the portal; the platform injects one authorized Admin

@@ -10,11 +10,6 @@ def actor_id(ctx) -> str:
     return getattr(ctx, "user_id", None) or "anonymous"
 
 
-def friendship_query(ctx, *, user_id: str) -> dict[str, Any]:
-    """Query scoped to a specific user's friendship records."""
-    return {"user_id": user_id}
-
-
 def request_query_as_requester(ctx, *, requester_id: str, status: str | None = None) -> dict[str, Any]:
     q: dict[str, Any] = {"requester_id": requester_id}
     if status and status != "all":

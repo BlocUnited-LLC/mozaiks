@@ -285,3 +285,61 @@ The `notifications` module's handler must implement a
 `get_notification_profile_summary` action that returns a dict matching those
 field ids. No changes anywhere else are needed — the profile page picks it up
 automatically on next load.
+
+
+## Profile images and owner access
+
+The shared profile page offers Change photo and Change banner on your own profile.
+`PUT /api/me/media/{kind}` accepts a JPEG, PNG, or WebP request body, with
+`kind` equal to `avatar` or `cover`. The platform bounds input at 5 MB and
+16 million pixels, decodes it, removes metadata, resizes it, and stores a JPEG
+of at most 2 MB through the existing media content store. The app-scoped
+UserProfiles record atomically receives its content reference and display URL
+after storage completes. The configured local, GridFS, or external media backend
+owns the bytes. Replaced content remains available for operator retention cleanup.
+
+Authenticated profile projections contain `avatar_url` and `cover_url`.
+`GET /api/users/{user_id}/media/{kind}/{digest}` resolves the exact image within
+the authenticated app scope. Reads require authentication and send private,
+no-store cache headers. The shared profile UI fetches images using its auth
+adapter and revokes temporary object URLs when the image or account changes.
+Image bytes are excluded from profile JSON responses.
+
+Factory's app workbench displays the admin email allowlist from the generated
+app manifest. The configured identity provider owns registration, password setup,
+and recovery. A verified identity matching that allowlist gains app admin access.
+The account menu uses effective backend roles. Operators must configure that
+provider and deliver its account setup or recovery flow before customer launch.
+
+The Social pack stores one authoritative request/connection record for each
+unordered pair of users. Acceptance, decline, withdrawal, and removal use atomic
+conditional state transitions. Both users' friendship views derive from accepted
+records. Request IDs change on a new invitation, fencing delayed responses from
+an earlier invitation. Older Social workspaces require a fresh development
+lineage or an explicit reviewed migration before adopting this pre-production
+storage contract.
+
+
+The Social Friends tab accepts a username, resolves the existing public profile,
+and sends a request to that authenticated app's user identity. Owners can accept,
+decline, and remove connections. The Messaging tab links to the pack's conversation
+creation page and retains unsent text when the service refuses a message.
+
+`tests/test_social_messaging_journey.py` materializes the packs, applies their data
+migration, and runs signed API and Playwright journeys against an owned ephemeral
+Mongo container. It requires local Docker with the test's pinned Mongo image,
+Node, and installed web_shell dependencies. The fixture stops its own container
+and HTTP server and removes its temporary synthetic bearer-token file. Other
+accounts, databases, and services are outside that fixture's scope.
+
+
+Acceptance stores its event identity and acceptance timestamp in the same atomic
+transition. Retrying the acceptance replays that identity and payload through
+`ModuleContext.emit`, including after a fresh service/router starts. Both first
+acceptance and retry return the accepting user's friendship view. Recovery after
+a stopped process leaves a persisted confirmation-pending flag. The accepting
+user can reopen their Friends tab and select Send confirmation to retry the
+existing acceptance action. Load more friends makes older confirmations reachable
+beyond the first page. Friend cursors include the timestamp and request identity
+so equal timestamps retain every connection. Successful dispatch clears that flag. The acceptance notification
+uses the existing declared notification reaction and durable idempotency ledger.

@@ -276,7 +276,6 @@ def test_user_posts_delete_is_soft_not_hard() -> None:
 # ---------------------------------------------------------------------------
 
 SOCIAL_COLLECTIONS = {
-    ("friends", "friendships"),
     ("friends", "requests"),
     ("activity_feed", "events"),
     ("user_posts", "posts"),

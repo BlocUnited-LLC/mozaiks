@@ -28,7 +28,7 @@ async function harness(t) {
     }};
     window.fetch = (url,options={}) => new Promise(resolve => {
       window.fixture.requests.push({url,method:options.method||'GET',headers:options.headers,
-        body:options.body ? JSON.parse(options.body) : null,
+        body:options.body instanceof File ? {filename:options.body.name,size:options.body.size} : options.body ? JSON.parse(options.body) : null,
         // Deliberately ignore abort: late transport completions must be harmless.
         respond:(status,body)=>resolve(Response.json(body,{status}))});
     });
@@ -91,7 +91,7 @@ test('failed owner read is retryable and never invents an identity, role, or sav
   await page.waitForFunction(() => window.fixture.requests.length === 6);
   await load(page, 3, 'Alice');
   await page.getByRole('heading', { name: 'Alice' }).waitFor();
-  assert.equal(await page.locator('input[type=file]').count(), 0);
+  assert.equal(await page.locator('input[type=file]').count(), 2);
   assert.equal(await page.locator('img').count(), 0);
   assert.equal(await page.getByText('admin', { exact: true }).count(), 0);
   const requests = await page.evaluate(() => window.fixture.requests.map(({ url, headers }) => ({ url, headers })));
@@ -180,4 +180,34 @@ test('malformed successful responses stay retryable instead of inventing a profi
   await page.getByRole('alert').filter({ hasText: 'Could not load this profile' }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Edit profile' }).count(), 0);
   assert.equal(await page.getByText('Demo User').count(), 0);
+});
+
+
+test('profile photo and banner uploads send real files and preserve errors', async t => {
+  const page = await harness(t);
+  await load(page, 0, 'Alice');
+  await page.getByRole('button', { name: 'Edit profile' }).waitFor();
+  const photo = page.getByLabel('Change photo', { exact: true });
+  await photo.setInputFiles({name:'avatar.png', mimeType:'image/png', buffer:Buffer.from('fixture image bytes')});
+  await page.waitForFunction(() => window.fixture.requests.length === 4);
+  const upload = await page.evaluate(() => {
+    const request = window.fixture.requests[3];
+    return {url:request.url,method:request.method,headers:request.headers,body:request.body};
+  });
+  assert.ok(upload.url.endsWith('/api/me/media/avatar'));
+  assert.equal(upload.method, 'PUT');
+  assert.equal(upload.headers.Authorization, 'Bearer authenticated-account-token');
+  assert.equal(upload.body.filename, 'avatar.png');
+  await respond(page, 3, {detail:'Choose a valid image'}, 422);
+  await page.getByRole('alert').filter({hasText:'Choose a valid image'}).waitFor();
+  const banner = page.getByLabel('Change banner', {exact:true});
+  await banner.setInputFiles({name:'banner.png',mimeType:'image/png',buffer:Buffer.from('banner image bytes')});
+  await page.waitForFunction(() => window.fixture.requests.length === 5);
+  await respond(page, 4, {});
+  await page.waitForFunction(() => window.fixture.requests.length === 6);
+  await respond(page, 5, {user_id:'alice',username:'alice',display_name:'Alice',cover_url:'/api/users/alice/media/cover/digest'});
+  await page.waitForFunction(() => window.fixture.requests.length === 7);
+  await respond(page, 6, {image:'fixture'});
+  await page.locator('img').waitFor({state:'attached'});
+  assert.ok((await page.locator('img').getAttribute('src')).startsWith('blob:'));
 });

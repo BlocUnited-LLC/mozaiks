@@ -365,7 +365,7 @@ async def test_social_reaction_service_emits_own_contract_and_stays_http_interna
             yaml.safe_load((root / "module.yaml").read_text(encoding="utf-8"))
         )
         manifests = {}
-        for kind in ("events", "reactions"):
+        for kind in ("events", "reactions", "notifications"):
             path = root / f"contracts/{kind}.yaml"
             if path.exists():
                 manifests[kind] = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -385,7 +385,7 @@ async def test_social_reaction_service_emits_own_contract_and_stays_http_interna
         emitted.append(envelope)
 
     dispatcher.register_handler("domain.social.activity.recorded", observe)
-    ModuleEventRouter(modules, event_emitter=dispatcher.emit).register(dispatcher)
+    ModuleEventRouter(modules, event_emitter=dispatcher.emit, notification_store=lambda _record: True).register(dispatcher)
     incoming = source()
     incoming.update(type=event_type, payload=payload)
     incoming["source"]["module_id"] = (

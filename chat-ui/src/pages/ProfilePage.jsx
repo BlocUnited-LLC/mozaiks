@@ -149,13 +149,42 @@ function ErrorState({ message, onRetry }) {
 // Hero
 // ---------------------------------------------------------------------------
 
+function ProfileImage({ src, backendUrl, auth, ...props }) {
+  const [loaded, setLoaded] = useState(null);
+  const managed = src?.startsWith('/api/users/');
+  useEffect(() => {
+    if (!managed) return undefined;
+    const controller = new AbortController();
+    let objectUrl;
+    setLoaded(null);
+    fetchWithAuth(`${backendUrl}${src}`, { signal: controller.signal }, auth)
+      .then(response => {
+        if (!response.ok) throw new Error('Image unavailable');
+        return response.blob();
+      })
+      .then(blob => {
+        if (controller.signal.aborted) return;
+        objectUrl = URL.createObjectURL(blob);
+        setLoaded(objectUrl);
+      }).catch(() => {});
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [src, backendUrl, auth, managed]);
+  const imageSrc = managed ? loaded : src;
+  return imageSrc ? <img src={imageSrc} {...props} /> : null;
+}
+
 function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
   const saveRequest = useRef(null);
+  const uploadRequest = useRef(null);
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState(profile.display_name || profile.username || '');
   const [bio, setBio] = useState(profile.bio || '');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
+  const [uploading, setUploading] = useState(null);
 
   const name = profile.display_name || profile.username || 'Unknown';
   const handle = profile.username ? `@${profile.username}` : null;
@@ -163,7 +192,40 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
   const roles = profile.roles || [];
   const avatarText = initials(name, profile.email);
 
-  useEffect(() => () => saveRequest.current?.abort(), []);
+  useEffect(() => () => {
+    saveRequest.current?.abort();
+    uploadRequest.current?.abort();
+  }, []);
+
+  async function uploadImage(event, kind) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || uploadRequest.current) return;
+    setSaveError(null);
+    if (file.size > 5 * 1024 * 1024) {
+      setSaveError('Choose an image smaller than 5 MB');
+      return;
+    }
+    const controller = new AbortController();
+    uploadRequest.current = controller;
+    setUploading(kind);
+    try {
+      const response = await fetchWithAuth(`${backendUrl}/api/me/media/${kind}`, {
+        method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file,
+        signal: controller.signal,
+      }, auth);
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Image upload failed');
+      }
+      if (!controller.signal.aborted) onEdited?.();
+    } catch (error) {
+      if (!controller.signal.aborted) setSaveError(error.message);
+    } finally {
+      uploadRequest.current = null;
+      if (!controller.signal.aborted) setUploading(null);
+    }
+  }
 
   async function handleSave() {
     if (saveRequest.current) return;
@@ -197,7 +259,7 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
       {/* Cover */}
       <div className="relative h-36 sm:h-48 w-full overflow-hidden bg-gradient-to-br from-primary/30 via-primary/10 to-secondary/20">
         {profile.cover_url && (
-          <img src={profile.cover_url} alt="" className="absolute inset-0 h-full w-full object-cover" />
+          <ProfileImage backendUrl={backendUrl} auth={auth} src={profile.cover_url} alt="" className="absolute inset-0 h-full w-full object-cover" />
         )}
       </div>
 
@@ -207,7 +269,7 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
           <div className="relative group">
             <div className="h-24 w-24 rounded-full border-4 border-card overflow-hidden flex items-center justify-center bg-primary/15 shadow-lg flex-shrink-0">
               {profile.avatar_url ? (
-                <img src={profile.avatar_url} alt={name} className="h-full w-full object-cover" />
+                <ProfileImage backendUrl={backendUrl} auth={auth} src={profile.avatar_url} alt={name} className="h-full w-full object-cover" />
               ) : (
                 <span className="text-3xl font-bold text-primary">{avatarText}</span>
               )}
@@ -225,6 +287,20 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
             )}
           </div>
         </div>
+
+        {isOwner && (
+          <div className="mt-4 flex flex-wrap gap-3">
+            {['avatar', 'cover'].map(kind => (
+              <label key={kind} className="rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground cursor-pointer">
+                {uploading === kind ? 'Uploading…' : kind === 'avatar' ? 'Change photo' : 'Change banner'}
+                <input className="sr-only" type="file" accept="image/jpeg,image/png,image/webp"
+                  aria-label={kind === 'avatar' ? 'Change photo' : 'Change banner'}
+                  disabled={Boolean(uploading)} onChange={event => uploadImage(event, kind)} />
+              </label>
+            ))}
+          </div>
+        )}
+        {saveError && !editing && <p role="alert" className="mt-3 text-sm text-destructive">{saveError}</p>}
 
         {/* Name + bio */}
         <div className="mt-4">

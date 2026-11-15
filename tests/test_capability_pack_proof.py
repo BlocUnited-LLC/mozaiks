@@ -57,7 +57,9 @@ from tests.factory_context import factory_context
 from tests.pack_proof_action_sweep import _bad_params, run_action_sweep
 from tests.pack_proof_provider_fixture import PACKS as PROVIDER_FIXTURE_PACKS
 from tests.pack_proof_provider_fixture import run_provider_probe
-from tests.test_app_runtime_smoke import mongo  # noqa: F401 - real MongoDB and its leaked-database guard
+from tests.test_app_runtime_smoke import (
+    mongo,  # noqa: F401 - real MongoDB and its leaked-database guard
+)
 
 BUILD_CONTEXT = Path(__file__).resolve().parents[1] / "factory_app" / "build_context"
 BUILD_TIMESTAMP = "2026-01-01T00:00:00+00:00"
