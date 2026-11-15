@@ -63,6 +63,11 @@
               "name": "accepted_at",
               "type": "string",
               "required": false
+            },
+            {
+              "name": "acceptance_delivery_pending",
+              "type": "boolean",
+              "required": false
             }
           ],
           "lifecycle": {

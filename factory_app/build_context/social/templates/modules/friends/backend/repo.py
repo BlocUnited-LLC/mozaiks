@@ -27,6 +27,9 @@ def _parties(user_id: str) -> dict[str, Any]:
 def friendship_view(request: Mapping[str, Any], user_id: str) -> Document:
     return {
         "friendship_id": f"fs_{request['request_id']}",
+        "request_id": request["request_id"],
+        "recipient_id": request["recipient_id"],
+        "acceptance_delivery_pending": bool(request.get("acceptance_delivery_pending")),
         "user_id": user_id,
         "friend_user_id": request["recipient_id"] if request["requester_id"] == user_id else request["requester_id"],
         "since": request["updated_at"],
@@ -41,7 +44,7 @@ class FriendRequestRepo:
         try:
             await collection.update_one(
                 {"_id": pair_id, "status": {"$nin": ["pending", "accepted"]}},
-                {"$set": dict(doc), "$unset": {"acceptance_event_id": "", "accepted_at": ""}}, upsert=True,
+                {"$set": dict(doc), "$unset": {"acceptance_event_id": "", "accepted_at": "", "acceptance_delivery_pending": ""}}, upsert=True,
             )
         except Exception:
             # A simultaneous request or an uncertain write is reconciled by the
@@ -67,12 +70,20 @@ class FriendRequestRepo:
         if status == "accepted":
             if not event_id:
                 raise ValueError("Acceptance requires a durable event identity")
-            changes.update(acceptance_event_id=event_id, accepted_at=updated_at)
+            changes.update(acceptance_event_id=event_id, accepted_at=updated_at, acceptance_delivery_pending=True)
         result = await _collection(ctx, "requests").update_one(
             {"request_id": request_id, "status": "pending"},
             {"$set": changes},
         )
         return bool(getattr(result, "modified_count", 0))
+
+    async def mark_acceptance_delivered(self, ctx, *, request_id: str, event_id: str) -> None:
+        result = await _collection(ctx, "requests").update_one(
+            {"request_id": request_id, "acceptance_event_id": event_id},
+            {"$set": {"acceptance_delivery_pending": False}},
+        )
+        if getattr(result, "acknowledged", True) is False:
+            raise RuntimeError("Acceptance confirmation acknowledgement was not stored")
 
     async def list(self, ctx, *, query: dict[str, Any], limit: int, before: str | None = None) -> list[Document]:
         if before:

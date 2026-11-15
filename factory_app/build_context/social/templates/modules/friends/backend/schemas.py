@@ -29,9 +29,13 @@ class FriendRequest(TypedDict, total=False):
     updated_at: str
     acceptance_event_id: str
     accepted_at: str
+    acceptance_delivery_pending: bool
 
 
 class Friendship(TypedDict, total=False):
+    request_id: str
+    recipient_id: str
+    acceptance_delivery_pending: bool
     friendship_id: str
     user_id: str
     friend_user_id: str

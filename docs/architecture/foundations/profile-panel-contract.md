@@ -337,5 +337,7 @@ Acceptance stores its event identity and acceptance timestamp in the same atomic
 transition. Retrying the acceptance replays that identity and payload through
 `ModuleContext.emit`, including after a fresh service/router starts. Both first
 acceptance and retry return the accepting user's friendship view. Recovery after
-a stopped process requires an acceptance-action retry. The acceptance notification
+a stopped process leaves a persisted confirmation-pending flag. The accepting
+user can reopen their Friends tab and select Send confirmation to retry the
+existing acceptance action. Successful dispatch clears that flag. The acceptance notification
 uses the existing declared notification reaction and durable idempotency ledger.

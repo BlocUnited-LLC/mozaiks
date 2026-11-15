@@ -55,7 +55,7 @@ async def test_failed_acceptance_emission_replays_the_durable_event_from_a_fresh
 
     async def transition(*args, **kwargs):
         request.update(status=kwargs["status"], updated_at=kwargs["updated_at"],
-                       accepted_at=kwargs["updated_at"], acceptance_event_id=kwargs["event_id"])
+                       accepted_at=kwargs["updated_at"], acceptance_event_id=kwargs["event_id"], acceptance_delivery_pending=True)
         return True
 
     repository = SimpleNamespace(get=AsyncMock(side_effect=lambda *args, **kwargs: dict(request)),
@@ -92,7 +92,7 @@ async def test_first_acceptance_and_retry_return_the_accepting_users_same_view()
 
     async def transition(*args, **kwargs):
         request.update(status=kwargs["status"], updated_at=kwargs["updated_at"],
-                       accepted_at=kwargs["updated_at"], acceptance_event_id=kwargs["event_id"])
+                       accepted_at=kwargs["updated_at"], acceptance_event_id=kwargs["event_id"], acceptance_delivery_pending=True)
         return True
 
     service = FriendsService()

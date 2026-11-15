@@ -63,6 +63,17 @@ try {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.getByRole("button", { name: "View bob", exact: true }).click();
+  await page.getByRole("heading", { name: "bob", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Send confirmation", exact: true }).waitFor();
+  await page.reload();
+  await page.getByRole("button", { name: "View bob", exact: true }).click();
+  await page.getByRole("heading", { name: "bob", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Send confirmation", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Send confirmation", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "View alice", exact: true }).click();
+  await page.getByRole("heading", { name: "alice", exact: true }).waitFor();
+
   await page.getByLabel("Friend's username").fill("charlie");
   await page
     .getByRole("button", { name: "Send friend request", exact: true })

@@ -180,16 +180,19 @@ def test_two_users_friend_request_accept_dm_reply_and_reload(runtime, mongo_jour
             assert failed_delivery.status_code == 500
             # Fresh router memory and the persisted acceptance record recover the event.
             wire_events(client)
-            accepted = action("bob", "friends", "accept_friend_request", request_id=request_id)
-            assert accepted["success"] is True
-            assert accepted["friendship"]["friend_user_id"] == "alice"
-            assert action("bob", "friends", "accept_friend_request", request_id=request_id) == accepted
+            async def acceptance_record():
+                context = MongoPersistenceContext(app_id="generated-messaging-app", client=client,
+                    database_name="social_messaging_journey", data_contract=executor._data_contract)
+                return await context.collection("friends", "requests").find_one({"request_id": request_id})
+
+            committed = runtime.client.portal.call(acceptance_record)
+            assert committed["acceptance_delivery_pending"] is True
 
             async def accepted_alerts():
                 return await client["mozaiks"]["platform_notifications"].count_documents({
-                    "event_type": "domain.social.friendship.created", "audience.user_ids": "alice"})
+                    "event_type": "domain.social.friendship.created", "source_event_id": committed["acceptance_event_id"]})
 
-            assert runtime.client.portal.call(accepted_alerts) == 1
+            assert runtime.client.portal.call(accepted_alerts) == 0
             for user, friend in [("alice", "bob"), ("bob", "alice")]:
                 assert action(user, "friends", "list_friends")["friends"][0]["friend_user_id"] == friend
             created = action("alice", "messages", "create_thread", participant_ids=["alice", "bob"], thread_type="direct")
@@ -222,15 +225,6 @@ def test_two_users_friend_request_accept_dm_reply_and_reload(runtime, mongo_jour
                 left = action("alice", "friends", "get_friendship_status", other_user_id=peer)["status"]
                 right = action(peer, "friends", "get_friendship_status", other_user_id="alice")["status"]
                 assert left == right == ("friends" if outcomes[0] else "none")
-
-            assert action("alice", "friends", "remove_friend", friend_user_id="bob")["success"] is True
-            assert action("bob", "friends", "accept_friend_request", request_id=request_id)["success"] is False
-            assert action("alice", "friends", "get_friendship_status", other_user_id="bob")["status"] == "none"
-            assert action("bob", "friends", "get_friendship_status", other_user_id="alice")["status"] == "none"
-            renewed = action("alice", "friends", "send_friend_request", recipient_id="bob")["request"]
-            assert renewed["request_id"] != request_id
-            assert action("bob", "friends", "accept_friend_request", request_id=request_id)["success"] is False
-            assert action("bob", "friends", "accept_friend_request", request_id=renewed["request_id"])["success"] is True
 
             with ThreadPoolExecutor(max_workers=2) as pool:
                 first = pool.submit(action, "alice", "friends", "send_friend_request", recipient_id="duplicate-peer")
@@ -281,5 +275,22 @@ def test_two_users_friend_request_accept_dm_reply_and_reload(runtime, mongo_jour
                 listener.close()
                 browser_client.close()
                 assert not thread.is_alive()
+            executor._persistence_client = client
+            wire_events(client)
+            assert runtime.client.portal.call(acceptance_record)["acceptance_delivery_pending"] is False
+            assert runtime.client.portal.call(accepted_alerts) == 1
+            confirmed = action("bob", "friends", "accept_friend_request", request_id=request_id)
+            assert confirmed["friendship"]["friend_user_id"] == "alice"
+            assert confirmed["friendship"]["acceptance_delivery_pending"] is False
+            assert runtime.client.portal.call(accepted_alerts) == 1
+            assert action("alice", "friends", "remove_friend", friend_user_id="bob")["success"] is True
+            assert action("bob", "friends", "accept_friend_request", request_id=request_id)["success"] is False
+            assert action("alice", "friends", "get_friendship_status", other_user_id="bob")["status"] == "none"
+            assert action("bob", "friends", "get_friendship_status", other_user_id="alice")["status"] == "none"
+            renewed = action("alice", "friends", "send_friend_request", recipient_id="bob")["request"]
+            assert renewed["request_id"] != request_id
+            assert action("bob", "friends", "accept_friend_request", request_id=request_id)["success"] is False
+            assert action("bob", "friends", "accept_friend_request", request_id=renewed["request_id"])["success"] is True
+
     finally:
         client.close()

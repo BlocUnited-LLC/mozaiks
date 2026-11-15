@@ -83,7 +83,7 @@ class FriendsService:
                 return await self._accepted_result(ctx, current)
             return {"success": False, "error": "The request changed before it could be accepted."}
         return await self._accepted_result(ctx, {**req, "status": REQUEST_STATUS_ACCEPTED,
-                                                "acceptance_event_id": event_id, "accepted_at": now, "updated_at": now})
+                                                "acceptance_event_id": event_id, "accepted_at": now, "updated_at": now, "acceptance_delivery_pending": True})
 
     async def _accepted_result(self, ctx, request: dict) -> dict:
         from mozaiksai.core.events.unified_event_dispatcher import EventDispatchOutcome
@@ -99,6 +99,9 @@ class FriendsService:
         }, event_id=request["acceptance_event_id"])
         if isinstance(outcome, ModuleEventRejection) or (isinstance(outcome, EventDispatchOutcome) and not outcome.success):
             raise RuntimeError("Friendship accepted; its notification delivery needs a retry.")
+        if isinstance(outcome, EventDispatchOutcome) and outcome.success:
+            await self._requests.mark_acceptance_delivered(ctx, request_id=request["request_id"], event_id=request["acceptance_event_id"])
+            request = {**request, "acceptance_delivery_pending": False}
         return {"success": True, "friendship": friendship_view(request, actor_id(ctx))}
 
     async def decline_friend_request(self, ctx, *, request_id: str) -> dict:

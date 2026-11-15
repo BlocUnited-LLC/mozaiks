@@ -93,6 +93,7 @@ export function FriendListTab({ data, isOwner = false }) {
     pending.current = true;
     setBusy(true);
     setError(null);
+    const submittedUsername = params.username;
     try {
       if (action === "send_friend_request") {
         const response = await fetch(`${API_BASE}/api/users/${encodeURIComponent(params.username)}`, { headers: authHeaders() });
@@ -112,7 +113,7 @@ export function FriendListTab({ data, isOwner = false }) {
       if (!mounted.current) return;
       setFriends(updatedFriends.friends || []);
       setRequests(updatedRequests.requests || []);
-      setRecipient("");
+      if (action === "send_friend_request") setRecipient(current => current.trim() === submittedUsername ? "" : current);
     } catch (failure) {
       if (mounted.current) setError(failure.message);
     } finally {
@@ -139,6 +140,10 @@ export function FriendListTab({ data, isOwner = false }) {
           <Avatar value={friend.display_name || friend.friend_user_id} />
           <strong>{friend.display_name || friend.friend_user_id}</strong>
           {friend.since && <span>{relativeTime(friend.since)}</span>}
+          {isOwner && friend.acceptance_delivery_pending && friend.user_id === friend.recipient_id && <div>
+            <span>Connection confirmation pending</span>
+            <button type="button" disabled={busy} onClick={() => act("accept_friend_request", {request_id: friend.request_id})}>Send confirmation</button>
+          </div>}
           {isOwner && <button type="button" disabled={busy} onClick={() => act("remove_friend", {friend_user_id: friend.friend_user_id})}>Remove friend</button>}
         </article>)}
       </div>
