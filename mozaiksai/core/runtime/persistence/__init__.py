@@ -60,6 +60,7 @@ from .startup_policy import (
     database_persistence_is_enabled,
     get_database_startup_policy,
 )
+from .transaction import run_app_data_transaction
 
 __all__ = [
     "ModulePersistenceContext",
@@ -99,6 +100,7 @@ __all__ = [
     "load_data_migrations",
     "migration_hash",
     "run_data_index_application",
+    "run_app_data_transaction",
     "get_database_startup_policy",
     "safe_identifier",
     "scope_filter_for",

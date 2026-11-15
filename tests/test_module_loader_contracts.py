@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.runtime.app.module_loader import ActionDef, ModuleLoader, ModuleLoadError
@@ -213,6 +214,42 @@ notifications:
         encoding="utf-8",
     )
 
+    with pytest.raises(ModuleLoadError):
+        ModuleLoader(str(tmp_path)).load("tasks")
+
+
+@pytest.mark.parametrize("scope", [None, "event", "app"])
+def test_notification_target_scope_loads_as_a_finite_direct_profile(tmp_path, scope):
+    module = _write_canonical_module(tmp_path)
+    audience = {"user_id_field": "recipient_id"}
+    if scope is not None:
+        audience["scope"] = scope
+    module.joinpath("contracts/notifications.yaml").write_text(yaml.safe_dump({"notifications": [{
+        "id": "task_created", "event_type": "domain.tasks.task_created", "audience": audience,
+        "source_event": "reference",
+    }]}), encoding="utf-8")
+    rule = ModuleLoader(str(tmp_path)).load("tasks").manifests.notifications.notifications[0]
+    assert rule.audience.scope == (scope or "event")
+    assert rule.source_event == "reference" and rule.audience.user_id_field == "recipient_id"
+
+
+@pytest.mark.parametrize("audience", [
+    {"scope": "app"},
+    {"scope": "app", "user_id_field": ""},
+    {"scope": "app", "user_id_field": 7},
+    {"scope": "app", "user_id_field": "recipient_id", "roles": ["operator"]},
+    {"scope": "app", "user_id_field": "recipient_id", "permissions": ["tasks.read"]},
+    {"scope": "app", "user_id_field": "recipient_id", "resolver": "backend.notices:resolve"},
+    {"scope": "app", "user_ids": ["alice"]},
+    {"scope": "tenant", "user_id_field": "recipient_id"},
+    {"scope": None, "user_id_field": "recipient_id"},
+    {"scope": [], "user_id_field": "recipient_id"},
+])
+def test_notification_target_scope_rejects_broad_or_unknown_profiles(tmp_path, audience):
+    module = _write_canonical_module(tmp_path)
+    module.joinpath("contracts/notifications.yaml").write_text(yaml.safe_dump({"notifications": [{
+        "id": "task_created", "event_type": "domain.tasks.task_created", "audience": audience,
+    }]}), encoding="utf-8")
     with pytest.raises(ModuleLoadError):
         ModuleLoader(str(tmp_path)).load("tasks")
 

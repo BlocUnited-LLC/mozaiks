@@ -38,6 +38,9 @@ export function PageFrame({
     gap: 'var(--shell-page-section-gap, 2rem)',
     paddingInline: 'clamp(var(--shell-page-padding-x-base, 1rem), 3vw, var(--shell-page-padding-x-xl, 2.5rem))',
     paddingBlock: 'clamp(var(--shell-page-padding-y-base, 2rem), 4vw, var(--shell-page-padding-y-md, 2.5rem))',
+    // The minimized assistant owns its geometry; pages retain their normal
+    // padding when the launcher is absent, expanded, or replaced by the bar.
+    paddingBlockEnd: 'max(clamp(var(--shell-page-padding-y-base, 2rem), 4vw, var(--shell-page-padding-y-md, 2.5rem)), var(--shell-page-assistant-clearance, 0px))',
   };
   const headerStyle = {
     paddingBottom: 'var(--shell-page-title-padding-bottom, 1rem)',

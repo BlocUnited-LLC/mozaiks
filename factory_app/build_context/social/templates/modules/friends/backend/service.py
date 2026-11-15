@@ -1,10 +1,11 @@
 """Business logic for the friends module."""
 from __future__ import annotations
 
+import json
 from uuid import uuid4
 
 from .policy import actor_id
-from .repo import FriendRequestRepo, FriendshipRepo
+from .repo import FriendRequestRepo, FriendshipRepo, friendship_view
 from .schemas import (
     REQUEST_STATUS_ACCEPTED,
     REQUEST_STATUS_DECLINED,
@@ -48,7 +49,8 @@ class FriendsService:
             "created_at": now,
             "updated_at": now,
         }
-        await self._requests.create(ctx, doc)
+        if await self._requests.create(ctx, doc) is None:
+            return {"success": False, "error": "A request or friendship already exists for these users."}
 
         await ctx.emit("domain.social.friend_request.sent", {
             "request_id": doc["request_id"],
@@ -68,28 +70,40 @@ class FriendsService:
             return {"success": False, "error": "Friend request not found."}
         if req.get("recipient_id") != user_id:
             return {"success": False, "error": "You can only accept requests addressed to you."}
+        if req.get("status") == REQUEST_STATUS_ACCEPTED:
+            return await self._accepted_result(ctx, req)
         if req.get("status") != REQUEST_STATUS_PENDING:
             return {"success": False, "error": f"Request is already {req.get('status')}."}
-
         now = timestamp_now()
-        await self._requests.update_status(ctx, request_id=request_id, status=REQUEST_STATUS_ACCEPTED, updated_at=now)
+        event_id = str(uuid4())
+        transitioned = await self._requests.update_status(ctx, request_id=request_id, status=REQUEST_STATUS_ACCEPTED,
+                                                         updated_at=now, event_id=event_id)
+        if not transitioned:
+            current = await self._requests.get(ctx, request_id=request_id)
+            if current and current.get("status") == REQUEST_STATUS_ACCEPTED:
+                return await self._accepted_result(ctx, current)
+            return {"success": False, "error": "The request changed before it could be accepted."}
+        return await self._accepted_result(ctx, {**req, "status": REQUEST_STATUS_ACCEPTED,
+                                                "acceptance_event_id": event_id, "accepted_at": now, "updated_at": now, "acceptance_delivery_pending": True})
 
-        friendship_id = f"fs_{uuid4().hex}"
-        base = {"friendship_id": friendship_id, "since": now, "created_at": now}
-        doc_a = {**base, "user_id": req["requester_id"], "friend_user_id": user_id}
-        doc_b = {**base, "user_id": user_id, "friend_user_id": req["requester_id"]}
-        await self._friendships.create_pair(ctx, doc_a, doc_b)
+    async def _accepted_result(self, ctx, request: dict) -> dict:
+        from mozaiksai.core.events.unified_event_dispatcher import EventDispatchOutcome
+        from mozaiksai.core.runtime.composition.module_event_provenance import ModuleEventRejection
 
-        await ctx.emit("domain.social.friendship.created", {
-            "friendship_id": friendship_id,
-            "user_a_id": req["requester_id"],
-            "user_b_id": user_id,
-            "requester_id": req["requester_id"],
-            "request_id": request_id,
-            "created_at": now,
-        })
-
-        return {"success": True, "friendship": doc_a}
+        outcome = await ctx.emit("domain.social.friendship.created", {
+            "friendship_id": f"fs_{request['request_id']}",
+            "user_a_id": request["requester_id"],
+            "user_b_id": request["recipient_id"],
+            "requester_id": request["requester_id"],
+            "request_id": request["request_id"],
+            "created_at": request["accepted_at"],
+        }, event_id=request["acceptance_event_id"])
+        if isinstance(outcome, ModuleEventRejection) or (isinstance(outcome, EventDispatchOutcome) and not outcome.success):
+            raise RuntimeError("Friendship accepted; its notification delivery needs a retry.")
+        if isinstance(outcome, EventDispatchOutcome) and outcome.success:
+            await self._requests.mark_acceptance_delivered(ctx, request_id=request["request_id"], event_id=request["acceptance_event_id"])
+            request = {**request, "acceptance_delivery_pending": False}
+        return {"success": True, "friendship": friendship_view(request, actor_id(ctx))}
 
     async def decline_friend_request(self, ctx, *, request_id: str) -> dict:
         user_id = actor_id(ctx)
@@ -103,7 +117,8 @@ class FriendsService:
             return {"success": False, "error": f"Request is already {req.get('status')}."}
 
         now = timestamp_now()
-        await self._requests.update_status(ctx, request_id=request_id, status=REQUEST_STATUS_DECLINED, updated_at=now)
+        if not await self._requests.update_status(ctx, request_id=request_id, status=REQUEST_STATUS_DECLINED, updated_at=now):
+            return {"success": False, "error": "The request changed before this action completed."}
 
         await ctx.emit("domain.social.friend_request.declined", {
             "request_id": request_id,
@@ -126,7 +141,8 @@ class FriendsService:
             return {"success": False, "error": f"Request is already {req.get('status')}."}
 
         now = timestamp_now()
-        await self._requests.update_status(ctx, request_id=request_id, status=REQUEST_STATUS_WITHDRAWN, updated_at=now)
+        if not await self._requests.update_status(ctx, request_id=request_id, status=REQUEST_STATUS_WITHDRAWN, updated_at=now):
+            return {"success": False, "error": "The request changed before this action completed."}
 
         await ctx.emit("domain.social.friend_request.withdrawn", {
             "request_id": request_id,
@@ -142,13 +158,13 @@ class FriendsService:
     async def remove_friend(self, ctx, *, friend_user_id: str) -> dict:
         user_id = actor_id(ctx)
 
-        deleted = await self._friendships.delete_pair(ctx, user_id=user_id, friend_user_id=friend_user_id)
+        deleted = await self._friendships.remove(ctx, user_id=user_id, friend_user_id=friend_user_id)
         if not deleted:
             return {"success": False, "error": "Friendship not found."}
 
         now = timestamp_now()
         await ctx.emit("domain.social.friendship.removed", {
-            "user_id": user_id,
+            "member_user_id": user_id,
             "friend_user_id": friend_user_id,
             "removed_at": now,
         })
@@ -164,7 +180,7 @@ class FriendsService:
         return {
             "friends": page,
             "count": len(page),
-            "next_cursor": page[-1]["created_at"] if has_more and page else None,
+            "next_cursor": json.dumps([page[-1]["created_at"], page[-1]["request_id"]]) if has_more and page else None,
         }
 
     async def list_friends_of(self, ctx, *, user_id: str, limit: int | None = None, before: str | None = None) -> dict:
@@ -175,7 +191,7 @@ class FriendsService:
         return {
             "friends": page,
             "count": len(page),
-            "next_cursor": page[-1]["created_at"] if has_more and page else None,
+            "next_cursor": json.dumps([page[-1]["created_at"], page[-1]["request_id"]]) if has_more and page else None,
         }
 
     async def list_friend_requests(

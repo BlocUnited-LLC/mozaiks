@@ -1111,3 +1111,16 @@ contract shape. The runtime loader will be updated to support the new paths.
 - [../app/canonical-app-structure.md](../app/canonical-app-structure.md) — full app workspace layout
 - [../app/app-bundle-declaratives.md](../app/app-bundle-declaratives.md) — declarative contract reference
 
+
+
+### Replay-safe notification persistence
+
+The default notification store derives a scoped notification identity from the
+source event ID, event type, module, rule, app, tenant and workspace. Mongo uses
+that identity as the notification record's `_id`. Replaying the same event keeps
+one durable alert and preserves its current stored state, including a read status.
+Custom notification stores receive the same stable `notification_id` and are
+responsible for applying that idempotency contract in their storage boundary.
+Producers can persist an event identity with their domain transition and supply
+it to `ModuleContext.emit(event_id=...)` on retries. Explicit notification
+reactions expose delivery failure through the existing event dispatch receipt.

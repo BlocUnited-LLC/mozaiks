@@ -143,8 +143,9 @@ async def test_preview_account_routes_reach_module_persistence(app_root, monkeyp
         app_id="preview-app", user_id="owner-a", email=None, name=None,
         roles=[], scopes=[], raw_claims={}, provider="test",
     )
-    # The routes read the loaded data contract from app state to scope handler persistence.
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
+    # The routes read the loaded data contract from app state to scope handler persistence,
+    # and act in the loaded app identity the platform host sets at startup.
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(loaded_app_id="preview-app")))
     own = contexts[0]
     own_rows = client[own.database_name][own.collection_name("user_onboarding", "status")].docs
     foreign = contexts[2]

@@ -37,6 +37,32 @@ contracts when the module needs that surface.
   as a hidden infrastructure provisioning layer.
 - Runtime extensions live at `app/modules/{module_id}/runtime_extensions.yaml`.
 
+## Notification Target Scope
+
+Notification rules default to `audience.scope: event`, retaining their source
+event's tenant/workspace ownership. An approved cross-workspace personal notice
+can declare an app target after its owning service validates every recipient:
+
+```yaml
+schema_version: mozaiks.notifications.v1
+notifications:
+  - id: task_ready
+    event_type: domain.tasks.ready
+    audience: {scope: app, user_id_field: recipient_id}
+    source_event: reference
+    template: {title: Task ready, body: Open the task to read it.}
+    context_fields: [task_id]
+```
+
+App scope requires that direct field and rejects roles, permissions, resolver
+and broadcast audiences. Missing or malformed recipients create no record.
+It does not change the source event or permit choosing a different app.
+`source_event: reference` independently keeps only the event id/type/optional
+related type and sets the notification actor to null. Explicit templates and
+context still retain the values they select; old records are not rewritten.
+See [Event System](../../architecture/foundations/events-and-data/event-system.md)
+for ownership validation and default support notification isolation.
+
 ## Service Boundary Example
 
 ```yaml

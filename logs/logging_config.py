@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Any
+from urllib.parse import unquote
 
 from logs.runtime_artifacts import clear_runtime_artifacts, should_clear_runtime_artifacts_on_start
 
@@ -151,8 +152,8 @@ class ProductionJSONFormatter(logging.Formatter):
         if record.exc_info:
             base["exception"] = {
                 "type": record.exc_info[0].__name__ if record.exc_info[0] else None,
-                "message": str(record.exc_info[1]) if record.exc_info[1] else None,
-                "trace": traceback.format_exception(*record.exc_info)
+                "message": _sanitize_log_message(str(record.exc_info[1])) if record.exc_info[1] else None,
+                "trace": [_sanitize_log_message(line) for line in traceback.format_exception(*record.exc_info)]
             }
         # Harvest extras
         extras: dict[str, Any] = {}
@@ -161,7 +162,10 @@ class ProductionJSONFormatter(logging.Formatter):
                 extras[k] = v
         if extras:
             base["extra"] = _maybe_redact_mapping(extras)
-        return json.dumps(base, ensure_ascii=False)
+        # Third-party records can carry opaque objects (for example a WebSocket
+        # connection). Never call their repr or fall into logging's raw-args
+        # stderr error handler when serializing otherwise valid diagnostics.
+        return json.dumps(base, ensure_ascii=False, default=lambda value: f"<{type(value).__name__}>")
 
 # ----------------------------------------------------------------------
 # Pretty, emoji-enhanced console formatter for developers
@@ -202,11 +206,18 @@ _GUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 # Common secret/value redaction patterns in log messages (not just extras)
 # 1) JSON-like key/value pairs: api_key, token, secret, password, authorization, clientSecret, etc.
 _JSON_SECRET_KV_RE = re.compile(
-    r"((?:[\"'])?\b(?:api[_-]?key|authorization|secret|password|token|client[_-]?secret|accountkey)\b(?:[\"'])?\s*[:=]\s*[\"']?)([^\"'\s,;}]+)([\"']?)",
+    r"((?:[\"'])?\b(?:api[_-]?key|authorization|secret|password|(?:access[_-]|refresh[_-]|id[_-])?token|client[_-]?secret|accountkey)\b(?:[\"'])?\s*[:=]\s*[\"']?)([^\"'\s,;}&]+)([\"']?)",
     re.IGNORECASE,
 )
 # 2) Bearer tokens
 _BEARER_RE = re.compile(r"(Bearer\s+)([A-Za-z0-9._\-~+/=]+)", re.IGNORECASE)
+# Access logs include rejected URLs before the application can authenticate.
+_QUERY_KV_RE = re.compile(r"([?&])([^=&#\s\"']+)=([^&#\s\"']*)")
+_QUERY_SECRET_KEYS = {"access_token", "refresh_token", "id_token", "token"}
+# The marker and credential may arrive in separate repeated protocol headers.
+_WS_PROTOCOL_HEADER_RE = re.compile(r"(\bsec-websocket-protocol\s*:\s*)[^\r\n]*", re.IGNORECASE)
+# Browser WebSocket auth uses this public marker followed by encoded bearer data.
+_WS_BEARER_RE = re.compile(r"(\bmozaiks\.bearer\.v1\s*,\s*)([^,\s\"'\]]+)", re.IGNORECASE)
 # 3) sk- style OpenAI keys
 _OPENAI_SK_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}")
 _GITHUB_TOKEN_RE = re.compile(r"\b(?:ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})")
@@ -220,6 +231,12 @@ def _sanitize_log_message(message: str, *, max_length: int | None = None) -> str
         return message
     # Redact GUIDs that appear in Azure tenant / client logs
     msg = _GUID_RE.sub(lambda m: m.group(0)[:4] + "***REDACTED***" + m.group(0)[-4:], message)
+    msg = _QUERY_KV_RE.sub(
+        lambda m: m.group(1) + m.group(2) + "=***REDACTED***"
+        if unquote(m.group(2)).lower() in _QUERY_SECRET_KEYS else m.group(0), msg,
+    )
+    msg = _WS_PROTOCOL_HEADER_RE.sub(lambda m: m.group(1) + "***REDACTED***", msg)
+    msg = _WS_BEARER_RE.sub(lambda m: m.group(1) + "***REDACTED***", msg)
     # Redact api keys, tokens and secrets in JSON-ish text
     msg = _JSON_SECRET_KV_RE.sub(lambda m: m.group(1) + "***REDACTED***" + m.group(3), msg)
     # Redact common bearer tokens
@@ -274,7 +291,7 @@ class PrettyConsoleFormatter(logging.Formatter):
         extra_str = f" | {' '.join(extras)}" if extras else ""
         base = f"{ts} [{color}{level:>5}{reset}] {emoji} {logger_name} - {msg}{extra_str}  ({file}:{line} {func})"
         if record.exc_info:
-            base += "\n" + "".join(traceback.format_exception(*record.exc_info)).rstrip()
+            base += "\n" + _sanitize_log_message("".join(traceback.format_exception(*record.exc_info)).rstrip())
         return base
 
 # ----------------------------------------------------------------------

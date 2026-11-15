@@ -12,7 +12,12 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+
 ### Fixed
+
+- Retried friendship acceptance replays its stored event identity and returns the accepting user’s view. Default notification storage keeps one alert per scoped source event across retries.
+
+- Social friendships derive from atomic request states, fencing competing accept, decline, withdrawal, and removal actions. Profile tabs expose friend requests and messaging, with nullable pagination cursors and failed message sends preserving drafts.
 
 - Generated task-based apps retain admin registries, app-owned assistant settings,
   brand identity and approved signup intent; app menus show one authorized Admin entry.
@@ -26,8 +31,14 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Authenticated profile photo and banner uploads reuse the configured media content store. Factory app workbenches show the owner account and sign-in setup guidance.
+
 - Factory refinement agents can receive advisory file and dependency evidence
   tied to the verified app build they are changing.
+
+- Notification rules can explicitly select `audience.scope: app` for validated
+  direct recipients across workspaces. Event ownership remains the default;
+  broad audiences and malformed source ownership cannot use the new mode.
 
 - A reusable content pack supplies permission-protected publishing records while
   leaving app pages and branding customizable through canonical app contracts.
@@ -103,6 +114,9 @@ This project follows a practical pre-1.0 changelog format:
 
 - Factory design agents receive verified selected-pack capabilities, action
   identities and ownership boundaries while retaining app-specific design intent.
+- Notification `source_event: reference` also stores `actor: null`, retaining
+  the minimal origin reference without changing the original attributed event.
+  Existing records are not rewritten; envelope-mode retention stays unchanged.
 
 - Fresh OSS installs, generated workspaces, and refinement profiles default to
   Google `gemini-3.8-flash`. Its Gemini API free tier requires a Google key and

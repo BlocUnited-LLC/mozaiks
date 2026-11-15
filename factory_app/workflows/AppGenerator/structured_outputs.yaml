@@ -2698,6 +2698,11 @@ models:
   ModuleNotificationAudience:
     type: model
     fields:
+      scope:
+        type: literal
+        values: [event, app]
+        default: event
+        description: Event scope retains producer tenant/workspace ownership. Explicit app scope permits only a nonempty user_id_field, with no roles, permissions or resolver; the owning service must validate every recipient.
       roles:
         type: optional_list
         items: str
@@ -2741,6 +2746,15 @@ models:
       audience:
         type: ModuleNotificationAudience
         description: Audience declaration or resolver hook.
+      source_event:
+        type: literal
+        values: [envelope, reference]
+        default: envelope
+        description: Reference keeps only the event id, type and optional related_type, with actor null on the notification; the original event stays attributed. Envelope keeps existing origin retention. Independent of audience scope.
+      context_fields:
+        type: optional_list
+        items: str
+        description: Explicit safe payload keys copied to notification context. Omit message text, sender identity and private metadata when the notice must not retain them.
       preference_key:
         type: str
         description: User preference key controlling this notification.

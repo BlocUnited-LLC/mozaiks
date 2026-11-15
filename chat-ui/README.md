@@ -130,9 +130,24 @@ aliases `@mozaiks/chat-ui` to `chat-ui/src`.
 - `@mozaiks/chat-ui/ui` — web-safe UI primitives for Studio, app pages, and custom routes.
 - `@mozaiks/chat-ui/workspace` — `WorkspaceLayout`.
 - `@mozaiks/chat-ui/embed` — the embeddable widget (`MozaiksEmbed`).
-- `@mozaiks/chat-ui/auth` — browser auth adapter plus login and callback pages.
+- `@mozaiks/chat-ui/auth` — browser auth adapter, login and callback pages, and `openAuthenticatedWebSocket` for app-owned sockets.
 
 These paths are declared explicitly in `package.json` via the package `exports` map. The portable surface is now formalized there rather than relying on extra top-level re-export files.
+
+App-owned browser sockets can use the same authenticated handshake as the chat
+transport:
+
+```js
+import { openAuthenticatedWebSocket } from '@mozaiks/chat-ui/auth';
+
+const socket = openAuthenticatedWebSocket(socketUrl, accessToken);
+```
+
+Pass a URL without credentials and the current access token from the configured
+auth adapter. The helper carries the token in the WebSocket subprotocol header;
+it does not append it to the URL. The receiving endpoint must authenticate the
+handshake and authorize its own resource. Connection lifecycle, reconnect and
+event handling remain the caller's responsibility.
 
 ### React Native / non-browser hosts
 

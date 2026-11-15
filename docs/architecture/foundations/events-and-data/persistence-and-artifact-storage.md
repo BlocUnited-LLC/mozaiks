@@ -442,9 +442,15 @@ then `MOZAIKS_APP_DATABASE_NAME`, then `MOZAIKS_APPS_DATABASE`, then
 
 Account export and deletion dispatch registered module `AccountDataHandler`
 implementations through the platform's `/api/account/export` and `/api/account`
-routes. The routes use the authenticated principal's app and user identity and
-the existing app-data database accessor; they do not read the workflow runtime's
-persistence manager. App-data alias consumers additionally honor
+routes. The routes use the trusted `app.state.loaded_app_id` and authenticated
+user identity with the existing app-data database accessor; they do not read the
+workflow runtime's persistence manager. Independently composed account routers
+must set their loaded app identity before serving requests. Missing or malformed
+loaded identity returns 503, and a conflicting token app binding returns 403, before
+database resolution, registered handlers or completion hooks run. A token without
+an app claim still acts in the loaded app; the principal's original claims remain
+unchanged. Query/body app, user or module selectors do not redirect account scope.
+App-data alias consumers additionally honor
 `MOZAIKS_APP_DATA_DATABASE_NAME` before the app database settings above. Handlers
 resolve their own collection contracts and enforce app/user ownership. Factory's
 onboarding module exercises this path with canonical generated collection names;
