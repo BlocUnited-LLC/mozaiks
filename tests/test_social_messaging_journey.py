@@ -164,6 +164,36 @@ def test_two_users_friend_request_accept_dm_reply_and_reload(runtime, mongo_jour
                 assert action("alice", "friends", "list_friends")["friends"][0]["friend_user_id"] == "bob"
             finally:
                 reloaded.close()
+                executor._persistence_client = client
+            from concurrent.futures import ThreadPoolExecutor
+
+            for competing in ["decline_friend_request", "withdraw_friend_request"]:
+                peer = "race-" + competing
+                pending = action("alice", "friends", "send_friend_request", recipient_id=peer)["request"]
+                competitor = peer if competing == "decline_friend_request" else "alice"
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    accept = pool.submit(action, peer, "friends", "accept_friend_request", request_id=pending["request_id"])
+                    other = pool.submit(action, competitor, "friends", competing, request_id=pending["request_id"])
+                    outcomes = [accept.result()["success"], other.result()["success"]]
+                assert sum(outcomes) == 1
+                left = action("alice", "friends", "get_friendship_status", other_user_id=peer)["status"]
+                right = action(peer, "friends", "get_friendship_status", other_user_id="alice")["status"]
+                assert left == right == ("friends" if outcomes[0] else "none")
+
+            assert action("alice", "friends", "remove_friend", friend_user_id="bob")["success"] is True
+            assert action("bob", "friends", "accept_friend_request", request_id=request_id)["success"] is False
+            assert action("alice", "friends", "get_friendship_status", other_user_id="bob")["status"] == "none"
+            assert action("bob", "friends", "get_friendship_status", other_user_id="alice")["status"] == "none"
+            renewed = action("alice", "friends", "send_friend_request", recipient_id="bob")["request"]
+            assert renewed["request_id"] != request_id
+            assert action("bob", "friends", "accept_friend_request", request_id=request_id)["success"] is False
+            assert action("bob", "friends", "accept_friend_request", request_id=renewed["request_id"])["success"] is True
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                first = pool.submit(action, "alice", "friends", "send_friend_request", recipient_id="duplicate-peer")
+                second = pool.submit(action, "duplicate-peer", "friends", "send_friend_request", recipient_id="alice")
+                assert sum([first.result()["success"], second.result()["success"]]) == 1
+
             # Exercise the materialized UI and canonical moduleApi helper through
             # an actual loopback HTTP server with the same signed test identities.
             import socket

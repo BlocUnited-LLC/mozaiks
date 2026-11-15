@@ -6,7 +6,7 @@ module:
   description: >
     Bidirectional friend connections with friend request lifecycle.
     Users send, accept, decline, and withdraw requests; accepted requests
-    create symmetric friendship records queryable by either party.
+    atomically accept the request, exposing symmetric friendship views to either party.
   user_data_scope: true
   handler: backend.handler:FriendsHandler
 
@@ -165,7 +165,7 @@ actions:
       additionalProperties: false
       properties:
         direction: { type: string, enum: [incoming, outgoing, all] }
-        status: { type: string, enum: [pending, accepted, declined, withdrawn, all] }
+        status: { type: string, enum: [pending, accepted, declined, withdrawn, removed, all] }
         limit: { type: integer }
         before: { type: string }
     output_schema:

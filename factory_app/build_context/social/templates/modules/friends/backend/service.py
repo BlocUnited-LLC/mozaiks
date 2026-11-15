@@ -4,7 +4,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 from .policy import actor_id
-from .repo import FriendRequestRepo, FriendshipRepo
+from .repo import FriendRequestRepo, FriendshipRepo, friendship_view
 from .schemas import (
     REQUEST_STATUS_ACCEPTED,
     REQUEST_STATUS_DECLINED,
@@ -48,7 +48,8 @@ class FriendsService:
             "created_at": now,
             "updated_at": now,
         }
-        await self._requests.create(ctx, doc)
+        if await self._requests.create(ctx, doc) is None:
+            return {"success": False, "error": "A request or friendship already exists for these users."}
 
         await ctx.emit("domain.social.friend_request.sent", {
             "request_id": doc["request_id"],
@@ -68,17 +69,19 @@ class FriendsService:
             return {"success": False, "error": "Friend request not found."}
         if req.get("recipient_id") != user_id:
             return {"success": False, "error": "You can only accept requests addressed to you."}
+        if req.get("status") == REQUEST_STATUS_ACCEPTED:
+            return {"success": True, "friendship": friendship_view(req, user_id)}
         if req.get("status") != REQUEST_STATUS_PENDING:
             return {"success": False, "error": f"Request is already {req.get('status')}."}
-
         now = timestamp_now()
-
+        transitioned = await self._requests.update_status(ctx, request_id=request_id, status=REQUEST_STATUS_ACCEPTED, updated_at=now)
+        if not transitioned:
+            current = await self._requests.get(ctx, request_id=request_id)
+            if current and current.get("status") == REQUEST_STATUS_ACCEPTED:
+                return {"success": True, "friendship": friendship_view(current, user_id)}
+            return {"success": False, "error": "The request changed before it could be accepted."}
         friendship_id = f"fs_{request_id}"
-        base = {"friendship_id": friendship_id, "since": now, "created_at": now}
-        doc_a = {**base, "member_user_id": req["requester_id"], "friend_user_id": user_id}
-        doc_b = {**base, "member_user_id": user_id, "friend_user_id": req["requester_id"]}
-        await self._friendships.create_pair(ctx, doc_a, doc_b)
-        await self._requests.update_status(ctx, request_id=request_id, status=REQUEST_STATUS_ACCEPTED, updated_at=now)
+        doc_a = friendship_view({**req, "updated_at": now}, req["requester_id"])
 
         await ctx.emit("domain.social.friendship.created", {
             "friendship_id": friendship_id,
@@ -103,7 +106,8 @@ class FriendsService:
             return {"success": False, "error": f"Request is already {req.get('status')}."}
 
         now = timestamp_now()
-        await self._requests.update_status(ctx, request_id=request_id, status=REQUEST_STATUS_DECLINED, updated_at=now)
+        if not await self._requests.update_status(ctx, request_id=request_id, status=REQUEST_STATUS_DECLINED, updated_at=now):
+            return {"success": False, "error": "The request changed before this action completed."}
 
         await ctx.emit("domain.social.friend_request.declined", {
             "request_id": request_id,
@@ -126,7 +130,8 @@ class FriendsService:
             return {"success": False, "error": f"Request is already {req.get('status')}."}
 
         now = timestamp_now()
-        await self._requests.update_status(ctx, request_id=request_id, status=REQUEST_STATUS_WITHDRAWN, updated_at=now)
+        if not await self._requests.update_status(ctx, request_id=request_id, status=REQUEST_STATUS_WITHDRAWN, updated_at=now):
+            return {"success": False, "error": "The request changed before this action completed."}
 
         await ctx.emit("domain.social.friend_request.withdrawn", {
             "request_id": request_id,
@@ -142,7 +147,7 @@ class FriendsService:
     async def remove_friend(self, ctx, *, friend_user_id: str) -> dict:
         user_id = actor_id(ctx)
 
-        deleted = await self._friendships.delete_pair(ctx, user_id=user_id, friend_user_id=friend_user_id)
+        deleted = await self._friendships.remove(ctx, user_id=user_id, friend_user_id=friend_user_id)
         if not deleted:
             return {"success": False, "error": "Friendship not found."}
 

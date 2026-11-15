@@ -1,7 +1,6 @@
 """Pack account handlers address the same declared storage as module actions."""
 from __future__ import annotations
 
-import importlib.util
 import os
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
@@ -26,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MODULES = {
     "files": ("files", ("records",)),
     "commerce": ("commerce", ("carts", "orders", "checkout_requests", "products")),
-    "friends": ("social", ("friendships", "requests")),
+    "friends": ("social", ("requests",)),
     "activity_feed": ("social", ("events",)),
     "notification_settings": ("notifications", ("preferences",)),
     "support": ("support", ("requests",)),
@@ -34,8 +33,8 @@ MODULES = {
 
 
 @pytest.mark.parametrize("module,service_name,action,collection,key,identifier", [
-    ("friends", "FriendsService", "list_friends", "friendships", "friends", "friendship_id"),
-    ("friends", "FriendsService", "list_friends_of", "friendships", "friends", "friendship_id"),
+    ("friends", "FriendsService", "list_friends", "requests", "friends", "friendship_id"),
+    ("friends", "FriendsService", "list_friends_of", "requests", "friends", "friendship_id"),
     ("activity_feed", "ActivityFeedService", "get_feed", "events", "events", "event_id"),
     ("activity_feed", "ActivityFeedService", "get_profile_activity", "events", "events", "event_id"),
 ])
@@ -51,16 +50,20 @@ async def test_social_maximum_page_keeps_cursor_and_all_rows(
     persistence = host.persistence()
     rows = [
         {**row(module, index), identifier: f"record-{index:03d}",
-         "created_at": (datetime(2026, 1, 1, tzinfo=UTC) + timedelta(seconds=index)).isoformat()}
+         "created_at": (datetime(2026, 1, 1, tzinfo=UTC) + timedelta(seconds=index)).isoformat(),
+         "updated_at": (datetime(2026, 1, 1, tzinfo=UTC) + timedelta(seconds=index)).isoformat()}
         for index in range(105)
     ]
+    if module == "friends":
+        for record in rows:
+            record["request_id"] = record.pop("friendship_id")
     for record in rows:
         await persistence.collection(module, collection).insert_one(record)
     await host.persistence(app_id="app-two").collection(module, collection).insert_one(
         {**rows[-1], identifier: "foreign-app"}
     )
     await host.persistence(user_id="bob").collection(module, collection).insert_one(
-        {**rows[-1], "member_user_id": "bob", "user_id": "bob", "actor_id": "bob", "feed_user_ids": ["bob"],
+        {**rows[-1], "requester_id": "bob", "user_id": "bob", "actor_id": "bob", "feed_user_ids": ["bob"],
          identifier: "other-user"}
     )
     params = {"limit": requested_limit}
@@ -74,18 +77,14 @@ async def test_social_maximum_page_keeps_cursor_and_all_rows(
     second = await call(ctx, **params, before=first["next_cursor"])
     assert second["count"] == 6 and second["next_cursor"] is None
     assert [record[identifier] for page in (first, second) for record in page[key]] == [
-        record[identifier] for record in reversed(rows)
+        ("fs_" + record["request_id"] if module == "friends" else record[identifier]) for record in reversed(rows)
     ]
 
 
 def handler_class(module):
     pack = MODULES[module][0]
-    path = ROOT / f"factory_app/build_context/{pack}/templates/modules/{module}/backend/account_data_handler.py"
-    spec = importlib.util.spec_from_file_location(f"pack_account_{module}", path)
-    assert spec and spec.loader
-    loaded = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(loaded)
-    return loaded.AccountDataHandler
+    return import_module(f"factory_app.build_context.{pack}.templates.modules.{module}.backend.account_data_handler").AccountDataHandler
+
 
 
 @pytest_asyncio.fixture
@@ -161,7 +160,7 @@ def row(module, index=0, user="alice"):
     if module == "commerce":
         return {**common, "actor_id": user}
     if module == "friends":
-        return {**common, "member_user_id": user, "friend_user_id": "carol", "requester_id": user, "recipient_id": "carol"}
+        return {**common, "request_id": f"request-{user}-{index}", "requester_id": user, "recipient_id": "carol", "status": "accepted", "updated_at": common["created_at"]}
     if module == "activity_feed":
         return {**common, "actor_id": user, "feed_user_ids": [user, "carol"]}
     if module == "notification_settings":
@@ -289,8 +288,7 @@ async def test_shared_social_contributions_are_removed_without_deleting_peer_con
     for module in ("friends", "activity_feed"):
         host.registry.register(module, handler_class(module))
     for index in range(105):
-        await peer.collection("friends", "friendships").insert_one({"record_id": index, "friend_user_id": "alice"})
-        await peer.collection("friends", "requests").insert_one({"record_id": index, "requester_id": "bob", "recipient_id": "alice"})
+        await peer.collection("friends", "requests").insert_one({"record_id": index, "request_id": f"peer-request-{index}", "requester_id": "bob", "recipient_id": "alice", "status": "accepted", "updated_at": "2026-01-01"})
         await peer.collection("activity_feed", "events").insert_one({
             "record_id": index, "actor_id": "bob", "about_user_id": "alice", "feed_user_ids": ["alice", "bob"],
             "subject_label": "Peer content", "created_at": datetime(2026, 1, 1, tzinfo=UTC),
@@ -303,7 +301,7 @@ async def test_shared_social_contributions_are_removed_without_deleting_peer_con
     assert response.json()["activity_events"] == []
     deleted = await host.http.delete("/api/account", headers=host.headers())
     result = deleted.json()["results"]
-    assert result["friends"] == {"friendships_deleted": 105, "requests_deleted": 105, "deleted_count": 210}
+    assert result["friends"] == {"friendships_deleted": 105, "requests_deleted": 105, "deleted_count": 105}
     assert result["activity_feed"] == {"events_deleted": 0, "events_anonymized": 105, "feed_memberships_removed": 105}
     events = owner.collection("activity_feed", "events")
     assert await events.count({"actor_id": "bob", "feed_user_ids": ["bob"], "about_user_id": {"$exists": False},

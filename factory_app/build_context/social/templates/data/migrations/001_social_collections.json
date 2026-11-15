@@ -2,69 +2,8 @@
   "schema_version": "mozaiks.data_migration.v1",
   "migration_id": "social_001_collections",
   "version": "1",
-  "description": "Ensure social platform collections and indexes (friendships, friend requests, activity feed events, posts, post reactions, and post comments) without rewriting records.",
+  "description": "Ensure social request, feed, post, reaction, and comment collections and indexes.",
   "operations": [
-    {
-      "type": "ensure_collection",
-      "module_id": "friends",
-      "entity_name": "friendships"
-    },
-    {
-      "type": "ensure_index",
-      "module_id": "friends",
-      "entity_name": "friendships",
-      "index": {
-        "name": "friendships_by_id",
-        "keys": [
-          [
-            "friendship_id",
-            1
-          ],
-          [
-            "member_user_id",
-            1
-          ]
-        ],
-        "unique": true
-      }
-    },
-    {
-      "type": "ensure_index",
-      "module_id": "friends",
-      "entity_name": "friendships",
-      "index": {
-        "name": "friendships_by_user",
-        "keys": [
-          [
-            "member_user_id",
-            1
-          ],
-          [
-            "created_at",
-            -1
-          ]
-        ]
-      }
-    },
-    {
-      "type": "ensure_index",
-      "module_id": "friends",
-      "entity_name": "friendships",
-      "index": {
-        "name": "friendships_by_user_friend",
-        "keys": [
-          [
-            "member_user_id",
-            1
-          ],
-          [
-            "friend_user_id",
-            1
-          ]
-        ],
-        "unique": true
-      }
-    },
     {
       "type": "ensure_collection",
       "module_id": "friends",

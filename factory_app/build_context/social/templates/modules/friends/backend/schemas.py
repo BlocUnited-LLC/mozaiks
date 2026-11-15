@@ -24,7 +24,7 @@ class FriendRequest(TypedDict, total=False):
     requester_id: str
     requester_name: str
     recipient_id: str
-    status: str          # pending | accepted | declined | withdrawn
+    status: str          # pending | accepted | declined | withdrawn | removed
     created_at: str
     updated_at: str
 

@@ -15,7 +15,7 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
-- Social friendships preserve both members and support acceptance retries after partial writes. Profile tabs expose friend requests and messaging, with nullable pagination cursors and failed message sends preserving drafts.
+- Social friendships derive from atomic request states, fencing competing accept, decline, withdrawal, and removal actions. Profile tabs expose friend requests and messaging, with nullable pagination cursors and failed message sends preserving drafts.
 
 - Generated task-based apps retain admin registries, app-owned assistant settings,
   brand identity and approved signup intent; app menus show one authorized Admin entry.

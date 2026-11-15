@@ -311,11 +311,13 @@ and recovery. A verified identity matching that allowlist gains app admin access
 The account menu uses effective backend roles. Operators must configure that
 provider and deliver its account setup or recovery flow before customer launch.
 
-The Social pack friendship membership field is `member_user_id`. Runtime
-`user_id` metadata identifies the actor writing a record. Apps using an older
-Social template must regenerate their development data before adopting this
-pre-production contract. Friendship indexes include membership identity so both
-sides of a connection can be stored.
+The Social pack stores one authoritative request/connection record for each
+unordered pair of users. Acceptance, decline, withdrawal, and removal use atomic
+conditional state transitions. Both users' friendship views derive from accepted
+records. Request IDs change on a new invitation, fencing delayed responses from
+an earlier invitation. Older Social workspaces require a fresh development
+lineage or an explicit reviewed migration before adopting this pre-production
+storage contract.
 
 
 The Social Friends tab accepts a username, resolves the existing public profile,
