@@ -995,6 +995,7 @@ test('standalone shell identifies drafts through loading and navigation without 
         builder.onLoad({filter: /.*/, namespace:'fixture'}, ({path: kind}) => ({
           resolveDir: shell, loader:'jsx', contents: kind === 'extensions' ? 'export {};' : `
             import React, {useState} from 'react';
+            export {safeReturnPath} from ${JSON.stringify(path.join(shell, '../chat-ui/src/auth/authAdapter.js'))};
             export const componentRegistry = {hasComponent: () => true};
             export class WebSocketApiAdapter {}
             export const LoginPage = () => null;
