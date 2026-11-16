@@ -124,6 +124,7 @@ export default function SupportProfileTab({ operator = false }) {
                   type="button"
                   disabled={replying}
                   onClick={() => {
+                    if (request.request_id === activeRequestId) return
                     setActiveThread(null)
                     setMessages([])
                     setNewMessage('')

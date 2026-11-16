@@ -40,6 +40,9 @@ for (const operator of [false, true]) {
     const page=await browser.newPage();
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await expect(page.getByText('Please help',{exact:true})).toBeVisible();
+    await page.getByRole('button',{name:/Account issue/}).click();
+    await expect(page.getByText('Please help',{exact:true})).toBeVisible();
+    await expect(page.getByLabel('Reply to support request')).toBeVisible();
     await page.getByLabel('Reply to support request').fill('Follow-up');
     await page.getByRole('button',{name:'Reply',exact:true}).click();
     await expect(page.getByText('Follow-up',{exact:true})).toBeVisible();

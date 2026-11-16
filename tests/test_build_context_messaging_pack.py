@@ -280,9 +280,10 @@ def test_messages_profile_tab_declared_for_dm_inbox() -> None:
     profile = _read_yaml(
         TEMPLATES / "modules" / "messages" / "contracts" / "profile.yaml"
     )
-    assert profile.get("schema_version") == "mozaiks.profile.v1"
-    tab_ids = {tab["id"] for tab in profile.get("tabs") or []}
+    assert profile.get("schema_version") == "mozaiks.profile.v2"
+    tab_ids = {tab["id"] for tab in profile.get("pages") or []}
     assert "messages" in tab_ids
+    assert profile["pages"][0]["visibility"] == "owner_only"
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +293,7 @@ def test_messages_profile_tab_declared_for_dm_inbox() -> None:
 def test_messaging_has_only_a_profile_workspace() -> None:
     assert not (TEMPLATES / "ui" / "route_manifest.json").exists()
     profile = _read_yaml(TEMPLATES / "modules/messages/contracts/profile.yaml")
-    assert profile["tabs"][0]["component"] == "MessagingProfileTab"
+    assert profile["pages"][0]["component"] == "MessagingProfileTab"
 
 
 def test_messaging_ui_component_exists() -> None:
@@ -331,7 +332,7 @@ def test_messaging_ui_reads_only_theme_tokens_without_fallbacks() -> None:
 
 def test_messaging_profile_owns_conversation_creation() -> None:
     profile = _read_yaml(TEMPLATES / "modules/messages/contracts/profile.yaml")
-    assert [tab["action"] for tab in profile["tabs"]] == ["list_threads"]
+    assert [tab["action"] for tab in profile["pages"]] == ["list_threads"]
     source = _read_text(MESSAGING_UI_FILES[0])
     assert "create_thread" in source
     assert "encodeURIComponent(username)" in source
