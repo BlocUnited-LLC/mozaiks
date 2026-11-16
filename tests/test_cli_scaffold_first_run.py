@@ -13,6 +13,7 @@ import json
 from argparse import Namespace
 
 import pytest
+import yaml
 
 from mozaiks_cli.commands import init_command, onboard_command
 from mozaiks_cli.commands import quickstart as quickstart_command
@@ -48,6 +49,13 @@ def _assert_first_run_ready(workspace, *, app_id: str) -> None:
     assert env_example["AUTH_ENABLED"] == "false"
     assert env_example["ENV"] == "development"
     assert env_example["AUTH_ANON_ROLES"] == "admin,user"
+    assert env_example["LLM_PRIMARY_API_TYPE"] == "google"
+    assert env_example["LLM_PRIMARY_MODEL"] == "gemini-3.8-flash"
+    assert env_example["GEMINI_API_KEY"] == ""
+    policy = yaml.safe_load((workspace / "app" / "config" / "refinement_policy.yaml").read_text(encoding="utf-8"))
+    for profile in policy["llm_profiles"].values():
+        assert profile["llm_config"]["api_type"] == env_example["LLM_PRIMARY_API_TYPE"]
+        assert profile["llm_config"]["model"] == env_example["LLM_PRIMARY_MODEL"]
 
 
 @pytest.mark.parametrize("preset", ["engine", "chat", "integrated", "full"])
@@ -79,7 +87,7 @@ def test_secret_contract_example_uses_the_current_entry_shape() -> None:
 
     assert example[0] == "secrets:"
     contract = validate_secret_contract_text("version: 1\n" + "\n".join(example) + "\n")
-    assert [entry.env for entry in contract.secrets] == ["OPENAI_API_KEY", "MONGO_URI"]
+    assert [entry.env for entry in contract.secrets] == ["GEMINI_API_KEY", "MONGO_URI"]
 
 
 def test_scaffold_scripts_bind_loopback_by_default(tmp_path) -> None:

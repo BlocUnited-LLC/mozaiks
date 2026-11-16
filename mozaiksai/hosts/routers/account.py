@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from mozaiksai.core.account import account_data_registry
@@ -34,6 +34,16 @@ from mozaiksai.core.runtime.persistence import (
 
 router = APIRouter(tags=["account"])
 logger = logging.getLogger("mozaiks_app.account_router")
+
+
+def _account_app_id(request: Request, principal: UserPrincipal) -> str:
+    """Account operations belong to the trusted loaded host, not a token target."""
+    app_id = getattr(request.app.state, "loaded_app_id", None)
+    if not isinstance(app_id, str) or not app_id.strip() or app_id != app_id.strip():
+        raise HTTPException(status_code=503, detail="Loaded app identity unavailable")
+    if principal.app_id is not None and principal.app_id != app_id:
+        raise HTTPException(status_code=403, detail="App ID does not match the loaded app")
+    return app_id
 
 
 def _account_persistence(request: Request, principal: UserPrincipal, *, app_id: str, user_id: str) -> Any:
@@ -76,7 +86,7 @@ async def delete_account(
     The response intentionally omits personal data — it contains only counts
     and success/error status per module.
     """
-    app_id = str(principal.app_id or "default")
+    app_id = _account_app_id(request, principal)
     user_id = validate_user_id_against_principal(principal)
 
     logger.info("ACCOUNT_DELETE_STARTED: app_id=%s user_id=%s", app_id, user_id)
@@ -141,7 +151,7 @@ async def export_account_data(
     exports are collected — the host can inject platform-owned records
     (billing history, subscription snapshots, auth identity) at that point.
     """
-    app_id = str(principal.app_id or "default")
+    app_id = _account_app_id(request, principal)
     user_id = validate_user_id_against_principal(principal)
 
     logger.info("ACCOUNT_EXPORT_STARTED: app_id=%s user_id=%s", app_id, user_id)

@@ -14,7 +14,7 @@ derived from digest-verified bytes.  There is no caller-constructible
 authority token anywhere on the public resolution API.
 
 The corpus is discovered independently from the checked-in factory packs and
-pinned: 10 modules, 67 actions, all certifying end to end through
+pinned: 11 modules, 72 actions, all certifying end to end through
 ``resolve_module_action_implementation`` with exact verified bytes for the
 manifest, leaf, base, AND pack contract (the blob-read count proves the
 contract bytes are actually read), and the #484 closed request import.
@@ -52,8 +52,8 @@ SCOPE = ExecutionAccessScopeRef(tenant_id="tenant", workspace_id="workspace")
 OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant", workspace_id="elsewhere")
 OTHER_TENANT = ExecutionAccessScopeRef(tenant_id="rival", workspace_id="workspace")
 
-EXPECTED_MODULE_COUNT = 10
-EXPECTED_ACTION_COUNT = 67
+EXPECTED_MODULE_COUNT = 11
+EXPECTED_ACTION_COUNT = 72
 
 
 def _discover_split_modules() -> list[tuple[str, str]]:

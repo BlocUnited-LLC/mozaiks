@@ -26,6 +26,7 @@ from mozaiks_cli.workspace import (
 )
 
 PROVIDER_DEFAULT_MODELS = {
+    "google": "gemini-3.8-flash",
     "anthropic": "claude-sonnet-4-5",
     "openai": "gpt-4.1",
     "local": "qwen3:latest",
@@ -82,14 +83,15 @@ def run(args) -> int:
     provider = _prompt_choice(
         label="Which AI provider do you want to start with?",
         explicit=getattr(args, "provider", None),
-        default=existing_llm.get("provider") or "anthropic",
-        options=["anthropic", "openai", "local", "other"],
+        default=existing_llm.get("provider") or "google",
+        options=list(PROVIDER_DEFAULT_MODELS),
         should_prompt=should_prompt,
     )
     model = _prompt_text(
         label="Default model",
         explicit=getattr(args, "model", None),
-        default=existing_llm.get("model") or PROVIDER_DEFAULT_MODELS[provider],
+        default=(existing_llm.get("model") if provider == existing_llm.get("provider") else None)
+        or PROVIDER_DEFAULT_MODELS[provider],
         should_prompt=should_prompt,
     )
 

@@ -186,7 +186,7 @@ def test_nullable_required_and_enum_are_independent_and_requests_remain_exact():
     assert validate_json_schema({"item": {"state": "done"}}, result) is None
     for value in ({"item": {}}, {"item": {"state": "other"}}, {"item": {"state": None, "note": None}}):
         assert validate_json_schema(value, result).category == "value_invalid"
-    with pytest.raises(ValueError, match="closed requests require false"):
+    with pytest.raises(ValueError, match=r"^property 'item\.state': request schemas \(input_schema\) cannot be nullable"):
         _materialize_schema_contract(schema, closed_request=True)
 
 

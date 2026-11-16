@@ -49,6 +49,58 @@ from mozaiksai.core.runtime.composition.platform_hooks import (
 # Helpers — build mock LoadedModule objects
 # ---------------------------------------------------------------------------
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", [None, "schema", "producer", "emits", "public"])
+async def test_admitted_handler_app_notice_preserves_the_source_boundary(fault):
+    from copy import deepcopy
+
+    from mozaiksai.core.runtime.app.module_loader import ModuleNotificationsManifest
+    from tests.test_module_reaction_emission import OUTPUT, SOURCE, module, source
+
+    stored, output = [], []
+
+    async def on_order(ctx):
+        await ctx.emit(OUTPUT, {"record_id": 7 if fault == "schema" else "task-1", "recipient_id": "bob"})
+
+    loaded = module(SimpleNamespace(on_order=on_order), producer="other" if fault == "producer" else "feed")
+    if fault == "emits":
+        loaded.definition.actions[0].emits = []
+    if fault == "public":
+        loaded.definition.actions[0].api_surface = "public"
+    loaded.manifests.notifications = ModuleNotificationsManifest.model_validate({"notifications": [{
+        "id": "ready", "event_type": OUTPUT, "audience": {"scope": "app", "user_id_field": "recipient_id"},
+        "source_event": "reference", "context_fields": ["record_id"], "template": {"title": "Task ready"},
+    }]})
+
+    async def store(record):
+        stored.append(record)
+
+    async def observe(event):
+        output.append(deepcopy(event))
+
+    dispatcher = UnifiedEventDispatcher()
+    router = ModuleEventRouter([loaded], notification_store=store, event_emitter=dispatcher.emit)
+    router.register(dispatcher)
+    dispatcher.register_handler(OUTPUT, observe)
+    incoming = source()
+    before = deepcopy(incoming)
+    await dispatcher.emit(SOURCE, incoming)
+    assert incoming == before
+    if fault is not None:
+        assert stored == output == []
+        return
+    event, = output
+    notice, = stored
+    assert event["tenant"] == incoming["tenant"] and event["actor"] == incoming["actor"]
+    assert event["source"]["module_id"] == "feed" and event["source"]["action_id"] == "process_order"
+    assert event["correlation"]["causation_id"] == incoming["id"]
+    assert "orders.read" in event["authority"]["permissions"]
+    assert notice["app_id"] == incoming["tenant"]["app_id"]
+    assert not {"tenant_id", "workspace_id", "scope"} & notice.keys()
+    assert notice["actor"] is None and notice["audience"]["user_ids"] == ["bob"]
+    assert notice["source_event"] == {"id": event["id"], "type": OUTPUT}
+
 def _reaction_model(event_type: str, **extra) -> MagicMock:
     m = MagicMock()
     m.event_type = event_type

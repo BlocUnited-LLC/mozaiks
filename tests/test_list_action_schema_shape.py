@@ -39,7 +39,8 @@ def _object_wrapping_an_array() -> dict:
 
 def test_the_shape_the_agent_wrote_is_still_rejected() -> None:
     """The guard is correct and is not being relaxed to accommodate the repair."""
-    with pytest.raises(ValueError, match="Only object schema contracts"):
+    with pytest.raises(ValueError, match=r"^a 'array' schema cannot declare properties; use type 'object' for fields, "
+                                         r"or type 'array' with items_type 'object' and items_properties for rows$"):
         _materialize_schema_contract(_array_with_properties())
 
 

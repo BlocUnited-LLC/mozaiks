@@ -128,6 +128,18 @@ def task_allowed_paths(task: dict[str, Any], tasks: list[dict[str, Any]]) -> set
     return (own | optional_task_output_paths(task)) - foreign - {""}
 
 
+def repair_inventory(context: Any) -> list[dict[str, Any]]:
+    """Repair authority includes the registry's existing workflow owner, outside build tasks."""
+    tasks = approved_task_inventory(context)
+    registry = {
+        "task_id": "AdminRegistryAgent", "initial_agent": "AdminRegistryAgent",
+        "owned_paths": ["admin/admin_registry.yaml"], "depends_on": [],
+    }
+    if any(task.get("task_id") == registry["task_id"] or "admin/admin_registry.yaml" in task.get("owned_paths", []) for task in tasks):
+        raise ValueError("admin/admin_registry.yaml belongs to the workflow's AdminRegistryAgent")
+    return [*tasks, registry]
+
+
 def settled_task_snapshot(context: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Validate and detach original settled execution evidence for artifact capture."""
     items = _get(context, "app_task_batch_items")
@@ -362,7 +374,7 @@ def validate_repair_candidate(
     if active.get("status") != "selected" or not active.get("request_id"):
         reject("repair request is not pending; replay or interrupted dispatch is blocked")
     try:
-        tasks = approved_task_inventory(context)
+        tasks = repair_inventory(context)
     except (TypeError, ValueError) as exc:
         reject(str(exc))
     task = next((task for task in tasks if task.get("task_id") == active.get("task_id")), None)

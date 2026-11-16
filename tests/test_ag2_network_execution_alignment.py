@@ -337,6 +337,132 @@ class _DeterministicAgent(Agent):
         return _Reply(self._body)
 
 
+class _OwnedHTTPClientProbe:
+    _mozaiks_ag2_session_owned = True
+
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
+
+
+def _request_with_owned_http_client(agent: Agent, client: _OwnedHTTPClientProbe, *, pause: bool = False):
+    agent.config = SimpleNamespace(http_client=client)
+    return AG2NetworkRunnerRequest(
+        workflow_name="OwnedGeminiHTTP",
+        chat_id=f"owned-gemini-{id(agent)}",
+        app_id="app",
+        agents={"Planner": agent},
+        initial_agent_name="Planner",
+        initial_message="Start",
+        transition_rules=[{
+            "source_agent": "Planner",
+            "target_agent": "user" if pause else "terminate",
+            "transition_type": "after_turn",
+        }],
+        knowledge_store=MemoryKnowledgeStore(),
+        idle_timeout_seconds=3.0,
+    )
+
+
+@pytest.mark.anyio
+async def test_runner_closes_owned_gemini_clients_on_completion_and_failure() -> None:
+    completed_client = _OwnedHTTPClientProbe()
+    completed = await AG2NetworkRunner().run(_request_with_owned_http_client(
+        _DeterministicAgent("Planner", "Complete."), completed_client,
+    ))
+    assert completed.status is RunStatus.COMPLETED
+    assert completed_client.close_calls == 1
+
+    class FailingAgent(_DeterministicAgent):
+        async def ask(self, *msg: Any, **kwargs: Any) -> _Reply:
+            raise RuntimeError("expected provider failure")
+
+    failed_client = _OwnedHTTPClientProbe()
+    failed = await AG2NetworkRunner().run(_request_with_owned_http_client(
+        FailingAgent("Planner", "unused"), failed_client,
+    ))
+    assert failed.status is RunStatus.FAILED
+    assert failed_client.close_calls == 1
+
+
+@pytest.mark.anyio
+async def test_runner_keeps_owned_gemini_client_until_paused_live_session_closes() -> None:
+    client = _OwnedHTTPClientProbe()
+    paused = await AG2NetworkRunner().run(_request_with_owned_http_client(
+        _DeterministicAgent("Planner", "Waiting."), client, pause=True,
+    ))
+    assert paused.status is RunStatus.PAUSED
+    assert client.close_calls == 0
+
+    await paused.live_run.close()
+    assert client.close_calls == 1
+
+
+@pytest.mark.anyio
+async def test_runner_closes_owned_gemini_client_when_cancelled() -> None:
+    started = asyncio.Event()
+
+    class WaitingAgent(_DeterministicAgent):
+        async def ask(self, *msg: Any, **kwargs: Any) -> _Reply:
+            started.set()
+            await asyncio.Event().wait()
+            return _Reply("unreachable")
+
+    client = _OwnedHTTPClientProbe()
+    task = asyncio.create_task(AG2NetworkRunner().run(_request_with_owned_http_client(
+        WaitingAgent("Planner", "unused"), client,
+    )))
+    await asyncio.wait_for(started.wait(), timeout=3.0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert client.close_calls == 1
+
+
+@pytest.mark.anyio
+async def test_live_run_closes_owned_gemini_clients_when_continuation_is_cancelled() -> None:
+    worker_started = asyncio.Event()
+
+    class WaitingWorker(_DeterministicAgent):
+        async def ask(self, *msg: Any, **kwargs: Any) -> _Reply:
+            worker_started.set()
+            await asyncio.Event().wait()
+            return _Reply("unreachable")
+
+    planner_client = _OwnedHTTPClientProbe()
+    worker_client = _OwnedHTTPClientProbe()
+    planner = _DeterministicAgent("Planner", "Waiting for approval.")
+    worker = WaitingWorker("Worker", "unused")
+    planner.config = SimpleNamespace(http_client=planner_client)
+    worker.config = SimpleNamespace(http_client=worker_client)
+    paused = await AG2NetworkRunner().run(AG2NetworkRunnerRequest(
+        workflow_name="OwnedGeminiLiveCancel",
+        chat_id="owned-gemini-live-cancel",
+        app_id="app",
+        agents={"Planner": planner, "Worker": worker},
+        initial_agent_name="Planner",
+        initial_message="Start",
+        transition_rules=[
+            {"source_agent": "Planner", "target_agent": "user", "transition_type": "after_turn"},
+            {"source_agent": "user", "target_agent": "Worker", "transition_type": "after_turn"},
+            {"source_agent": "Worker", "target_agent": "terminate", "transition_type": "after_turn"},
+        ],
+        knowledge_store=MemoryKnowledgeStore(),
+        idle_timeout_seconds=3.0,
+    ))
+    assert paused.status is RunStatus.PAUSED
+    assert planner_client.close_calls == worker_client.close_calls == 0
+
+    continuation = asyncio.create_task(paused.live_run.continue_with_user_message("Approved"))
+    await asyncio.wait_for(worker_started.wait(), timeout=3.0)
+    continuation.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await continuation
+    assert planner_client.close_calls == worker_client.close_calls == 1
+
+
 class _PlannerOutput(BaseModel):
     plan_ready: bool
 

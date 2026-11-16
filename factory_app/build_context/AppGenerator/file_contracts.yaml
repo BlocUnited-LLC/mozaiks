@@ -21,7 +21,25 @@ description: >
   auth contract validates against the shared mozaiks.auth.v2 model;
   ui/auth/authAdapter.js
   delegates to @mozaiks/chat-ui/auth. Do not generate OIDC, token storage, or
-  local demo identity implementations. Backend configuration selects auth mode.
+  local demo identity implementations. Approved AppBuildPlan.auth_mode uses the
+  runtime AuthMode vocabulary. Null preserves existing access intent; an explicit
+  mode updates signup intent without replacing provider handles or routes.
+  Provider registration and real signup availability remain deployment prerequisites.
+
+  Final assembly emits app-owned config/ai.json and app identity branding even
+  when task batches bypass full schema saves. Never copy Studio assistant prompts,
+  provider credentials, or Factory workflow references into customer apps.
+  Initial app admin bootstrap uses authenticated runtime platform_user_email only,
+  including a pre-app design revision verified by the revision baseline owner;
+  refinement preserves baseline admins. Missing trusted email requires operator setup.
+  Shared profile photo and banner uploads use the platform profile media endpoints
+  and its configured media content store. Do not generate duplicate profile upload
+  modules, browser-local profile records, or storage credentials. The Factory
+  workbench displays the materialized app owner allowlist and account setup guidance.
+  AdminRegistryAgent owns admin/admin_registry.yaml after task materialization.
+  Module panel page references must resolve to enabled registry pages. Registry
+  navigation belongs inside the portal; the platform injects one authorized Admin
+  menu entry rather than app-declared shortcuts to individual admin pages.
   The optional Android client uses the canonical frontend.android env handles;
   never replace the browser client, issuer, or API audience to enable mobile.
   Native client registration belongs to the host/operator, not generated code.
@@ -112,6 +130,7 @@ task_contracts:
       - Typed JsonSchemaContract output uses only properties[].required booleans for requiredness. Do not author a top-level required list; the renderer derives the runtime JSON Schema required names for actions, capabilities, event payloads, and policy hooks.
       - module_contract owned_paths are YAML/declarative contract files only - module.yaml, contracts/*.yaml, and optional runtime_extensions.yaml. Do not include backend/*.py in module_contract tasks; use data_models for backend/schemas.py and business_services for handler.py/service.py/repo.py/policy.py. For modules owning data_contract collections, schemas.py and policy.py are rendered by code. The injected read/write ownership inventories identify exactly which canonical action implementations are code-owned and which remain authored. Canonical list/get names or empty read permissions do not by themselves make an implementation code-owned; implement every authored action in its owned backend files.
       - Optional request and event properties are not nullable unless their declared type admits null. Service code normalizes documented defaults before writes, preserves omitted fields on partial update, and omits absent optional event keys rather than emitting None. Verify required-only inputs against the event schema as well as fully populated forms.
+      - For a role-protected app_wide collection, any narrowed canonical write input must be part of a complete authored create/update/delete family. Explicitly include all three actions in module.yaml.actions, each with handler_method, input_schema, output_schema, permissions, and api_surface. Keep each input a closed subset with canonical types, enums, and requiredness; update/delete must require the canonical record id. Never narrow only one write or leave a sibling action partial; if server-supplied fields do not need to be omitted, preserve the canonical request schemas so the compiler can own ordinary CRUD.
       - actions[].input_schema is a closed request contract. Every object level (root, nested objects, array item objects) must declare additionalProperties false, and every accepted request key must be an explicitly declared property. Never emit an open map property such as metadata {type object} in an action input schema - use a closed nested object with declared keys, or an array of closed {key, value} string entries for app-defined annotations. Keep input schemas to closed-profile keywords (type, enum, items, properties, required, additionalProperties); defaults and length limits live in service code. Expected business-rule input rejections raise mozaiksai.core.runtime.ModuleInputValidationError before writes/events, producing INVALID_PARAMS/400. Plain ValueError remains an unexpected execution error.
       - Canonical generated get actions raise mozaiksai.core.runtime.ModuleRecordNotFoundError when the scoped record is absent. The executor returns RECORD_NOT_FOUND/404 identically for missing and foreign records; plain LookupError remains an unexpected execution error.
       - Typed object properties require nonempty properties; typed object-array rows require nonempty items_properties. Both lists contain terminal JsonSchemaLeafProperty scalar or scalar-array members only. Declare every custom/joined response field before implementation or page generation; descriptions and service code are not field declarations. Duplicate names, wrong-kind member lists, open object rows and deeper nesting fail contract admission. Output nullable true explicitly admits null; closed action/capability inputs require false.
@@ -147,6 +166,8 @@ task_contracts:
       - Notification rules must use schema_version mozaiks.notifications.v1, stable notification ids, event_type values declared in contracts/events.yaml or canonical domain/platform/hosted/mozaikspay namespaces, controlled channels from [in_app, email, push, sms], and explicit audience roles/permissions, audience.user_id_field for event-payload target users, or a declared module-local resolver hook.
       - Use channel in_app by default. Add email, push, or sms only when the app plan explicitly requires external delivery and the corresponding operator pack or app-owned provider adapter is available. Do not invent provider delivery internals in module business logic.
       - Use context_fields only for non-secret identifiers or display context needed by the notification center. Never include token, key, password, credential, payment provider, or idempotency fields.
+      - 'Notification audience.scope defaults to event and retains verified producer ownership. Explicit app scope requires a nonempty user_id_field validated by the owning service for every recipient, with no roles, permissions or resolver. Missing/invalid recipients create no notice; never bypass source provenance or make an unresolved target a broadcast.'
+      - 'Notification source_event: reference retains only event id/type/optional related_type and sets actor null on the target record. Source events remain unchanged. Target scope is independent; safe templates/context_fields must deliberately exclude any content or identity the notice must not retain.'
       - Persistent modules express collection ownership through data_contract, not ad hoc database files.
       - backend/repo.py owns persistence operations and must not contain product policy.
       - When the approved design and task dependencies require an internal service call to another app module, import that admitted dependency through modules.<module_id>.backend.service using its exact module id and existing function signature. ModuleLoader binds modules to the active app; dispatched handlers use separate synthetic package roots. Do not derive sibling paths from __package__, use bare module ids or app.modules imports, alter sys.path, or invent import fallbacks. This is an implementation call, not a new action dispatch; retain the original ctx and its permission, persistence and event boundaries. Report missing dependency contracts or action event declarations rather than fabricating authority.

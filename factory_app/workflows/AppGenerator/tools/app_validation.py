@@ -24,6 +24,7 @@ import zipfile
 
 logger = logging.getLogger(__name__)
 from collections.abc import Iterable, Mapping
+from itertools import islice
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -2495,6 +2496,119 @@ def _build_failure_message(
     return "\n".join(lines)
 
 
+def _diagnostic_id(value: Any) -> str | None:
+    """Correlate generated identifiers without logging their potentially private text."""
+    if not isinstance(value, str) or not value:
+        return None
+    return hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
+def _task_failure_diagnostic(task_id: Any, failure: Any) -> dict[str, Any] | None:
+    if not isinstance(failure, dict):
+        return None
+    kinds = {"output_rejected", "dependency_blocked", "execution_failed", "interrupted"}
+    kind = failure.get("failure_kind")
+    kind = kind if isinstance(kind, str) and kind in kinds else "unknown"
+    error = failure.get("error")[:4096] if isinstance(failure.get("error"), str) else ""
+    attempts = failure.get("attempts")
+    attempts = attempts if type(attempts) is int and 0 <= attempts <= 1000 else None
+    diagnostic: dict[str, Any] = {
+        "task_id_hash": _diagnostic_id(task_id),
+        "worker_id_hash": _diagnostic_id(failure.get("worker_agent")),
+        "failure_kind": kind,
+        "attempts": attempts,
+    }
+    blocked_by = failure.get("blocked_by")
+    if isinstance(blocked_by, list):
+        diagnostic["blocked_by_hashes"] = [
+            digest for item in blocked_by[:32] if (digest := _diagnostic_id(item)) is not None
+        ]
+        diagnostic["blocked_by_count"] = len(blocked_by)
+    if "request schemas (input_schema) cannot be nullable" in error:
+        diagnostic.update(reason="nullable_request_property", location="input_schema")
+    elif "does not admit the observer default" in error:
+        diagnostic.update(reason="missing_read_fixture", location="module_contract.fixtures_yaml")
+    elif kind == "dependency_blocked":
+        diagnostic["reason"] = "dependency_failed"
+    else:
+        diagnostic["reason"] = "unclassified"
+    # Provider exception text may include request data. Extract only a numeric
+    # status when the failure identifies an HTTP/provider error.
+    status = re.search(
+        r"\b(?:HTTP\s+(?:status|error)\s*[:=]?\s*|(?:ClientError|ServerError)\s*[:=]\s*)"
+        r"(400|401|403|404|408|429|5\d\d)\b",
+        error, re.IGNORECASE,
+    )
+    if status:
+        diagnostic["provider_status"] = int(status.group(1))
+    return diagnostic
+
+
+def _log_validation_outcome(
+    context_variables: Any | None, *, passed: bool, ends_run: bool,
+    recovery_requested: bool, repair_selected: bool, acceptance: dict[str, Any],
+    validation: dict[str, Any] | None,
+) -> None:
+    """Emit bounded diagnostics without raw model output, errors, or prompts."""
+    batch = _context_get(context_variables, "app_task_batch_results", {})
+    failed = batch.get("_failed", {}) if isinstance(batch, dict) else {}
+    failed = failed if isinstance(failed, dict) else {}
+    meta = batch.get("_meta", {}) if isinstance(batch, dict) else {}
+    history = meta.get("failure_history", {}) if isinstance(meta, dict) else {}
+    history = history if isinstance(history, dict) else {}
+    tasks = []
+    for task_id, failure in islice(failed.items(), 32):
+        diagnostic = _task_failure_diagnostic(task_id, failure)
+        if diagnostic is None:
+            continue
+        earlier = history.get(task_id, [])
+        if isinstance(earlier, list) and diagnostic["attempts"] is not None:
+            prior = []
+            for item in earlier[:8]:
+                previous = _task_failure_diagnostic(task_id, item)
+                if previous is not None and previous["attempts"] is not None and previous["attempts"] < diagnostic["attempts"]:
+                    prior.append(previous)
+            if prior:
+                diagnostic["previous_attempts"] = prior
+        tasks.append(diagnostic)
+    outcome = "passed" if passed else (
+        "failed" if ends_run else "recovery_requested" if recovery_requested
+        else "repair_selected" if repair_selected else "pending"
+    )
+    evidence = acceptance.get("validation_evidence")
+    known_gates = {
+        "assembly", "planned_completeness", "schema_quality", "bundle_scan", "agent_backend",
+        "module_wiring", "module_implementation", "module_runtime_quality", "functional_completeness",
+        "workflow_integration", "app_runtime_load", "app_runtime_load_worker", "app_runtime_smoke",
+    }
+    def gate_names(key: str) -> list[str]:
+        names = evidence.get(key, []) if isinstance(evidence, dict) else []
+        return sorted({name for name in names[:64] if isinstance(name, str) and name in known_gates}) if isinstance(names, list) else []
+
+    acceptance_status = acceptance.get("status")
+    acceptance_status = acceptance_status if isinstance(acceptance_status, str) and acceptance_status in {"passed", "failed", "pending", "skipped"} else None
+    status = (validation or {}).get("validation_status")
+    status = status if isinstance(status, str) and status in {"passed", "failed", "pending", "skipped"} else None
+    infrastructure = (validation or {}).get(INFRASTRUCTURE_FAILURE)
+    infrastructure = infrastructure if type(infrastructure) is bool else None
+    report = {
+        "stage": "app_validation",
+        "chat_id_hash": _diagnostic_id(_context_get(context_variables, "chat_id")),
+        "outcome": outcome,
+        "failed_task_count": len(failed),
+        "acceptance_status": acceptance_status,
+        "failed_gates": gate_names("failed"),
+        "skipped_gates": gate_names("skipped"),
+        "validation_status": status,
+        "infrastructure_failure": infrastructure,
+        "tasks": tasks,
+    }
+    logger.log(
+        logging.INFO if passed else logging.WARNING,
+        "APP_GENERATOR_VALIDATION %s", json.dumps(report, sort_keys=True, separators=(",", ":")),
+    )
+
+
 def _record_validation_outcome(
     context_variables: Any | None,
     *,
@@ -2550,6 +2664,20 @@ def _record_validation_outcome(
         if ends_run
         else None,
     )
+    try:
+        _log_validation_outcome(
+            context_variables, passed=passed, ends_run=ends_run,
+            recovery_requested=recovery_request is not None,
+            repair_selected=repair.get("target_agent") is not None,
+            acceptance=acceptance, validation=validation,
+        )
+    except Exception:
+        # Diagnostics must never replace the validation result or leak a payload
+        # through an exception raised while preparing or emitting the record.
+        try:
+            logger.warning("APP_GENERATOR_VALIDATION diagnostic_unavailable")
+        except Exception:
+            pass
 
 
 async def validate_app_bundle_from_request(

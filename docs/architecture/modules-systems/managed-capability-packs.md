@@ -124,6 +124,52 @@ builds no task for them, a worker's copy is discarded, and assembly takes them
 only from the templates. Every `owner: templates` path must ship a template.
 See [AppGenerator Output Assembly Contract](../builder/appgenerator-output-assembly-contract.md#rejection-and-pack-owned-outputs).
 
+## Factory Planning and Structured Outputs
+
+The same build-context registry also supplies local template packs. Preserve
+each descriptor's `capability_source`: a `generated_module` pack supplies app
+modules, while a `managed_capability` supplies access to an external service.
+The source classification does not decide which files an agent writes;
+`required_outputs[].owner` and the verified templates decide that ownership.
+
+AppGenerator's existing planning hook renders descriptors and typed contract
+rules for `AppPlanAgent`. It includes output paths with their owners and applies
+managed-service facade/client instructions only when a managed capability is
+present. A template-backed local module must not inherit the managed-service
+prohibition on generating `modules/{pack_id}/` or be scheduled for a backend
+rewrite simply because its source is `generated_module`.
+
+The agent returns the existing `AppBuildPlanOutput` structured output. Its
+finite source, surface and implementation choices remain the canonical schema;
+the prompt does not introduce another plan or template language. Plan admission
+resolves the selected pack, removes tasks for template-owned outputs and retains
+app-owned work such as pages and generator-owned smoke fixtures. Only tasks
+that still own their module manifest reserve optional event companions; a
+fixture-only task cannot reclaim a template-owned `contracts/events.yaml`, and
+a fully supplied module does not acquire a new task for an unrequested event
+file. Assembly
+verifies the pack identity and materializes static files or strict Jinja
+templates locally. Worker copies cannot replace pack-owned files.
+
+Nonempty launch-time `capability_packs` are admitted selections consumed by
+assembly, not just catalog suggestions. Do not project an entire catalog into
+that field to offer choices. Use the catalog projections for discovery and the
+existing trusted selection path for actual packs.
+
+The formatted planning block does not contain template implementations. That
+does not establish a token or spend cap: raw descriptor exposure and later
+revision/dependency context can still include additional data or generated
+source. DesignDocs' declared pack context currently serves deterministic
+ownership consumers; declaring a context variable alone does not supply its
+contract to the DesignDocs agent prompt. Qualify each workflow's actual input
+projection before claiming complete model-driven generation.
+
+The integration checks in `tests/test_pack_planning_structured_outputs.py`
+exercise typed plan admission and ownership with the real Content pack.
+`tests/test_pack_outputs_are_not_model_work.py` and
+`tests/test_content_starter_materialization.py` cover local assembly and runtime
+consumption. These are fixture-based proofs, not fresh model or browser builds.
+
 ## Generated App Output
 
 A selected managed capability may generate:

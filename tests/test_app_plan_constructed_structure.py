@@ -22,6 +22,9 @@ from factory_app.workflows.AppGenerator.tools.app_plan_review import (
     validate_plan_dependencies,
     validate_plan_origins,
 )
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    verify_pack_integrity,
+)
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
@@ -52,9 +55,11 @@ def _live_inputs():
     values = fixture["context"]
     values["app_plan_attempts"] = 0
     for pack in values["capability_packs"]:
-        pack["pack_source_path"] = str(
-            Path(__file__).resolve().parents[1] / "factory_app/build_context" / pack["id"]
-        )
+        # This test projects current pack sources, not the captured pack bytes.
+        # Keep their pins coherent without changing the saved model response.
+        source = Path(__file__).resolve().parents[1] / "factory_app/build_context" / pack["id"]
+        metadata = verify_pack_integrity(source, pack["id"])
+        pack.update(pack_source_path=str(source), version=metadata["version"], digest=metadata["digest"])
     return fixture["plan"], ContextVariablesBridge(values)
 
 

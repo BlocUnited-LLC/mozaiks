@@ -12,6 +12,21 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+
+### Fixed
+
+- Retried friendship acceptance replays its stored event identity and returns the accepting user’s view. Default notification storage keeps one alert per scoped source event across retries.
+
+- Social friendships derive from atomic request states, fencing competing accept, decline, withdrawal, and removal actions. Profile tabs expose friend requests and messaging, with nullable pagination cursors and failed message sends preserving drafts.
+
+- Generated task-based apps retain admin registries, app-owned assistant settings,
+  brand identity and approved signup intent; app menus show one authorized Admin entry.
+- App role projection uses backend-authorized grants, and generated owner bootstrap
+  uses trusted profile identity while preserving existing grants during refinement.
+- Standalone app administration uses the shared core renderer, authenticated configuration reads, and module panels on the overview.
+- App profile menus offer the declared app home, floating assistants follow app AI configuration, and chat surfaces use the app brand.
+
+
 ### Added
 
 - Agent replies rejected by structured-output validation now write an
@@ -33,6 +48,29 @@ This project follows a practical pre-1.0 changelog format:
   one boundary sees it. Whether a record persists depends on the configured
   audit store; without one it falls back to a log line. Validation still fails
   closed, and an audit failure cannot change that.
+- Factory generation and final review offer an owner-account handoff into the app's OIDC flow. Owner entry verifies app Admin access, supports provider reauthentication, and carries self-host account setup guidance into exported environments and scaffold documentation.
+
+- Authenticated profile photo and banner uploads reuse the configured media content store. Factory app workbenches show the owner account and sign-in setup guidance.
+
+- Factory refinement agents can receive advisory file and dependency evidence
+  tied to the verified app build they are changing.
+
+- Notification rules can explicitly select `audience.scope: app` for validated
+  direct recipients across workspaces. Event ownership remains the default;
+  broad audiences and malformed source ownership cannot use the new mode.
+
+- A reusable content pack supplies permission-protected publishing records while
+  leaving app pages and branding customizable through canonical app contracts.
+
+- Workflow operators can optionally select the Gemini thinking level without
+  changing the provider's default when the setting is omitted.
+
+- Docker sandbox callers can attach a validated allocation identity before
+  container creation, allowing an interrupted allocation to be identified for cleanup.
+
+- Factory validation reports bounded failed-gate and task-dependency diagnostics
+  without copying raw prompts or generated payloads into the diagnostic record.
+
 - Generated bundle validation can resolve approved compiler inputs from the exact
   owned build record. Factory saves actual design/subscription input identities,
   and coding/media children preserve those inputs while validating fresh bytes.
@@ -92,6 +130,22 @@ This project follows a practical pre-1.0 changelog format:
   remote HTTP(S) entries redirect through the configured backend origin.
 
 ### Changed
+
+- Notification `source_event: reference` also stores `actor: null`, retaining
+  the minimal origin reference without changing the original attributed event.
+  Existing records are not rewritten; envelope-mode retention stays unchanged.
+
+- Fresh OSS installs, generated workspaces, and refinement profiles default to
+  Google `gemini-3.8-flash`. Its Gemini API free tier requires a Google key and
+  remains subject to account quotas and Google's data terms. Explicit runtime
+  configuration and stored provider records remain authoritative.
+- OpenAI runtime configuration can select Responses with
+  `LLM_USE_RESPONSES_API` and reasoning with `LLM_REASONING_EFFORT`; native
+  reasoning settings now reach workflow and refinement model calls. The shared
+  output-token environment limit maps to the selected provider's API field.
+- Single-call capabilities use AG2's native client for Google and other
+  non-OpenAI providers. Responses calls preserve reasoning and output limits,
+  so product-owned defaults can select GPT-6 Luna independently of OSS.
 
 - Design permission repair identifies every conflicting action/collection
   binding together. Factory guidance keeps one permission anchor per action
@@ -388,6 +442,40 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Context Graph indexing uses native TypeScript, TSX, and CSS grammars, resolves
+  calls through source bindings, and keeps similarly named files separate
+  when combining source and structural graphs.
+
+- First app builds no longer use an upstream workflow or design artifact as
+  their app-bundle parent. App revisions retain their existing baseline selection.
+
+- Factory planning distinguishes local template modules from managed services
+  and preserves file ownership so agents can plan app-specific work without
+  being instructed to regenerate supplied implementations.
+- App planning no longer reassigns a pack's event contract to an app-owned
+  fixture task after releasing template-owned files.
+
+- Scoped page refinements receive supported page contracts and linked
+  server-query context, with guidance for selecting the query owner when server
+  matching changes and for keeping presentation-only edits page-scoped.
+
+- AppGenerator planning guidance now identifies the supported task-local
+  location for build-task context variables.
+
+- AppGenerator requests a short assembly acknowledgement instead of repeating
+  generated files that its assembly tool already combines.
+
+- Module actions return a sanitized `DEPENDENCY_UNAVAILABLE` HTTP 503 when the
+  generated Cloud or Pay client cannot resolve its required connector
+  configuration. Permission denials still precede connector lookup and provider calls.
+
+- Module generation repair can see an independent missing read-fixture issue
+  alongside a rejected write contract, without relaxing either validation.
+
+- AppGenerator now tells module-contract generation to keep role-protected
+  narrowed writes complete across create, update, and delete, matching the
+  validator's authored-write contract.
+
 - Prompt hooks receive the active task's values for context keys declared by the agent, so AppGenerator uses task-specific file ownership guidance without changing shared workflow state.
 
 - A generated app's refinement harness now reaches the Refinement Engine. Studio
@@ -398,6 +486,14 @@ This project follows a practical pre-1.0 changelog format:
   exports the app bundle root as `MOZAIKS_APP_WORKSPACE_PATH`; it was looked up
   inside `app/`.
 
+- App design no longer stalls when an app keeps members from editing or deleting
+  some records. Every generated create, update and delete still has to belong to
+  a role, because an unassigned one would be open to any signed-in user. The
+  design prompt and the rejection message now say to give those actions to the
+  role that administers the records, such as an admin or approver. Before, the
+  design step repeated the same omission until its repair attempts ran out.
+  When a design save is refused, the retry now opens with the exact reason,
+  instead of leaving it as one value at the end of a long prompt.
 - App Studio cancels abandoned data loads during navigation and development
   StrictMode replay, preventing duplicate detail requests while keeping refresh available.
 

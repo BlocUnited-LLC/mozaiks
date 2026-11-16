@@ -34,7 +34,7 @@ from .code_file_utils import (
 
 def materialize_auth_scaffold(
     files: dict[str, str], *, data_contract: Any = None,
-    design_surface_map: Any = None, access_policy: Any = None,
+    design_surface_map: Any = None, access_policy: Any = None, auth_mode: str | None = None,
 ) -> dict[str, str]:
     """Render the canonical auth file delta for a constructed app bundle."""
     generated = dict(files)
@@ -49,6 +49,9 @@ def materialize_auth_scaffold(
         access_policy, data_contract=data_contract, design_surface_map=design_surface_map,
     ) if access_policy is not None else None
     if policy and policy["roles"]:
+        manifest["authRequired"] = True
+        generated["app.json"] = json.dumps(manifest, indent=2) + "\n"
+    if auth_mode is not None:
         manifest["authRequired"] = True
         generated["app.json"] = json.dumps(manifest, indent=2) + "\n"
     rendered: dict[str, str] = {}
@@ -74,11 +77,20 @@ def materialize_auth_scaffold(
                 raise AppAuthContractError("Cannot read valid YAML from config/auth.yaml") from None
         if not isinstance(config, dict):
             raise AppAuthContractError("config/auth.yaml must be a YAML object")
+        if auth_mode is not None:
+            config["mode"] = auth_mode
+            config["signup_enabled"] = auth_mode == "public_self_signup"
+            for method in config.get("login_methods") or []:
+                if method.get("kind") == "oidc_redirect" and method.get("primary"):
+                    if config["signup_enabled"]:
+                        method["label"] = "Sign in or create account"
+                    elif method.get("label") == "Sign in or create account":
+                        method["label"] = "Sign in"
         if policy is not None:
             config["authorization"] = {"roles": compiled_role_grants(policy)}
         validate_app_auth_contract(config)
         encoded = yaml.safe_dump(config, sort_keys=False)
-        if "config/auth.yaml" not in generated or policy is not None:
+        if "config/auth.yaml" not in generated or policy is not None or auth_mode is not None:
             rendered["config/auth.yaml"] = encoded
         if "ui/auth/authAdapter.js" not in generated:
             rendered["ui/auth/authAdapter.js"] = (templates / "ui" / "auth" / "authAdapter.js").read_text(encoding="utf-8")
@@ -107,6 +119,7 @@ async def save_auth_scaffold(
         data_contract=context.get("data_contract"),
         design_surface_map=context.get("design_surface_map"),
         access_policy=resolve_design_access_policy(context),
+        auth_mode=(context.get("app_build_plan") or {}).get("auth_mode"),
     )
     for path in overlay_pack_composed_roots(context_variables) & rendered.keys():
         rendered.pop(path)

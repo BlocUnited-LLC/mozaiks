@@ -35,6 +35,7 @@ _DEFAULT_IMAGE = os.getenv("DOCKER_SANDBOX_IMAGE", "mozaiks-sandbox:local")
 _DEFAULT_WORKDIR = "/workspace"
 _DEFAULT_TIMEOUT_SECONDS = int(os.getenv("DOCKER_SANDBOX_TIMEOUT") or "300")
 _IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_ALLOCATION_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _MAX_DOCKER_OUTPUT_BYTES = 1_048_576
 
 
@@ -174,6 +175,11 @@ class DockerSandboxAdapter:
                 raise ValueError("Invalid sandbox environment variable name")
             env_args += ["-e", f"{key}={val}"]
         label_args: list[str] = ["--label", "mozaiks.sandbox=true"]
+        allocation_id = (metadata or {}).get("allocation_id")
+        if metadata is not None and "allocation_id" in metadata:
+            if not isinstance(allocation_id, str) or not _ALLOCATION_ID_RE.fullmatch(allocation_id):
+                raise ValueError("Invalid sandbox allocation ID")
+            label_args += ["--label", f"mozaiks.sandbox.allocation={allocation_id}"]
         if metadata and metadata.get("manager_sandbox_id"):
             label_args += ["--label", f"mozaiks.preview={metadata['manager_sandbox_id']}"]
 
@@ -220,7 +226,8 @@ class DockerSandboxAdapter:
                "--tmpfs", "/workspace/logs:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700",
                "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,uid=10001,gid=10001,mode=0700",
                "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite-temp:rw,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700",
-               "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite:rw,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700"]
+               "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite:rw,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700",
+               "--tmpfs", "/opt/mozaiks/web_shell/node_modules/.vite-apps:rw,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700"]
               if sealed_candidate else []),
             *contained_args,
             *(["--network", "none"] if offline_validation else []),

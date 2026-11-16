@@ -9,7 +9,11 @@ from ag2.middleware.builtin import RetryMiddleware
 from ag2.observers import TokenMonitor
 from pydantic import BaseModel
 
-from mozaiksai.core.adapters.llm_fallback import llm_config_to_ag2_config, response_schema_to_ag2
+from mozaiksai.core.adapters.llm_fallback import (
+    close_ag2_session_http_client,
+    llm_config_to_ag2_config,
+    response_schema_to_ag2,
+)
 from mozaiksai.core.usage.context import AuxiliaryUsageContext
 from mozaiksai.core.usage.middleware import build_ag2_usage_middleware
 
@@ -112,18 +116,22 @@ class AG2StructuredAgentRunner:
             llm_config=dict(llm_config or {}),
             middleware=middleware,
         )
-        reply = await agent.ask(
-            user_prompt,
-            stream=self._stream_factory(),
-            observers=[TokenMonitor()],
-            response_schema=provider_schema,
-        )
-        result = await reply.content(retries=schema_validation_retries)
-        if result is None:
-            raise ValueError(f"{agent_name} returned an empty response")
-        if isinstance(result, response_schema):
-            return result
-        return response_schema.model_validate(result)
+        try:
+            reply = await agent.ask(
+                user_prompt,
+                stream=self._stream_factory(),
+                observers=[TokenMonitor()],
+                response_schema=provider_schema,
+            )
+            result = await reply.content(retries=schema_validation_retries)
+            if result is None:
+                raise ValueError(f"{agent_name} returned an empty response")
+            if isinstance(result, response_schema):
+                return result
+            return response_schema.model_validate(result)
+        finally:
+            config = getattr(agent, "config", None)
+            await close_ag2_session_http_client(getattr(config, "http_client", None))
 
     def _make_agent(
         self,

@@ -515,10 +515,24 @@ class ModuleReactionsManifest(ModuleContractModel):
 
 
 class ModuleNotificationAudience(ModuleContractModel):
+    scope: Literal["event", "app"] = "event"
     roles: list[str] = Field(default_factory=list)
     permissions: list[str] = Field(default_factory=list)
     user_id_field: str | None = None
     resolver: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _app_direct_target(cls, value: Any) -> Any:
+        if isinstance(value, dict) and value.get("scope") == "app":
+            field = value.get("user_id_field")
+            if (
+                not isinstance(field, str) or not field.strip()
+                or value.get("roles") or value.get("permissions")
+                or value.get("resolver") is not None
+            ):
+                raise ValueError("app notification scope requires only audience.user_id_field")
+        return value
 
     @field_validator("roles", "permissions", mode="before")
     @classmethod
@@ -556,7 +570,7 @@ class ModuleNotification(ModuleContractModel):
     body: str | None = None
     context_fields: list[str] = Field(default_factory=list)
     # "reference" stores only the originating event's id, type and related_type,
-    # for rules whose events carry content the notification must not retain.
+    # with actor null on the notification. The source event remains unchanged.
     source_event: Literal["envelope", "reference"] = "envelope"
     preference_key: str | None = None
     default_enabled: bool = True

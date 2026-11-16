@@ -23,6 +23,7 @@ from mozaiksai.control_plane import (  # noqa: E402
     ControlPlaneCodingCapabilityConfig,
     ControlPlaneConfig,
 )
+from mozaiksai.control_plane.context_graph.assessment import DependencyGraphContext
 from mozaiksai.control_plane.implementations.acp_coding_provider import (  # noqa: E402
     ACPCodingProvider,
     build_acp_agent_config,
@@ -482,12 +483,23 @@ def test_provider_prompt_separates_editable_and_read_only_files(tmp_path: Path) 
         _request_files(), workspace_root=tmp_path / "ws",
         read_only_files={"tests/test_dashboard.py": "def test_dashboard(): pass\n"},
     )
-    prompt = build_provider_prompt(_request(), workspace)
+    dependency = "app/ui/components/Title.jsx"
+    context = DependencyGraphContext(
+        app_id="app_1", build_record_id="av_123", build_family="app_bundle", build_key="app_bundle",
+        bundle_digest=f"sha256:{'1' * 64}", graph_hash=f"sha256:{'2' * 64}",
+        files=(_SCOPED_PATH, dependency), recommended_paths=(dependency,),
+        dependencies=(), coverage_incomplete=False,
+    )
+    prompt = build_provider_prompt(_request(dependency_graph=context), workspace)
 
     assert _SCOPED_PATH in prompt
     assert "Read-only inspection files (do not modify or delete):\n- tests/test_dashboard.py" in prompt
     assert "Make the dashboard return 1" in prompt
     assert "changes anywhere else are rejected" in prompt
+    assert dependency in prompt
+    assert "Dependency evidence from the verified build (advisory only)" in prompt
+    assert set(workspace.editable_manifest) == {_SCOPED_PATH}
+    assert dependency not in workspace.read_only_manifest
 
 
 @pytest.mark.asyncio

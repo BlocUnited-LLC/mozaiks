@@ -113,7 +113,7 @@ Canonical ownership:
 | `factory_app/app/ui/pages/custom/studio/` | Studio management UI components |
 | `factory_app/app/admin/` | Admin portal layer — `admin_registry.yaml` declares pages, `admin/index.js` registers components, `admin/pages/` holds custom admin page React files |
 | `factory_app/app/modules/factory_control_plane/` | Studio identity module only — no backend actions |
-| `chat-ui/src/admin/` | Platform-management surfaces — registered by Studio, inherited by Mozaiks App |
+| `chat-ui/src/admin/` | Shared core AdminPortal rendered from app-declared registries; Studio owns its custom management extensions |
 | `platform/` | Repo-local infrastructure assets only — not an app workspace |
 | `generated/` | Generator output awaiting validation/promotion |
 

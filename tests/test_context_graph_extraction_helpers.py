@@ -2,10 +2,6 @@
 Context graph extraction pure helper unit tests.
 
 Covers:
-  _qualified_symbol_name:
-    - no parent → name returned
-    - parent present → "parent.name"
-    - empty parent (falsy) → name only
 
   _extract_action_ids:
     - empty list → []
@@ -44,63 +40,18 @@ Covers:
     - no module refs → []
     - duplicates deduplicated
 
-  _reference_name_candidates:
-    - empty/None target → []
-    - simple name → [name]
-    - dotted name → [full, last, first]
-    - single-dot name → [full, last] (last == first, deduplicated)
-    - three-part dotted name → [full, last, first]
 
-  _is_noise_reference:
-    - noise target "print" → True
-    - noise target "len" → True
-    - non-noise target → False
-    - empty target → True
-    - dotted noise like "something.print" → True (last part is noise)
-    - dotted non-noise → False
 
-  _ascend:
-    - count 0 → same path
-    - count 1 → parent
-    - count 2 → grandparent
 
-  _join_relative:
-    - simple path join
-    - ".." ascends directory
-    - "." skipped
-    - empty segments skipped
 """
 from __future__ import annotations
 
-from pathlib import PurePosixPath
-
 from mozaiksai.core.app_context.context_graph import (
-    ExtractedReference,
-    _ascend,
     _extract_action_ids,
     _extract_module_refs,
     _extract_named_items,
     _extract_tool_names,
-    _is_noise_reference,
-    _join_relative,
-    _qualified_symbol_name,
-    _reference_name_candidates,
 )
-
-# ---------------------------------------------------------------------------
-# 1. _qualified_symbol_name
-# ---------------------------------------------------------------------------
-
-class TestQualifiedSymbolName:
-    def test_no_parent_returns_name(self):
-        assert _qualified_symbol_name(parent=None, name="my_func") == "my_func"
-
-    def test_parent_present_returns_dotted(self):
-        assert _qualified_symbol_name(parent="MyClass", name="my_method") == "MyClass.my_method"
-
-    def test_empty_parent_falsy_returns_name(self):
-        assert _qualified_symbol_name(parent="", name="my_func") == "my_func"
-
 
 # ---------------------------------------------------------------------------
 # 2. _extract_action_ids
@@ -263,118 +214,3 @@ class TestExtractModuleRefs:
 
     def test_empty_dict_returns_empty(self):
         assert _extract_module_refs({}) == []
-
-
-# ---------------------------------------------------------------------------
-# 6. _reference_name_candidates
-# ---------------------------------------------------------------------------
-
-class TestReferenceNameCandidates:
-    def test_empty_string_returns_empty(self):
-        assert _reference_name_candidates("") == []
-
-    def test_none_like_returns_empty(self):
-        assert _reference_name_candidates(None) == []  # type: ignore[arg-type]
-
-    def test_simple_name_returns_single(self):
-        assert _reference_name_candidates("my_func") == ["my_func"]
-
-    def test_dotted_two_parts(self):
-        result = _reference_name_candidates("MyClass.my_method")
-        assert "MyClass.my_method" in result
-        assert "my_method" in result
-        assert "MyClass" in result
-
-    def test_dotted_three_parts(self):
-        result = _reference_name_candidates("a.b.c")
-        assert "a.b.c" in result
-        assert "c" in result  # last part
-        assert "a" in result  # first part
-
-    def test_no_duplicates_in_result(self):
-        result = _reference_name_candidates("foo")
-        assert len(result) == len(set(result))
-
-
-# ---------------------------------------------------------------------------
-# 7. _is_noise_reference
-# ---------------------------------------------------------------------------
-
-class TestIsNoiseReference:
-    def _ref(self, target: str) -> ExtractedReference:
-        return ExtractedReference(target=target, kind="call")
-
-    def test_print_is_noise(self):
-        assert _is_noise_reference(self._ref("print")) is True
-
-    def test_len_is_noise(self):
-        assert _is_noise_reference(self._ref("len")) is True
-
-    def test_bool_is_noise(self):
-        assert _is_noise_reference(self._ref("bool")) is True
-
-    def test_empty_target_is_noise(self):
-        assert _is_noise_reference(self._ref("")) is True
-
-    def test_dotted_noise_last_part(self):
-        # "something.print" → last part "print" is noise
-        assert _is_noise_reference(self._ref("something.print")) is True
-
-    def test_dotted_non_noise(self):
-        assert _is_noise_reference(self._ref("MyService.create")) is False
-
-    def test_non_noise_target(self):
-        assert _is_noise_reference(self._ref("save_workflow_output")) is False
-
-    def test_console_log_is_noise(self):
-        assert _is_noise_reference(self._ref("console.log")) is True
-
-
-# ---------------------------------------------------------------------------
-# 8. _ascend
-# ---------------------------------------------------------------------------
-
-class TestAscend:
-    def test_count_zero_returns_same(self):
-        path = PurePosixPath("a/b/c")
-        assert _ascend(path, 0) == path
-
-    def test_count_one_returns_parent(self):
-        path = PurePosixPath("a/b/c")
-        assert _ascend(path, 1) == PurePosixPath("a/b")
-
-    def test_count_two_returns_grandparent(self):
-        path = PurePosixPath("a/b/c")
-        assert _ascend(path, 2) == PurePosixPath("a")
-
-    def test_ascend_from_root_stays_at_root(self):
-        path = PurePosixPath(".")
-        result = _ascend(path, 3)
-        # PurePosixPath(".").parent is still "." at root
-        assert str(result) in {".", ""}
-
-
-# ---------------------------------------------------------------------------
-# 9. _join_relative
-# ---------------------------------------------------------------------------
-
-class TestJoinRelative:
-    def test_simple_join(self):
-        result = _join_relative(PurePosixPath("a/b"), "c.py")
-        assert result == "a/b/c.py"
-
-    def test_parent_dot_dot_ascends(self):
-        result = _join_relative(PurePosixPath("a/b/c"), "../d.py")
-        assert result == "a/b/d.py"
-
-    def test_single_dot_skipped(self):
-        result = _join_relative(PurePosixPath("a/b"), "./c.py")
-        assert result == "a/b/c.py"
-
-    def test_multiple_parent_traversals(self):
-        result = _join_relative(PurePosixPath("a/b/c"), "../../d.py")
-        assert result == "a/d.py"
-
-    def test_root_dir_with_filename(self):
-        result = _join_relative(PurePosixPath("src"), "utils.py")
-        assert result == "src/utils.py"

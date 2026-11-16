@@ -13,21 +13,12 @@ Covers:
     - non-dict event_data coerced to empty dict
     - all keys present in output
 
-  _dedupe_symbols (context_graph):
-    - empty list → []
-    - single symbol → returned
-    - duplicate (same name+kind+line) → deduplicated
-    - same name+kind, different line → both kept
-    - same name, different kind → both kept
-    - None line treated as distinct from int line
-    - preserves insertion order (first wins)
 """
 from __future__ import annotations
 
 from types import SimpleNamespace
 
 from mozaiksai.core.adapters.ag2_network_runner import _envelope_to_dict
-from mozaiksai.core.app_context.context_graph import ExtractedSymbol, _dedupe_symbols
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -114,57 +105,3 @@ class TestEnvelopeToDict:
         result = _envelope_to_dict(env)
         assert result["envelope_id"] == "42"
         assert result["channel_id"] == "99"
-
-
-# ---------------------------------------------------------------------------
-# 2. _dedupe_symbols
-# ---------------------------------------------------------------------------
-
-def _sym(name: str, kind: str, line: int | None = None) -> ExtractedSymbol:
-    return ExtractedSymbol(name=name, kind=kind, line=line)
-
-
-class TestDedupeSymbols:
-    def test_empty_list_returns_empty(self):
-        assert _dedupe_symbols([]) == []
-
-    def test_single_symbol_returned(self):
-        s = _sym("my_func", "function", 1)
-        result = _dedupe_symbols([s])
-        assert len(result) == 1
-        assert result[0] is s
-
-    def test_duplicate_removed(self):
-        s1 = _sym("my_func", "function", 10)
-        s2 = _sym("my_func", "function", 10)
-        result = _dedupe_symbols([s1, s2])
-        assert len(result) == 1
-        assert result[0] is s1  # first occurrence kept
-
-    def test_same_name_different_line_both_kept(self):
-        s1 = _sym("my_func", "function", 10)
-        s2 = _sym("my_func", "function", 20)
-        result = _dedupe_symbols([s1, s2])
-        assert len(result) == 2
-
-    def test_same_name_different_kind_both_kept(self):
-        s1 = _sym("config", "variable", 5)
-        s2 = _sym("config", "class", 5)
-        result = _dedupe_symbols([s1, s2])
-        assert len(result) == 2
-
-    def test_none_line_distinct_from_int_line(self):
-        s1 = _sym("my_func", "function", None)
-        s2 = _sym("my_func", "function", 10)
-        result = _dedupe_symbols([s1, s2])
-        assert len(result) == 2
-
-    def test_preserves_insertion_order(self):
-        symbols = [_sym(f"func_{i}", "function", i) for i in range(5)]
-        result = _dedupe_symbols(symbols)
-        assert [s.name for s in result] == [f"func_{i}" for i in range(5)]
-
-    def test_multiple_duplicates_all_collapsed(self):
-        s = _sym("target", "function", 1)
-        result = _dedupe_symbols([s, s, s, s])
-        assert len(result) == 1

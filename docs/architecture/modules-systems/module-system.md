@@ -16,6 +16,22 @@ A module is a self-contained unit of **deterministic business logic** declared i
 Modules are **not** AI workflows. They run without AI. Workflows call modules; modules do not
 contain orchestration or reasoning logic.
 
+### Expected dependency configuration failures
+
+An action's client may raise `ModuleDependencyUnavailableError` from
+`mozaiksai.core.runtime.composition.module_executor` when a required service is
+unconfigured or its configuration cannot be read. The executor records a failed
+dispatch with `DEPENDENCY_UNAVAILABLE`; HTTP module routes return 503 with the
+sanitized message `Required service is unavailable.` No exception text, endpoint,
+credential, or vault diagnostic reaches the response. Permission enforcement
+still precedes the handler, so a caller without its required grant receives 403
+without reading connector configuration or calling the provider.
+
+The generated Cloud and Pay clients retain their existing configuration exception
+types and classify only those errors this way. Provider HTTP failures and
+unexpected implementation exceptions retain their existing error handling. A
+503 is a failed action, not evidence that a role holder's operation works.
+
 ### Workflow tool dispatch
 
 Tools running in a live authenticated workflow may call
@@ -1095,3 +1111,16 @@ contract shape. The runtime loader will be updated to support the new paths.
 - [../app/canonical-app-structure.md](../app/canonical-app-structure.md) — full app workspace layout
 - [../app/app-bundle-declaratives.md](../app/app-bundle-declaratives.md) — declarative contract reference
 
+
+
+### Replay-safe notification persistence
+
+The default notification store derives a scoped notification identity from the
+source event ID, event type, module, rule, app, tenant and workspace. Mongo uses
+that identity as the notification record's `_id`. Replaying the same event keeps
+one durable alert and preserves its current stored state, including a read status.
+Custom notification stores receive the same stable `notification_id` and are
+responsible for applying that idempotency contract in their storage boundary.
+Producers can persist an event identity with their domain transition and supply
+it to `ModuleContext.emit(event_id=...)` on retries. Explicit notification
+reactions expose delivery failure through the existing event dispatch receipt.

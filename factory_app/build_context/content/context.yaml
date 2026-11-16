@@ -1,0 +1,29 @@
+context_id: content
+description: Reusable editorial content backend for app-owned articles, portfolio
+  entries, and case studies; presentation remains app-owned.
+applies_to_workflows:
+- DesignDocs
+- AppGenerator
+assets:
+- path: contract.yaml
+  kind: contract
+- path: templates/
+  kind: templates
+pack:
+  id: content
+  version: 0.1.0
+  status: active
+  capability_source: generated_module
+  description: Deterministic editorial entry storage and publication actions; no fixed
+    page layout, provider, or runtime model calls.
+capabilities:
+- capability_id: content.entries.read
+  facade_recommended: content
+- capability_id: content.entries.manage
+  facade_recommended: content
+projections:
+  context_variables:
+    capability_packs:
+      from: capability_packs
+    operator_contracts:
+      from: operator_contracts

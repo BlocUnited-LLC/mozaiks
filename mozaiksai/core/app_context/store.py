@@ -23,6 +23,7 @@ from mozaiksai.core.artifacts.models import (
 from mozaiksai.core.artifacts.store import BuildRecordStore, get_build_record_store
 from mozaiksai.core.utils.sequences import dedupe_strings
 
+from .context_graph import context_graph_file_node_id
 from .indexer import index_file_map, persist_app_context_index
 from .models import (
     AdoptionPath,
@@ -1550,7 +1551,7 @@ def _greenfield_app_context_graph(
             )
 
     for path in paths:
-        node_id = _file_node_id(path)
+        node_id = context_graph_file_node_id(path)
         file_node_by_path[path] = node_id
         add_node(
             AppContextGraphNode(
@@ -1866,8 +1867,6 @@ def _add_greenfield_relationship_edges(
             )
 
 
-def _file_node_id(path: str) -> str:
-    return f"file:{_surface_id('path', path)}"
 
 
 def _manifest_checksum(entry: dict[str, Any] | None) -> str | None:

@@ -716,17 +716,18 @@ class TestHookManagedCapabilityContextInjection:
         self.hook.inject_managed_capabilities_context(agent, [])
         assert "[MANAGED CAPABILITIES CONTEXT]" in agent.system_message
 
-    def test_taxonomy_covers_all_five_sources(self):
+    def test_managed_guidance_keeps_the_provider_boundary_without_unrelated_source_rules(self):
         agent = _FakeAgent("AppPlanAgent", context_variables={
             "capability_packs": [{"id": "module_execution"}],
         })
         self.hook.inject_managed_capabilities_context(agent, [])
         msg = agent.system_message
-        assert "host_universal" in msg
-        assert "framework_pack" in msg
-        assert "managed_capability" in msg
-        assert "generated_module" in msg
-        assert "external_adapter" in msg
+        assert "capability_source: managed_capability" in msg
+        assert "Never generate modules/{capability_pack_id}/ for the hosted provider" in msg
+        assert "Pages bind to declared app-owned facade module/action pairs" in msg
+        assert "host_universal" not in msg
+        assert "framework_pack" not in msg
+        assert "external_adapter" not in msg
 
     def test_no_injection_in_oss_mode(self):
         agent = _FakeAgent("AppPlanAgent", context_variables={
@@ -1129,8 +1130,12 @@ class TestPlannerOutputContract:
         assert "```" not in self.output
 
     def test_task_context_does_not_duplicate_shared_inputs(self):
-        assert "Workers inherit app_build_plan and dependency_task_outputs" in self.output
-        assert "Task context_variables contain only task-local overrides" in self.output
+        output = " ".join(self.output.split())
+        assert "Workers inherit app_build_plan and dependency_task_outputs" in output
+        assert "`context_variables` belongs only inside each `AppBuildPlan.build_tasks[]` task" in output
+        assert "never put it directly on `AppBuildPlan`" in output
+        assert "Task values contain only task-local overrides" in output
+        assert "Never embed a copy of app_build_plan, upstream documents, or shared catalogs" in output
 
     def test_output_does_not_expand_page_schemas(self):
         assert "Do not expand nested modal/page schemas during planning" in self.output

@@ -18,6 +18,7 @@ CHECKPOINT_HANDLER_ENTRYPOINTS: dict[str, str] = {
     "route_requested": "mozaiksai.control_plane.implementations.refinement_router:RefinementTriggerRouteResolver",
     "decision_requested": "mozaiksai.control_plane.implementations.harness_decision:FirstPartyHarnessDecisionPolicy",
     "scope_requested": "mozaiksai.control_plane.implementations.scope_proposer:ArtifactScopeProposer",
+    "dependency_graph_requested": "mozaiksai.control_plane.implementations.dependency_graph_agent:DependencyGraphAgent",
     "contract_surface_requested": "mozaiksai.control_plane.implementations.contract_surface_planner:ContractSurfacePlanner",
     "coding_requested": "mozaiksai.control_plane.implementations.coding_worker:ScopedRefinementCodingWorker",
 }

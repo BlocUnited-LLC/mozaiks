@@ -11,8 +11,10 @@ manifests loaded by the platform host:
 This keeps module event meaning above the runtime kernel.
 """
 
+import hashlib
 import importlib
 import inspect
+import json
 import re
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -27,7 +29,11 @@ from mozaiksai.core.events.unified_event_dispatcher import (
     EventDeliveryEvidence,
     EventDispatchOutcome,
 )
-from mozaiksai.core.runtime.app.module_loader import ActionDef, LoadedModule
+from mozaiksai.core.runtime.app.module_loader import (
+    ActionDef,
+    LoadedModule,
+    ModuleNotificationAudience,
+)
 from mozaiksai.core.runtime.composition.module_event_contract import (
     build_module_event_envelope,
     module_event_id,
@@ -1414,6 +1420,28 @@ class ModuleEventRouter:
             context = None
 
         audience = dict(rule.get("audience") if isinstance(rule.get("audience"), dict) else {})
+        target_scope = audience.pop("scope", "event")
+        if target_scope != "event":
+            # Directly constructed rules must obey the same finite contract as
+            # loaded YAML. Never turn a failed target into an app-wide audience.
+            try:
+                ModuleNotificationAudience.model_validate({**audience, "scope": target_scope})
+            except ValueError:
+                logger.warning("NOTIFICATION_SCOPE_INVALID: rule_id=%s", rule.get("id"))
+                return False
+            source = envelope.get("source")
+            app_claims = [
+                item["app_id"]
+                for item in (tenant, envelope, source if isinstance(source, dict) else {})
+                if "app_id" in item
+            ]
+            if (
+                not event_provenance.app_id
+                or any(value is not None and not isinstance(value, str) for value in app_claims)
+                or len({value.strip() for value in app_claims if isinstance(value, str) and value.strip()}) > 1
+            ):
+                logger.warning("NOTIFICATION_APP_INVALID: rule_id=%s", rule.get("id"))
+                return False
         if "user_id_field" in audience:
             raw_user_id_field = audience["user_id_field"]
             user_id_field = raw_user_id_field.strip() if isinstance(raw_user_id_field, str) else ""
@@ -1447,7 +1475,10 @@ class ModuleEventRouter:
             "event_type": event_type,
             "source_event_id": envelope.get("id"),
             "app_id": event_provenance.app_id,
-            "actor": envelope.get("actor") if isinstance(envelope.get("actor"), dict) else None,
+            "actor": (
+                envelope.get("actor")
+                if rule.get("source_event") != "reference" and isinstance(envelope.get("actor"), dict) else None
+            ),
             "audience": audience,
             "channels": rule.get("channels") if isinstance(rule.get("channels"), list) else ["in_app"],
             "title": _render_template(str(template.get("title") or rule.get("id") or "Notification"), payload),
@@ -1459,8 +1490,8 @@ class ModuleEventRouter:
                 if rule.get("source_event") == "reference" else envelope
             ),
         }
-        # Store the same owner chosen by event provenance. A malformed or
-        # contradictory supplied owner must never become an unowned alert.
+        # Validate the original provenance before projecting target ownership.
+        # A malformed or contradictory owner must never become an unowned alert.
         for owner_key in ("tenant_id", "workspace_id"):
             raw_owners = [
                 source[owner_key]
@@ -1480,7 +1511,7 @@ class ModuleEventRouter:
                 )
                 return
             normalized_owner = getattr(event_provenance, owner_key)
-            if normalized_owner:
+            if normalized_owner and target_scope == "event":
                 record[owner_key] = normalized_owner
         if context is not None:
             record["context"] = context
@@ -1533,17 +1564,30 @@ class ModuleEventRouter:
         return True
 
     async def _store_notification(self, record: dict[str, Any]) -> bool:
+        identity_fields = ("app_id", "module_id", "rule_id", "event_type", "source_event_id", "tenant_id", "workspace_id")
+        if isinstance(record.get("source_event_id"), str) and record["source_event_id"]:
+            identity = json.dumps([record.get(field) for field in identity_fields], separators=(",", ":"))
+            record["notification_id"] = "ntf_" + hashlib.sha256(identity.encode()).hexdigest()
         try:
             if self._notification_store is not None:
                 result = await self._maybe_await(self._notification_store(record))
                 return not _reaction_result_failed(result)
 
+            from pymongo.errors import DuplicateKeyError
+
             from mozaiksai.core.core_config import get_mongo_client
 
-            result = await get_mongo_client()["mozaiks"]["platform_notifications"].insert_one(
-                dict(record)
-            )
-            return result.acknowledged is not False
+            collection = get_mongo_client()["mozaiks"]["platform_notifications"]
+            try:
+                result = await collection.insert_one({**record, "_id": record["notification_id"]})
+                return result.acknowledged is not False
+            except DuplicateKeyError:
+                existing = await collection.find_one({"_id": record["notification_id"]})
+                if not existing or any(existing.get(field) != record.get(field) for field in identity_fields):
+                    return False
+                record.clear()
+                record.update({key: value for key, value in existing.items() if key != "_id"})
+                return True
         except Exception as exc:
             logger.warning("NOTIFICATION_STORE_FAILED: %s", type(exc).__name__)
             return False

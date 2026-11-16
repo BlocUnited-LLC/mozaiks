@@ -715,7 +715,7 @@ function themeConfigToTheme(config, basePath) {
   if (!assets.chatbackgroundImage)
     console.warn(`⚠️ [THEME] [${_bn}] assets.chatbackgroundImage not set — using solid background`);
   if (!assets.logo)
-    console.warn(`⚠️ [THEME] [${_bn}] assets.logo not set — header logo will be missing`);
+    console.warn(`⚠️ [THEME] [${_bn}] assets.logo not set — using app identity`);
   if (!assets.favicon)
     console.warn(`⚠️ [THEME] [${_bn}] assets.favicon not set — browser tab icon will be missing`);
   if (!assets.wordmark)

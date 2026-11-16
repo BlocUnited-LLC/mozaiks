@@ -92,9 +92,54 @@ def test_selecting_one_canonical_read_requires_the_other_without_inventing_grant
     policy["grants"][0]["actions"].append(read)
     before = deepcopy(policy)
     missing = "list_tasks" if read == "get_tasks" else "get_tasks"
-    with pytest.raises(ValueError, match=f"omits canonical read grants.*{missing}"):
+    with pytest.raises(ValueError, match=f"omits canonical read grants.*{missing}") as error:
         validate_access_policy(policy, data_contract=_contract(), design_surface_map=_surface())
     assert policy == before
+    assert (f"canonical get and list both use the collection name, so grant ['{missing}'] "
+            f"wherever ['{read}'] is granted") in str(error.value)
+    assert WRITE_GRANT_REMEDY not in str(error.value)
+
+
+@pytest.mark.parametrize("wrong,right", [
+    ("get_task", "get_tasks"), ("list_task", "list_tasks"), ("delete_tasks", "delete_task"),
+])
+def test_misspelled_canonical_action_names_the_canonical_id_without_accepting_it(wrong, right):
+    policy = _policy()
+    policy["grants"][0]["actions"].append(wrong)
+    with pytest.raises(ValueError, match=f"access_policy action '{wrong}' is not an approved action") as error:
+        validate_access_policy(policy, data_contract=_contract(), design_surface_map=_surface())
+    assert f"Use the canonical {right!r} instead of {wrong!r}." in str(error.value)
+
+
+def test_another_collections_canonical_action_names_that_collection_not_a_misspelling():
+    """Live run 7 (mozaiks#1005) put create_borrow_request under 'tools' and was told to use create_tool."""
+    contract = _contract("app_wide")
+    notes = deepcopy(contract["surfaces"][0]["collections"][0])
+    notes.update(name="notes", entity="Note")
+    contract["surfaces"][0]["collections"].append(notes)
+    policy = _policy()
+    policy["grants"][0]["actions"].append("create_note")
+    with pytest.raises(ValueError, match="'create_note' is not an approved action of 'tasks'") as error:
+        validate_access_policy(policy, data_contract=contract, design_surface_map=_surface())
+    assert ("'create_note' is the canonical action of collection 'notes'; grant it in a grant whose "
+            "collection is 'notes', not 'tasks'.") in str(error.value)
+    assert "Use the canonical" not in str(error.value)
+
+
+def test_unrelated_unknown_action_gets_no_canonical_spelling():
+    policy = _policy()
+    policy["grants"][0]["actions"].append("archive_everything")
+    with pytest.raises(ValueError, match="'archive_everything' is not an approved action") as error:
+        validate_access_policy(policy, data_contract=_contract(), design_surface_map=_surface())
+    assert "Use the canonical" not in str(error.value)
+    # Live run 4 granted an undeclared approval three times; the rejection says how to declare it.
+    surface_id = _surface()["surfaces"][0]["surface_id"]
+    assert (f"To grant 'archive_everything', declare it in surface_map surface {surface_id!r} "
+            "owned_mutations (custom_reads for a read) in this same bundle or grant the canonical "
+            "'update_task'.") in str(error.value)
+    surface = _surface()
+    surface["surfaces"][0]["owned_mutations"] = ["archive_everything"]
+    assert validate_access_policy(policy, data_contract=_contract(), design_surface_map=surface) == policy
 
 
 def test_read_pair_coverage_is_across_roles_without_giving_each_role_both():
@@ -228,6 +273,18 @@ def test_policy_cannot_grant_managed_facade_actions():
         validate_access_policy(_policy(), data_contract=_contract("app_wide"), design_surface_map=surface)
 
 
+# The rejection names the remedy once, so a repair converges instead of repeating the omission.
+WRITE_GRANT_REMEDY = (
+    "every canonical create, update and delete of a collection in access_policy must be granted "
+    "to at least one role, because an ungranted canonical write would be open to every signed-in "
+    "user; when members should not change or delete these records directly, grant the missing "
+    "canonical writes to the role that administers them (for example an admin or approver role) "
+    "instead of omitting them. For example, when the approved concept has submitter and approver "
+    "roles, submitter may receive create_<entity> while approver receives update_<entity> and "
+    "delete_<entity> for the same collection; use this split only when it matches the approved roles"
+)
+
+
 def test_incomplete_policy_reports_every_collection_for_one_repair():
     contract = _contract("app_wide")
     template = contract["surfaces"][0]["collections"][0]
@@ -244,6 +301,7 @@ def test_incomplete_policy_reports_every_collection_for_one_repair():
         "access_policy for 'archives' omits canonical write grants ['delete_archive', 'update_archive']",
         "access_policy for 'notes' omits canonical write grants ['delete_note', 'update_note']",
         "access_policy for 'tasks' omits canonical write grants ['delete_task', 'update_task']",
+        WRITE_GRANT_REMEDY,
     ])
     for ordered in (grants, list(reversed(grants))):
         with pytest.raises(ValueError) as error:
@@ -274,7 +332,8 @@ def test_cross_role_action_bindings_report_all_conflicts_without_selecting_autho
         "bind this module action to exactly one collection in every role's grants, "
         "even when its implementation changes several collections"
         for action in mutations
-    ] + ["access_policy for 'notes' omits canonical write grants ['create_note', 'delete_note', 'update_note']"])
+    ] + ["access_policy for 'notes' omits canonical write grants ['create_note', 'delete_note', 'update_note']",
+           WRITE_GRANT_REMEDY])
     for grants in (policy["grants"], list(reversed(policy["grants"]))):
         with pytest.raises(ValueError) as error:
             validate_access_policy({**policy, "grants": grants}, data_contract=contract, design_surface_map=surface)

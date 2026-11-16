@@ -38,6 +38,10 @@ def build_context_graph_prompt_pack(
         "app_id": catalog.get("app_id"),
         "stale_status": catalog.get("stale_status"),
         "graph_hash": catalog.get("graph_hash"),
+        "build_record_id": catalog.get("build_record_id"),
+        "build_family": catalog.get("build_family"),
+        "build_key": catalog.get("build_key"),
+        "bundle_digest": catalog.get("bundle_digest"),
         "summary": {
             "node_count": catalog.get("node_count"),
             "edge_count": catalog.get("edge_count"),
@@ -109,6 +113,7 @@ def _scan_summary(health: dict[str, Any]) -> dict[str, Any] | None:
         "candidate_file_count": health.get("candidate_file_count"),
         "limit_reached": health.get("limit_reached"),
         "selected_by_priority": health.get("selected_by_priority"),
+        "parse_coverage": health.get("parse_coverage"),
         "parser_active": {
             key: value.get("active_parser")
             for key, value in languages.items()  # type: ignore[union-attr]

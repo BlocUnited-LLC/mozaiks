@@ -128,7 +128,7 @@ class TestIsEmpty:
 class TestFormatManagedCapabilities:
     def test_header_always_present(self):
         result = _format_managed_capabilities([])
-        assert "Managed capabilities available" in result
+        assert "Registered capability packs supplied to planning" in result
 
     def test_pack_id_rendered(self):
         result = _format_managed_capabilities([{"id": "payment_provider_pay"}])
@@ -416,6 +416,25 @@ class TestFormatOperatorContracts:
         }]
         result = _format_operator_contracts(contracts)
         assert "modules/orders/module.yaml" in result
+
+    def test_required_output_owners_and_instructions_survive_formatting(self):
+        contract = {"contract_id": "content", "required_outputs": [
+            {"path": "modules/content/module.yaml", "owner": "templates"},
+            {"path": "modules/content/backend/handler.py", "owner": "workspace"},
+            {"path": "modules/content/contracts/fixtures.yaml", "owner": "generator",
+             "notes": "Use the app's approved editor role.\nInclude a successful publication probe."},
+        ]}
+        result = _format_operator_contracts([contract])
+        for output in contract["required_outputs"]:
+            assert f"{output['path']} [owner: {output['owner']}]" in result
+        assert "Use the app's approved editor role." in result
+        assert "Include a successful publication probe." in result
+
+    def test_required_output_without_owner_uses_the_template_default(self):
+        result = _format_operator_contracts([{
+            "contract_id": "content", "required_outputs": [{"path": "modules/content/module.yaml"}],
+        }])
+        assert "modules/content/module.yaml [owner: templates]" in result
 
     def test_inactive_surfaces_rendered(self):
         contracts = [{"contract_id": "c1", "inactive_surfaces": ["checkout", "admin"]}]

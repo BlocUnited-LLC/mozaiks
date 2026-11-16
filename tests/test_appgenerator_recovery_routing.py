@@ -60,7 +60,8 @@ def test_recovered_batch_reassembles_before_artifact_repair_or_final_block(graph
         graph, "AppValidationAgent", app_task_recovery_status=status,
         bundle_repair_status="blocked", bundle_repair_target="ServiceAgent",
         app_validation_status="failed", integration_tests_passed=False,
-    ) == "AssemblyAgent"
+    ) == "AdminRegistryAgent"
+    assert _next(graph, "AdminRegistryAgent") == "AssemblyAgent"
 
 
 @pytest.mark.parametrize("status", ["partial", "failed"])

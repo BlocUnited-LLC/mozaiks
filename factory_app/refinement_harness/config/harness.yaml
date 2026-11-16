@@ -78,6 +78,8 @@ checkpoints:
       - get_stale_artifact_families
   - event: route_requested
   - event: decision_requested
+  - event: dependency_graph_requested
+    prompt_id: dependency_graph_assessment_system
   - event: scope_requested
     prompt_id: coding_scope_selection_system
     tool_ids:

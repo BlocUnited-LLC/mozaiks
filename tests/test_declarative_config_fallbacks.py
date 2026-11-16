@@ -247,7 +247,7 @@ def test_shared_context_graph_hook_injects_preloaded_graph_pack() -> None:
             "context_graph_pack": {
                 "graph_id": "graph_1",
                 "stale_status": "current",
-                "candidate_files": [{"path": "modules/tasks/backend/service.py"}],
+                "relevant_paths": [{"path": "modules/tasks/backend/service.py"}],
                 "matched_nodes": [{"node_id": "module:tasks", "node_type": "module", "label": "tasks"}],
             }
         }

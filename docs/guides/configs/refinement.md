@@ -138,6 +138,7 @@ Refinement should use code context progressively:
 | Checkpoint | Context tools | Purpose |
 | --- | --- | --- |
 | `request_submitted` | `get_revision_context`, `get_artifact_summary`, `get_app_intelligence_context`, `get_stale_artifact_families` | classify request scope from builder state, App Intelligence freshness, and staleness, without raw code snippets |
+| `dependency_graph_requested` | Verified app bundle and bounded graph traversal | assess relevant existing files and tests for scope, coding, and generator revision prompts |
 | `scope_requested` | `get_app_intelligence_context`, `get_artifact_workspace_catalog`, `get_context_graph_catalog`, `search_app_source_context` | choose the smallest safe file scope from app shape, graph relationships, and bounded source search |
 | `contract_surface_requested` | `get_contract_surface_context`, `get_app_intelligence_context`, `search_app_source_context` | map the request to module/page/workflow/config contract surfaces |
 | `coding_requested` | `get_artifact_summary`, `get_app_intelligence_context`, `get_artifact_workspace_scope`, `get_context_graph_scope`, `read_app_source_file`, `get_related_app_source_files`, `search_app_source_context` | patch only explicit scoped files while using exact source reads and related files as read-only context |
@@ -146,6 +147,24 @@ Do not dump a repository into prompts. The current `AppIntelligenceSnapshot`
 summarizes architecture and ownership; `SourceContextBundle` stores selected
 redacted files, chunks, symbols, and imports; agents retrieve exact evidence
 through tools only when their checkpoint needs it.
+
+Enable the specialist through `dependency_graph.enabled` in
+`app/config/refinement_policy.yaml` and point `dependency_graph.llm_profile`
+at a configured profile. Factory uses `impact_analyzer`. The specialist runs
+through the same AG2 structured runner as the other checkpoints.
+
+For a selected app build, graph and source tools read that record's archive
+without borrowing files or relationships from the current app. The specialist
+requires digest-verified bytes. It starts from selected paths or request
+keyword matches, follows the Context Graph's dependencies, and passes a
+bounded list of paths and relationships to the model. The result carries
+the target app, build record, bundle digest, and graph hash. Scope and coding
+agents receive this evidence as advice. The harness still enforces edit scope.
+
+Generator revision middleware renders the assessment through the existing
+graph prompt pack when a verified app bundle is available. A new app without
+a source build has no dependency assessment. An unavailable or invalid
+requested build has no fallback to current app evidence.
 
 ## Boundaries
 

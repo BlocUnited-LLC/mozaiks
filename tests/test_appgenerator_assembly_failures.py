@@ -234,7 +234,8 @@ async def test_failed_assembly_preserves_real_partial_batch_recovery_and_reassem
     assert validation["task_recovery_request"]["root_task_ids"] == ["task_reports_services"]
     assert validation["bundle_repair"]["target_agent"] is None
     await execute("AppValidationAgent")
-    assert _next("AppValidationAgent", context) == "AssemblyAgent"
+    assert _next("AppValidationAgent", context) == "AdminRegistryAgent"
+    assert _next("AdminRegistryAgent", context) == "AssemblyAgent"
     assert counts["task_reports_services"] == 2
     assert counts["task_report_pages"] == 1
     monkeypatch.setattr(assembly, "_apply_app_config_contracts", original)

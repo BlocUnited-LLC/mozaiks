@@ -172,17 +172,26 @@ definitions:
       default: null
   context_graph_pack:
     type: object
+    authority_class: tool_only_information
+    writer_ids: [lifecycle_tool]
+    model_visible: false
+    persisted: false
     description: >
       Compact Context Graph prompt pack loaded by the before_chat lifecycle
       tool. Contains the prompt-safe graph status, relevant paths, matched
       nodes, relationship hints, warnings, and semantic annotation targets.
       This is advisory code-context intelligence, not routing or execution
-      authority.
+      authority. The middleware renders the bounded pack, including a specialist
+      assessment only when its verified build and content identity match.
     source:
       type: state
       default: null
   context_graph_catalog:
     type: object
+    authority_class: tool_only_information
+    writer_ids: [lifecycle_tool]
+    model_visible: false
+    persisted: false
     description: >
       Rich machine-readable Context Graph catalog for diagnostics and tooling.
       This is intentionally distinct from context_graph_pack. Populated by

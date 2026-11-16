@@ -26,7 +26,7 @@ import io
 import zipfile
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -36,6 +36,7 @@ from mozaiksai.core.artifacts.content_store import (
     LocalArtifactContentStore,
     get_artifact_content_store,
 )
+from mozaiksai.core.artifacts.models import BuildRecord
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -51,13 +52,10 @@ def _make_zip_bytes(entries: dict[str, str]) -> bytes:
 
 
 def _make_artifact_version(metadata: dict[str, Any]):
-    """Return a MagicMock shaped like ArtifactVersionDoc with given commit_metadata.metadata."""
-    commit_meta = MagicMock()
-    commit_meta.metadata = metadata
-    artifact = MagicMock()
-    artifact.id = "av_test_001"
-    artifact.commit_metadata = commit_meta
-    return artifact
+    return BuildRecord(
+        id="av_001", app_id="app1", build_family="app_bundle", build_key="app_bundle",
+        version_number=1, lineage_root_id="av_001", commit_metadata={"metadata": metadata},
+    )
 
 
 def _run_async(awaitable):

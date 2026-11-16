@@ -6,6 +6,8 @@ import pytest
 from mozaiksai.core.adapters import llm_fallback
 from mozaiksai.core.workflow import llm_config
 
+_REAL_RESOLVE_MODEL_API_KEY = llm_fallback.resolve_model_api_key
+
 
 @pytest.fixture(autouse=True)
 def isolated_config(monkeypatch):
@@ -13,11 +15,16 @@ def isolated_config(monkeypatch):
         "LLM_PRIMARY_API_TYPE", "LLM_PRIMARY_MODEL", "LLM_PRIMARY_BASE_URL",
         "LLM_FALLBACK_MODELS", "LLM_FALLBACK_BASE_URLS", "LLM_FALLBACK_ENABLED",
         "OPENAI_MODEL_FALLBACK", "DEFAULT_LLM_MODEL", "LLM_MAX_TOKENS",
-        "LLM_STRUCTURED_OUTPUT_MODE",
+        "LLM_STRUCTURED_OUTPUT_MODE", "LLM_USE_RESPONSES_API", "LLM_REASONING_EFFORT",
+        "LLM_GEMINI_THINKING_LEVEL",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("MOZAIKS_LLM_CONFIG_SKIP_MONGO", "true")
-    monkeypatch.setattr(llm_fallback, "resolve_model_api_key", lambda provider, explicit=None: explicit or "test-only-" + provider)
+    monkeypatch.setattr(
+        llm_fallback,
+        "resolve_model_api_key",
+        lambda provider, explicit=None, **kwargs: explicit or "test-only-" + provider,
+    )
     monkeypatch.setattr(llm_fallback, "_optional_secret", lambda name: "")
     llm_config.clear_llm_caches()
     yield
@@ -38,10 +45,13 @@ async def test_environment_preserves_selected_provider_model_and_key(provider, m
 
 
 @pytest.mark.asyncio
-async def test_historical_openai_default_and_order_remain(monkeypatch):
+async def test_clean_environment_selects_gemini_and_openai_requires_explicit_selection(monkeypatch):
     _, default = await llm_config.get_llm_config()
-    assert default["config_list"][0]["model"] == "gpt-5-nano"
+    assert default["config_list"] == [{
+        "model": "gemini-3.8-flash", "api_type": "google", "api_key": "test-only-google",
+    }]
     llm_config.clear_llm_caches()
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
     monkeypatch.setenv("DEFAULT_LLM_MODEL", "unused-default")
     monkeypatch.setenv("OPENAI_MODEL_FALLBACK", "first, second")
     _, config = await llm_config.get_llm_config()
@@ -50,7 +60,7 @@ async def test_historical_openai_default_and_order_remain(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("provider", ["anthropic", "google", "ollama"])
+@pytest.mark.parametrize("provider", ["anthropic", "ollama"])
 async def test_non_openai_requires_explicit_model(provider, monkeypatch):
     monkeypatch.setenv("LLM_PRIMARY_API_TYPE", provider)
     with pytest.raises(ValueError, match="LLM_PRIMARY_MODEL"):
@@ -112,6 +122,23 @@ async def test_database_anthropic_does_not_consume_openai_named_key(monkeypatch)
     stored_config(monkeypatch, [{"api_type": "anthropic", "model": "stored-model", "OPENAI_API_KEY": "wrong-provider-key"}])
     _, config = await llm_config.get_llm_config()
     assert config["config_list"][0]["api_key"] == "test-only-anthropic"
+
+
+@pytest.mark.asyncio
+async def test_stored_non_primary_provider_does_not_consume_generic_primary_key(monkeypatch):
+    stored_config(monkeypatch, [{"api_type": "openai", "model": "stored-model"}])
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "google")
+    monkeypatch.setattr(llm_fallback, "resolve_model_api_key", _REAL_RESOLVE_MODEL_API_KEY)
+    fake_keys = {
+        "LLM_PRIMARY_API_KEY": "FAKE-GOOGLE-PRIMARY-KEY",
+        "OPENAI_API_KEY": "FAKE-OPENAI-PROVIDER-KEY",
+    }
+    monkeypatch.setattr(llm_fallback, "_optional_secret", lambda name: fake_keys.get(name, ""))
+
+    _, config = await llm_config.get_llm_config()
+
+    assert config["config_list"][0]["api_key"] == "FAKE-OPENAI-PROVIDER-KEY"
+    assert "FAKE-GOOGLE-PRIMARY-KEY" not in str(config)
 
 
 @pytest.mark.asyncio
@@ -217,6 +244,14 @@ def test_fallback_entries_preserve_selected_provider(monkeypatch):
     assert [entry["api_type"] for entry in config] == ["anthropic", "anthropic"]
 
 
+def test_fallback_builder_uses_google_and_provider_temperature_by_default(monkeypatch):
+    monkeypatch.delenv("LLM_TEMPERATURE", raising=False)
+    config = llm_fallback.build_fallback_llm_config()
+    actual = llm_fallback.llm_config_to_ag2_config(config)
+    assert actual.model == "gemini-3.8-flash"
+    assert actual.temperature is None
+
+
 @pytest.mark.asyncio
 async def test_structured_output_mode_env_override_and_cache_are_explicit(monkeypatch):
     _, native = await llm_config.get_llm_config()
@@ -246,3 +281,236 @@ async def test_invalid_environment_structured_output_mode_fails_closed(monkeypat
     monkeypatch.setenv("LLM_STRUCTURED_OUTPUT_MODE", "automatic")
     with pytest.raises(ValueError, match="structured_output_mode"):
         await llm_config.get_llm_config()
+
+
+@pytest.mark.asyncio
+async def test_luna_environment_reaches_responses_and_native_reasoning(monkeypatch):
+    from ag2.config import OpenAIResponsesConfig
+
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
+    monkeypatch.setenv("LLM_PRIMARY_MODEL", "gpt-6-luna")
+    monkeypatch.setenv("LLM_USE_RESPONSES_API", "true")
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "medium")
+    monkeypatch.setenv("LLM_MAX_TOKENS", "1024")
+    _, config = await llm_config.get_llm_config()
+    actual = llm_fallback.llm_config_to_ag2_config(config)
+    assert isinstance(actual, OpenAIResponsesConfig)
+    assert actual.model == "gpt-6-luna"
+    assert actual.reasoning == {"effort": "medium"}
+    assert actual.max_output_tokens == 1024
+    _, override = await llm_config.get_llm_config(extra_config={"reasoning": {"effort": "low"}})
+    assert llm_fallback.llm_config_to_ag2_config(override).reasoning == {"effort": "low"}
+
+
+@pytest.mark.asyncio
+async def test_default_google_uses_native_limit_and_ignores_openai_env(monkeypatch):
+    from ag2.config import GeminiConfig
+
+    monkeypatch.setenv("LLM_USE_RESPONSES_API", "true")
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "medium")
+    monkeypatch.setenv("LLM_MAX_TOKENS", "1024")
+    _, config = await llm_config.get_llm_config()
+    actual = llm_fallback.llm_config_to_ag2_config(config)
+    assert isinstance(actual, GeminiConfig)
+    assert actual.model == "gemini-3.8-flash"
+    assert actual.max_output_tokens == 1024
+    assert actual.http_client.timeout.read == config["timeout"] == 600
+    await actual.http_client.aclose()
+    assert "reasoning" not in config["config_list"][0]
+    assert "use_responses_api" not in config["config_list"][0]
+
+
+@pytest.mark.asyncio
+async def test_gemini_thinking_environment_is_optional_and_cache_aware(monkeypatch):
+    monkeypatch.setenv("LLM_MAX_TOKENS", "8192")
+    _, default = await llm_config.get_llm_config()
+    default_actual = llm_fallback.llm_config_to_ag2_config(default)
+    assert default_actual.thinking_level is None
+    await default_actual.http_client.aclose()
+
+    monkeypatch.setenv("LLM_GEMINI_THINKING_LEVEL", "low")
+    _, low = await llm_config.get_llm_config()
+    actual = llm_fallback.llm_config_to_ag2_config(low)
+    assert actual.thinking_level == "low"
+    assert actual.max_output_tokens == 8192
+    await actual.http_client.aclose()
+
+    monkeypatch.setenv("LLM_GEMINI_THINKING_LEVEL", "high")
+    _, high = await llm_config.get_llm_config()
+    updated = llm_fallback.llm_config_to_ag2_config(high)
+    assert updated.thinking_level == "high"
+    await updated.http_client.aclose()
+    assert low["config_list"][0]["thinking_level"] == "low"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("providers", "expected_provider", "expected_thinking"),
+    [
+        ([{"api_type": "google", "model": "gemini-3.8-flash", "api_key": ""},
+          {"api_type": "openai", "model": "test-openai-model", "api_key": "fake-key"}], "openai", None),
+        ([{"api_type": "openai", "model": "test-openai-model", "api_key": ""},
+          {"api_type": "google", "model": "gemini-3.8-flash", "api_key": "fake-key"}], "google", "low"),
+    ],
+)
+async def test_gemini_environment_tracks_selected_provider_without_mutating_raw_cache(
+    providers, expected_provider, expected_thinking, monkeypatch,
+):
+    from copy import deepcopy
+
+    from mozaiksai.core.capabilities.simple_llm import SimpleLLMCapabilityService
+
+    original = deepcopy(providers)
+
+    async def load():
+        return providers
+
+    monkeypatch.setattr(llm_config, "_load_raw_config_list", load)
+    monkeypatch.setenv("LLM_GEMINI_THINKING_LEVEL", "low")
+    selected = await SimpleLLMCapabilityService()._select_default_provider()
+    assert selected["api_type"] == expected_provider
+    assert selected.get("thinking_level") == expected_thinking
+    actual = llm_fallback.llm_config_to_ag2_config({"config_list": [selected]})
+    if expected_provider == "google":
+        assert actual.thinking_level == "low"
+        if actual.http_client is not None:
+            await actual.http_client.aclose()
+    assert providers == original
+
+
+@pytest.mark.asyncio
+async def test_stored_gemini_thinking_precedes_shared_and_environment_settings(monkeypatch):
+    stored = stored_config(monkeypatch, [{
+        "api_type": "google", "model": "gemini-3.8-flash", "api_key": "test-key",
+        "thinking_level": "medium",
+    }])
+    monkeypatch.setenv("LLM_GEMINI_THINKING_LEVEL", "low")
+    monkeypatch.setattr(llm_config, "_CACHE_TTL", 0)
+    _, config = await llm_config.get_llm_config(extra_config={"thinking_level": "high"})
+    actual = llm_fallback.llm_config_to_ag2_config(config)
+    assert actual.thinking_level == "medium"
+    await actual.http_client.aclose()
+    stored.providers[0]["thinking_level"] = "low"
+    _, updated = await llm_config.get_llm_config(extra_config={"thinking_level": "high"})
+    changed = llm_fallback.llm_config_to_ag2_config(updated)
+    assert changed.thinking_level == "low"
+    await changed.http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_shared_gemini_thinking_overrides_environment(monkeypatch):
+    monkeypatch.setenv("LLM_GEMINI_THINKING_LEVEL", "low")
+    _, config = await llm_config.get_llm_config(extra_config={"thinking_level": "medium"})
+    actual = llm_fallback.llm_config_to_ag2_config(config)
+    assert actual.thinking_level == "medium"
+    await actual.http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_explicit_null_shared_thinking_suppresses_environment_and_keeps_inputs(monkeypatch):
+    supplied = [{"api_type": "google", "model": "gemini-3.8-flash", "api_key": "fake-key"}]
+    monkeypatch.setenv("LLM_GEMINI_THINKING_LEVEL", "low")
+    _, config = await llm_config.get_llm_config(extra_config={"config_list": supplied, "thinking_level": None})
+    actual = llm_fallback.llm_config_to_ag2_config(config)
+    assert actual.thinking_level is None
+    assert "thinking_level" not in supplied[0]
+    await actual.http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_environment_decoration_does_not_mutate_caller_list(monkeypatch):
+    supplied = [{"api_type": "google", "model": "gemini-3.8-flash", "api_key": "fake-key"}]
+    monkeypatch.setenv("LLM_GEMINI_THINKING_LEVEL", "low")
+    _, config = await llm_config.get_llm_config(extra_config={"config_list": supplied})
+    assert config["config_list"][0]["thinking_level"] == "low"
+    assert "thinking_level" not in supplied[0]
+    config["config_list"][0]["thinking_level"] = "high"
+    _, cached = await llm_config.get_llm_config(extra_config={"config_list": supplied})
+    assert cached["config_list"][0]["thinking_level"] == "low"
+    assert "thinking_level" not in supplied[0]
+
+
+@pytest.mark.asyncio
+async def test_stored_gemini_null_thinking_preserves_provider_default(monkeypatch):
+    stored_config(monkeypatch, [{
+        "api_type": "google", "model": "gemini-3.8-flash", "api_key": "test-key",
+        "thinking_level": None,
+    }])
+    monkeypatch.setenv("LLM_GEMINI_THINKING_LEVEL", "low")
+    _, config = await llm_config.get_llm_config()
+    actual = llm_fallback.llm_config_to_ag2_config(config)
+    assert actual.thinking_level is None
+    await actual.http_client.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("level", ["minimal", "invalid", "LOW"])
+async def test_invalid_gemini_thinking_environment_fails_before_client_creation(level, monkeypatch):
+    monkeypatch.setenv("LLM_GEMINI_THINKING_LEVEL", level)
+    _, config = await llm_config.get_llm_config()
+    with pytest.raises(ValueError, match="thinking_level"):
+        llm_fallback.llm_config_to_ag2_config(config)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["openai", "anthropic", "ollama"])
+async def test_gemini_thinking_environment_does_not_affect_other_providers(provider, monkeypatch):
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", provider)
+    monkeypatch.setenv("LLM_PRIMARY_MODEL", "other-model")
+    monkeypatch.setenv("LLM_GEMINI_THINKING_LEVEL", "low")
+    _, config = await llm_config.get_llm_config()
+    assert "thinking_level" not in config
+    assert "thinking_level" not in config["config_list"][0]
+
+
+@pytest.mark.parametrize("level", ["", "minimal", "invalid", "LOW", 1, True, [], {}])
+def test_invalid_gemini_thinking_level_fails_before_client_creation(level):
+    config = {"config_list": [{"api_type": "google", "model": "gemini-3.8-flash"}], "thinking_level": level}
+    with pytest.raises(ValueError, match="thinking_level"):
+        llm_fallback.llm_config_to_ag2_config(config)
+
+
+def test_explicit_gemini_thinking_level_rejected_for_other_provider():
+    config = {"config_list": [{"api_type": "openai", "model": "test-model"}], "thinking_level": "low"}
+    with pytest.raises(ValueError, match="only supported by the Gemini"):
+        llm_fallback.llm_config_to_ag2_config(config)
+
+
+@pytest.mark.asyncio
+async def test_stored_responses_settings_remain_authoritative_and_refresh(monkeypatch):
+    from ag2.config import OpenAIResponsesConfig
+
+    stored = stored_config(monkeypatch, [{
+        "api_type": "openai", "model": "gpt-6-luna", "use_responses_api": True,
+        "reasoning": {"effort": "low"}, "max_output_tokens": 256,
+    }])
+    monkeypatch.setenv("LLM_USE_RESPONSES_API", "false")
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "high")
+    monkeypatch.setattr(llm_config, "_CACHE_TTL", 0)
+    _, config = await llm_config.get_llm_config()
+    actual = llm_fallback.llm_config_to_ag2_config(config)
+    assert isinstance(actual, OpenAIResponsesConfig)
+    assert actual.reasoning == {"effort": "low"}
+    stored.providers[0]["reasoning"] = {"effort": "medium"}
+    _, updated = await llm_config.get_llm_config()
+    assert llm_fallback.llm_config_to_ag2_config(updated).reasoning == {"effort": "medium"}
+
+
+@pytest.mark.asyncio
+async def test_invalid_responses_environment_fails_closed(monkeypatch):
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
+    monkeypatch.setenv("LLM_USE_RESPONSES_API", "automatic")
+    with pytest.raises(ValueError, match="LLM_USE_RESPONSES_API"):
+        await llm_config.get_llm_config()
+
+
+@pytest.mark.asyncio
+async def test_stored_native_limit_overrides_environment_without_conflict(monkeypatch):
+    stored_config(monkeypatch, [{
+        "api_type": "openai", "model": "test-model", "max_completion_tokens": 256,
+    }])
+    monkeypatch.setenv("LLM_MAX_TOKENS", "1024")
+    _, config = await llm_config.get_llm_config()
+    actual = llm_fallback.llm_config_to_ag2_config(config)
+    assert actual.max_completion_tokens == 256
+    assert "max_tokens" not in config

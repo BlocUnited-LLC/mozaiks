@@ -7,6 +7,7 @@ worker's honest strategy vocabulary.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -91,6 +92,40 @@ async def test_docker_validation_session_has_no_network_or_published_ports(monke
 
 
 @pytest.mark.asyncio
+async def test_docker_allocation_identity_is_labeled_before_validation_dispatch():
+    adapter = DockerSandboxAdapter()
+    allocation_id = "a" * 32
+    fake_run = AsyncMock(return_value=(0, "validation-container\n", ""))
+    with patch.object(adapter, "_run", fake_run):
+        await adapter.create_session(metadata={"purpose": "app_validation", "allocation_id": allocation_id})
+    args = fake_run.await_args.args[0]
+    assert f"mozaiks.sandbox.allocation={allocation_id}" in args
+    assert args[args.index("--network") + 1] == "none"
+    assert "-p" not in args
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("allocation_id", [None, "", "A" * 32, "a" * 31, "a" * 33, "-" * 32, 123])
+async def test_docker_invalid_allocation_identity_fails_before_dispatch(allocation_id):
+    adapter = DockerSandboxAdapter()
+    fake_run = AsyncMock()
+    with patch.object(adapter, "_run", fake_run), pytest.raises(ValueError, match="allocation ID"):
+        await adapter.create_session(metadata={"purpose": "app_validation", "allocation_id": allocation_id})
+    fake_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_docker_preview_and_allocation_labels_remain_distinct():
+    adapter = DockerSandboxAdapter()
+    fake_run = AsyncMock(return_value=(0, "preview-container\n", ""))
+    with patch.object(adapter, "_run", fake_run):
+        await adapter.create_session(metadata={"purpose": "artifact_preview", "manager_sandbox_id": "preview-id", "allocation_id": "b" * 32})
+    args = fake_run.await_args.args[0]
+    assert "mozaiks.preview=preview-id" in args
+    assert f"mozaiks.sandbox.allocation={'b' * 32}" in args
+
+
+@pytest.mark.asyncio
 async def test_app_runtime_diagnostic_has_bounded_writable_space(monkeypatch):
     monkeypatch.setenv("SANDBOX_PREVIEW_PORT", "invalid-preview-port")
     adapter = DockerSandboxAdapter()
@@ -115,6 +150,32 @@ async def test_app_runtime_diagnostic_has_bounded_writable_space(monkeypatch):
     assert any(mount.startswith("/workspace:") and "size=128m" in mount for mount in tmpfs)
     assert any(mount.startswith("/tmp:") and "size=64m" in mount for mount in tmpfs)
     assert any(mount.startswith("/home/sandbox:") and "size=16m" in mount for mount in tmpfs)
+
+
+@pytest.mark.asyncio
+async def test_sealed_preview_mounts_the_configured_per_app_vite_cache():
+    vite_config = (Path(__file__).resolve().parents[1] / "web_shell/vite.config.js").read_text(encoding="utf-8")
+    assert "cacheDir: path.join(__dirname, 'node_modules', '.vite-apps'," in vite_config
+    assert "createHash('sha256').update(platformAppDir).digest('hex').slice(0, 16)" in vite_config
+
+    adapter = DockerSandboxAdapter()
+    commands: list[list[str]] = []
+
+    async def fake_run(args, timeout: float = 60.0):
+        commands.append(list(args))
+        return 0, "sealed-container\n", ""
+
+    image_id = "sha256:" + "a" * 64
+    with patch.object(adapter, "_run", side_effect=fake_run):
+        await adapter.create_session(template=image_id, envs={}, metadata={"purpose": "sealed_candidate_preview"})
+
+    args = next(command for command in commands if command[1] == "run")
+    tmpfs = [args[index + 1] for index, value in enumerate(args) if value == "--tmpfs"]
+    assert "/opt/mozaiks/web_shell/node_modules/.vite-apps:rw,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700" in tmpfs
+    assert "--read-only" in args and "--user=10001:10001" in args and "--pull=never" in args
+    assert "--cap-drop=ALL" in args and "--security-opt=no-new-privileges" in args
+    assert args[args.index("--network") + 1] == "none"
+    assert image_id in args and "-p" not in args and "-e" not in args
 
 
 @pytest.mark.asyncio

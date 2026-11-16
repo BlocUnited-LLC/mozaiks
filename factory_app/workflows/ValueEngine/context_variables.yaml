@@ -16,11 +16,10 @@ definitions:
     type: string
     description: >
       Email of the authenticated platform user running this session.
-      Injected from the platform at session start. Null in OSS/unauthenticated contexts.
-      When non-null, agents know who they are talking to and can personalize the experience.
+      Projected from the backend-owned account profile for the authenticated execution
+      app and user. Missing profiles yield null and require operator bootstrap setup.
     source:
-      type: config
-      env_var: PLATFORM_USER_EMAIL
+      type: runtime
       default: null
 
   app_type:

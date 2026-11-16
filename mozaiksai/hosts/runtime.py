@@ -405,10 +405,19 @@ async def _runtime_shutdown() -> None:
     """Clean up runtime-only services."""
     global mongo_client, simple_transport
 
-    simple_transport = None
-    if mongo_client:
-        close_mongo_client()
-        mongo_client = None
+    from mozaiksai.core.capabilities import close_general_capability_service
+
+    try:
+        if simple_transport is not None:
+            await simple_transport.close_live_ag2_workflow_runs()
+    finally:
+        try:
+            await close_general_capability_service()
+        finally:
+            simple_transport = None
+            if mongo_client:
+                close_mongo_client()
+                mongo_client = None
 
 
 @asynccontextmanager

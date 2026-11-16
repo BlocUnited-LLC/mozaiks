@@ -93,6 +93,18 @@ def test_index_file_map_builds_canonical_source_corpus_graph_and_health() -> Non
     assert any(node.metadata.get("path") == "app/ui/pages/Dashboard.jsx" for node in indexed.app_context_graph.nodes)
 
 
+def test_index_file_map_reports_incomplete_source_parsing() -> None:
+    indexed = index_file_map(
+        app_id="app_1",
+        artifact_version_id="av_app_1",
+        file_map={"src/Broken.tsx": "export function Broken() { return <main>"},
+    )
+
+    assert indexed.scan_health["parse_coverage"] == {"partial": 1}
+    assert indexed.health_report["coverage"]["parse_coverage"] == {"partial": 1}
+    assert "context_graph_source_parse_incomplete" in indexed.health_report["warnings"]
+
+
 def test_index_workspace_root_respects_scan_policy_and_source_ref(tmp_path: Path) -> None:
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "main.py").write_text(

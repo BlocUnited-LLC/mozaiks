@@ -220,7 +220,15 @@ async def test_app_intelligence_index_feeds_persisted_source_context_tools(tmp_p
 
     search = await search_app_source_context(context=context, artifact_store=store)
     assert search["present"] is True
-    assert search["source"] == "current_app_context"
+    assert search["source"] == "artifact_zip"
+    assert search["provenance"] == {
+        "app_id": "app_1",
+        "build_record_id": result.app_bundle_artifact_version_id,
+        "build_family": "app_bundle",
+        "build_key": APP_INTELLIGENCE_WORKSPACE_ARTIFACT_KEY,
+        "bundle_digest": None,
+        "verified": False,
+    }
     assert any(item["path"] == "app/ui/pages/Dashboard.jsx" for item in search["results"])
 
     read = await read_app_source_file(

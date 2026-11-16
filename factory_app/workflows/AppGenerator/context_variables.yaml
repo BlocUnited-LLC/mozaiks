@@ -155,12 +155,11 @@ definitions:
     type: string
     description: >
       Email address of the authenticated platform user who started this AppGenerator
-      session. Injected by the hosted platform at workflow start from the session JWT.
+      session. Projected from the backend-owned account profile for the authenticated execution app and user.
       Used by scaffold/config agents to populate `app/app.json` `admins` without
-      prompting the user. Falls back to null in OSS / unauthenticated contexts, in
-      which case InterviewAgent captures the email during the intake interview.
+      prompting the user. Missing profiles yield null and require operator bootstrap setup.
     source:
-      type: state
+      type: runtime
       default: null
   coding_participation:
     type: string
@@ -373,17 +372,26 @@ definitions:
       default: null
   context_graph_pack:
     type: object
+    authority_class: tool_only_information
+    writer_ids: [lifecycle_tool]
+    model_visible: false
+    persisted: false
     description: >
       Compact Context Graph prompt pack loaded by the before_chat lifecycle
       tool. Contains the prompt-safe graph status, relevant paths, matched
       nodes, relationship hints, warnings, and semantic annotation targets.
       This is advisory code-context intelligence, not routing or execution
-      authority.
+      authority. The middleware renders the bounded pack, including a specialist
+      assessment only when its verified build and content identity match.
     source:
       type: state
       default: null
   context_graph_catalog:
     type: object
+    authority_class: tool_only_information
+    writer_ids: [lifecycle_tool]
+    model_visible: false
+    persisted: false
     description: >
       Rich machine-readable Context Graph catalog for diagnostics and tooling.
       This is intentionally distinct from context_graph_pack. Populated by
@@ -2042,9 +2050,14 @@ agents:
     - dependency_task_outputs
   AdminRegistryAgent:
     variables:
+    - bundle_repair_request
+    - bundle_repair_errors
     - app_build_plan
     - capability_packs
     - admin_registry
+    - app_task_batch_results
+    - generated_files
+    - code_files
   ModuleContractQualityAgent:
     variables:
     - admin_registry

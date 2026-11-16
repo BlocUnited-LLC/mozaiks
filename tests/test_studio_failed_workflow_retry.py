@@ -49,6 +49,11 @@ REQUEST = "Repair the existing saved form bindings without changing approved sco
 FIND_UNMET_DEPENDENCY = SessionRouter._find_first_unmet_dependency
 
 
+@pytest.fixture(autouse=True)
+def account_profile_identity(monkeypatch):
+    monkeypatch.setattr("mozaiksai.core.profile.identity.read_account_profile_identity", AsyncMock(return_value=None))
+
+
 @pytest.fixture
 def retry(monkeypatch):
     pm = _FakePersistence()

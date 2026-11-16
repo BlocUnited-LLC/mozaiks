@@ -34,6 +34,8 @@ def test_factory_app_refinement_policy_enables_refinement_engine() -> None:
     assert coding_cfg is not None
     assert coding_cfg["model"]  # any non-empty model is valid
     assert config.scope.llm_profile == "impact_analyzer"
+    assert config.dependency_graph.enabled
+    assert config.resolve_capability_llm_config("dependency_graph") == config.llm_profiles["impact_analyzer"].llm_config
     assert config.contract_surface.llm_profile == "impact_analyzer"
     assert config.contract_surface.regeneration_llm_profile == "codegen"
     assert config.resolve_capability_llm_config("scope") == config.llm_profiles["impact_analyzer"].llm_config
@@ -94,7 +96,7 @@ def test_control_plane_rejects_unknown_capability_profile_reference() -> None:
         )
 
 
-@pytest.mark.parametrize("capability", ["classifier", "scope", "coding", "contract_surface"])
+@pytest.mark.parametrize("capability", ["classifier", "scope", "coding", "contract_surface", "dependency_graph"])
 def test_enabled_capability_requires_named_profile_with_model(capability: str) -> None:
     with pytest.raises(ValidationError, match=f"Refinement capability '{capability}' requires llm_profile"):
         ControlPlaneConfig.model_validate({"enabled": True, capability: {"enabled": True}})
@@ -117,7 +119,7 @@ def test_enabled_surface_requires_separate_regeneration_profile() -> None:
         ControlPlaneConfig.model_validate(policy)
 
 
-@pytest.mark.parametrize("capability", ["classifier", "scope", "coding", "contract_surface"])
+@pytest.mark.parametrize("capability", ["classifier", "scope", "coding", "contract_surface", "dependency_graph"])
 def test_enabled_capability_rejects_config_list_model_override(capability: str) -> None:
     with pytest.raises(ValidationError, match="config_list is not supported"):
         ControlPlaneConfig.model_validate({

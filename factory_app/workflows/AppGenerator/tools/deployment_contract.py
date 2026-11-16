@@ -1137,8 +1137,19 @@ def _render_env_example(spec: dict[str, Any], *, environment: str | None = None)
         "# Artifact review staging is handled by Mozaiks/Studio before promotion.",
         "# Environment staging is handled by your deployment host or CI environment.",
         "",
-        "# Required variables",
     ]
+    if _dict_or_empty(spec.get("auth")).get("required"):
+        lines.extend([
+            "# Owner account setup",
+            "# Configure this app's OIDC issuer, API audience, browser client and exact callback URL.",
+            "# Hosted SSO can reuse the builder's existing identity-provider session.",
+            "# Self-hosters select their own OIDC provider and create or invite the owner there.",
+            "# The owner chooses a password through that provider and verifies their email.",
+            "# The verified email must match app/app.json admins to bootstrap Admin access.",
+            "# Open the configured app/config/auth.yaml login route with ?owner=1 to confirm access.",
+            "",
+        ])
+    lines.append("# Required variables")
     for key in required_env:
         if key in secret_env:
             lines.append(f"{key}=")

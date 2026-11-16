@@ -25,6 +25,7 @@ from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_exp
 from factory_app.workflows.AppGenerator.tools.materialize_app_config_contracts import (
     materialize_app_config_contracts,
 )
+from factory_app.workflows.AppGenerator.tools.save_admin_registry import save_admin_registry
 from factory_app.workflows.SubscriptionContractDesigner.tools import (
     save_subscription_contract as subscription_module,
 )
@@ -644,6 +645,7 @@ async def test_ai_research_workspace_offline_golden_path(
     active_workflows_root = tmp_path / "active" / "workflows"
     promotion = promote_generated_workflow(generated_workflow, active_workflows_root)
     assert Path(promotion["target_dir"]).is_dir()
+    context.set("workflow_integration_metadata", {**_workflow_metadata(), "source": "workflow_bundle_files"})
     monkeypatch.setattr(UnifiedWorkflowManager, "_instance", None)
     workflow_manager = UnifiedWorkflowManager(workflows_base_path=str(active_workflows_root))
     workflow_info = workflow_manager.get_workflow_info("ResearchWorkflow")
@@ -677,6 +679,11 @@ async def test_ai_research_workspace_offline_golden_path(
     for key, value in replay_context.items():
         context.set(key, value)
     context.set("workflow_name", "AppGenerator")
+    save_admin_registry(admin_registry={"pages": [
+        {"id": "overview", "label": "Overview", "path": "/admin"},
+        {"id": "usage", "label": "Usage", "path": "/admin/usage"},
+        {"id": "billing", "label": "Billing", "path": "/admin/billing"},
+    ]}, context_variables=context)
     assembled = await assemble_app_tasks(context_variables=context)
     assert detach(context.get("app_task_batch_results")) == accepted
     files = {entry["filename"]: entry["content"] for entry in assembled["code_files"]}

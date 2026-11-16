@@ -837,9 +837,9 @@ def test_admin_gate_has_no_pass_through_for_auth_off(monkeypatch) -> None:
 
 
 def test_admin_email_allowlist_never_promotes_a_visitor(monkeypatch) -> None:
-    from mozaiksai.core.admin import router as admin_router
+    from mozaiksai.core.admin import email_promotion
 
-    monkeypatch.setattr(admin_router, "is_admin_by_email", lambda email: email == "boss@example.com")
+    monkeypatch.setattr(email_promotion, "is_admin_by_email", lambda email: email == "boss@example.com")
 
     _off(monkeypatch, AUTH_ANON_EMAIL="boss@example.com")
     assert _client(LOCAL).get("/admin").status_code == 200
@@ -1480,6 +1480,9 @@ def _startup_env(monkeypatch, tmp_path):
     policy = tmp_path / "secrets.yaml"
     policy.write_text("version: 1\nprovider: {type: env}\nsecrets: []\n")
     monkeypatch.setenv("MOZAIKS_SECRETS_CONFIG_PATH", str(policy))
+    # This suite exercises auth posture, not the runtime's selected-provider
+    # default. Keep its boot environment explicitly on the OpenAI fixture path.
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("MONGO_URI", "mongodb://127.0.0.1:27017")
     monkeypatch.setenv("INTERNAL_API_KEY", "test-startup-api-key-long-enough")

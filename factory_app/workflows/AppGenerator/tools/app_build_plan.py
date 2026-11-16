@@ -3,10 +3,11 @@ import logging
 import re
 from collections.abc import Callable, Iterable
 from pathlib import PurePosixPath
-from typing import Annotated, Any
+from typing import Annotated, Any, get_args
 
 from pydantic import Field
 
+from mozaiksai.core.runtime.app.auth_contract import AuthMode
 from mozaiksai.core.runtime.app.paths import (
     APP_AUTH_CONFIG_PATH,
     APP_PROVENANCE_PATH,
@@ -488,9 +489,10 @@ def _reserve_module_event_contract_paths(build_tasks: list[dict[str, Any]]) -> l
         if item.get("task_type") == "module_contract":
             module_id = _infer_module_id_from_owned_paths(item)
             event_path = f"modules/{module_id}/contracts/events.yaml"
-            if module_id and event_path not in owned:
+            manifest_path = f"modules/{module_id}/module.yaml"
+            if module_id and manifest_path in _normalized_owned_paths(item) and event_path not in owned:
                 # Actions are authored later. Reserving this optional companion
-                # grants one owner without inventing an event version or payload.
+                # extends the manifest owner's work, never a fixture-only task.
                 item["owned_paths"] = [*_normalized_owned_paths(item), event_path]
                 owned.add(event_path)
         normalized.append(item)
@@ -2218,6 +2220,11 @@ def app_build_plan(
     roles = _normalize_string_list(AppBuildPlan.get("roles"))
     auth_strategy = AppBuildPlan.get("auth_strategy")
     auth_required_from_strategy(auth_strategy, roles=roles, field="AppBuildPlan.auth_strategy")
+    auth_mode = AppBuildPlan.get("auth_mode")
+    if auth_mode is not None and auth_mode not in get_args(AuthMode):
+        raise ValueError("AppBuildPlan.auth_mode must use a canonical runtime auth mode")
+    if auth_mode is not None and auth_strategy in (None, "public"):
+        raise ValueError("AppBuildPlan.auth_mode requires a sign-in auth_strategy")
     service_scope = _normalize_string_list(AppBuildPlan.get("service_scope"))
     frontend_scope = _normalize_string_list(AppBuildPlan.get("frontend_scope"))
     theme_preferences = AppBuildPlan.get("theme_preferences")
@@ -2390,6 +2397,7 @@ def app_build_plan(
         "entities": entities,
         "roles": roles,
         "auth_strategy": auth_strategy,
+        "auth_mode": auth_mode,
         "service_scope": service_scope,
         "frontend_scope": frontend_scope,
         "theme_preferences": theme_preferences,

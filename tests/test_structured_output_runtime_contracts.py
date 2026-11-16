@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from pathlib import Path
 
-from pydantic import BaseModel
+import pytest
+from pydantic import BaseModel, ValidationError
 
 from tests.import_utils import import_module_directly
+from tests.test_continuous_deterministic_materialization import _plan_payload
 
 _workflow_manager_mod = import_module_directly("mozaiksai.core.workflow.workflow_manager")
 _structured_mod = import_module_directly("mozaiksai.core.workflow.outputs.structured")
@@ -103,6 +106,34 @@ def test_appgenerator_structured_outputs_load_task_batch_build_task_contract() -
     assert "AppChildWorkflowSpec" not in models
     assert task.initial_agent == "ConfigMiddlewareAgent"
     assert task.context_variables[1].key == "current_build_task_id"
+
+
+def test_app_plan_context_variables_are_task_local() -> None:
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    _workflow_manager_mod.initialize_workflows(base_path=str(workflows_root))
+    _structured_mod._workflow_models.clear()
+    _structured_mod._workflow_registries.clear()
+    _structured_mod._workflow_structured_agents.clear()
+
+    _, registry = _structured_mod.load_workflow_structured_outputs("AppGenerator")
+    model = registry["AppPlanAgent"]
+    payload = _plan_payload()
+    payload["AppBuildPlan"]["build_tasks"][0]["context_variables"] = [
+        {"key": "task_run_mode", "value": "true", "value_type": "boolean"},
+    ]
+
+    validated = model.model_validate(payload)
+    assert validated.AppBuildPlan.build_tasks[0].context_variables[0].key == "task_run_mode"
+
+    invalid = deepcopy(payload)
+    invalid["AppBuildPlan"]["context_variables"] = []
+    with pytest.raises(ValidationError) as exc_info:
+        model.model_validate(invalid)
+    assert [(item["loc"], item["type"]) for item in exc_info.value.errors()] == [
+        (("AppBuildPlan", "context_variables"), "extra_forbidden"),
+    ]
 
 
 def test_appgenerator_provider_schema_uses_strict_section_config_union() -> None:

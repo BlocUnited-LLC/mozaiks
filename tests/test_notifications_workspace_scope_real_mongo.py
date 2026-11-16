@@ -210,6 +210,83 @@ def _ids(response) -> set[str]:
     return {row["notification_id"] for row in response.json()["notifications"]}
 
 
+def test_generated_app_target_crosses_workspaces_only_for_exact_recipients(notification_http, monkeypatch, tmp_path):
+    from copy import deepcopy
+
+    import yaml
+
+    from mozaiksai.core.runtime.app.module_loader import ModuleLoader
+    from tests.test_module_loader_contracts import _write_canonical_module
+
+    _register_notification_memberships(notification_http, monkeypatch, [
+        _notification_member(WORKSPACE_A, TENANT_A), _notification_member(WORKSPACE_B, TENANT_B),
+    ])
+    notification_http.collection.delete_many({})  # Only this fixture's UUID database.
+    module = _write_canonical_module(tmp_path)
+    module.joinpath("contracts/notifications.yaml").write_text(yaml.safe_dump({"notifications": [{
+        "id": "task_created", "event_type": "domain.tasks.task_created", "source_event": "reference",
+        "audience": {"scope": "app", "user_id_field": "recipient_id"},
+        "template": {"title": "Task ready"}, "context_fields": ["task_id"],
+    }, {
+        "id": "owned", "event_type": "domain.tasks.task_created", "source_event": "reference",
+        "audience": {"user_id_field": "recipient_id"}, "template": {"title": "Owned task"},
+    }]}), encoding="utf-8")
+    loaded = ModuleLoader(str(tmp_path)).load("tasks")
+
+    async def store(record):
+        notification_http.collection.insert_one(record)
+
+    router = ModuleEventRouter([loaded], notification_store=store)
+
+    async def produce():
+        for identity, app_id, recipient in (
+            ("first", APP_ID, USER_ID), ("second", APP_ID, USER_ID),
+            ("another", APP_ID, "another-user"), ("foreign", "other-app", USER_ID),
+        ):
+            event = {
+                "id": identity, "type": "domain.tasks.task_created",
+                "source": {"layer": "module", "module_id": "tasks", "action_id": "create", "app_id": app_id},
+                "tenant": {"app_id": app_id, "tenant_id": TENANT_A, "workspace_id": WORKSPACE_A},
+                "actor": {"type": "user", "id": "sender"},
+                "payload": {"task_id": identity, "title": "Task", "recipient_id": recipient},
+            }
+            before = deepcopy(event)
+            await router.handle_event(event["type"], event)
+            assert event == before
+
+    asyncio.run(produce())
+    target = {row["notification_id"] for row in notification_http.collection.find({
+        "app_id": APP_ID, "rule_id": "task_created", "audience.user_ids": USER_ID,
+    })}
+    owned = {row["notification_id"] for row in notification_http.collection.find({
+        "app_id": APP_ID, "rule_id": "owned", "audience.user_ids": USER_ID,
+    })}
+    assert len(target) == len(owned) == 2
+    for record in notification_http.collection.find({"rule_id": "task_created"}):
+        assert record["actor"] is None and "scope" not in record["audience"]
+        assert not {"tenant_id", "workspace_id"} & record.keys()
+    client = notification_http.client
+    a, b = notification_http.token(WORKSPACE_A), notification_http.token(WORKSPACE_B)
+    assert _ids(client.get("/api/notifications", headers=a)) == target | owned
+    assert _ids(client.get("/api/notifications", headers=b)) == target
+    assert client.get("/api/notifications/count", headers=b).json()["count"] == 2
+    outsider = notification_http.token(WORKSPACE_B, user_id="sender")
+    assert _ids(client.get("/api/notifications", headers=outsider)) == set()
+    assert client.get("/api/notifications/count", headers=outsider).json()["count"] == 0
+    assert client.post(f"/api/notifications/{next(iter(target))}/read", headers=outsider).json()["success"] is False
+    assert client.post("/api/notifications/mark-all-read", headers=outsider).json()["marked_count"] == 0
+    assert client.delete("/api/notifications", headers=outsider).json()["cleared_count"] == 0
+    assert client.get("/api/notifications", headers=notification_http.token(None, app_id="other-app")).status_code == 403
+    assert client.post(f"/api/notifications/{next(iter(owned))}/read", headers=b).json()["success"] is False
+    assert client.post(f"/api/notifications/{next(iter(target))}/read", headers=b).json()["success"] is True
+    assert client.get("/api/notifications/count", headers=b).json()["count"] == 1
+    assert client.post("/api/notifications/mark-all-read", headers=b).json()["marked_count"] == 1
+    assert client.delete("/api/notifications", headers=b).json()["cleared_count"] == 2
+    assert _ids(client.get("/api/notifications", headers=a)) == owned
+    assert client.get("/api/notifications/count", headers=a).json()["count"] == 2
+    assert notification_http.collection.count_documents({}) == 6
+
+
 def _register_notification_memberships(notification_http, monkeypatch, memberships):
     """Synthetic host lookup; JWT validation, HTTP and Mongo queries are real."""
     hooks = PlatformHookRegistry()

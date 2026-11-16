@@ -86,7 +86,8 @@ const GlobalChatWidgetWrapper = () => {
   const meta = matchedPage?.meta || {};
   const canViewPage = !authLoading && (meta.requiresAuth === false || Boolean(user))
     && roleMatches(meta.requiresRole || meta.requiredRole || meta.roles, getUserRoles(user));
-  const isAppRoute = Boolean(matchedPage) && !isPrimaryChatRoute && !isAuthRoute && canViewPage;
+  const isAppRoute = navigation?.assistant_available === true
+    && Boolean(matchedPage) && !isPrimaryChatRoute && !isAuthRoute && canViewPage;
 
   // Ensure widget mode is active on non-chat routes.
   // This keeps the persistent widget available across module/admin/discovery pages

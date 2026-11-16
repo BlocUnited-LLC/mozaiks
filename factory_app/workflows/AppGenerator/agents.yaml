@@ -222,6 +222,13 @@ agents:
       - If `task_run_mode` is true, the task context is already scoped by the AppGenerator task batch executor.
       - Use the existing context instead of re-interviewing.
 
+      Choose `AppBuildPlan.auth_mode` from the approved access requirements supplied in
+      the concept/design inputs. Use `public_self_signup` for explicitly approved self
+      registration, `private_workspace` for private/invite access, or another declared
+      runtime AuthMode when required. Use null when the requirements do not settle it.
+      Preserve explicit retained auth configuration during refinement. App category
+      alone never authorizes public registration.
+
       Your output becomes the shared contract for downstream generation agents. Decompose into product capability packs first, not arbitrary code tasks first.
       In revision mode, AppBuildPlan still describes the complete retained app architecture; only build_tasks is a delta. Preserve every existing module capability, surface_id, operation, page, and data ownership entry from generated_files and app intelligence even when the requested edit touches one file. "Do not change modules/pages" means retain their declarations and omit unnecessary generation tasks, not clear capability_packs/pages. A service-only patch still resolves its capability_pack_id to a declared retained module capability.
   - id: industry_defaults
@@ -559,9 +566,12 @@ agents:
           - The api_surface task must emit the typed `ControllerOutput.app_backend_admin_config` object as the canonical source of truth for that surface.
           - `backend/admin_config.py` must return the canonical `mozaiks.admin.app_backend.v1` config as a plain dict (validated at codegen time).
           - `services/routes/admin.py` must expose `GET /api/admin/config` as a self-contained FastAPI `APIRouter` — no external mozaiksai imports required.
-        - **admin bootstrap population**: Use `platform_user_email` from context as the initial `admins` entry in the bundle-root `app.json`.
-          If `platform_user_email` is null or empty, use the email captured from the user during the interview.
-          Never leave `admins` empty — if both are null, use `"admin@example.com"` as a placeholder and note it in the scaffold context.
+        - **admin bootstrap population**: The materializer reads trusted runtime `platform_user_email`
+          for the initial app.json admins allowlist. Emit app identity through AppManifest.
+          Preserve existing grants on refinement. When the trusted identity is absent, report
+          operator setup as required. Do not invent placeholder emails or model-authored grants.
+          The materializer also renders app-owned Ask configuration from this app's identity
+          and available workflow artifacts. Provider credentials remain deployment inputs.
         - Do NOT include an `admin_config` build task.
         - Do NOT include admin pages in `pages[]`, generated page routes, or admin tasks targeting React files.
       12b. **surface realization rule**:
@@ -762,8 +772,10 @@ agents:
       - Keep task initial_message to task-specific decisions and exact required interfaces.
         Workers inherit app_build_plan and dependency_task_outputs; reference that context
         instead of copying the full plan, design documents, catalogs, or page schemas.
-      - Task context_variables contain only task-local overrides, normally [].
-        Never embed a copy of app_build_plan, upstream documents, or shared catalogs there.
+      - `context_variables` belongs only inside each `AppBuildPlan.build_tasks[]` task;
+        never put it directly on `AppBuildPlan`. Task values contain only task-local
+        overrides, normally []. Never embed a copy of app_build_plan, upstream documents,
+        or shared catalogs there.
       - Keep sections_hint.config_hint a compact JSON-encoded partial config string or null.
         Do not expand nested modal/page schemas during planning; they belong in the page_bundle task output.
       - Plan persistence_contract, module_contract, data_models, business_services, and
@@ -1259,10 +1271,13 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. Return valid CodeFilesOutput JSON that summarizes the assembly boundary.
+      1. Return a short CodeFilesOutput acknowledgement with `code_files: []`
+         and `deleted_files: []`. These are fields in your reply, not requests
+         to clear the existing task outputs, file overlays, or deletions in context.
       2. The auto-invoked `assemble_app_tasks` tool is the source of truth for
          final merged `code_files`.
-      3. Do not manually serialize pages from context.
+      3. Do not repeat files or file contents from context in your reply. The
+         tool reads the existing task outputs, overlays, and deletions itself.
       4. Do not invent, repair, or omit files.
       5. Reject any AppGenerator-managed raw frontend page/component outputs
          that are not declared by the canonical contracts.
@@ -1278,17 +1293,9 @@ agents:
 
       ```json
       {
-        "code_files": [
-          { "filename": "app.json", "content": "{\"appName\":\"MyApp\",\"startup\":{\"landing_spot\":\"/dashboard\"}}" },
-          { "filename": "ui/pages/Dashboard.yaml", "content": "name: Dashboard\n..." },
-          { "filename": "ui/route_manifest.json", "content": "{\"pages\":[...]}" },
-          { "filename": "ui/pages/custom/InvestorDealRoom.jsx", "content": "export default function InvestorDealRoom() { return null; }\n" },
-          { "filename": "ui/index.js", "content": "export function register(registerComponent) { /* ... */ }\n" },
-          { "filename": "brand/theme_config.json", "content": "{\"theme\":{...}}" },
-          { "filename": "config/shell.json", "content": "{\"header\":{...}}" },
-          { "filename": "config/asset_manifest.json", "content": "{\"assets\":[...]}" }
-        ],
-        "agent_message": "Schema bundle ready for download."
+        "code_files": [],
+        "deleted_files": [],
+        "agent_message": "Assembling the generated app."
       }
       ```
 
@@ -1685,6 +1692,13 @@ agents:
         service derives, such as requester identity or initial state. Retained
         fields keep their canonical types and requiredness; update/delete keep
         the required record id. The business-services task implements those restricted writes.
+        For a role-protected app_wide collection, any narrowed canonical write input must be part of a
+        complete authored create/update/delete family. Explicitly include all three actions in
+        module.yaml.actions, each with handler_method, input_schema, output_schema, permissions, and
+        api_surface. Keep each input a closed subset with the canonical types, enums, and requiredness;
+        update/delete must require the canonical record id. Never narrow only one write or leave a
+        sibling action partial; if server-supplied fields do not need to be omitted, preserve the
+        canonical request schemas so the compiler can own ordinary CRUD.
         Approved role permissions remain code-owned in both cases. You may
         declare `emits` and, for runtime-only writes, `api_surface:
         internal` or `admin_internal` on a canonical write id; everything else on it
@@ -1806,6 +1820,8 @@ agents:
         - If `generated_workflow_trigger_events` is non-empty, generate one reaction entry per trigger event that routes the matching domain event to the workflow capability using `generated_workflow_capability_id` as the target. Do not use the raw workflow name — the capability id is the stable platform-resolvable identifier.
         - Do not add workflow capability entries or reactions for workflow ids that are absent from `generated_workflow_trigger_events` / `generated_workflow_capability_id`. The acceptance gate blocks invented workflow routes and trigger events routed to the wrong workflow capability.
       8. **notifications.yaml**: include `schema_version: mozaiks.notifications.v1` and one rule per declared module event that warrants a user-facing notification. This is the standard deterministic path for in-app notification records, unread counts, and the notification center. Use `in_app` by default; add `email`, `push`, or `sms` only when the app plan explicitly requires external delivery and a corresponding operator pack or app-owned provider adapter is available. Use stable ids, explicit `event_type`, controlled `channels`, plain title/body templates, and static `audience.roles`/`audience.permissions` whenever possible. Use `audience.user_id_field` when the target user id is present in the event payload, such as `ticket_user_id`; use simple `condition.field` plus `equals`/`not_equals`/`in` for deterministic filtering. Use `audience.resolver` or `renderer` only when static roles/permissions, payload user ids, and plain templates are insufficient, and mirror those entrypoints in `python_stubs`. Do not create module-local notification repos, websocket workers, or custom persistence for ordinary in-app notifications.
+         - `audience.scope` defaults to `event`, retaining the verified event tenant/workspace. Use `app` only when the approved audience must read across workspaces and the owning service validates every exact recipient. App scope requires `user_id_field` and forbids role, permission, resolver and broadcast audiences. Never change the source event's scope or bypass its provenance validation to deliver a notice.
+         - `source_event: reference` minimizes stored origin data to event id/type/optional related_type and sets the notification actor to null, without changing the original event. It does not change target ownership. Use safe `context_fields` and content-free templates where source text or identity must not survive; an explicitly rendered field is still retained. Existing records are not rewritten.
       9. **settings.yaml**: include `schema_version: mozaiks.settings.v1`, module-local `settings[]`, and `features[]`. Settings may reference optional Python hooks (`validator`, `on_change`) but must not contain secrets. Every hook reference must be module-local and mirrored in `python_stubs`.
       9a. **profile.yaml** (optional — emit only when warranted): set `profile_yaml` to a `ModuleProfileManifest` object when the module has user-scoped data worth surfacing on the user profile page. Otherwise set `profile_yaml` to null.
          - **When to emit**: the module owns user-facing summary data such as account stats, notification preferences, usage history, subscription status, friends, direct messages, user posts, or activity feeds.
@@ -2985,6 +3001,13 @@ agents:
         for this build. Null or empty in OSS contexts without workspace build context.
         Use this to include provider-backed/operator pages that are not part of the
         standard framework admin surface.
+        - `app_task_batch_results`, `generated_files`, and `code_files`: current typed task
+          outputs and retained app artifacts. Read module `contracts/admin.yaml` panel
+          page references from these inputs and include their declared page ids.
+          Preserve retained registry pages unless the approved change removes them.
+      - If bundle_repair_request is supplied, repair only its declared registry
+        path using bundle_repair_errors and the supplied panel references. Keep
+        unrelated registry entries and module/pack files unchanged.
 
       **Standard app-scope page inclusion rules** (apply per capability set):
       - `overview` — always include; path `/admin`; icon `dashboard`; order 0
@@ -3047,6 +3070,9 @@ agents:
       8. Set `enabled: true` for all pages.
       9. Output a typed `admin_registry` object matching the `AdminRegistry` model.
       10. Serialize `admin/admin_registry.yaml` as a YAML string in `code_files`.
+        The typed registry is authoritative. The save tool serializes it and replaces
+        its previous file. `show_in_navigation` controls links inside the portal.
+        The platform projects the single authorized Admin menu entry automatically.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-

@@ -84,7 +84,7 @@ export function validateAuthBootstrap(authConfig) {
   return runtime;
 }
 
-export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {}, authorizationTransport } = {}) {
+export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {}, authorizationTransport, apiBaseUrl } = {}) {
   const runtime = validateAuthBootstrap(authConfig);
   const contract = authConfig.contract;
   const routes = contract?.routes || { login: '/login', callback: '/auth/callback', logout: '/login', post_login_default: '/' };
@@ -151,6 +151,26 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {}, aut
       return null;
     }
     return session;
+  }
+
+  async function hydrateAppUser(user, accessToken) {
+    if (apiBaseUrl === undefined) return user;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(`${apiBaseUrl.replace(/\/$/, '')}/api/me`, {
+        headers: { Accept: 'application/json', Authorization: `Bearer ${accessToken}` },
+        signal: controller.signal,
+      });
+      if (!response.ok) return user;
+      const profile = await response.json();
+      if (profile.user_id !== user.id || !Array.isArray(profile.roles)) return user;
+      return { ...user, roles: profile.roles.filter(role => typeof role === 'string') };
+    } catch {
+      return user;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   function notify() {
@@ -244,14 +264,16 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {}, aut
     const expiresAt = Math.min(lifetime, claims.exp, Number.isFinite(accessClaims?.exp) ? accessClaims.exp : Infinity) * 1000;
     if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new Error('OIDC token lifetime is missing or expired');
     const roles = claims.realm_access?.roles || claims.roles;
-    const user = {
+    let user = {
       id: claims.sub, user_id: claims.sub,
       email: typeof claims.email === 'string' ? claims.email : null,
       name: claims.name || claims.preferred_username || claims.email || claims.sub,
       firstName: claims.given_name || null, lastName: claims.family_name || null,
       roles: Array.isArray(roles) ? roles.filter(role => typeof role === 'string') : [],
     };
+    user = await hydrateAppUser(user, data.access_token);
     if (sessionRevision !== revision) throw new Error('Sign-in was cancelled. Restart sign-in.');
+    sessionRevision += 1;
     sessionStorage.setItem(sessionKey, JSON.stringify({ accessToken: data.access_token, idToken: data.id_token, expiresAt, user }));
     notify();
     return { returnPath: safeReturnPath(transaction.returnPath, routes.post_login_default) };
@@ -276,14 +298,24 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {}, aut
 
   return {
     routes,
-    getCurrentUser: async () => readSession()?.user || null,
+    getCurrentUser: async () => {
+      const revision = sessionRevision;
+      const session = readSession();
+      if (!session) return null;
+      const user = await hydrateAppUser(session.user, session.accessToken);
+      if (sessionRevision !== revision || readSession()?.accessToken !== session.accessToken
+          || readSession()?.user.id !== session.user.id) return null;
+      sessionStorage.setItem(sessionKey, JSON.stringify({ ...session, user }));
+      return user;
+    },
     getAccessToken: () => readSession()?.accessToken || null,
     onAuthStateChange: callback => {
       listeners.add(callback);
       notify();
       return () => { listeners.delete(callback); if (!listeners.size) clearTimeout(expirationTimer); };
     },
-    login: async ({ returnPath } = {}) => {
+    login: async ({ returnPath, reauthenticate = false } = {}) => {
+      if (typeof reauthenticate !== 'boolean') throw new Error('Reauthentication must be a boolean');
       if (authorizationTransport && authorizationPending) throw new Error('Authorization is already in progress');
       if (authorizationTransport) authorizationPending = true;
       const revision = sessionRevision;
@@ -300,6 +332,7 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {}, aut
         sessionStorage.setItem(transactionKey, JSON.stringify(pending));
         const url = new URL(document.authorization_endpoint);
         for (const [key, value] of Object.entries({ client_id: clientId, redirect_uri: redirectUri, response_type: 'code', scope, code_challenge: challenge, code_challenge_method: 'S256', state, nonce })) url.searchParams.set(key, value);
+        if (reauthenticate) url.searchParams.set('prompt', 'login');
         if (!authorizationTransport) { window.location.assign(url.href); return; }
         const callbackUrl = await authorizationTransport.open({ url: url.href, callbackUri: redirectUri });
         if (sessionRevision !== revision) throw new Error('Sign-in was cancelled. Restart sign-in.');
@@ -357,7 +390,7 @@ export async function loadShellAuth({ apiBaseUrl = '', createAppAuthAdapter, env
   if (!response.ok) throw new Error(`Application sign-in configuration failed: HTTP ${response.status}`);
   const shellConfig = await response.json();
   const runtime = validateAuthBootstrap(shellConfig.auth);
-  const options = { authConfig: shellConfig.auth, appId: shellConfig.appId, env };
+  const options = { authConfig: shellConfig.auth, appId: shellConfig.appId, env, apiBaseUrl };
   const authAdapter = await (runtime.enabled && shellConfig.auth.required && typeof createAppAuthAdapter === 'function'
     ? createAppAuthAdapter(options) : createAuthAdapter(options));
   for (const name of ['getCurrentUser', 'getAccessToken', 'onAuthStateChange', 'login', 'logout']) {

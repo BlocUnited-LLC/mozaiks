@@ -1,0 +1,62 @@
+schema_version: mozaiks.events.v1
+events:
+- type: domain.content.entry_created
+  version: 1
+  producer: content
+  description: An editorial draft was stored.
+  payload_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      entry_id:
+        type: string
+        pattern: ^ent_[0-9a-f]{32}$
+      status:
+        type: string
+        enum:
+        - draft
+        - published
+        - archived
+    required:
+    - entry_id
+    - status
+- type: domain.content.entry_updated
+  version: 1
+  producer: content
+  description: An editorial entry was edited or its publication status changed.
+  payload_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      entry_id:
+        type: string
+        pattern: ^ent_[0-9a-f]{32}$
+      status:
+        type: string
+        enum:
+        - draft
+        - published
+        - archived
+    required:
+    - entry_id
+    - status
+- type: domain.content.entry_archived
+  version: 1
+  producer: content
+  description: An editorial entry was archived.
+  payload_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      entry_id:
+        type: string
+        pattern: ^ent_[0-9a-f]{32}$
+      status:
+        type: string
+        enum:
+        - draft
+        - published
+        - archived
+    required:
+    - entry_id
+    - status

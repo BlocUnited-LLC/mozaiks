@@ -447,7 +447,12 @@ models:
           Granting either canonical read requires both across roles; custom read
           grants imply no canonical read grants. Any granted collection with
           module_action writes still requires all three canonical write grants
-          across roles. No permission strings or wildcards.
+          across roles, counted across grant rows rather than per row. For
+          example, when the approved concept has submitter and approver roles,
+          submitter may receive create_<entity> while approver receives
+          update_<entity> and delete_<entity> for the same collection. Use this
+          split only when it matches the approved roles. No permission strings
+          or wildcards.
   DesignAccessPolicy:
     type: model
     fields:

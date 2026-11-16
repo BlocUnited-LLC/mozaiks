@@ -620,13 +620,12 @@ def test_save_app_schema_writes_default_ai_config(monkeypatch, tmp_path: Path) -
         context_variables=_Context(),
     )
 
-    workspace = Path(__file__).resolve().parents[1]
-    expected = json.loads(
-        (workspace / "factory_app" / "app" / "config" / "ai.json").read_text(encoding="utf-8")
-    )
     actual = json.loads((tmp_path / "config" / "ai.json").read_text(encoding="utf-8"))
-
-    assert actual == expected
+    assert _base_manifest()["app_name"] in actual["ask"]["ask_mode_prompt"]
+    assert actual["chat"]["chat_startup_mode"] == "ask"
+    assert actual["workflows"]["entry_point"] is None
+    assert "Studio" not in actual["ask"]["ask_mode_prompt"]
+    assert "support" not in actual
     assert "config/ai.json" in result
 
 

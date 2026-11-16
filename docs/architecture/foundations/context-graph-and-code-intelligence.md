@@ -153,14 +153,21 @@ Syntax extraction reads source files and produces deterministic facts:
 - references
 - call targets
 
-Tree-sitter is the baseline parser path for supported languages. The OSS
-runtime still records parser health and falls back deterministically if a parser
-package is missing at runtime:
+Tree-sitter uses the native Python, JavaScript (including JSX), TypeScript, TSX,
+and CSS grammars. CSS extraction records import relationships. YAML and JSON
+use structured parsing for declarative contracts.
 
-- Python uses `ast` fallback extraction.
-- JavaScript and TypeScript use conservative regex extraction only when the
-  Tree-sitter parser is unavailable.
-- YAML and JSON use structured parsing for declarative contracts.
+When a grammar is unavailable, Python falls back to `ast` and JavaScript,
+JSX, TypeScript, TSX, and CSS fall back to conservative text extraction. Graph
+health reports counts of partial and failed parses. Malformed source can
+contribute partial facts.
+Call resolution uses lexical bindings and explicit imports and exports.
+Ambiguous targets remain unresolved.
+
+File nodes use a shared identity derived from the normalized source path.
+This lets source and structural projections join on the same file while
+keeping distinct paths with similar spellings separate. Reindex existing
+snapshots to recover source facts that older file IDs may have collapsed.
 
 The extractor should never ask an LLM to parse code. LLMs operate only after
 deterministic syntax facts exist.
@@ -555,7 +562,6 @@ This is tracked as open work below.
 The current layer establishes the contract and default extraction path. Next
 work should focus on:
 
-- deeper Tree-sitter coverage for JavaScript, TypeScript, JSX, and TSX
 - reverse call/import traversal helpers
 - explicit test-target discovery
 - event/read/write side-effect extraction from canonical module layers

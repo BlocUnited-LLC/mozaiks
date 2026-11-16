@@ -23,13 +23,13 @@ def test_studio_support_queue_routes_are_operator_only() -> None:
 
 def test_admin_portal_is_the_only_registered_admin_page() -> None:
     core_source = _read("chat-ui/src/registry/coreComponents.js")
-    # ui/index.js delegates to admin/index.js; AdminPortal registration lives in the admin barrel
+    # The framework owns AdminPortal; app barrels register only app extensions.
     ui_source = _read("factory_app/app/ui/index.js")
     admin_source = _read("factory_app/app/admin/index.js")
 
-    assert "registerComponent('AdminPortal'" not in core_source
+    assert "registerComponent('AdminPortal'" in core_source
     assert "registerAdminComponents" in ui_source
-    assert "registerComponent('AdminPortal'" in admin_source
+    assert "registerComponent('AdminPortal'" not in admin_source
     assert "AppAdminDashboard" not in core_source
     assert "AppAdminDashboard" not in ui_source
     assert "AppAdminDashboard" not in admin_source

@@ -19,6 +19,7 @@ emission, and no stripped "clean" payload accepted later.
 
 from __future__ import annotations
 
+import json
 import sys
 import types
 from enum import Enum
@@ -197,12 +198,14 @@ def _valid_theme_payload() -> dict[str, Any]:
     return payload
 
 
-async def _drive_runtime(payload: dict[str, Any], pattern: _PatternContext, turn: int = 1) -> Any:
-    _, registry = _so.load_workflow_structured_outputs(WORKFLOW)
+async def _drive_runtime(
+    payload: Any, pattern: Any, turn: int = 1, *, workflow: str = WORKFLOW, agent: str = AGENT,
+) -> Any:
+    _, registry = _so.load_workflow_structured_outputs(workflow)
     return await emit_validated_agent_output(
-        current_agent_name=AGENT,
+        current_agent_name=agent,
         last_reply=payload,
-        workflow_name=WORKFLOW,
+        workflow_name=workflow,
         chat_id="chat-theme-1",
         app_id="app-theme-1",
         user_id="user-1",
@@ -210,7 +213,7 @@ async def _drive_runtime(payload: dict[str, Any], pattern: _PatternContext, turn
         context_vars_dict={"app_id": "app-theme-1"},
         context_bridge=pattern,
         structured_registry=registry,
-        auto_tool_agents={AGENT},
+        auto_tool_agents={agent},
         wf_logger=_Logger(),
     )
 
@@ -467,3 +470,122 @@ async def test_theme_save_failure_sets_blocked_outcome_in_runtime(factory_manage
     assert not pattern.data.get("theme_capture_persisted")
     assert side_effect_probes["ui_surfaces"] == []
     assert side_effect_probes["summary_artifacts"] == []
+
+
+@pytest.fixture
+def assembly_runtime(factory_manager, side_effect_probes, monkeypatch):
+    from mozaiksai.core.events import unified_event_dispatcher
+
+    assert not factory_manager.reload_workflow("AppGenerator").get("error")
+    dispatcher = unified_event_dispatcher.UnifiedEventDispatcher()
+    monkeypatch.setattr(unified_event_dispatcher, "get_event_dispatcher", lambda: dispatcher)
+    return dispatcher
+
+
+def _assembly_reply():
+    return {"code_files": [], "deleted_files": [], "agent_message": "Assembling the generated app."}
+
+
+def test_assembly_prompt_example_is_a_short_request_not_generated_files():
+    import yaml
+
+    agents = yaml.safe_load((FACTORY_WORKFLOWS / "AppGenerator" / "agents.yaml").read_text(encoding="utf-8"))
+    assembly = next(agent for agent in agents["agents"] if agent["name"] == "AssemblyAgent")
+    sections = {section["id"]: section["content"] for section in assembly["prompt_sections"]}
+    example = sections["output_format"].split("```json", 1)[1].split("```", 1)[0]
+    assert json.loads(example) == _assembly_reply()
+    assert "tool reads the existing task outputs, overlays, and deletions" in sections["instructions"]
+
+
+async def _dispatch_assembly(payload, context, turn=1):
+    return await _drive_runtime(payload, context, turn, workflow="AppGenerator", agent="AssemblyAgent")
+
+
+async def test_short_assembly_reply_preserves_tasks_repair_overlay_and_deletion(assembly_runtime, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from factory_app.workflows.AppGenerator.tools import app_validation
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import admitted_app_file_map
+    from mozaiksai.core.workflow.agents.factory import _workflow_tool_invocation
+    from mozaiksai.core.workflow.context.frozen import detach
+    from tests.test_appgenerator_assembly_failures import _context
+
+    context = _context(
+        generated_files={"README.md": "old", "unchanged.txt": "kept", "obsolete.txt": "remove"},
+        code_files=[{"filename": "README.md", "content": "admitted repair"}],
+        deleted_files=["obsolete.txt"],
+    )
+    for turn in (1, 2):
+        result = await _dispatch_assembly(_assembly_reply(), context, turn)
+        assert result == _assembly_reply()
+        assert context.get("app_assembly_status") == "passed"
+        files = context.get("generated_files")
+        assert files["README.md"] == "admitted repair"
+        assert files["unchanged.txt"] == "kept"
+        assert "obsolete.txt" not in files
+        assert detach(context.get("code_files")) == [{"filename": "README.md", "content": "admitted repair"}]
+        assert detach(context.get("deleted_files")) == ["obsolete.txt"]
+        assert admitted_app_file_map(context) == files
+        # Assembly is not app validation or acceptance.
+        assert context.get("app_validation_status") == "pending"
+        assert context.get("app_bundle_acceptance_status") == "pending"
+        assert not context.get("integration_tests_passed")
+        assert STRUCTURED_OUTPUT_KEY not in context.snapshot()
+
+    # Do not start contained workers in this test or fabricate their success.
+    # The real acceptance gate must still reject this intentionally incomplete app.
+    skipped = {"status": "skipped", "passed": None, "skipped_reason": "offline test", "checks": []}
+    monkeypatch.setattr(app_validation, "_app_runtime_load_result", AsyncMock(return_value=skipped))
+    monkeypatch.setattr(app_validation, "_app_runtime_smoke_result", AsyncMock(return_value=skipped))
+    with _workflow_tool_invocation(context):
+        acceptance = await app_validation.run_app_bundle_acceptance_gate(context_variables=context)
+    assert acceptance["passed"] is False
+    assert not acceptance["bundle_scan"]["passed"]
+    assert any("app.json" in item for item in acceptance["bundle_scan"]["errors"])
+
+
+async def test_short_assembly_reply_uses_persisted_schema_files(assembly_runtime, tmp_path):
+    from tests.test_appgenerator_assembly_failures import _context
+
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "example.json").write_text('{"schema_source": true}', encoding="utf-8")
+    context = _context(
+        generated_files={}, app_task_batch_results={}, app_task_batch_items=[],
+        app_schema_ready=True, app_ui_quality_status="passed", generated_app_dir=str(tmp_path),
+    )
+    assert await _dispatch_assembly(_assembly_reply(), context) == _assembly_reply()
+    assert context.get("app_assembly_status") == "passed"
+    assert context.get("generated_files")["config/example.json"] == '{"schema_source": true}'
+    assert context.get("app_validation_status") == "pending"
+
+
+@pytest.mark.parametrize("reason", ["missing_source", "ui_quality", "missing_binding"])
+async def test_short_assembly_reply_cannot_bypass_assembly_failure(assembly_runtime, reason):
+    from factory_app.workflows.AppGenerator.tools.app_validation import (
+        validate_app_bundle_from_request,
+    )
+    from mozaiksai.core.workflow.agents.factory import _workflow_tool_invocation
+    from tests.test_appgenerator_assembly_failures import _context
+
+    kwargs = {"generated_files": {}, "app_task_batch_results": {}, "app_task_batch_items": []}
+    if reason == "ui_quality":
+        kwargs.update(app_schema_ready=True, app_ui_quality_status="blocked")
+    elif reason == "missing_binding":
+        kwargs["run_build_binding"] = None
+    context = _context(**kwargs)
+    assert await _dispatch_assembly(_assembly_reply(), context) == _assembly_reply()
+    assert context.get("app_assembly_status") == "failed"
+    with _workflow_tool_invocation(context):
+        validation = await validate_app_bundle_from_request({}, context_variables=context)
+    assert validation["passed"] is False
+    assert validation["validation_evidence"] == {"completed": [], "failed": ["assembly"]}
+    assert context.get("app_bundle_acceptance_status") == "failed"
+
+
+async def test_invalid_assembly_json_never_invokes_auto_tool(assembly_runtime):
+    from tests.test_appgenerator_assembly_failures import _context
+
+    context = _context()
+    before = context.snapshot()
+    assert await _dispatch_assembly('{"code_files": [', context) is None
+    assert context.snapshot() == before

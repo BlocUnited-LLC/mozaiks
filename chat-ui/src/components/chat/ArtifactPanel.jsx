@@ -83,7 +83,7 @@ const ArtifactPanel = ({
           <div className="absolute inset-0 pointer-events-none bg-[rgba(0,0,0,0.45)] z-0" />
 
           <div className={`absolute inset-0 overflow-y-auto ${scrollPaddingClass} my-scroll1 z-10 h-full flex flex-col`}>
-            {/* If no content, show just the Mozaiks logo */}
+            {/* Empty artifacts retain the app identity. */}
             {showLoadingState && !hasMessages ? (
               loadingSurface
             ) : (!messages || messages.length === 0) ? (
@@ -92,9 +92,9 @@ const ArtifactPanel = ({
                   <div className="mx-auto mb-5 w-24 h-24 sm:w-28 sm:h-28 bg-gradient-to-br from-[var(--color-primary)]/20 to-[var(--color-secondary)]/20 rounded-2xl sm:rounded-3xl border-2 border-[var(--color-primary-light)]/45 flex items-center justify-center backdrop-blur-sm shadow-2xl">
                     <img
                       src={brandLogoSrc}
-                      alt="Mozaiks Logo"
+                      alt={`${chatTheme?.branding?.name || 'App'} logo`}
                       className="w-16 h-16 sm:w-20 sm:h-20"
-                      onError={applyBrandImageFallback}
+                      onError={event => applyBrandImageFallback(event, getBrandLogoSrc({ branding: { name: chatTheme?.branding?.name } }))}
                     />
                   </div>
                   <div className="text-[11px] uppercase tracking-[0.28em] text-[rgba(var(--color-primary-light-rgb),0.72)] mb-3 heading-font">

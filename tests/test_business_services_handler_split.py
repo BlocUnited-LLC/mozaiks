@@ -27,6 +27,9 @@ import yaml
 
 from factory_app.workflows.AppGenerator.tools import app_plan_review
 from factory_app.workflows.AppGenerator.tools.app_plan_review import review_app_build_plan
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    verify_pack_integrity,
+)
 from mozaiksai.core.adapters.ag2_task_batch_runner import AG2TaskBatchRunnerResult
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow import task_batches
@@ -119,7 +122,10 @@ def _review(owns_base_handler: bool) -> dict:
     fixture = json.loads(REVIEW_FIXTURE.read_text(encoding="utf-8"))
     variables = deepcopy(fixture["context_variables"])
     for pack in variables.get("capability_packs") or []:
-        pack["pack_source_path"] = str(ROOT / pack["pack_source_path"])
+        # Project the current source and its verified pins, retaining the raw fixture.
+        source = ROOT / pack["pack_source_path"]
+        metadata = verify_pack_integrity(source, pack["id"])
+        pack.update(pack_source_path=str(source), version=metadata["version"], digest=metadata["digest"])
     context = ContextVariablesBridge(variables)
     plan = deepcopy(fixture["AppBuildPlan"])
     services = _task(plan, "business_services")

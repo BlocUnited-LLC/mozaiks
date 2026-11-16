@@ -5,6 +5,7 @@ from collections import Counter
 from typing import Any
 
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
+from mozaiksai.core.app_context.source_corpus import redact_source_text
 from mozaiksai.core.artifacts.store import ArtifactStore, get_artifact_store
 
 from ._artifact_workspace import load_artifact_workspace, safe_relpath
@@ -59,6 +60,8 @@ async def get_artifact_workspace_catalog(
         artifact_store=store,
         app_id=app_id,
         build_record_id=build_record_id,
+        build_family=tool_context.build_family,
+        build_key=tool_context.build_key,
     )
     if not workspace.get("present"):
         return workspace
@@ -128,7 +131,7 @@ def _rank_matches(*, file_map: dict[str, str], keywords: list[str]) -> list[dict
                     "score": score,
                     "path_hits": path_hits,
                     "content_hits": content_hits,
-                    "excerpt": text_excerpt(content, max_length=300),
+                    "excerpt": text_excerpt(redact_source_text(path=path, content=content), max_length=300),
                 },
             )
         )

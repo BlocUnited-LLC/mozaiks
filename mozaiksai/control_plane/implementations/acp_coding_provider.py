@@ -169,6 +169,14 @@ def build_provider_prompt(
     """
     editable = "\n".join(f"- {path}" for path in sorted(workspace.editable_manifest))
     read_only = "\n".join(f"- {path}" for path in sorted(workspace.read_only_manifest)) or "(none)"
+    graph_context = (
+        [
+            "Dependency evidence from the verified build (advisory only):",
+            request.dependency_graph.model_dump_json(),
+            "",
+        ]
+        if request.dependency_graph is not None else []
+    )
     operation_instructions = (
         [
             "Approved creation paths:",
@@ -200,6 +208,7 @@ def build_provider_prompt(
             "Read-only inspection files (do not modify or delete):",
             read_only,
             "",
+            *graph_context,
             *operation_instructions,
         ]
     )

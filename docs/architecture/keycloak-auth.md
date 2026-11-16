@@ -98,6 +98,47 @@ hosted-product policy.
 account, or enterprise SSO action, but they do not carry provider endpoints,
 tenant IDs, client secrets, or OAuth implementation code.
 
+## Factory Owner Account Handoff
+
+The AppGenerator workbench and final AppReview workspace share an owner-access
+card. It labels the draft's owner email and offers **Open as owner** for a
+running preview. This opens the preview origin at `/?owner=1` in a separate
+tab. Before mounting its router, the target web shell resolves that root entry
+through its own current auth contract to its configured login route.
+The running preview may contain synchronized edits. The draft email and
+artifact ID do not establish which bytes are running there.
+
+The shipped LoginPage starts the app's existing OIDC authorization-code flow with PKCE.
+Hosted builders can reuse their identity-provider session when the host has
+configured the app for the same sign-in service. Each app receives its own
+authorization response and validates its configured API audience.
+
+Self-hosted operators configure their own OIDC issuer, API audience, public
+browser client and exact callback URL using the exported environment settings.
+They create or invite the owner through that provider. Password creation,
+email verification and account recovery occur at the provider. The verified
+owner email matches the app manifest's `admins` allowlist.
+
+After sign-in, the owner-entry page calls the app's authenticated
+`GET /api/admin/config`. A successful, valid response enables **Open Admin** and
+**Open app**. A denied account receives guidance to use its designated owner
+identity and verify its email. Network and malformed-response failures remain
+retryable. Account and API-origin changes clear the pending access result.
+
+**Sign in again** repeats OIDC authorization with `prompt=login` and keeps
+the owner-entry return path. This uses the OIDC reauthentication mechanism.
+[OpenID Connect Core](https://openid.net/specs/openid-connect-core-1_0.html#AuthRequest).
+
+Apps that replace the shipped LoginPage own equivalent owner-entry behavior
+in their custom component. Root owner entry requires enabled authentication
+and a safe local login route. Ordinary app routes and OIDC callbacks follow
+their existing routing.
+
+Owner-entry confirmation describes the current app session. Build acceptance
+and activation use the saved artifact lifecycle gates. Provider client
+registration and email delivery are deployment prerequisites. Public visitor
+access follows the app's public-auth contract.
+
 ## Adapter Extension Model
 
 The default generated app path is intentionally boring:

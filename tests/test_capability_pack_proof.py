@@ -47,19 +47,24 @@ from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     verify_pack_integrity,
 )
+from factory_app.workflows.AppGenerator.tools.save_admin_registry import save_admin_registry
 from mozaiksai.core.workflow.context.adapter import create_context_container
 from mozaiksai.core.workflow.outcome_feedback import WorkflowFeedbackEvidence
 from mozaiksai.version import __version__ as FRAMEWORK_VERSION
 from tests.appgenerator_subscription_fixture import subscription_contract
+from tests.content_smoke_fixtures import content_smoke_fixtures
 from tests.factory_context import factory_context
 from tests.pack_proof_action_sweep import _bad_params, run_action_sweep
 from tests.pack_proof_provider_fixture import PACKS as PROVIDER_FIXTURE_PACKS
 from tests.pack_proof_provider_fixture import run_provider_probe
-from tests.test_app_runtime_smoke import mongo  # noqa: F401 - real MongoDB and its leaked-database guard
+from tests.test_app_runtime_smoke import (
+    mongo,  # noqa: F401 - real MongoDB and its leaked-database guard
+)
 
 BUILD_CONTEXT = Path(__file__).resolve().parents[1] / "factory_app" / "build_context"
 BUILD_TIMESTAMP = "2026-01-01T00:00:00+00:00"
 EMPTY_DATA_CONTRACT: dict[str, Any] = {"version": "1", "surfaces": [], "shared_collections": []}
+PROOF_ROLE = "pack_proof_operator"
 # Gate checks requiring a separately qualified contained runtime image.
 CONTAINED_GATE_CHECKS = frozenset({"app_runtime_load", "app_runtime_load_worker", "app_runtime_smoke"})
 # planned_completeness compares the bundle with the AppGenerator plan's build tasks.
@@ -143,6 +148,10 @@ def _plan_catalog_contract() -> dict[str, Any]:
 
 # What a real build's approved plan supplies to the assembler for each pack.
 PLAN_INPUTS: dict[str, dict[str, Any]] = {
+    "content": {"code_files": [{
+        "filename": "modules/content/contracts/fixtures.yaml",
+        "content": content_smoke_fixtures(PROOF_ROLE),
+    }]},
     "operator_readiness": {
         "readiness_profile": "host_operator_platform",
         "evidence_mode": "local",
@@ -158,6 +167,8 @@ PLAN_INPUTS: dict[str, dict[str, Any]] = {
     },
 }
 
+APP_ADMIN_PAGES = {"commerce": ("commerce",), "mozaikspay": ("usage",)}
+
 
 # Explicit authorization for the test app, reviewed against the shipped pack
 # contracts. A new permission must be reviewed here; never grant permissions by
@@ -168,6 +179,7 @@ APP_PERMISSIONS: dict[str, tuple[str, ...]] = {
         "commerce.checkout.start", "commerce.inventory.manage", "commerce.orders.manage",
         "commerce.orders.read",
     ),
+    "content": ("content.manage",),
     "entitlement_dispatch": (),
     "files": ("files.read", "files.write"),
     "messaging": ("messages.read", "messages.write"),
@@ -187,7 +199,6 @@ APP_PERMISSIONS: dict[str, tuple[str, ...]] = {
     ),
     "support": ("support.manage", "support.submit"),
 }
-PROOF_ROLE = "pack_proof_operator"
 
 
 def _auth_fixture(pack_id: str) -> str:
@@ -292,6 +303,11 @@ async def _assemble(pack_id: str) -> tuple[dict[str, str], Any, list[dict[str, s
             "data/contract.json": json.dumps(approved),
         },
     }))
+    page_ids = ["overview", *sorted({page for member in _required_packs(pack_id) for page in APP_ADMIN_PAGES.get(member, ())})]
+    save_admin_registry(admin_registry={"pages": [
+        {"id": page, "label": page.title(), "path": "/admin" if page == "overview" else "/admin/" + page}
+        for page in page_ids
+    ]}, context_variables=context)
     result = await assemble_app_tasks(context_variables=context)
     assert result["success"], f"{pack_id} cannot be assembled alone: {result.get('error')}"
     return {file["filename"]: file["content"] for file in result["code_files"]}, context, identities

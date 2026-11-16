@@ -17,6 +17,7 @@ from mozaiksai.core.runtime.composition.module_authority import (
     ModuleDispatchProvenance,
 )
 from mozaiksai.core.runtime.composition.module_executor import (
+    ModuleDependencyUnavailableError,
     ModuleExecutor,
     ModuleInputValidationError,
     ModuleRequest,
@@ -139,6 +140,29 @@ class TestModuleActionResolution:
 # ---------------------------------------------------------------------------
 
 class TestActionErrorHandling:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("asynchronous", [False, True])
+    async def test_expected_dependency_failure_is_sanitized_and_audited(self, asynchronous):
+        class Handler:
+            def reject(self, ctx):
+                raise ModuleDependencyUnavailableError("private endpoint/key diagnostic")
+
+            async def reject_async(self, ctx):
+                self.reject(ctx)
+
+        ex = ModuleExecutor()
+        ex.register("contacts", Handler(), action_method_map={"read": "reject_async" if asynchronous else "reject"})
+        ex._finalize_dispatch_audit = AsyncMock()
+        result = await ex.execute(_request(action="read"))
+        assert result.success is False
+        assert result.error_code == "DEPENDENCY_UNAVAILABLE"
+        assert result.error == "Required service is unavailable."
+        assert result.data is None
+        audit = ex._finalize_dispatch_audit.await_args
+        assert audit.args[0].outcome == "failed"
+        assert audit.args[0].reason == "DEPENDENCY_UNAVAILABLE"
+        assert audit.kwargs["error"] == "DEPENDENCY_UNAVAILABLE"
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize("asynchronous", [False, True])
     async def test_expected_business_input_error_is_not_an_execution_failure(self, asynchronous):

@@ -18,7 +18,7 @@ from mozaiksai.core.admin.contract import (
     DEFAULT_RUNTIME_PANELS,
     build_default_admin_config,
 )
-from mozaiksai.core.admin.email_promotion import is_admin_by_email
+from mozaiksai.core.admin.email_promotion import is_admin_by_email, is_app_admin
 from mozaiksai.core.admin.paths import resolve_admin_app_root as resolve_admin_app_root_path
 from mozaiksai.core.admin.registry import load_admin_registry
 from mozaiksai.core.auth.dependencies import UserPrincipal, require_user
@@ -275,15 +275,13 @@ async def _require_admin(
     principal = await require_user(request, authorization)
 
     # Already has admin role (auth provider or AUTH_ANON_ROLES assigned it)
-    if principal.has_role("admin"):
+    if is_app_admin(principal):
+        if not principal.has_role("admin"):
+            principal.roles = list(principal.roles) + ["admin"]
         return principal
 
     # Email allowlist promotion, for a verified email only
     if is_admin_by_email(principal.email):
-        if principal.email_verified or principal.has_local_development_access:
-            logger.debug("[admin] email-promoted to admin: %s", principal.email)
-            principal.roles = list(principal.roles) + ["admin"]
-            return principal
         # The refusal says only "Admin access required", like any other, so a
         # self-registered account cannot learn which addresses are admins.
         logger.warning(

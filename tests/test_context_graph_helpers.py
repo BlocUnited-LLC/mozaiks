@@ -20,7 +20,7 @@ or test_context_graph_extraction_helpers.py:
   _language_for_path:
     - .py → python
     - .js / .jsx → javascript
-    - .ts / .tsx → typescript
+    - .ts → typescript; .tsx → tsx
     - .yaml / .yml → yaml
     - .json → json
     - .css → css
@@ -109,11 +109,6 @@ or test_context_graph_extraction_helpers.py:
     - schema_version and source always present
     - empty purpose/lists filtered by _clean_metadata
 
-  _dedupe_symbols:
-    - duplicate (name, kind, line) removed
-    - first occurrence preserved
-    - symbols with different line kept
-    - empty list → []
 
   _semantic_candidate_sort_key:
     - module_action_handler → priority 0
@@ -129,11 +124,9 @@ import hashlib
 import json
 
 from mozaiksai.core.app_context.context_graph import (
-    ExtractedSymbol,
     _annotation_node_id,
     _clean_metadata,
     _contract_path,
-    _dedupe_symbols,
     _file_map_checksum,
     _first_text,
     _language_for_path,
@@ -254,8 +247,8 @@ class TestLanguageForPath:
     def test_ts_is_typescript(self):
         assert _language_for_path("module.ts") == "typescript"
 
-    def test_tsx_is_typescript(self):
-        assert _language_for_path("component.tsx") == "typescript"
+    def test_tsx_uses_native_grammar(self):
+        assert _language_for_path("component.tsx") == "tsx"
 
     def test_yaml_is_yaml(self):
         assert _language_for_path("config.yaml") == "yaml"
@@ -707,51 +700,7 @@ class TestNormalizeSemanticAnnotation:
         assert result["domain_concepts"] == ["user", "event"]
 
 
-# ---------------------------------------------------------------------------
-# 16. _dedupe_symbols
-# ---------------------------------------------------------------------------
 
-class TestDedupeSymbols:
-    def _sym(self, name: str, kind: str = "function", line: int | None = 1) -> ExtractedSymbol:
-        return ExtractedSymbol(name=name, kind=kind, line=line)
-
-    def test_empty_list_returns_empty(self):
-        assert _dedupe_symbols([]) == []
-
-    def test_single_symbol_returned(self):
-        sym = self._sym("foo")
-        assert _dedupe_symbols([sym]) == [sym]
-
-    def test_duplicate_name_kind_line_removed(self):
-        sym1 = self._sym("foo", "function", 1)
-        sym2 = self._sym("foo", "function", 1)
-        result = _dedupe_symbols([sym1, sym2])
-        assert len(result) == 1
-        assert result[0] is sym1
-
-    def test_different_line_kept(self):
-        sym1 = self._sym("foo", "function", 1)
-        sym2 = self._sym("foo", "function", 2)
-        result = _dedupe_symbols([sym1, sym2])
-        assert len(result) == 2
-
-    def test_different_kind_kept(self):
-        sym1 = self._sym("Foo", "function", 1)
-        sym2 = self._sym("Foo", "class", 1)
-        result = _dedupe_symbols([sym1, sym2])
-        assert len(result) == 2
-
-    def test_preserves_first_occurrence(self):
-        sym1 = self._sym("foo", "function", 1)
-        sym2 = self._sym("foo", "function", 1)
-        result = _dedupe_symbols([sym1, sym2])
-        assert result[0] is sym1
-
-    def test_none_line_deduped_correctly(self):
-        sym1 = self._sym("foo", "function", None)
-        sym2 = self._sym("foo", "function", None)
-        result = _dedupe_symbols([sym1, sym2])
-        assert len(result) == 1
 
 
 # ---------------------------------------------------------------------------

@@ -103,6 +103,7 @@ export default function Messages() {
         thread_id: selectedThreadId,
         body,
       });
+      if (!result?.success) throw new Error(result?.error || "Could not send message.");
       if (result.message) {
         setSelectedMessages((current) => [...current, result.message]);
       }

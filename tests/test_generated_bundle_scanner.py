@@ -182,6 +182,7 @@ actions:
     }
     # The MozaiksPay client, billing facade and pages are the verified pack templates, as assembly writes them.
     files.update(_mozaikspay_template_files())
+    files["admin/admin_registry.yaml"] = "pages: [{id: overview, label: Overview, path: /admin}, {id: usage, label: Usage, path: /admin/usage}]\n"
     files["data/contract.json"] = json.dumps(ensure_subscription_assignment_stores(
         {"version": "1", "surfaces": [], "shared_collections": []},
         {"contract_required": True, "subscription_config_file": yaml.safe_load(files["config/subscriptions.yaml"])},

@@ -37,6 +37,7 @@ def evaluate_context_graph_health(scan_health: dict[str, Any] | None) -> Context
     selected_by_priority = _dict_ints(health.get("selected_by_priority"))
     selected_by_extension = _dict_ints(health.get("selected_by_extension"))
     skipped = _dict_ints(health.get("skipped"))
+    parse_coverage = _dict_ints(health.get("parse_coverage"))
     limit_reached = bool(health.get("limit_reached"))
     core_count = sum(selected_by_priority.get(bucket, 0) for bucket in _CORE_PRIORITY_BUCKETS)
 
@@ -52,6 +53,8 @@ def evaluate_context_graph_health(scan_health: dict[str, Any] | None) -> Context
         warnings.append("context_graph_sensitive_paths_skipped")
     if selected_count > 0 and core_count <= 0:
         warnings.append("context_graph_no_mozaiks_core_surfaces_indexed")
+    if parse_coverage.get("partial", 0) or parse_coverage.get("failed", 0):
+        warnings.append("context_graph_source_parse_incomplete")
 
     parser_status = health.get("parser_status") if isinstance(health.get("parser_status"), dict) else {}
     parser_warning = _parser_fallback_warning(
@@ -79,6 +82,7 @@ def evaluate_context_graph_health(scan_health: dict[str, Any] | None) -> Context
             "sensitive_path_skipped_count": skipped.get("sensitive_path", 0),
             "selected_by_priority": selected_by_priority,
             "selected_by_extension": selected_by_extension,
+            "parse_coverage": parse_coverage,
         },
     )
 
@@ -88,16 +92,20 @@ def _parser_fallback_warning(
     parser_status: dict[str, Any],
     selected_by_extension: dict[str, int],
 ) -> str | None:
-    js_like_count = sum(selected_by_extension.get(ext, 0) for ext in (".js", ".jsx", ".ts", ".tsx"))
+    selected_by_language = {
+        "javascript": selected_by_extension.get(".js", 0) + selected_by_extension.get(".jsx", 0),
+        "typescript": selected_by_extension.get(".ts", 0),
+        "tsx": selected_by_extension.get(".tsx", 0),
+    }
     python_count = selected_by_extension.get(".py", 0)
-    if js_like_count <= python_count:
+    if sum(selected_by_language.values()) <= python_count:
         return None
     raw_languages = parser_status.get("languages")
     languages = raw_languages if isinstance(raw_languages, dict) else {}
-    raw_javascript = languages.get("javascript")
-    javascript = raw_javascript if isinstance(raw_javascript, dict) else {}
-    if str(javascript.get("active_parser") or "") == "regex":
-        return "context_graph_javascript_parser_fallback"
+    for language, count in selected_by_language.items():
+        status = languages.get(language)
+        if count and isinstance(status, dict) and status.get("active_parser") == "regex":
+            return "context_graph_javascript_parser_fallback"
     return None
 
 

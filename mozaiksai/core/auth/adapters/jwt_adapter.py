@@ -6,7 +6,7 @@ Supports configurable claim mappings to work with any JWT-based auth provider.
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import jwt
@@ -78,6 +78,9 @@ class JWTAdapterConfig:
     # Expected ``aud`` claim. Required: every token's audience is verified
     # against it, and validation refuses to run without it.
     audience: str = ""
+    # "contains" accepts this resource among several audiences. "single"
+    # requires exactly this one resource, as a string or a singleton array.
+    audience_mode: str = field(default="contains", kw_only=True)
     # RFC 9068 access tokens use JOSE typ=at+jwt. Issuers without that header
     # must expose an access-token-only signed claim configured by these fields.
     access_token_type_claim: str = ""
@@ -126,6 +129,8 @@ class JWTAdapterConfig:
     discovery_cache_ttl_seconds: int = DEFAULT_DISCOVERY_CACHE_TTL_SECONDS
 
     def __post_init__(self):
+        if not isinstance(self.audience_mode, str) or self.audience_mode not in {"contains", "single"}:
+            raise ValueError("JWT audience mode must be 'contains' or 'single'")
         if self.algorithms is None:
             self.algorithms = ["RS256"]
         self.email_verified_claim = self.email_verified_claim.strip()
@@ -182,6 +187,7 @@ class JWTAdapterConfig:
             jwks_url=_get("AUTH_JWKS_URL"),
             issuer=_get("AUTH_ISSUER"),
             audience=_get("AUTH_AUDIENCE"),
+            audience_mode=_get("AUTH_AUDIENCE_MODE", "contains").strip() or "contains",
             access_token_type_claim=_get("AUTH_ACCESS_TOKEN_TYPE_CLAIM"),
             access_token_type_value=_get("AUTH_ACCESS_TOKEN_TYPE_VALUE"),
             oidc_authority=_get("MOZAIKS_OIDC_AUTHORITY"),
@@ -355,6 +361,9 @@ class GenericJWTAdapter(BaseAuthAdapter):
 
         token = token.strip()
 
+        audience_mode = self._config.audience_mode
+        if not isinstance(audience_mode, str) or audience_mode not in {"contains", "single"}:
+            raise AuthError("Invalid configured audience policy", 500, self.name)
         audience = self._config.audience.strip()
         if not audience:
             # Fail closed: never validate a token without binding it to this
@@ -412,6 +421,10 @@ class GenericJWTAdapter(BaseAuthAdapter):
                 leeway=self._config.clock_skew_seconds,
                 options=decode_options,  # type: ignore[arg-type]
             )
+            # Check only signed, validated claims. A dedicated resource can
+            # refuse a token also meant for another resource on the same issuer.
+            if audience_mode == "single" and claims.get("aud") not in (audience, [audience]):
+                raise jwt.InvalidAudienceError("A single matching resource audience is required")
             if self._config.access_token_type_claim:
                 token_type = claims.get(self._config.access_token_type_claim)
                 valid_type = token_type == self._config.access_token_type_value

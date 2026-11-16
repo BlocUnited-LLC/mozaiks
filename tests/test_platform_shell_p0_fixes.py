@@ -344,3 +344,45 @@ def test_unknown_surface_falls_back_to_platform(monkeypatch, tmp_path: Path) -> 
     shell = asyncio.run(shell_config.build_shell_config(surface="bogus"))
     assert shell.get("surface") == "platform", "Unknown surface must normalize to 'platform'"
 
+
+
+def test_assistant_availability_requires_app_ai_configuration(monkeypatch, tmp_path):
+    app_root = _make_app_root(tmp_path, [])
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
+    assert asyncio.run(shell_config.build_shell_config())["assistant_available"] is True
+    (app_root / "config" / "ai.json").unlink()
+    assert asyncio.run(shell_config.build_shell_config())["assistant_available"] is False
+
+
+def test_declared_admin_pages_respect_navigation_visibility(monkeypatch, tmp_path):
+    app_root = _make_app_root(tmp_path, [])
+    (app_root / "admin").mkdir()
+    (app_root / "admin" / "admin_registry.yaml").write_text(
+        "pages:\n  - id: overview\n    label: Administration\n    path: /admin\n"
+        "  - id: hidden\n    label: Hidden\n    path: /admin/hidden\n    show_in_navigation: false\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
+    monkeypatch.setattr(shell_config, "resolve_active_app_root", lambda: app_root)
+    shell = asyncio.run(shell_config.build_shell_config())
+    menu = shell["profile"]["menu"]
+    admin = next(item for item in menu if item.get("path") == "/admin")
+    assert admin["requiresRole"] == "admin"
+    assert not any(item.get("path") == "/admin/hidden" for item in menu)
+
+
+def test_assistant_does_not_infer_ask_from_metadata_or_workflow_startup(monkeypatch, tmp_path):
+    app_root = _make_app_root(tmp_path, [])
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
+    for config in ({"chat": {"label": "Help"}}, {"chat": {"chat_startup_mode": "workflow"}}, {"ask": {"ask_mode_prompt": " "}}):
+        (app_root / "config" / "ai.json").write_text(json.dumps(config), encoding="utf-8")
+        assert asyncio.run(shell_config.build_shell_config())["assistant_available"] is False
+    (app_root / "config" / "ai.json").write_text(json.dumps({"ask": {"ask_mode_prompt": "Help with this app"}}), encoding="utf-8")
+    assert asyncio.run(shell_config.build_shell_config())["assistant_available"] is True
+
+
+def test_workflow_only_app_preserves_widget_return_controls(monkeypatch, tmp_path):
+    app_root = _make_app_root(tmp_path, [])
+    monkeypatch.setattr(shell_config, "resolve_app_root", lambda: app_root)
+    (app_root / "config" / "ai.json").write_text(json.dumps({"workflows": {"entry_point": "ExistingWorkflow"}}), encoding="utf-8")
+    assert asyncio.run(shell_config.build_shell_config())["assistant_available"] is True

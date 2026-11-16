@@ -35,6 +35,7 @@ DATA_CONTRACT = "data/contract.json"
 ROUTE_MANIFEST = "ui/route_manifest.json"
 PROVENANCE = ".mozaiks/pack_provenance.json"
 EMPTY_CONTRACT = {"version": "1", "surfaces": [], "shared_collections": []}
+BILLING_ADMIN_REGISTRY = "pages: [{id: overview, label: Overview, path: /admin}, {id: usage, label: Usage, path: /admin/usage}]\n"
 PROJECTS = {"surface_id": "projects", "surface_kind": "module", "collections": [{
     "name": "projects", "entity": "Project", "scope": "app", "tenancy": "per_user",
     "owner_field": "owner", "fields": [{"name": "owner", "type": "string", "required": True}],
@@ -637,6 +638,7 @@ def _hosted_mozaikspay_bundle() -> dict[str, str]:
         )
     }
     files["app.json"] = json.dumps({"appId": "billing", "appName": "Billing"})
+    files["admin/admin_registry.yaml"] = BILLING_ADMIN_REGISTRY
     files["config/subscriptions.yaml"] = HOSTED_SUBSCRIPTIONS
     files[DATA_CONTRACT] = json.dumps(ensure_subscription_assignment_stores(
         dict(EMPTY_CONTRACT), {"contract_required": True, "subscription_config_file": yaml.safe_load(HOSTED_SUBSCRIPTIONS)},
@@ -1987,6 +1989,7 @@ def test_a_verified_selection_materializes_and_passes_canonical_validation_with_
         data_contract=dict(EMPTY_CONTRACT), context_variables={"capability_packs": rows},
     )}
     files["app.json"] = json.dumps({"appId": "billing", "appName": "Billing"})
+    files["admin/admin_registry.yaml"] = BILLING_ADMIN_REGISTRY
     files["config/subscriptions.yaml"] = HOSTED_SUBSCRIPTIONS
     files[DATA_CONTRACT] = json.dumps(ensure_subscription_assignment_stores(
         json.loads(files[DATA_CONTRACT]),

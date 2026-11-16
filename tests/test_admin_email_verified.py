@@ -561,3 +561,27 @@ def test_a_visitor_loses_any_verified_email_with_the_email() -> None:
     claims = visitor_claims(UserClaims(user_id="anonymous", email=_ADMIN_EMAIL, email_verified=True), config)
 
     assert (claims.email, claims.email_verified) == (None, False)
+
+
+@pytest.mark.parametrize("email,verified,roles,expected", [
+    (_ADMIN_EMAIL, True, ["user"], ["user", "admin"]),
+    (_ADMIN_EMAIL, False, ["user"], ["user"]),
+    ("ordinary@example.com", True, ["user"], ["user"]),
+    ("ordinary@example.com", False, ["admin"], ["admin"]),
+])
+def test_current_profile_projects_the_same_admin_access_as_the_admin_gate(
+    admin_client, monkeypatch, email, verified, roles, expected,
+):
+    from mozaiksai.hosts import platform
+
+    async def account_profile(principal, *, app_id, user_id):
+        return {"user_id": user_id, "roles": ["stale_profile_role"]}
+
+    monkeypatch.setattr(platform, "_ensure_account_profile", account_profile)
+    monkeypatch.setattr(platform, "_resolve_profile_scope", lambda principal, app_id=None: ("app", principal.user_id))
+    admin_client.app.get("/api/me")(platform.get_current_user_profile)
+    token = _token(email=email, email_verified=verified, roles=roles)
+    response = admin_client.get("/api/me", headers={"Authorization": "Bearer " + token})
+    assert response.status_code == 200
+    assert response.json()["roles"] == expected
+    assert _health(admin_client, token).status_code == (200 if "admin" in expected else 403)

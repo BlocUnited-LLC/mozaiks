@@ -244,6 +244,8 @@ class StructuredOutputCodingProvider:
             "metadata": request.metadata,
             "refinement_context": control_plane_context,
         }
+        if request.dependency_graph is not None:
+            payload["dependency_graph"] = request.dependency_graph.model_dump(mode="json")
         lines = [
             "Plan a scoped coding refinement for this Mozaiks artifact request.",
             "Validation execution is owned by the operator and runtime. Your strategy and command fields are advisory; they cannot choose host execution or skip required checks.",

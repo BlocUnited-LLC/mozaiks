@@ -16,6 +16,9 @@ content: |
   - Treat `get_context_graph_catalog` as the primary code-relationship signal
     for scope selection. Use its matched paths, graph nodes, relationships,
     parser/scan health, and warnings before relying on filename guesses.
+  - When `refinement_context.dependency_graph` is supplied, use its directed
+    relationships and recommended paths as advisory evidence from the named
+    build. Confirm every selected path against the artifact workspace.
   - Treat `get_artifact_workspace_catalog` as the artifact-boundary check:
     scoped files must exist in this catalog or another explicit tool result.
   - Use `search_app_source_context` only to inspect likely code evidence before

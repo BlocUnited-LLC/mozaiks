@@ -18,7 +18,12 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Set `MONGO_URI` before running Studio. Set `OPENAI_API_KEY` before running real workflows.
+Set `MONGO_URI` before running Studio. The default workflow model is Google
+`gemini-3.8-flash`; set `GEMINI_API_KEY` before running workflows. Google's free
+quota and data terms apply. Use non-sensitive examples with the free tier.
+Other providers use `LLM_PRIMARY_API_TYPE`, `LLM_PRIMARY_MODEL`, and their API
+key in `.env`. Refinement models are configured separately in
+`app/config/refinement_policy.yaml`.
 
 ## Run
 

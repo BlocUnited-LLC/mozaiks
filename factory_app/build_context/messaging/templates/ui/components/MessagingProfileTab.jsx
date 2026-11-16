@@ -68,7 +68,8 @@ export default function MessagingProfileTab({ data }) {
     setSending(true);
     setError(null);
     try {
-      await moduleAction("messages", "send_message", { thread_id: selectedId, body: value });
+      const sent = await moduleAction("messages", "send_message", { thread_id: selectedId, body: value });
+      if (!sent?.success) throw new Error(sent?.error || "Could not send message.");
       setBody("");
       const result = await moduleAction("messages", "get_thread", { thread_id: selectedId, message_limit: 100 });
       setMessages(Array.isArray(result?.messages) ? result.messages : []);
@@ -85,6 +86,7 @@ export default function MessagingProfileTab({ data }) {
       <aside style={{ minWidth: 0, borderRight: "1px solid var(--color-border)" }}>
         <header style={{ borderBottom: "1px solid var(--color-border)", padding: 12 }}>
           <strong>Messages</strong>
+          <a href="/messages" style={{ display: "block", marginTop: 8 }}>New conversation</a>
           <input aria-label="Search conversations" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search conversations" style={{ display: "block", marginTop: 10, maxWidth: "100%", width: "100%" }} />
         </header>
         <div>

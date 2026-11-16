@@ -1,6 +1,7 @@
 schema_version: mozaiks.reactions.v1
 reactions:
   - id: activity_feed_on_friendship_created
+    idempotency_key: friendship_acceptance
     event_type: domain.social.friendship.created
     target:
       kind: handler

@@ -130,11 +130,13 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     )
 
     requirements = (target_dir / "requirements.txt").read_text(encoding="utf-8")
-    assert f"mozaiks=={init_command._current_mozaiks_version()}" in requirements
+    assert f"mozaiks[gemini]=={init_command._current_mozaiks_version()}" in requirements
     assert "App-specific dependencies" in requirements
 
     env_example = (target_dir / ".env.example").read_text(encoding="utf-8")
-    assert "OPENAI_API_KEY=" in env_example
+    assert "GEMINI_API_KEY=" in env_example
+    assert "LLM_PRIMARY_API_TYPE=google" in env_example
+    assert "LLM_PRIMARY_MODEL=gemini-3.8-flash" in env_example
     assert "MONGO_URI=mongodb://localhost:27017/mozaiks" in env_example
 
     gitignore = (target_dir / ".gitignore").read_text(encoding="utf-8")
@@ -149,6 +151,7 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     assert "The `.venv` belongs inside this workspace." in readme
     assert "python -m pip install -r requirements.txt" in readme
     assert "Set `MONGO_URI` before running Studio." in readme
+    assert "Set `GEMINI_API_KEY` before running real workflows." in readme
     assert "python -m mozaiks studio --dir . --open" in readme
     assert "installed `mozaiks` package" in readme
     assert "Coding Agent Guidance" in readme

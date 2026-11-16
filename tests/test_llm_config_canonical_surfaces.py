@@ -51,6 +51,7 @@ async def test_llm_config_skip_mongo_uses_env_provider(monkeypatch: pytest.Monke
     monkeypatch.setenv("MOZAIKS_LLM_CONFIG_SKIP_MONGO", "true")
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
     monkeypatch.setenv("DEFAULT_LLM_MODEL", "gpt-4o-mini")
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
     monkeypatch.delenv("OPENAI_MODEL_FALLBACK", raising=False)
     monkeypatch.setattr(module, "get_mongo_client", fail_if_mongo_called)
     monkeypatch.delenv("LLM_PRIMARY_API_KEY", raising=False)
@@ -76,6 +77,7 @@ async def test_openai_config_consumes_declared_vault_reference(monkeypatch, tmp_
     monkeypatch.setenv("MOZAIKS_SECRETS_CONFIG_PATH", str(policy))
     monkeypatch.setenv("MOZAIKS_LLM_CONFIG_SKIP_MONGO", "true")
     monkeypatch.setenv("DEFAULT_LLM_MODEL", "gpt-4o-mini")
+    monkeypatch.setenv("LLM_PRIMARY_API_TYPE", "openai")
     for name in ("OPENAI_API_KEY", "LLM_PRIMARY_API_KEY", "OPENAI_MODEL_FALLBACK",
                  "OPENAI_API_KEY_SECRET_NAME", "LLM_PRIMARY_API_KEY_SECRET_NAME"):
         monkeypatch.delenv(name, raising=False)

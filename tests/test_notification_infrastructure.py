@@ -16,11 +16,132 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 _MOZAIKS_ROOT = Path(__file__).resolve().parents[1]
 _MODULE_EVENT_ROUTER = _MOZAIKS_ROOT / "mozaiksai" / "core" / "runtime" / "composition" / "module_event_router.py"
 _PLATFORM_PY = _MOZAIKS_ROOT / "mozaiksai" / "hosts" / "platform.py"
 # Notification routes were extracted to this router module.
 _NOTIFICATIONS_ROUTER_PY = _MOZAIKS_ROOT / "mozaiksai" / "hosts" / "routers" / "notifications.py"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", [None, "event", "app"])
+@pytest.mark.parametrize("retention", ["envelope", "reference"])
+async def test_target_scope_and_origin_retention_are_independent(scope, retention):
+    from copy import deepcopy
+
+    from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
+
+    stored, emitted = [], []
+
+    async def store(record):
+        stored.append(record)
+
+    async def emit(kind, envelope):
+        emitted.append((kind, envelope))
+
+    event = {
+        "id": "evt-target", "type": "domain.tasks.ready",
+        "tenant": {"app_id": "app-test", "tenant_id": "tenant-source", "workspace_id": "workspace-source"},
+        "source": {"layer": "module", "module_id": "tasks", "app_id": "app-test"},
+        "actor": {"type": "user", "id": "sender-private"},
+        "payload": {"recipient_id": "recipient", "task_id": "task-1", "note": "private words", "app_id": "forged"},
+    }
+    before = deepcopy(event)
+    audience = {"user_id_field": "recipient_id"}
+    if scope is not None:
+        audience["scope"] = scope
+    rule = {
+        "id": "ready", "module_id": "tasks", "audience": audience,
+        "source_event": retention, "context_fields": ["task_id"], "template": {"title": "Task ready"},
+    }
+    assert await ModuleEventRouter([], notification_store=store, event_emitter=emit)._create_notification(
+        rule, event["type"], event,
+    ) is True
+    record, = stored
+    assert record["app_id"] == "app-test" and record["audience"] == {
+        "user_id_field": "recipient_id", "user_ids": ["recipient"],
+    }
+    if scope == "app":
+        assert not {"tenant_id", "workspace_id"} & record.keys()
+    else:
+        assert (record["tenant_id"], record["workspace_id"]) == ("tenant-source", "workspace-source")
+    if retention == "reference":
+        assert record["actor"] is None
+        assert record["source_event"] == {"id": "evt-target", "type": "domain.tasks.ready"}
+        assert "sender-private" not in repr(record) and "private words" not in repr(record)
+    else:
+        assert record["actor"] == event["actor"] and record["source_event"] is event
+    created = next(value for kind, value in emitted if kind == "notification.created")
+    assert created["payload"] == record
+    for _, signal in emitted:
+        assert signal["tenant"] == {
+            key: record[key] for key in ("app_id", "tenant_id", "workspace_id") if key in record
+        }
+    assert event == before and rule["audience"] == audience
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("audience", [
+    {"scope": "app"}, {"scope": "app", "user_id_field": 7},
+    {"scope": "app", "user_id_field": "to", "roles": ["owner"]},
+    {"scope": "app", "user_id_field": "to", "permissions": ["read"]},
+    {"scope": "app", "user_id_field": "to", "resolver": "backend.notice:all"},
+    {"scope": "app", "user_id_field": "to", "user_ids": ["another"]},
+    {"scope": "tenant", "user_id_field": "to"}, {"scope": None, "user_id_field": "to"},
+])
+async def test_app_target_defensively_refuses_raw_broad_or_unknown_rules(audience):
+    from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
+
+    stored = []
+
+    async def store(record):
+        stored.append(record)
+
+    await ModuleEventRouter([], notification_store=store)._create_notification(
+        {"id": "notice", "audience": audience}, "domain.tasks.ready",
+        {"tenant": {"app_id": "app-test"}, "payload": {"to": "recipient"}},
+    )
+    assert stored == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recipient", [None, "", [], ["recipient", 7], {"$ne": None}, 7, False])
+async def test_app_target_never_broadcasts_an_unresolved_recipient(recipient):
+    from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
+
+    stored = []
+
+    async def store(record):
+        stored.append(record)
+
+    await ModuleEventRouter([], notification_store=store)._create_notification(
+        {"id": "notice", "audience": {"scope": "app", "user_id_field": "to"}}, "domain.tasks.ready",
+        {"tenant": {"app_id": "app-test"}, "payload": {"to": recipient}},
+    )
+    assert stored == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owner_key", ["tenant_id", "workspace_id", "app_id"])
+@pytest.mark.parametrize("bad_value", [7, ["owner"], {"$ne": None}, "conflicting-owner"])
+async def test_app_target_validates_original_ownership_before_removing_it(owner_key, bad_value):
+    from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
+
+    stored = []
+
+    async def store(record):
+        stored.append(record)
+
+    event = {
+        "tenant": {"app_id": "app-test", "tenant_id": "tenant", "workspace_id": "workspace"},
+        "payload": {"to": "recipient"}, owner_key: bad_value,
+    }
+    await ModuleEventRouter([], notification_store=store)._create_notification(
+        {"id": "notice", "audience": {"scope": "app", "user_id_field": "to"}}, "domain.tasks.ready", event,
+    )
+    assert stored == []
 
 
 # ---------------------------------------------------------------------------

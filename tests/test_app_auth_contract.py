@@ -364,3 +364,48 @@ async def test_app_declared_public_profile_is_never_a_navigation_entry(monkeypat
     assert "/members" in item_paths
     assert PUBLIC_PROFILE_ROUTE not in item_paths
     assert "/u/" not in navigation_targets(shell)
+
+
+@pytest.mark.parametrize("mode,signup", [("public_self_signup", True), ("private_workspace", False)])
+def test_auth_scaffold_uses_approved_access_mode_and_retains_explicit_revision(mode, signup):
+    from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import (
+        materialize_auth_scaffold,
+    )
+    files = {"app.json": json.dumps({"appName": "App", "authRequired": True, "startup": {"landing_spot": "/home"}})}
+    rendered = materialize_auth_scaffold(files, auth_mode=mode)
+    config = yaml.safe_load(rendered["config/auth.yaml"])
+    assert config["mode"] == mode
+    assert config["signup_enabled"] is signup
+    assert ("create account" in config["login_methods"][0]["label"]) is signup
+    retained = {**files, "config/auth.yaml": rendered["config/auth.yaml"]}
+    delta = materialize_auth_scaffold(retained, auth_mode=None)
+    assert "config/auth.yaml" not in delta
+    assert retained["config/auth.yaml"] == rendered["config/auth.yaml"]
+
+
+def test_plan_auth_mode_taxonomy_matches_runtime():
+    from typing import get_args
+
+    from mozaiksai.core.runtime.app.auth_contract import AuthMode
+    path = FACTORY_APP.parent / "workflows/AppGenerator/structured_outputs.yaml"
+    models = yaml.safe_load(path.read_text(encoding="utf-8"))["models"]
+    assert set(models["AppAuthMode"]["values"]) == set(get_args(AuthMode))
+
+
+def test_approved_auth_mode_change_updates_existing_intent_without_replacing_provider_setup(auth_document):
+    from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import (
+        materialize_auth_scaffold,
+    )
+    before = deepcopy(auth_document)
+    files = {"app.json": json.dumps({"appName":"App","authRequired":True}), "config/auth.yaml":yaml.safe_dump(before)}
+    changed = yaml.safe_load(materialize_auth_scaffold(files, auth_mode="public_self_signup")["config/auth.yaml"])
+    assert changed["mode"] == "public_self_signup"
+    assert changed["signup_enabled"] is True
+    assert changed["login_methods"][0]["label"] == "Sign in or create account"
+    for field in before.keys() - {"mode", "signup_enabled", "login_methods"}:
+        assert changed[field] == before[field]
+    files["config/auth.yaml"] = yaml.safe_dump(changed)
+    private = yaml.safe_load(materialize_auth_scaffold(files, auth_mode="private_workspace")["config/auth.yaml"])
+    assert private["mode"] == "private_workspace"
+    assert private["signup_enabled"] is False
+    assert private["login_methods"][0]["label"] == "Sign in"

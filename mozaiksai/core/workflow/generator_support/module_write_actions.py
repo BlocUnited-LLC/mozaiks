@@ -383,7 +383,9 @@ def _authored_role_write_contracts(
         prior = existing.get(action_id)
         if prior is None or "input_schema" not in prior:
             continue
-        schema = _materialize_schema_contract(prior["input_schema"], closed_request=True)
+        schema = _materialize_schema_contract(
+            prior["input_schema"], closed_request=True, where=f"{module_id}/{action_id}.input_schema",
+        )
         import_closed_contract_schema(schema)
         canonical = expected["input_schema"]
         properties = schema.get("properties", {})
@@ -783,6 +785,13 @@ def close_module_events(
     return {**(document or {}), "schema_version": "mozaiks.events.v1", "events": events}
 
 
+def _warn_read_fixture_diagnostic_failure() -> None:
+    try:
+        logger.warning("Module read-fixture diagnostic failed after write rejection")
+    except Exception:
+        pass  # A logging failure must not replace the rejected write's feedback.
+
+
 def close_module_actions(
     payload: Any, *, app_build_plan: Any, data_contract: Any = None, design_surface_map: Any = None,
     subscription_contract: Any = None, declared_auth_scopes: frozenset[str] | None = None,
@@ -872,10 +881,36 @@ def close_module_actions(
     } or _companions_from_files(module_id, companion_files)
     role_permissions = role_grants.get(module_id, {})
     apply_module_role_permissions(manifest, role_permissions)
-    _close_manifest_writes(
-        module_id, manifest, plan, contract, subscription_contract=subscription_contract, granted=granted,
-        companions=companions, role_permissions=role_permissions,
-    )
+    try:
+        _close_manifest_writes(
+            module_id, manifest, plan, contract, subscription_contract=subscription_contract, granted=granted,
+            companions=companions, role_permissions=role_permissions,
+        )
+    except ValueError as write_error:
+        # Read closure is diagnostic only: it cannot make a rejected write admissible.
+        try:
+            read_probe = close_module_read_actions(
+                payload, app_build_plan=plan, data_contract=contract,
+                design_surface_map=design_surface_map, subscription_contract=subscription_contract,
+                access_policy=access_policy,
+            )
+        except Exception:
+            _warn_read_fixture_diagnostic_failure()
+            raise write_error from None
+        probe_bundle = read_probe.get("module_contract") if isinstance(read_probe, dict) else None
+        if isinstance(probe_bundle, dict) and isinstance(probe_bundle.get("module_yaml"), dict):
+            from .module_smoke_fixtures import validate_module_fixture_record_identities
+
+            try:
+                validate_module_fixture_record_identities(
+                    module_id, probe_bundle.get("fixtures_yaml"), data_contract=contract,
+                    manifest=probe_bundle["module_yaml"],
+                )
+            except ValueError as read_error:
+                raise ValueError(f"{write_error}\n{read_error}") from write_error
+            except Exception:
+                _warn_read_fixture_diagnostic_failure()
+        raise write_error from None
     output = close_module_read_actions(
         output, app_build_plan=plan, data_contract=contract, design_surface_map=design_surface_map,
         subscription_contract=subscription_contract,
@@ -974,7 +1009,10 @@ def materialize_module_actions(
         for action in expanded.get("actions") or []:
             for key in ("input_schema", "output_schema"):
                 if isinstance(action.get(key), dict):
-                    action[key] = _materialize_schema_contract(action[key], closed_request=key == "input_schema")
+                    action[key] = _materialize_schema_contract(
+                        action[key], closed_request=key == "input_schema",
+                        where=f"{module_id}/{action.get('id', '<unnamed>')}.{key}",
+                    )
         if expanded != manifest:
             changed[path] = yaml.safe_dump(expanded, sort_keys=False, allow_unicode=True)
         for key, relative in companion_paths.items():
@@ -984,7 +1022,9 @@ def materialize_module_actions(
             if key == _EVENTS_KEY:
                 for event in document.get("events") or []:
                     if isinstance(event.get("payload_schema"), dict):
-                        event["payload_schema"] = _materialize_schema_contract(event["payload_schema"])
+                        event["payload_schema"] = _materialize_schema_contract(
+                            event["payload_schema"], where=f"{module_id} event {event.get('type', '<unnamed>')}.payload_schema",
+                        )
             if document != authored.get(key):
                 changed[f"modules/{module_id}/{relative}"] = yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
     return changed

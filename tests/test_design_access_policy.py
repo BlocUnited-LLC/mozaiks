@@ -94,6 +94,10 @@ def test_design_read_guidance_keeps_explicit_policy_and_canonical_wire_contract(
     assert "cover both list_<collection> and get_<collection>" in policy
     assert "A custom read grant does not grant either canonical read" in policy
     assert "cover all three canonical writes" in policy
+    # A design that keeps members from editing or deleting must still assign those writes.
+    assert "grant the update and delete writes to the role that administers the records" in policy
+    assert "submitter may receive create_<entity> while the approver receives update_<entity> and delete_<entity>" in policy
+    assert "omission cannot make an update or delete public" not in policy
     assert "never inherit read authority from write grants" in policy
     assert "Without explicit canonical read grants" in policy
     all_guidance = " ".join(sections.values())
@@ -112,6 +116,7 @@ def test_design_action_guidance_distinguishes_collection_reads_from_entity_write
         for action in ("get_project_updates", "list_project_updates", "create_project_update",
                        "update_project_update", "delete_project_update"):
             assert action in guidance
+    assert "counted across grant rows rather than per row" in description
 
 
 def test_unknown_read_feedback_reaches_next_declared_prompt_without_authorizing(monkeypatch, persistence):
@@ -133,6 +138,8 @@ def test_unknown_read_feedback_reaches_next_declared_prompt_without_authorizing(
     feedback = context.get("design_docs_save_feedback")
     assert result["error"] == feedback
     assert "action 'get_report' is not an approved action of 'reports'" in feedback
+    # The live repair dropped such a read instead of renaming it; the rejection names the fix.
+    assert "Use the canonical 'get_reports' instead of 'get_report'." in feedback
     assert bundle == original
     assert context.get("design_docs_save_attempts") == 1
     assert context.get("access_policy") is None
@@ -156,13 +163,59 @@ def test_unknown_read_feedback_reaches_next_declared_prompt_without_authorizing(
     runner._middleware_functions = hooks
     runner._agent_name = "DesignDocsAgent"
     runner._base_system_message = _compose_prompt_sections(agent["prompt_sections"])
+    # The feedback is the repair turn's newest input (statusbar), not a prompt context value.
+    middleware = yaml.safe_load((workflow_dir / "middleware.yaml").read_text(encoding="utf-8"))
+    statusbar = {entry["agent"]: entry["variables"] for entry in middleware["statusbar_middleware"]}
+    assert statusbar["DesignDocsAgent"] == ["design_docs_save_feedback"]
     runner._context_bridge = context
     runner._context_exposures = []
-    runner._context_variables = variables
+    runner._context_variables = [key for key in variables if key not in statusbar["DesignDocsAgent"]]
     prompt = asyncio.run(runner._run_prompt_middleware(SimpleNamespace(variables={})))
-    assert prompt.count(feedback) == 1
+    # The system message leads with the rejection, once.
+    lead, _, rest = prompt.partition("\n\n")
+    assert lead.startswith("[REPAIR REQUIRED]\nYour previous design bundle was not saved. Reason:\n")
+    assert feedback in lead and feedback not in rest
+    assert prompt.count("[REPAIR REQUIRED]") == 1
     assert "Approved actions: ['create_report', 'delete_report', 'get_reports', 'list_reports', " \
            "'summarize_reports', 'update_report']" in feedback
+
+
+@pytest.mark.parametrize("outcome,feedback,leads", [
+    ("revise", "access_policy for 'notes' omits canonical write grants ['delete_note']", True),
+    ("review_changes", "Owner asked to restrict deletes to coordinators", True),
+    ("saved", "stale reason from an earlier attempt", False),
+    ("blocked", "no bound target app", False),
+    ("revise", "", False),
+])
+def test_repair_turn_leads_with_the_save_rejection_only_when_routed_back(outcome, feedback, leads):
+    from factory_app.workflows.DesignDocs.tools.hook_save_feedback_directive import (
+        inject_save_feedback_directive,
+    )
+
+    class Agent:
+        name = "DesignDocsAgent"
+
+        def __init__(self):
+            self.context_variables = {"design_docs_save_outcome": outcome, "design_docs_save_feedback": feedback}
+            self.system_message = "[ROLE]\nDesign the app."
+
+        def update_system_message(self, message):
+            self.system_message = message
+
+    agent = Agent()
+    inject_save_feedback_directive(agent, [])
+    assert agent.system_message.startswith("[REPAIR REQUIRED]") is leads
+    assert agent.system_message.endswith("[ROLE]\nDesign the app.")
+    if leads:
+        assert feedback in agent.system_message
+        inject_save_feedback_directive(agent, [])
+        assert agent.system_message.count("[REPAIR REQUIRED]") == 1
+        # A later rejection replaces the earlier reason; the turn never acts on a stale one.
+        agent.context_variables["design_docs_save_feedback"] = "omits canonical read grants ['get_tools']"
+        inject_save_feedback_directive(agent, [])
+        assert agent.system_message.count("[REPAIR REQUIRED]") == 1
+        assert "['get_tools']" in agent.system_message and feedback not in agent.system_message
+        assert agent.system_message.endswith("[ROLE]\nDesign the app.")
 
 
 def test_owner_approval_persists_exact_policy_and_projects_from_summary(monkeypatch, persistence):

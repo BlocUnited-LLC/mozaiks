@@ -92,7 +92,7 @@ def create_parser():
     )
     quickstart_parser.add_argument(
         "--provider",
-        choices=["anthropic", "openai", "local", "other"],
+        choices=["google", "anthropic", "openai", "local", "other"],
         default=None,
         help="Default AI provider to store in the workspace config",
     )
@@ -226,7 +226,7 @@ def create_parser():
     )
     onboard_parser.add_argument(
         "--provider",
-        choices=["anthropic", "openai", "local", "other"],
+        choices=["google", "anthropic", "openai", "local", "other"],
         default=None,
         help="Default AI provider",
     )

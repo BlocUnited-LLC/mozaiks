@@ -5,9 +5,10 @@
  * primitives. Extension panel rendering is also centralised here.
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { getComponent } from '../../registry/componentRegistry'
 import { useChatUI } from '../../context/ChatUIContext'
+import { authFetch } from '../../adapters/api.js'
 import AdminSchemaPanel from './AdminSchemaPanel.jsx'
 
 // ---------------------------------------------------------------------------
@@ -26,25 +27,39 @@ export function useAdminFetch(endpoint, intervalMs = 0) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const currentRequest = useRef(null)
 
   const load = useCallback(async () => {
+    currentRequest.current?.abort()
+    const controller = new AbortController()
+    currentRequest.current = controller
+    const isCurrent = () => currentRequest.current === controller && !controller.signal.aborted
+    setLoading(true)
+    setError(null)
     try {
-      const res = await fetch(`${API_BASE}${endpoint}`)
+      // authFetch owns backend URL resolution and the current session token.
+      const res = await authFetch(endpoint, { signal: controller.signal })
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-      setData(await res.json())
-      setError(null)
+      const result = await res.json()
+      if (isCurrent()) setData(result)
     } catch (e) {
-      setError(e.message)
+      if (isCurrent()) {
+        setData(null)
+        setError(e.message)
+      }
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
     }
   }, [endpoint])
 
   useEffect(() => {
+    setData(null)
     load()
-    if (intervalMs > 0) {
-      const id = setInterval(load, intervalMs)
-      return () => clearInterval(id)
+    const id = intervalMs > 0 ? setInterval(load, intervalMs) : null
+    return () => {
+      if (id !== null) clearInterval(id)
+      currentRequest.current?.abort()
+      currentRequest.current = null
     }
   }, [load, intervalMs])
 

@@ -44,6 +44,7 @@ from mozaiksai.control_plane.contracts import (
     ContractSurfaceTargetKind,
     ContractSurfaceUpdate,
 )
+from mozaiksai.control_plane.file_contract_context import server_page_bindings
 from mozaiksai.control_plane.loader import load_selected_refinement_harness
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
 from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
@@ -59,7 +60,6 @@ _CHECKPOINT_EVENT = "contract_surface_requested"
 
 _ELIGIBLE_CHANGE_CLASSES = {"feature", "design"}
 _ELIGIBLE_ARTIFACT_KINDS = {"app_bundle", "workflow_bundle"}
-
 class _SurfaceEntry(ContractSurfaceTarget):
     rationale: str = Field(min_length=1)
     confidence: float = Field(ge=0.0, le=1.0)
@@ -489,14 +489,28 @@ class ContractSurfacePlanner:
         workspace_files: dict[str, str],
         allowed_paths: list[str] | None,
     ) -> str:
+        available = _available_targets(workspace_files, request.build_family, request.artifact_app_id)
+        page_paths = list(dict.fromkeys(
+            path for target in available if target["kind"] == "page_binding" for path in target["affected_paths"]
+        ))
+        server_bindings = server_page_bindings(file_map=workspace_files, selected_paths=page_paths[:32])
+        for binding in server_bindings:
+            owner = next((target for target in available if target["kind"] == "module_action"
+                          and target["target_id"] == binding["module_id"]), None)
+            binding["owner_available"] = owner is not None and binding["action_declared"]
+            binding["owner_within_allowed_paths"] = owner is not None and binding["owner_available"] and (
+                allowed_paths is None or set(owner["affected_paths"]).issubset(allowed_paths)
+            )
         payload: dict[str, Any] = {
             "change_class": routing_decision.change_intent.change_class.value,
             "build_family": request.build_family,
             "raw_user_request": request.raw_user_request,
             "workflow_sequence": routing_decision.workflow_sequence,
             "rationale": routing_decision.change_intent.rationale,
-            "available_targets": _available_targets(workspace_files, request.build_family, request.artifact_app_id),
+            "available_targets": available,
             "allowed_paths": allowed_paths,
+            "server_page_bindings": server_bindings[:32],
+            "server_page_bindings_truncated": len(page_paths) > 32 or len(server_bindings) > 32,
         }
         if context_graph_catalog:
             payload["candidate_files"] = (context_graph_catalog.get("candidate_files") or [])[:15]

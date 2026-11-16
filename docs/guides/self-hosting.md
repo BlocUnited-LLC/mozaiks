@@ -416,6 +416,15 @@ the Mozaiks API.
 
 ### Admin access and email verification
 
+Factory's **Open as owner** action opens the generated app's configured login
+route with `?owner=1`. For a self-hosted export, configure the OIDC environment
+settings and register its callback URL, then open that same route on your app.
+Create or invite the owner account through your identity provider and choose
+its password there. Use the owner email listed in `app/app.json` `admins`.
+After sign-in, the app checks Admin access with its backend and offers
+**Open Admin** when that check succeeds. **Sign in again** requests provider
+reauthentication after a denied check.
+
 An address in `app/app.json` `admins` grants admin only once Keycloak marks
 that email verified (the token's `email_verified` claim is `true`). The
 included local realm allows self-registration and has no mail server, so it

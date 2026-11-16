@@ -12,7 +12,7 @@ from typing import Any
 
 from mozaiksai.core.workflow.context.frozen import detach
 
-from .task_integrity import approved_task_inventory, task_allowed_paths
+from .task_integrity import repair_inventory, task_allowed_paths
 
 
 def _get(context: Any, key: str, default: Any = None) -> Any:
@@ -33,7 +33,7 @@ def _digest(value: Any) -> str:
 def owned_diagnostics(context: Any, diagnostics: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Resolve exact paths, never infer authority from an agent-name heuristic."""
     try:
-        inventory = approved_task_inventory(context)
+        inventory = repair_inventory(context)
     except (TypeError, ValueError) as exc:
         return [{"code": "PLAN_INVENTORY_INVALID", "error": str(exc), "block_reason": "invalid_inventory"}]
     owners: dict[str, list[dict[str, Any]]] = {}
@@ -85,7 +85,7 @@ def owned_diagnostics(context: Any, diagnostics: list[dict[str, Any]]) -> list[d
             item.update(task_id=task_id, owner_agent=task["initial_agent"])
             if task_id in failures:
                 item["block_reason"] = "task_failure_requires_batch_recovery"
-            elif task_id not in results:
+            elif task_id != "AdminRegistryAgent" and task_id not in results:
                 item["block_reason"] = "missing_accepted_task_evidence"
             elif any(dep not in results for dep in task.get("depends_on", [])):
                 item["block_reason"] = "prerequisite_not_accepted"
@@ -141,7 +141,7 @@ def prepare_bundle_repair(
         if item.get("owner_agent") and not item.get("block_reason"):
             grouped.setdefault(item["task_id"], []).append(item)
     try:
-        inventory = {task["task_id"]: task for task in approved_task_inventory(context)}
+        inventory = {task["task_id"]: task for task in repair_inventory(context)}
     except (TypeError, ValueError):
         inventory = {}
     # A selected proposal which reaches validation without a settled save has

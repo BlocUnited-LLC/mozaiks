@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -27,7 +28,7 @@ from mozaiksai.core.artifacts.store import ArtifactStore, get_artifact_store
 from .context_graph import build_context_graph_from_file_map, context_graph_parser_status
 from .health import evaluate_context_graph_health
 from .intelligence import AppIntelligenceSnapshot, build_app_intelligence_snapshot
-from .models import AppContextGraph, SourceRef, SourceRefKind
+from .models import AppContextGraph, GraphNodeType, SourceRef, SourceRefKind
 from .scan_policy import (
     SourceScanPolicy,
     SourceScanResult,
@@ -144,6 +145,16 @@ def index_source_scan(
         file_map=safe_file_map,
         source_ref=resolved_source_ref,
         indexed_at=resolved_indexed_at,
+    )
+    parse_coverage = Counter(
+        status
+        for node in graph.nodes
+        if node.node_type == GraphNodeType.FILE
+        and isinstance(status := node.metadata.get("parse_status"), str)
+    )
+    scan_result = replace(
+        scan_result,
+        health={**scan_result.health, "parse_coverage": dict(sorted(parse_coverage.items()))},
     )
     intelligence_snapshot = build_app_intelligence_snapshot(
         app_id=resolved_app_id,

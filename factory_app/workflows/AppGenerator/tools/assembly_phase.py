@@ -343,7 +343,7 @@ def _merge_code_files(
             file_map["config/auth.yaml"] = admitted_auth
         file_map.update(materialize_auth_scaffold(
             file_map, data_contract=data_contract, design_surface_map=design_surface_map,
-            access_policy=approved_policy,
+            access_policy=approved_policy, auth_mode=(app_build_plan or {}).get("auth_mode"),
         ))
         if candidate_auth is not None:
             allowed_auth = [yaml.safe_load(file_map.get("config/auth.yaml", "null"))]
