@@ -83,8 +83,9 @@ runtime_boundaries:
       Requests start in the shared widget. Declare a support page in
       admin/admin_registry.yaml for the module SupportAdminPanel inbox.
       Register SupportProfileTab through ui/index.js and its profile manifest.
-      Grant support.submit to authenticated members and support.read plus
-      support.manage to the app owner or explicitly configured support team.
+      Grant support.submit to members, owners, and support-team roles.
+      Also grant support.read and support.manage to the app owner or
+      explicitly configured support team.
       Do not emit standalone support routes or global admin menu entries.
   - id: ticket_metadata_only
     rule: >
