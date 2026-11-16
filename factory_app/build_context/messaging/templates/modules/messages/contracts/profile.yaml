@@ -1,7 +1,11 @@
-schema_version: mozaiks.profile.v1
-tabs:
+schema_version: mozaiks.profile.v2
+pages:
   - id: messages
     label: Messages
+    route: messages
+    section: overview
     order: 40
+    renderer: custom_component
+    visibility: owner_only
     action: list_threads
     component: MessagingProfileTab
