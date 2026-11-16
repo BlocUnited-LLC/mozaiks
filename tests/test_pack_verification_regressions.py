@@ -423,7 +423,7 @@ def test_upgrade_does_not_create_a_data_contract_with_nothing_to_compose(tmp_pat
     assert (plan.status, plan.recomposed_files) == ("ready", [])
     assert not (app_root / DATA_CONTRACT).exists()
     composed = json.loads((app_root / PROVENANCE).read_text(encoding="utf-8"))["composed_outputs"]
-    assert DATA_CONTRACT not in composed and set(composed) == {"ui/index.js", ROUTE_MANIFEST}
+    assert DATA_CONTRACT not in composed and set(composed) == {"ui/index.js"}
 
 
 @pytest.mark.parametrize("change", ["changed", "removed"])
