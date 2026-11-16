@@ -17,7 +17,7 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     planned_page_path,
 )
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
-    resolve_design_access_policy,
+    resolve_authored_module_access_policy,
 )
 from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
@@ -287,7 +287,7 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
                 data_contract=_context_get(context, "data_contract"),
                 subscription_contract=_context_get(context, "subscription_contract"),
                 design_surface_map=_context_get(context, "design_surface_map"),
-                access_policy=resolve_design_access_policy(context),
+                access_policy=resolve_authored_module_access_policy(context),
             )
             lines.extend(_format_list_block(
                 "Code-owned write methods; omit their handler/service/repo bodies and use declared hooks only:",

@@ -25,6 +25,7 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
     validate_collection_ownership,
 )
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
 from mozaiksai.core.workflow.generator_support.data_contract_fields import (
     normalize_structured_defaults,
     validate_collection_fields,
@@ -36,7 +37,12 @@ from mozaiksai.core.workflow.generator_support.design_access_policy import (
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     canonical_read_actions_for_surface,
 )
-from mozaiksai.core.workflow.generator_support.module_role_grants import validate_access_policy
+from mozaiksai.core.workflow.generator_support.module_role_grants import (
+    PackAuthorization,
+    validate_access_policy,
+    validate_reviewed_pack_data,
+    verified_pack_authorization,
+)
 from mozaiksai.core.workflow.generator_support.persistence_artifacts import (
     normalize_data_contract_indexes,
 )
@@ -65,12 +71,16 @@ class _AccessPolicyCancellation(BaseModel):
 
 async def _review_access_policy(
     policy: dict[str, Any], *, experience_spec: dict[str, Any], binding: Any, context_variables: Any,
+    pack_authorization: PackAuthorization | None = None,
 ) -> dict[str, Any]:
     page_roles = validate_design_page_roles(experience_spec, policy)
+    identities = [row.model_dump() for row in (pack_authorization.identities if pack_authorization else ())] if policy["grants"] else []
     receipt = {
-        "status": "not_required", "policy_sha256": access_policy_sha256(policy, experience_spec),
+        "status": "not_required", "policy_sha256": access_policy_sha256(policy, experience_spec, pack_identities=identities),
         "target_app_id": binding.target_app_id, "build_id": binding.build_id,
     }
+    if identities:
+        receipt["pack_identities"] = identities
     if not policy["grants"] and not any(page_roles.values()):
         return receipt
     user_id, chat_id = _cv_get(context_variables, "user_id"), _cv_get(context_variables, "chat_id")
@@ -83,6 +93,7 @@ async def _review_access_policy(
         f"{labels[grant['role_id']]} may {', '.join(grant['actions'])} on {grant['collection']}."
         for grant in policy["grants"]
     )
+    checkpoints.extend(f"Selected pack {row['pack_id']} version {row['version']} ({row['digest']})." for row in identities)
     checkpoints.extend(
         f"Page {route}: " + (
             "requires a verified role of " + ", ".join(f"{labels[role]} ({role})" for role in roles) + "."
@@ -443,12 +454,13 @@ def _canonical_data_contract(
     app_id: str,
     artifact_version_id: str | None,
     surface_map: dict[str, Any],
+    allow_empty: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError("data_contract must be an object")
 
     raw_surfaces = raw.get("surfaces")
-    if not isinstance(raw_surfaces, list) or not raw_surfaces:
+    if not isinstance(raw_surfaces, list) or (not raw_surfaces and not allow_empty):
         raise ValueError("data_contract.surfaces must be a non-empty list")
 
     known_surface_ids = {
@@ -644,14 +656,53 @@ def _reject_undeclared_entity(
     )
 
 
+def _compose_reviewed_pack_data(
+    data_contract: dict[str, Any], surface_map: dict[str, Any], pack_authorization: PackAuthorization,
+) -> dict[str, Any]:
+    """Compose exact verified pack data and its module surfaces into the reviewed design."""
+    if not pack_authorization.data_contracts:
+        return data_contract
+    compiled = compile_data_contract(data_contract, pack_data_contracts=list(pack_authorization.data_contracts))
+    surfaces = {surface["surface_id"]: surface for surface in surface_map["surfaces"]}
+    for contribution in pack_authorization.data_contracts:
+        for group in contribution.get("surfaces") or []:
+            module_id = group["surface_id"]
+            pack_id = pack_authorization.module_packs[module_id]
+            surface = surfaces.get(module_id)
+            if surface is None:
+                surface = {
+                    "surface_id": module_id, "label": module_id.replace("_", " ").title(),
+                    "surface_kind": "module", "owner": "app", "source_capability_packs": [pack_id],
+                    "primary_entities": [], "owned_pages": [], "owned_mutations": [], "custom_reads": [],
+                    "events_emitted": [], "workflow_triggers": [], "integrations": [], "notes": None,
+                }
+                surface_map["surfaces"].append(surface)
+                surfaces[module_id] = surface
+            if surface.get("surface_kind") != "module" or surface.get("owner") != "app":
+                raise ValueError(f"verified pack module {module_id!r} requires an app-owned module surface")
+            surface["source_capability_packs"] = list(dict.fromkeys([*(surface.get("source_capability_packs") or []), pack_id]))
+            surface["primary_entities"] = list(dict.fromkeys([
+                *(surface.get("primary_entities") or []),
+                *(collection["entity"] for collection in group.get("collections") or []),
+            ]))
+    return compiled
+
+
 def _validate_design_collections(
     data_contract: dict[str, Any], surface_map: dict[str, Any], context_variables: Any = None,
+    *, pack_authorization: PackAuthorization | None = None,
 ) -> list[str]:
     """Resolve explicit entity and row ownership after determined platform normalization.
 
     Returns the determined field corrections, one message each.
     """
     surfaces = {surface["surface_id"]: surface for surface in surface_map["surfaces"]}
+    pack_authorization = pack_authorization or PackAuthorization((), (), {}, {})
+    validate_reviewed_pack_data(data_contract, pack_authorization)
+    pack_surfaces = {
+        surface["surface_id"] for contribution in pack_authorization.data_contracts
+        for surface in contribution.get("surfaces") or []
+    }
     field_normalizations: list[str] = []
     collections = [
         (group["surface_id"], collection)
@@ -665,6 +716,12 @@ def _validate_design_collections(
             raise ValueError(f"data_contract collection on {group_id!r} must be an object")
         name = collection.get("name")
         path = f"data_contract collection {name!r}"
+        if group_id in pack_surfaces:
+            surface = surfaces.get(group_id)
+            if surface is None or surface.get("surface_kind") != "module" or surface.get("owner") != "app":
+                raise ValueError(f"verified pack collection {name!r} requires its app-owned module surface {group_id!r}")
+            validate_collection_ownership(collection, path)
+            continue
         ownership = collection.get("ownership") or {}
         surface_id = ownership.get("surface_id")
         surface = surfaces.get(surface_id)
@@ -1053,6 +1110,7 @@ async def save_design_docs_bundle(
             app_id=app_id,
             artifact_version_id=str(artifact_version_id) if artifact_version_id else None,
             surface_map=surface_map,
+            allow_empty=bool(context_variables.get("capability_packs")),
         )
         declared_entities = declare_collection_entities(
             surface_map,
@@ -1067,11 +1125,18 @@ async def save_design_docs_bundle(
             experience_spec=experience_spec,
             include_default_subscription=True,
         )
+        pack_authorization = verified_pack_authorization(context_variables)
+        data_contract = _compose_reviewed_pack_data(data_contract, surface_map, pack_authorization)
+        if not data_contract["surfaces"]:
+            raise ValueError("data_contract.surfaces must be a non-empty list")
         ownership_normalizations += _mirror_collection_kinds(data_contract, surface_map)
         _drop_canonical_custom_reads(ownership_normalizations, surface_map, data_contract)
-        field_normalizations = _validate_design_collections(data_contract, surface_map, context_variables)
+        field_normalizations = _validate_design_collections(
+            data_contract, surface_map, context_variables, pack_authorization=pack_authorization,
+        )
         access_policy = validate_access_policy(
             bundle.get("access_policy"), data_contract=data_contract, design_surface_map=surface_map,
+            pack_authorization=pack_authorization,
         )
         validate_design_page_roles(experience_spec, access_policy)
         if not frontend_markdown or not backend_markdown or not database_markdown:
@@ -1188,6 +1253,7 @@ async def save_design_docs_bundle(
     try:
         access_policy_review = await _review_access_policy(
             access_policy, experience_spec=experience_spec, binding=binding, context_variables=context_variables,
+            pack_authorization=pack_authorization,
         )
     except Exception as err:
         return _refused(context_variables, "access_policy_review_failed", str(err), outcome="blocked")
