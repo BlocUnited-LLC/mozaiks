@@ -64,9 +64,11 @@ required_outputs:
     owner: templates
   - path: ui/index.js
     owner: templates
-  - path: ui/pages/custom/Support.jsx
+  - path: ui/components/SupportProfileTab.jsx
     owner: templates
-  - path: ui/route_manifest.json
+  - path: modules/support/contracts/profile.yaml
+    owner: templates
+  - path: modules/support/contracts/admin.yaml
     owner: templates
 
 forbidden_outputs:
@@ -76,6 +78,14 @@ forbidden_outputs:
   - path_prefix: services/support/
 
 runtime_boundaries:
+  - id: support_surfaces
+    rule: >
+      Requests start in the shared widget. Declare a support page in
+      admin/admin_registry.yaml for the module SupportAdminPanel inbox.
+      Register SupportProfileTab through ui/index.js and its profile manifest.
+      Grant support.submit to authenticated members and support.read plus
+      support.manage to the app owner or explicitly configured support team.
+      Do not emit standalone support routes or global admin menu entries.
   - id: ticket_metadata_only
     rule: >
       The support module owns request metadata, status, severity, page context,

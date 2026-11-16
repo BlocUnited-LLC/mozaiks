@@ -343,3 +343,27 @@ existing acceptance action. Load more friends makes older confirmations reachabl
 beyond the first page. Friend cursors include the timestamp and request identity
 so equal timestamps retain every connection. Successful dispatch clears that flag. The acceptance notification
 uses the existing declared notification reaction and durable idempotency ledger.
+
+
+## Profile messaging and support
+
+The Messaging pack registers one workspace at `/me?tab=messages`. Conversation
+creation resolves usernames through authenticated public-profile lookup and uses
+the existing messages module. It emits no standalone Messages route.
+
+The Support pack registers an owner-only `support-tickets` profile page and a
+`support-inbox` Admin panel. Requests start in the shared widget. The shell
+projects the installed support module so the widget submits to that app's service.
+The app Admin registry must declare the `support` page referenced by the panel.
+App authorization grants `support.submit` to members and `support.read` and
+`support.manage` to the owner or support team. The backend enforces ticket access.
+
+A profile hydration action can return `profile_visible: false` to hide an empty
+page contribution. Missing values keep the page visible. Hydration errors also
+keep the page visible so users retain an error/retry path. Support uses this
+projection only until the requester has submitted a ticket, including resolved
+or archived tickets.
+
+Existing workspaces adopting these pack versions must remove old `/messages`
+and `/support` routes and register the updated profile components. The existing
+conversation and ticket collections continue through the same module actions.

@@ -88,3 +88,7 @@ class SupportBaseHandler:
             status=status,
             assignee_id=assignee_id,
         )
+
+    async def get_support_profile(self, ctx: ModuleContext, **_: object) -> dict:
+        result = await self._service.list_support_requests(ctx, status="all", scope="user")
+        return {**result, "profile_visible": bool(result["requests"])}

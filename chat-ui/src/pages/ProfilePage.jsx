@@ -691,6 +691,7 @@ function ProfileView({ username, backendUrl, auth }) {
 
   const searchParams = new URLSearchParams(location.search);
   const urlTabParam = searchParams.get('tab') || null;
+  const requestIdParam = searchParams.get('request_id') || null;
 
   // Profile state
   const [profile, setProfile] = useState(null);
@@ -786,7 +787,9 @@ function ProfileView({ username, backendUrl, auth }) {
     }
 
     if (!signal.aborted) {
-      setPagesBySection(sections);
+      setPagesBySection(Object.fromEntries(Object.entries(sections).map(([section, pages]) => [
+        section, pages.filter(page => page.error || page.data?.profile_visible !== false),
+      ])));
       setPagesLoading(false);
     }
   }, [backendUrl, auth, isOwner, username]);
@@ -804,7 +807,7 @@ function ProfileView({ username, backendUrl, auth }) {
     const controller = new AbortController();
     loadPages(controller.signal);
     return () => controller.abort();
-  }, [loadPages, reload]);
+  }, [loadPages, reload, requestIdParam]);
 
   // --- Derived state ---
 

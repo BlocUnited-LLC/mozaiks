@@ -8,7 +8,10 @@ def actor_id(ctx) -> str:
 
 
 def subject_app_id(ctx, value: str | None = None) -> str:
-    return str(value or getattr(ctx, "app_id", None) or "default").strip() or "default"
+    app_id = str(getattr(ctx, "app_id", None) or "default").strip()
+    if value is not None and str(value).strip() != app_id:
+        raise PermissionError("support request belongs to another app")
+    return app_id
 
 
 def actor_permissions(ctx) -> list[str] | None:
