@@ -40,6 +40,7 @@ export default function MessagingProfileTab({ data }) {
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
 
@@ -49,6 +50,23 @@ export default function MessagingProfileTab({ data }) {
   }, []);
 
   useEffect(() => { setThreads(Array.isArray(data?.threads) ? data.threads : []); }, [data]);
+
+  async function refreshConversations() {
+    if (refreshing) return;
+    setRefreshing(true);
+    setError(null);
+    try {
+      const result = await moduleAction('messages', 'list_threads', {});
+      if (!mounted.current) return;
+      const updated = Array.isArray(result?.threads) ? result.threads : [];
+      setThreads(updated);
+      if (!selectedIdRef.current) setSelectedId(updated[0]?.thread_id || null);
+    } catch (failure) {
+      if (mounted.current) setError(failure.message || 'Could not refresh conversations.');
+    } finally {
+      if (mounted.current) setRefreshing(false);
+    }
+  }
 
   async function createConversation(event) {
     event.preventDefault();
@@ -142,6 +160,7 @@ export default function MessagingProfileTab({ data }) {
       <aside style={{ minWidth: 0, borderRight: "1px solid var(--color-border)" }}>
         <header style={{ borderBottom: "1px solid var(--color-border)", padding: 12 }}>
           <strong>Messages</strong>
+          <button type="button" onClick={refreshConversations} disabled={refreshing}>Refresh</button>
           <button type="button" onClick={() => setShowCreate(current => !current)}>New conversation</button>
           {showCreate && <form onSubmit={createConversation}>
             <label>Usernames<input value={recipients} onChange={event => setRecipients(event.target.value)} placeholder="Usernames, comma separated" disabled={creating} /></label>
