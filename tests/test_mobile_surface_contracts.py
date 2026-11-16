@@ -272,7 +272,7 @@ def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
         assert title in smoke_source
     assert "Factory login follows discovery and PKCE callback, restores a protected route, and exposes the exchanged token" in auth_smoke_source
     assert "a forged callback shows failure without authenticated identity" in auth_smoke_source
-    assert "page.goto('/auth/callback?code=unsolicited&state=unknown')" in auth_smoke_source
+    assert "page.goto('/auth/callback?code=unsolicited&state=unknown&owner=1')" in auth_smoke_source
     assert "testMatch: 'auth.spec.js'" in _read("web_shell/playwright.auth.config.js")
 
     assert console_components == (route_components - APP_AUTH_COMPONENTS) | {
