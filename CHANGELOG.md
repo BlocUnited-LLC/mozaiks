@@ -31,6 +31,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Factory generation and final review offer an owner-account handoff into the app's OIDC flow. Owner entry verifies app Admin access, supports provider reauthentication, and carries self-host account setup guidance into exported environments and scaffold documentation.
+
 - Authenticated profile photo and banner uploads reuse the configured media content store. Factory app workbenches show the owner account and sign-in setup guidance.
 
 - Factory refinement agents can receive advisory file and dependency evidence

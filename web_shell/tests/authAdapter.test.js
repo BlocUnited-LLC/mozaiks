@@ -82,6 +82,7 @@ async function begin(adapter = createAuthAdapter({ authConfig: config(), appId: 
 
 test('PKCE login and a reload callback create one scoped session, notify listeners and restore the requested path', async () => {
   const { redirect } = await begin();
+  assert.equal(redirect.searchParams.get('prompt'), null);
   assert.equal(redirect.searchParams.get('response_type'), 'code');
   assert.equal(redirect.searchParams.get('code_challenge_method'), 'S256');
   assert.equal(redirect.searchParams.get('redirect_uri'), 'https://app.example/auth/callback');
@@ -105,6 +106,22 @@ test('PKCE login and a reload callback create one scoped session, notify listene
   assert.equal(window.location.search, '');
   const otherApp = createAuthAdapter({ authConfig: config(), appId: 'app-two' });
   assert.equal(await otherApp.getCurrentUser(), null);
+});
+
+test('owner account switching requests provider reauthentication while retaining PKCE', async () => {
+  const adapter = createAuthAdapter({ authConfig: config(), appId: 'app-one' });
+  await adapter.login({ returnPath: '/login?owner=1', reauthenticate: true });
+  const redirect = new URL(window.location.assigned);
+  assert.equal(redirect.searchParams.get('prompt'), 'login');
+  assert.equal(redirect.searchParams.get('code_challenge_method'), 'S256');
+  assert.ok(redirect.searchParams.get('state'));
+  assert.ok(redirect.searchParams.get('nonce'));
+});
+
+test('invalid reauthentication options fail before discovery or redirect', async () => {
+  const adapter = createAuthAdapter({ authConfig: config(), appId: 'app-one' });
+  await assert.rejects(adapter.login({ reauthenticate: 'yes' }), /boolean/);
+  assert.equal(requests.length, 0);
 });
 
 for (const stateCase of ['missing', 'wrong', 'expired', 'future', 'replayed']) {

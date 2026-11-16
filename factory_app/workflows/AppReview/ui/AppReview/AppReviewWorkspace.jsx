@@ -3,6 +3,7 @@ import { Button } from '@mozaiks/chat-ui/ui';
 import DownloadCenter from '@mozaiks/chat-ui/core/ui/DownloadCenter.js';
 import { studioFetch } from '../../../../app/admin/pages/studioApi.js';
 import PreviewPane from '../../../_shared/ui/app_preview/PreviewPane.js';
+import OwnerAccessCard from '../../../_shared/ui/app_preview/OwnerAccessCard.jsx';
 import { useSandbox } from '../../../_shared/ui/app_preview/useSandbox.js';
 import { useSavedArtifactBundle } from '../../../_shared/ui/app_preview/useSavedArtifactBundle.js';
 import { refinementOutput } from '../../../_shared/ui/app_preview/refinementOutput.js';
@@ -81,6 +82,8 @@ export default function AppReviewWorkspace({ payload = {} }) {
 
   return (
     <div className="min-w-0 space-y-4" data-testid="app-review-workspace">
+      {body && <OwnerAccessCard files={(selectedPreview || body).generated_files}
+        previewUrl={preview.previewArtifactId === selectedPreview?.artifact_version_id ? preview.livePreviewUrl : null} />}
       <PreviewPane
         previewUrl={preview.livePreviewUrl}
         artifactVersionId={previewVersion}

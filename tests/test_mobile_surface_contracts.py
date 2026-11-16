@@ -272,7 +272,7 @@ def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
         assert title in smoke_source
     assert "Factory login follows discovery and PKCE callback, restores a protected route, and exposes the exchanged token" in auth_smoke_source
     assert "a forged callback shows failure without authenticated identity" in auth_smoke_source
-    assert "page.goto('/auth/callback?code=unsolicited&state=unknown')" in auth_smoke_source
+    assert "page.goto('/auth/callback?code=unsolicited&state=unknown&owner=1')" in auth_smoke_source
     assert "testMatch: 'auth.spec.js'" in _read("web_shell/playwright.auth.config.js")
 
     assert console_components == (route_components - APP_AUTH_COMPONENTS) | {
@@ -308,7 +308,7 @@ def test_factory_app_react_files_are_classified() -> None:
         and page["component"] not in _non_admin_page_components
     }
     support_files = {
-        "factory_app/workflows/AppGenerator/ui/OwnerAccessCard.jsx",
+        "factory_app/workflows/_shared/ui/app_preview/OwnerAccessCard.jsx",
         "factory_app/workflows/AgentGenerator/ui/WorkflowPlanReview.jsx",
         "factory_app/app/admin/pages/AppStudioChrome.jsx",
         "factory_app/app/admin/pages/CreateAppRedirectPage.jsx",

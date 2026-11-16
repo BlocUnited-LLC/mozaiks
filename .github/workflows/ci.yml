@@ -429,6 +429,17 @@ jobs:
 
       - name: UI contract tests
         run: npm run test:ui-contracts
+        env:
+          RESPONSIVE_ARTIFACT_DIAGNOSTICS_DIR: ${{ github.workspace }}/responsive-artifact-diagnostics
+
+      - name: Upload responsive artifact diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: responsive-artifact-diagnostics
+          path: responsive-artifact-diagnostics/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Browser auth contract
         run: npm run test:auth

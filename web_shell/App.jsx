@@ -4,6 +4,7 @@ import {
   WebSocketApiAdapter,
   componentRegistry,
   loadShellAuth,
+  safeReturnPath,
   LoginPage,
   AuthCallbackPage,
   themeProvider,
@@ -22,6 +23,18 @@ function bootstrap() {
       createAppAuthAdapter: Reflect.get(platformExtensions, 'createAuthAdapter'),
       env: import.meta.env,
     }).then(async ({ authAdapter, shellConfig }) => {
+      // Resolve the owner handoff against this running app's auth contract.
+      // A mutable draft in the builder cannot select the target login route.
+      if (window.location.pathname === '/' && new URLSearchParams(window.location.search).get('owner') === '1') {
+        const loginPath = shellConfig.auth?.contract?.routes?.login;
+        if (!shellConfig.auth?.required || shellConfig.auth?.runtime?.enabled !== true
+          || !loginPath || safeReturnPath(loginPath, null) !== loginPath) {
+          throw new Error('Owner sign-in is not enabled for this app');
+        }
+        const login = new URL(loginPath, window.location.origin);
+        login.searchParams.set('owner', '1');
+        window.history.replaceState(window.history.state, '', `${login.pathname}${login.search}`);
+      }
       window.mozaiksAuth = authAdapter;
       // App initialization runs only after the host's authentication bootstrap.
       const register = Reflect.get(platformExtensions, 'register');
