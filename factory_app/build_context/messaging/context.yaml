@@ -1,5 +1,6 @@
 context_id: messaging
 applies_to_workflows:
+  - DesignDocs
   - AppGenerator
 assets:
   - path: contract.yaml
@@ -8,7 +9,7 @@ assets:
     kind: templates
 pack:
   id: messaging
-  version: "0.1.16"
+  version: "0.1.17"
   status: active
   capability_source: generated_module
 capabilities:
