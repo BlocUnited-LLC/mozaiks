@@ -30,10 +30,7 @@ from tests.test_messaging_pack_persistence_composition import (
 _route_pack = None
 
 
-@pytest.fixture(scope="module", autouse=True)
-def route_ownership_pack(tmp_path_factory):
-    global _route_pack
-    root = tmp_path_factory.mktemp("pack-owned-route") / "messaging"
+def make_route_ownership_pack(root):
     shutil.copytree(PACK, root, ignore=shutil.ignore_patterns("__pycache__"))
     templates = root / "templates"
     profile_barrel = (templates / "ui/index.js").read_text(encoding="utf-8")
@@ -52,7 +49,13 @@ def route_ownership_pack(tmp_path_factory):
         {"path": "ui/route_manifest.json", "owner": "templates"},
     ])
     (root / "contract.yaml").write_text(yaml.safe_dump(contract, sort_keys=False), encoding="utf-8")
-    _route_pack = root
+    return root
+
+
+@pytest.fixture(scope="module", autouse=True)
+def route_ownership_pack(tmp_path_factory):
+    global _route_pack
+    _route_pack = make_route_ownership_pack(tmp_path_factory.mktemp("pack-owned-route") / "messaging")
     yield
     _route_pack = None
 
