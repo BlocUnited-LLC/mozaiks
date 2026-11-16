@@ -422,10 +422,12 @@ const AppWorkbench = ({
         throw new Error(body.detail || `Artifact ${action} failed.`);
       }
       const confirmation = { accept: 'accepted', reject: 'rejected', promote: 'promoted' }[action];
-      if (body[confirmation] !== true) throw new Error(`Artifact ${action} was not confirmed. Refresh the review before retrying.`);
+      if (action !== 'revalidate' && body[confirmation] !== true) throw new Error(`Artifact ${action} was not confirmed. Refresh the review before retrying.`);
       if (isCurrent()) {
         setArtifactReview(body.review || null);
-        setArtifactReviewNotice(action === 'promote'
+        setArtifactReviewNotice(action === 'revalidate'
+          ? body.validation_status === 'passed' ? 'Draft validation passed.' : 'Draft validation did not pass. Review the checks below.'
+          : action === 'promote'
           ? body.restart_required
             ? 'Version activated. Restart the app to load this version.'
             : 'Version activated.'
@@ -706,8 +708,18 @@ const AppWorkbench = ({
               </details>
             )}
 
-            {(artifactReview.can_accept || artifactReview.can_reject || artifactReview.can_promote) && (
+            {(artifactReview.can_revalidate || artifactReview.can_accept || artifactReview.can_reject || artifactReview.can_promote) && (
               <div className="mt-3 flex flex-wrap gap-3">
+                {artifactReview.can_revalidate && (
+                  <button
+                    type="button"
+                    className={toolbarBtn(!artifactReviewBusy && !refinementStarting)}
+                    disabled={artifactReviewBusy || refinementStarting}
+                    onClick={() => handleArtifactReviewAction('revalidate')}
+                  >
+                    Revalidate draft
+                  </button>
+                )}
                 {artifactReview.can_accept && (
                   <button
                     type="button"
