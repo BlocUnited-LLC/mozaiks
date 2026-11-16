@@ -821,7 +821,7 @@ def test_digest_of_a_decision_reply_is_not_recoverable_by_enumeration(reply) -> 
 
 
 def test_configured_key_gives_a_stable_hmac_digest(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("mozaiksai.core.secrets.resolve_secret", lambda _name: KEY_A)
+    monkeypatch.setenv("MOZAIKS_AUDIT_DIGEST_KEY", KEY_A)
     reply = {"data": True}
 
     assert _validate(reply).output_digest == _expected_hmac(KEY_A, reply)
@@ -830,10 +830,10 @@ def test_configured_key_gives_a_stable_hmac_digest(monkeypatch: pytest.MonkeyPat
 
 def test_a_different_key_gives_a_different_digest(monkeypatch: pytest.MonkeyPatch) -> None:
     reply = {"data": True}
-    monkeypatch.setattr("mozaiksai.core.secrets.resolve_secret", lambda _name: KEY_A)
+    monkeypatch.setenv("MOZAIKS_AUDIT_DIGEST_KEY", KEY_A)
     first = _validate(reply).output_digest
     reset_output_digest_key()
-    monkeypatch.setattr("mozaiksai.core.secrets.resolve_secret", lambda _name: KEY_B)
+    monkeypatch.setenv("MOZAIKS_AUDIT_DIGEST_KEY", KEY_B)
 
     assert _validate(reply).output_digest != first
 
@@ -841,10 +841,7 @@ def test_a_different_key_gives_a_different_digest(monkeypatch: pytest.MonkeyPatc
 def test_unset_key_falls_back_to_a_random_process_key_never_a_plain_hash(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def unset(_name: str) -> str:
-        raise RuntimeError("not configured")
-
-    monkeypatch.setattr("mozaiksai.core.secrets.resolve_secret", unset)
+    monkeypatch.delenv("MOZAIKS_AUDIT_DIGEST_KEY", raising=False)
     reply = {"data": True}
 
     first = _validate(reply).output_digest
@@ -855,7 +852,7 @@ def test_unset_key_falls_back_to_a_random_process_key_never_a_plain_hash(
 
 
 def test_too_short_configured_key_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("mozaiksai.core.secrets.resolve_secret", lambda _name: "short")
+    monkeypatch.setenv("MOZAIKS_AUDIT_DIGEST_KEY", "short")
     reply = {"data": True}
 
     assert _validate(reply).output_digest != _expected_hmac("short", reply)
@@ -864,7 +861,25 @@ def test_too_short_configured_key_is_ignored(monkeypatch: pytest.MonkeyPatch) ->
 def test_keyed_digest_still_ignores_key_order_and_separates_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("mozaiksai.core.secrets.resolve_secret", lambda _name: KEY_A)
+    monkeypatch.setenv("MOZAIKS_AUDIT_DIGEST_KEY", KEY_A)
 
     assert _validate({"status": 1, "b": 2}).output_digest == _validate({"b": 2, "status": 1}).output_digest
     assert _validate({"status": 1, "b": 2}).output_digest != _validate({"status": 1, "b": 3}).output_digest
+
+
+def test_the_key_is_read_from_the_environment_and_never_the_secret_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The resolver can block on Key Vault before the audit timeout starts, so it must not be consulted."""
+
+    def must_not_be_called(*_args, **_kwargs):
+        raise AssertionError("the secret resolver was consulted for the audit digest key")
+
+    monkeypatch.setattr("mozaiksai.core.secrets.resolve_secret", must_not_be_called)
+    monkeypatch.setenv("MOZAIKS_AUDIT_DIGEST_KEY", KEY_A)
+    reply = {"data": True}
+
+    assert _validate(reply).output_digest == _expected_hmac(KEY_A, reply)
+    reset_output_digest_key()
+    monkeypatch.delenv("MOZAIKS_AUDIT_DIGEST_KEY")
+    assert len(_validate(reply).output_digest) == 64  # fallback path also avoids the resolver

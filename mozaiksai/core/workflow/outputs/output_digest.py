@@ -9,11 +9,17 @@ recognised as the same.
 Configuration
 -------------
 ``MOZAIKS_AUDIT_DIGEST_KEY``
-    At least 32 characters, resolved through the app secret contract like any
-    other secret. With it, digests are stable across restarts and processes.
-    Without it (or if it is unusable) a random key is generated once per
-    process: digests then compare only within that process, but are never
-    recoverable by enumeration. There is no unkeyed mode.
+    Read directly from the process environment, not through the app secret
+    resolver: that resolver can make a blocking Key Vault call, and the first
+    rejection would pay for it before the audit timeout even starts. Use a
+    randomly generated key of at least 32 characters, for example::
+
+        python -c "import secrets; print(secrets.token_hex(32))"
+
+    Digests are comparable across workers and restarts only if every process uses
+    the same key. Without a key (or with one that is too short) a random key is
+    generated once per process: digests then compare only within that process,
+    but are never recoverable by enumeration. There is no unkeyed mode.
 """
 
 from __future__ import annotations
@@ -36,12 +42,9 @@ _DOMAIN = b"mozaiks.audit.output-digest.v1"
 
 
 def _configured_key() -> bytes | None:
-    from mozaiksai.core.secrets import resolve_secret
-
-    try:
-        value = resolve_secret(DIGEST_KEY_ENV)
-    except Exception as exc:  # unset, invalid contract or vault failure: never log the secret
-        logger.debug("%s not available (%s); using a per-process digest key", DIGEST_KEY_ENV, type(exc).__name__)
+    value = os.getenv(DIGEST_KEY_ENV, "").strip()
+    if not value:
+        logger.debug("%s is not set; using a per-process digest key", DIGEST_KEY_ENV)
         return None
     if len(value) < _MIN_KEY_CHARS:
         logger.warning(
@@ -60,7 +63,7 @@ def _digest_key() -> bytes:
 
 
 def reset_output_digest_key() -> None:
-    """Forget the resolved key (tests, or after rotating the configured secret)."""
+    """Forget the cached key (tests, or after changing the configured key)."""
 
     _digest_key.cache_clear()
 

@@ -37,9 +37,11 @@ This project follows a practical pre-1.0 changelog format:
   id, failure category, error types with the field paths they apply to, and a
   keyed digest of the reply (HMAC-SHA256, so a yes/no, enum or score reply
   cannot be recovered by hashing the possible values). Set
-  `MOZAIKS_AUDIT_DIGEST_KEY` (32+ characters, resolved like other app
-  secrets) to make digests comparable across restarts; without it a random
-  per-process key is used and digests compare only within that process. A
+  `MOZAIKS_AUDIT_DIGEST_KEY` in the process environment to a randomly
+  generated key of 32+ characters (for example `python -c "import secrets;
+  print(secrets.token_hex(32))"`); digests compare across workers and restarts
+  only if they share that key. Without it a random per-process key is used and
+  digests compare only within that process. A
   path keeps only what the schema proves
   (declared fields and list or tuple indexes); mapping keys and any component
   the schema cannot prove become `<redacted-field>`. The reply and Pydantic's
