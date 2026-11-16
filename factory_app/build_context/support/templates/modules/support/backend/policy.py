@@ -47,10 +47,8 @@ def support_request_query(
     query: dict[str, Any] = {}
     if scope == "user":
         query["requester_id"] = actor_id(ctx)
-    if scope == "app":
-        query["subject_app_id"] = subject_app_id(ctx, app_id)
-    elif scope == "workspace" and app_id:
-        query["subject_app_id"] = subject_app_id(ctx, app_id)
+    if app_id is not None:
+        subject_app_id(ctx, app_id)
     if status and status != "all":
         query["status"] = status
     return query

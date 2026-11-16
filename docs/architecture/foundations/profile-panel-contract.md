@@ -355,8 +355,10 @@ The Support pack registers an owner-only `support-tickets` profile page and a
 `support-inbox` Admin panel. Requests start in the shared widget. The shell
 projects the installed support module so the widget submits to that app's service.
 The app Admin registry must declare the `support` page referenced by the panel.
-App authorization grants `support.submit` to members and `support.read` and
-`support.manage` to the owner or support team. The backend enforces ticket access.
+App authorization grants `support.submit` to members, owners, and support teams.
+Owners and support teams also receive `support.read` and `support.manage`.
+The backend enforces ticket access within the app-bound support collection.
+The inbox includes older app-owned tickets whose subject annotation is `default`.
 
 A profile hydration action can return `profile_visible: false` to hide an empty
 page contribution. Missing values keep the page visible. Hydration errors also
