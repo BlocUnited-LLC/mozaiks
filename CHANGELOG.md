@@ -16,6 +16,7 @@ This project follows a practical pre-1.0 changelog format:
 ### Fixed
 
 - Generated messaging uses the profile workspace for conversation creation and replies. App-owned support connects the widget, requester profile, and authorized Admin inbox through module manifests.
+- Generated app requirements resolve BSON imports to PyMongo, preserving the MongoDB driver's bundled BSON implementation.
 
 - Retried friendship acceptance replays its stored event identity and returns the accepting user’s view. Default notification storage keeps one alert per scoped source event across retries.
 
