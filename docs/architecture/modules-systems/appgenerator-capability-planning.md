@@ -51,6 +51,14 @@ Meanings:
 
 ## Ownership Sources
 
+An explicitly selected managed pack in the plan resolves through the same
+verified source resolver used by assembly, including installed factory packs
+selected by ID. The verified source's `context.yaml` is normalized through the
+canonical descriptor projection, so its facade modules and pages match an
+operator-selected projection. Source version and digest pins are checked before
+those descriptors contribute surfaces. Merely listing a
+pack in an operator capability catalog does not select it or add its pages.
+
 Every planned capability should resolve to one ownership source.
 
 | Source | Owner | Generation rule |

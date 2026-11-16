@@ -9,6 +9,9 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
+from tests.test_appgenerator_managed_capability_smoke import pack_sources as pack_sources
+from tests.test_appgenerator_managed_capability_smoke import wallet_pack_root as wallet_pack_root
+
 WORKSPACE = Path(__file__).resolve().parents[1]
 
 
@@ -783,7 +786,7 @@ def test_app_build_plan_tool_accepts_service_foundation_provider_adapter_lane() 
     assert task["owned_paths"] == ["services/adapters/search/vector_provider.py"]
 
 
-def test_app_build_plan_tool_rejects_managed_capability_backend_adapter_lane() -> None:
+def test_app_build_plan_tool_rejects_managed_capability_backend_adapter_lane(pack_sources) -> None:
     module = _load_module(
         "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
         "tests.app_build_plan_tool_hosted_backend_adapter_reject",
@@ -813,7 +816,9 @@ def test_app_build_plan_tool_rejects_managed_capability_backend_adapter_lane() -
     ]
 
     with pytest.raises(ValueError, match="Managed capability adapters must be thin API clients"):
-        module.app_build_plan(AppBuildPlan=plan, context_variables=_Context())
+        module.app_build_plan(
+            AppBuildPlan=plan, context_variables=_Context(available_managed_capabilities=pack_sources),
+        )
 
 
 def test_app_build_plan_tool_accepts_refinement_harness_task() -> None:

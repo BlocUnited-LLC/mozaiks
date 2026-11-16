@@ -58,12 +58,12 @@ Covers helpers not in test_app_build_plan_helpers.py or test_app_build_plan_help
     - managed capability with requires_modules → included
     - managed capability with capabilities[].module → included
     - managed capability's own id excluded from result
-    - pack not in context available_packs → nothing added
+    - unresolved managed pack → source verification refusal
 
   _selected_managed_capability_descriptors:
     - non-managed capabilities excluded
-    - managed capability in available_packs → descriptor from available_packs
-    - managed capability not in available_packs → descriptor from pack itself
+    - selected managed capability → descriptor from verified source
+    - unresolved managed capability → source verification refusal
 
   _managed_facade_route_rules:
     - no managed capabilities → empty dict
@@ -107,6 +107,22 @@ from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_
 
 def _ctx(data: dict) -> ContextVariablesBridge:
     return ContextVariablesBridge(data)
+
+
+@pytest.fixture
+def projected_descriptor_unit(monkeypatch):
+    """Isolate descriptor consumers; source verification has integration coverage."""
+    from factory_app.workflows.AppGenerator.tools import app_build_plan as module
+
+    def descriptors(packs, *, context_variables):
+        available = _context_available_pack_map(context_variables)
+        return {
+            pack["capability_pack_id"]: available[pack["capability_pack_id"]]
+            for pack in packs
+            if pack.get("capability_source") == "managed_capability" and pack["capability_pack_id"] in available
+        }
+
+    monkeypatch.setattr(module, "_selected_managed_capability_descriptors", descriptors)
 
 
 # ---------------------------------------------------------------------------
@@ -491,19 +507,19 @@ class TestHostedBackingModuleIds:
         result = _managed_capability_backing_module_ids([], context_variables=None)
         assert result == frozenset()
 
-    def test_backing_module_field_included(self):
+    def test_backing_module_field_included(self, projected_descriptor_unit):
         ctx = self._ctx_with_hosted("billing", {"backing_module": "payment_provider_internal"})
         packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability"}]
         result = _managed_capability_backing_module_ids(packs, context_variables=ctx)
         assert "payment_provider_internal" in result
 
-    def test_requires_modules_included(self):
+    def test_requires_modules_included(self, projected_descriptor_unit):
         ctx = self._ctx_with_hosted("billing", {"requires_modules": ["payment_processor"]})
         packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability"}]
         result = _managed_capability_backing_module_ids(packs, context_variables=ctx)
         assert "payment_processor" in result
 
-    def test_capabilities_module_field_included(self):
+    def test_capabilities_module_field_included(self, projected_descriptor_unit):
         ctx = self._ctx_with_hosted("billing", {
             "capabilities": [{"capability_id": "pay", "module": "payment_gateway"}],
         })
@@ -511,7 +527,7 @@ class TestHostedBackingModuleIds:
         result = _managed_capability_backing_module_ids(packs, context_variables=ctx)
         assert "payment_gateway" in result
 
-    def test_managed_capability_own_id_excluded(self):
+    def test_managed_capability_own_id_excluded(self, projected_descriptor_unit):
         ctx = self._ctx_with_hosted("billing", {"backing_module": "billing"})
         packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability"}]
         result = _managed_capability_backing_module_ids(packs, context_variables=ctx)
@@ -525,10 +541,14 @@ class TestHostedBackingModuleIds:
         result = _managed_capability_backing_module_ids(packs, context_variables=ctx)
         assert "billing_backend" not in result
 
-    def test_pack_not_in_context_returns_empty(self):
+    def test_unresolved_managed_pack_cannot_hide_backing_ownership(self):
+        from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+            PackIntegrityError,
+        )
+
         packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability"}]
-        result = _managed_capability_backing_module_ids(packs, context_variables=_ctx({}))
-        assert result == frozenset()
+        with pytest.raises(PackIntegrityError, match="cannot be resolved"):
+            _managed_capability_backing_module_ids(packs, context_variables=_ctx({}))
 
 
 # ---------------------------------------------------------------------------
@@ -547,7 +567,7 @@ class TestSelectedManagedCapabilityDescriptors:
 # ---------------------------------------------------------------------------
 
 class TestApplySelectedPackFiles:
-    def test_pack_declared_facade_overrides_llm_managed_source(self):
+    def test_verified_selected_pack_corrects_misclassified_app_owned_facade(self):
         ctx = _ctx({"available_managed_capabilities": [{
             "id": "mozaikspay",
             "capability_source": "managed_capability",
@@ -562,11 +582,9 @@ class TestApplySelectedPackFiles:
             build_tasks=[],
             context_variables=ctx,
         )
-
         by_id = {pack["capability_pack_id"]: pack for pack in packs}
         assert by_id["billing_portal"]["capability_source"] == "generated_module"
-        assert by_id["billing_portal"]["pack_type"] == "custom_domain"
-        assert pages == []
+        assert {page["route"] for page in pages} == {"/billing", "/usage"}
         assert tasks == []
 
     def test_sparse_registry_preserves_reviewed_facade_and_approved_ownership(self):
@@ -626,23 +644,25 @@ class TestApplySelectedPackFiles:
         )
         assert packs[1]["primary_entities"] == []
 
-    def test_managed_capability_in_available_packs_returns_available_descriptor(self):
+    def test_managed_capability_in_available_packs_uses_verified_descriptor(self):
         ctx = _ctx({"available_managed_capabilities": [{
-            "id": "billing",
+            "id": "mozaikspay",
             "capability_source": "managed_capability",
             "facades": [{"module_id": "billing_portal"}],
         }]})
-        packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability"}]
+        packs = [{"capability_pack_id": "mozaikspay", "capability_source": "managed_capability"}]
         result = _selected_managed_capability_descriptors(packs, context_variables=ctx)
-        assert "billing" in result
-        # Descriptor from available_packs includes facades
-        assert "facades" in result["billing"]
+        assert result["mozaikspay"]["facades"][0]["module_id"] == "billing_portal"
+        assert result["mozaikspay"]["pack_source_path"]
 
-    def test_managed_capability_not_in_context_uses_pack_itself(self):
+    def test_unresolved_managed_capability_cannot_supply_its_own_descriptor(self):
+        from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+            PackIntegrityError,
+        )
+
         packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability", "custom": True}]
-        result = _selected_managed_capability_descriptors(packs, context_variables=_ctx({}))
-        assert "billing" in result
-        assert result["billing"]["custom"] is True
+        with pytest.raises(PackIntegrityError, match="cannot be resolved"):
+            _selected_managed_capability_descriptors(packs, context_variables=_ctx({}))
 
     def test_empty_pack_id_excluded(self):
         packs = [{"capability_source": "managed_capability"}]
@@ -659,7 +679,7 @@ class TestHostedFacadeRouteRules:
         result = _managed_facade_route_rules([], context_variables=None)
         assert result == {}
 
-    def test_facade_with_provider_actions_builds_rules(self):
+    def test_facade_with_provider_actions_builds_rules(self, projected_descriptor_unit):
         ctx = _ctx({"available_managed_capabilities": [{
             "id": "billing",
             "capability_source": "managed_capability",
@@ -674,7 +694,7 @@ class TestHostedFacadeRouteRules:
         assert rules[("mozaikspay", "create_checkout")] == "billing_portal"
         assert rules[("mozaikspay", "cancel_subscription")] == "billing_portal"
 
-    def test_facade_missing_provider_module_falls_back_to_pack_id(self):
+    def test_facade_missing_provider_module_falls_back_to_pack_id(self, projected_descriptor_unit):
         ctx = _ctx({"available_managed_capabilities": [{
             "id": "billing",
             "capability_source": "managed_capability",
@@ -688,7 +708,7 @@ class TestHostedFacadeRouteRules:
         # Falls back to pack_id as provider_module
         assert rules[("billing", "checkout")] == "billing_portal"
 
-    def test_facade_missing_facade_id_skipped(self):
+    def test_facade_missing_facade_id_skipped(self, projected_descriptor_unit):
         ctx = _ctx({"available_managed_capabilities": [{
             "id": "billing",
             "capability_source": "managed_capability",
@@ -772,7 +792,7 @@ class TestValidateUserFacingManagedCapabilityTasks:
 # 13. _managed_facade_route_rules — additional edge cases
 # ---------------------------------------------------------------------------
 
-def test_empty_provider_actions_produces_no_rules():
+def test_empty_provider_actions_produces_no_rules(projected_descriptor_unit):
     ctx = _ctx({"available_managed_capabilities": [{
         "id": "billing",
         "capability_source": "managed_capability",
