@@ -64,9 +64,9 @@ def _context(root=PACK, *, pinned=True):
     }]}}
 
 
-def _assembled_files():
+def _assembled_files(root=PACK):
     """The messaging pack assembled alone: its files, its composed UI roots and the compiled contract."""
-    context = _context()
+    context = _context(root)
     ui_contributions: list[dict[str, Any]] = []
     emitted = resolve_managed_capability_templates(
         context["capability_packs"], context_variables=context, ui_contributions=ui_contributions,

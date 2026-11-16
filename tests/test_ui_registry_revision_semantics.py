@@ -1,6 +1,7 @@
 """Actual pack-app assembly: repair overlays, page deletion, provenance and workspace paths."""
 import json
 import logging
+import shutil
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,55 @@ from tests.factory_context import factory_context, planned_tasks
 from tests.test_app_ui_composition import component, compose, contribution, retitled
 from tests.test_appgenerator_revision_baseline import _replace_archive
 from tests.test_appgenerator_revision_baseline import baseline as revision_baseline  # noqa: F401
-from tests.test_messaging_pack_persistence_composition import _assembled_files, _context
+from tests.test_messaging_pack_persistence_composition import (
+    PACK,
+)
+from tests.test_messaging_pack_persistence_composition import (
+    _assembled_files as _messaging_files,
+)
+from tests.test_messaging_pack_persistence_composition import (
+    _context as _messaging_context,
+)
+
+# These tests exercise pack-owned routes. Messaging now has profile-only UI, so
+# the fixture adds an explicit test-owned route to a disposable copy of the pack.
+_route_pack = None
+
+
+@pytest.fixture(scope="module", autouse=True)
+def route_ownership_pack(tmp_path_factory):
+    global _route_pack
+    root = tmp_path_factory.mktemp("pack-owned-route") / "messaging"
+    shutil.copytree(PACK, root, ignore=shutil.ignore_patterns("__pycache__"))
+    templates = root / "templates"
+    profile_barrel = (templates / "ui/index.js").read_text(encoding="utf-8")
+    page = component("Messages", path="ui/pages/custom/Messages.jsx", order=50)
+    roots = compose({"ui/index.js": profile_barrel, **{
+        str(path.relative_to(templates)).replace("\\", "/"): path.read_text(encoding="utf-8")
+        for path in (templates / "ui/components").glob("*.jsx")
+    }}, page)
+    for name, content in {**page, **roots}.items():
+        target = templates / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    contract = yaml.safe_load((root / "contract.yaml").read_text(encoding="utf-8"))
+    contract["required_outputs"].extend([
+        {"path": "ui/pages/custom/Messages.jsx", "owner": "templates"},
+        {"path": "ui/route_manifest.json", "owner": "templates"},
+    ])
+    (root / "contract.yaml").write_text(yaml.safe_dump(contract, sort_keys=False), encoding="utf-8")
+    _route_pack = root
+    yield
+    _route_pack = None
+
+
+def _context(root=None, *, pinned=True):
+    return _messaging_context(root or _route_pack, pinned=pinned)
+
+
+def _assembled_files():
+    return _messaging_files(_route_pack)
+
 
 EMPTY_CONTRACT = {"version": "1", "surfaces": [], "shared_collections": []}
 OLD_PAGE = "ui/pages/custom/old.jsx"

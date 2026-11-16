@@ -223,9 +223,10 @@ def test_declarative_and_custom_pages_compose_under_the_retained_page_title_role
         "brand/theme_config.json": json.dumps({"identity": {"name": "Theme"}, "ui": {"page": {"title": title}}}),
     }
     registered, issues = resolve_registered_component_files(files, source_label="composed")
-    assert not issues and {"Board", "Messages"} <= set(registered)
-    messages = files["ui/pages/custom/Messages.jsx"]
-    assert 'import { PageHeader } from "@mozaiks/chat-ui/ui";' in messages and "<h1" not in messages
+    assert not issues and {"Board", "MessagingProfileTab"} <= set(registered)
+    messages = files["ui/components/MessagingProfileTab.jsx"]
+    assert "<h1" not in messages
+    assert "ui/pages/custom/Messages.jsx" not in files
     assert scan_generated_bundle(files, capability_packs=rows) == []
 
     invalid = {**files, "brand/theme_config.json": json.dumps({"ui": {"page": {"title": {**title, "size": "huge"}}}})}
