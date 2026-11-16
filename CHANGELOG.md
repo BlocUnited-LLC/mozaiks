@@ -120,8 +120,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
-- Factory design agents receive verified selected-pack capabilities, action
-  identities and ownership boundaries while retaining app-specific design intent.
+- Factory design agents receive verified selected-pack capabilities, actions and
+  ownership boundaries while retaining app-specific design intent. The shipped
+  catalog no longer selects unrequested packs. Social 0.1.18 and Messaging
+  0.1.17 support DesignDocs; older pinned identities require review and update.
 - Notification `source_event: reference` also stores `actor: null`, retaining
   the minimal origin reference without changing the original attributed event.
   Existing records are not rewritten; envelope-mode retention stays unchanged.

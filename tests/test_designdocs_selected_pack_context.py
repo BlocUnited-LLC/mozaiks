@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 import yaml
 
 from mozaiksai.core.session.build_context import load_trusted_build_context
@@ -166,6 +167,37 @@ def test_operator_selection_resolves_the_shipped_pack_before_prompting(tmp_path,
     assert "Pack: content (source: generated_module)" in prompt
     assert "content.list_entries" in prompt
     assert "Pack: mozaikspay" not in prompt
+
+
+@pytest.mark.parametrize("selected", [[], ["content"], ["social"], ["messaging"], ["social", "messaging"]])
+def test_shipped_root_selection_controls_design_prompt(tmp_path, monkeypatch, selected):
+    factory = tmp_path / "factory_app"
+    root = factory / "build_context"
+    for name in ("content", "social", "messaging"):
+        shutil.copytree(ROOT / "factory_app/build_context" / name, root / name)
+    selection = root / "selection"
+    selection.mkdir()
+    (selection / "context.yaml").write_text(yaml.safe_dump({
+        "context_id": "selection",
+        "applies_to_workflows": ["DesignDocs"],
+        "assets": [],
+        "values": {"operator_capabilities": selected},
+        "projections": {"context_variables": {"operator_capabilities": {"from": "operator_capabilities"}}},
+    }), encoding="utf-8")
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(root))
+    monkeypatch.setenv("MOZAIKS_FACTORY_APP_PATH", str(factory))
+    definitions = yaml.safe_load((WORKFLOW / "context_variables.yaml").read_text(encoding="utf-8"))["definitions"]
+    policy = build_context_authority_policy(workflow_name="DesignDocs", definitions=definitions)
+    trusted = load_trusted_build_context(policy, build_context_root=root)
+    prompt = _prompt(_prompt_runner(ContextVariablesBridge(trusted)))
+
+    for pack, action in {
+        "content": "content.list_entries",
+        "social": "friends.send_friend_request",
+        "messaging": "messages.send_message",
+    }.items():
+        assert (action in prompt) == (pack in selected)
+    assert (HEADER in prompt) == bool(selected)
 
 
 def test_invalid_template_module_is_reported_without_exposing_its_payload(tmp_path, monkeypatch, caplog):
