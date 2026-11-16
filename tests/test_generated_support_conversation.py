@@ -231,7 +231,7 @@ async def test_admin_inbox_retains_legacy_default_subject_tickets(tmp_path):
     _materialize(tmp_path)
     executor = _executor(tmp_path)
     persistence = _Persistence()
-    created = await _dispatch(executor, persistence, "alice", ["support.submit"], "support", "create_support_request", {"message": "Legacy ticket"})
+    created = await _dispatch(executor, persistence, "alice", ["support.submit"], "support", "create_support_request", {"message": "Existing ticket"})
     request_id = created.data["request"]["request_id"]
     persistence.collection("support", "requests").rows[0]["subject_app_id"] = "default"
     permissions = ["support.submit", "support.read", "support.manage"]
