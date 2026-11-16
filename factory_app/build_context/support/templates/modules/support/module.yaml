@@ -18,6 +18,22 @@ permissions:
     description: Manage support queues, reply to requests, and update request status.
 
 actions:
+  - id: get_support_profile
+    description: Hydrate the requester profile after their first support request.
+    handler_method: get_support_profile
+    input_schema:
+      type: object
+      additionalProperties: false
+      properties: {}
+    output_schema:
+      type: object
+      required: [requests, total, profile_visible]
+      properties:
+        requests: { type: array }
+        total: { type: integer }
+        profile_visible: { type: boolean }
+    permissions: [support.submit]
+
   - id: create_support_request
     description: Create a support request with its linked messages thread and first message.
     handler_method: create_support_request

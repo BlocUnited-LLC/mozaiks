@@ -581,7 +581,8 @@ async def test_paired_messaging_is_selected_before_admission_and_preserves_domai
         assert "modules/messages/backend/service.py" in files
         registry, errors = resolve_registered_component_files(files, source_label=f"paired {presentation}")
         assert not errors
-        assert {"Messages", "MessagingProfileTab"} <= set(registry)
+        assert "MessagingProfileTab" in registry
+        assert "Messages" not in registry
         if presentation == "B":
             assert "PlanningBoard" in registry
             assert files["ui/pages/custom/board.jsx"] == BOARD_SOURCE.read_text(encoding="utf-8")

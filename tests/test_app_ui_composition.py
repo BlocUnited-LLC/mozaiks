@@ -78,11 +78,11 @@ def test_actual_pack_custom_and_declarative_pages_preserve_bytes_and_metadata():
     files = {**app, **pack, **shared}
     registered, issues = resolve_registered_component_files(files, source_label="composed")
     assert not issues
-    assert set(registered) == {"Board", "Messages", "MessagingProfileTab"}
+    assert set(registered) == {"Board", "MessagingProfileTab"}
     routes = json.loads(shared["ui/route_manifest.json"])["pages"]
-    assert [route["path"] for route in routes] == ["/board", "/messages"]
+    assert [route["path"] for route in routes] == ["/board"]
     assert routes[0] == json.loads(app["ui/route_manifest.json"])["pages"][0]
-    assert routes[1] == json.loads(pack["ui/route_manifest.json"])["pages"][0]
+    assert "ui/route_manifest.json" not in pack
     assert files["ui/pages/projects.yaml"] == app["ui/pages/projects.yaml"]
     assert not audit_app_ui_bundle_integrity(contribution("all", files)["files"])
     assert app == original_app and pack == original_pack
@@ -107,9 +107,9 @@ def test_selected_pack_releases_only_exclusive_implementations_before_page_admis
     context = {"capability_packs": [{"id": "messaging", "pack_source_path": str(ROOT / "factory_app/build_context/messaging")}]}
     exclusive = pack_owned_output_paths(context)
     assert not exclusive & SHARED_PACK_OUTPUT_PATHS
-    assert {"modules/messages/module.yaml", "ui/pages/custom/Messages.jsx"} <= exclusive
+    assert {"modules/messages/module.yaml", "ui/components/MessagingProfileTab.jsx"} <= exclusive
     plan = {"build_tasks": [{"task_id": "pages", "owned_paths": [
-        "ui/pages/custom/Board.jsx", "ui/index.js", "ui/route_manifest.json", "ui/pages/custom/Messages.jsx",
+        "ui/pages/custom/Board.jsx", "ui/index.js", "ui/route_manifest.json", "ui/components/MessagingProfileTab.jsx",
     ]}, {"task_id": "data", "owned_paths": ["data/contract.json"]}]}
     release_pack_owned_paths(plan, context)
     assert plan["build_tasks"][0]["owned_paths"] == ["ui/pages/custom/Board.jsx", "ui/index.js", "ui/route_manifest.json"]
@@ -322,7 +322,7 @@ async def test_actual_genesis_accumulated_copy_cannot_hide_competing_ui_owners(o
         def set(self, key, value):
             self[key] = value
 
-    files = component() if other_owner == "task" else _assembled_files()
+    files = component() if other_owner == "task" else {**_assembled_files(), **component("MessagingProfileTab", path="ui/pages/custom/Hijacked.jsx")}
     output = {"code_files": contribution("task:pages", files)["files"]}
     context = Context(factory_context({
         **_context(), "app_id": "genesis_collision", "code_files": output["code_files"],
@@ -332,7 +332,10 @@ async def test_actual_genesis_accumulated_copy_cannot_hide_competing_ui_owners(o
     }))
     result = await assemble_app_tasks(context_variables=context)
     assert not result["success"]
-    assert "Competing owners for route" in result["error"]
+    if other_owner == "task":
+        assert "Competing owners for route" in result["error"]
+    else:
+        assert "component" in result["error"].lower()
 
 
 @pytest.mark.asyncio
@@ -366,8 +369,8 @@ async def test_actual_revision_assembly_updates_app_route_and_retains_verified_p
     assert result["success"], result
     files = {file["filename"]: file["content"] for file in result["code_files"]}
     assert json.loads(files["ui/route_manifest.json"])["pages"] == manifest["pages"]
-    assert files["ui/index.js"].count('registerComponent("Messages"') == 1
-    for path in ("modules/messages/backend/policy.py", "ui/pages/custom/Messages.jsx", "ui/pages/custom/board.jsx"):
+    assert files["ui/index.js"].count('registerComponent("MessagingProfileTab"') == 1
+    for path in ("modules/messages/backend/policy.py", "ui/components/MessagingProfileTab.jsx", "ui/pages/custom/board.jsx"):
         assert files[path] == saved.files[path]
     assert saved.content.get_bundle.await_count == 2
     saved.content.get_bundle.assert_awaited_with("immutable-archive")
@@ -384,7 +387,7 @@ async def test_actual_revision_assembly_updates_app_route_and_retains_verified_p
 def test_admitted_overlay_supersedes_saved_and_unchanged_task_routes_in_revision(repaired):
     board = component(path="ui/pages/custom/board.jsx")
     zeta = component("Zeta", path="ui/pages/custom/zeta.jsx", order=20)
-    pack = component("Messages", path="ui/pages/custom/Messages.jsx", order=50)
+    pack = component("Messages", path="ui/components/MessagingProfileTab.jsx", order=50)
     saved = {**board, **zeta, **pack, **compose(board, zeta, pack)}
     # The task re-emits board exactly as saved; the repair retitles one route.
     repair = {"ui/route_manifest.json": retitled(saved["ui/route_manifest.json"], repaired, "Repaired")}

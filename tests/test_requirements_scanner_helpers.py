@@ -94,6 +94,14 @@ class TestExtractTopLevelImports:
 
 
 class TestScanRequirements:
+    def test_bson_imports_use_pymongo_distribution(self):
+        files = {
+            "modules/notes/backend/repo.py": "from bson import ObjectId\nfrom bson.json_util import dumps\n",
+            "modules/notes/backend/service.py": "import bson\nimport pymongo\n",
+        }
+
+        assert scan_requirements(files) == f"mozaiks=={__version__}\npymongo\n"
+
     def test_recorded_bundle_lists_only_framework_and_third_party_packages(self):
         fixture = Path(__file__).parent / "fixtures" / "runtime_smoke_good_bundle_fdfa818e.json"
         files = json.loads(fixture.read_text(encoding="utf-8"))["files"]

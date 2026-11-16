@@ -53,6 +53,7 @@ const PersistentChatWidget = ({
   pageContext = null,
   pagePath = null,
   freshStartPath = null,
+  supportModule = 'workspace_support',
 }) => {
   const {
     setConversationMode,
@@ -525,6 +526,9 @@ const PersistentChatWidget = ({
     pageUrl = null,
     severity = 'low',
   }) => {
+    if (!['support', 'workspace_support'].includes(supportModule)) {
+      throw new Error('Support is unavailable for this app.');
+    }
     const supportScope = await resolveSupportRequestScope({
       api,
       auth,
@@ -550,13 +554,16 @@ const PersistentChatWidget = ({
       message,
     });
     const supportToken = await auth?.getAccessToken?.();
-    const response = await fetch(`${getSupportApiBaseUrl(api, config)}/api/modules/workspace_support/create_support_request`, {
+    const requestPayload = supportModule === 'support'
+      ? { message: payload.message, severity: payload.severity, ...(payload.page_url ? { page_url: payload.page_url } : {}), ...(payload.page_title ? { page_title: payload.page_title } : {}) }
+      : payload;
+    const response = await fetch(`${getSupportApiBaseUrl(api, config)}/api/modules/${supportModule}/create_support_request`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(supportToken ? { Authorization: `Bearer ${supportToken}` } : {}),
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(supportModule === 'support' ? { params: requestPayload } : requestPayload),
     });
     if (!response.ok) {
       supportWarn('support_request:create:failed_http', {
@@ -566,6 +573,7 @@ const PersistentChatWidget = ({
       throw new Error(`Support request failed with ${response.status}`);
     }
     const created = await response.json();
+    if (created?.success === false) throw new Error(created.error || 'Support request could not be created.');
     supportTrace('support_request:create:success', {
       requestId: created?.request_id || created?.request?.request_id || created?.result?.request_id || created?.data?.request_id || null,
       appId: created?.app_id || created?.subject_app_id || created?.result?.app_id || created?.data?.app_id || resolvedAppId || null,
@@ -575,7 +583,7 @@ const PersistentChatWidget = ({
       responseKeys: created && typeof created === 'object' ? Object.keys(created) : [],
     });
     return created;
-  }, [api, auth, config, pageContext, resolvedAppId, resolvedUserId, user]);
+  }, [api, auth, config, pageContext, resolvedAppId, resolvedUserId, user, supportModule]);
 
   const handleSubmitSupport = useCallback(async () => {
     const text = supportMessage.trim();
@@ -590,7 +598,7 @@ const PersistentChatWidget = ({
         appId: resolvedAppId,
         error: error?.message || String(error || ''),
       });
-      setSupportError('Could not send the request. Open your profile support tab and try again.');
+      setSupportError('Could not send your request. Please try again.');
     }
     setSupportLoading(false);
   }, [createSupportRequest, openSupportThread, supportMessage, supportLoading]);

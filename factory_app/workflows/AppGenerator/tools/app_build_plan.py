@@ -2,7 +2,7 @@ import json
 import logging
 import re
 from collections.abc import Callable, Iterable
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, get_args
 
 from pydantic import Field
@@ -1117,9 +1117,7 @@ def _apply_selected_pack_files(
     context_variables: Any | None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Apply deterministic facade pages from selected packs."""
-    available_packs = _context_available_pack_map(context_variables)
-    if not available_packs:
-        return capability_packs, pages, build_tasks
+    selected_descriptors = _selected_managed_capability_descriptors(capability_packs, context_variables=context_variables)
 
     def _merge_missing_page_metadata(target: dict[str, Any], source: dict[str, Any]) -> None:
         for key in (
@@ -1143,12 +1141,7 @@ def _apply_selected_pack_files(
                 continue
             target[key] = value
 
-    selected_managed_capability_ids = {
-        _pack_id_from_descriptor(pack)
-        for pack in capability_packs
-        if isinstance(pack, dict) and str(pack.get("capability_source") or "").strip() == "managed_capability"
-    } - {""}
-    if not selected_managed_capability_ids:
+    if not selected_descriptors:
         return capability_packs, pages, build_tasks
 
     result_packs = [dict(pack) for pack in capability_packs]
@@ -1178,8 +1171,8 @@ def _apply_selected_pack_files(
         if surface.get("owner") == "app" and surface.get("surface_kind") == "module"
     }
 
-    for pack_id in sorted(selected_managed_capability_ids):
-        descriptor = available_packs.get(pack_id) or {}
+    for pack_id in sorted(selected_descriptors):
+        descriptor = selected_descriptors[pack_id]
         facades = _pack_facades(descriptor)
         for facade in facades:
             facade_id = str(facade.get("module_id") or facade.get("facade_id") or "").strip()
@@ -1245,16 +1238,47 @@ def _selected_managed_capability_descriptors(
     *,
     context_variables: Any | None,
 ) -> dict[str, dict[str, Any]]:
+    """Read selected descriptors from the same verified sources assembly materializes."""
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        PackIntegrityError,
+        verified_pack_selection,
+    )
+    from mozaiksai.core.session.build_context import (
+        load_build_context,
+        normalize_pack_descriptor,
+    )
+
     available_packs = _context_available_pack_map(context_variables)
     descriptors: dict[str, dict[str, Any]] = {}
+    unresolved: list[tuple[str, PackIntegrityError]] = []
     for pack in capability_packs:
         if not isinstance(pack, dict) or str(pack.get("capability_source") or "").strip() != "managed_capability":
             continue
         pack_id = _pack_id_from_descriptor(pack)
         if not pack_id:
             continue
-        descriptor = dict(available_packs.get(pack_id) or pack)
-        descriptors[pack_id] = descriptor
+        selected = _merge_available_pack_defaults(dict(pack), available_packs.get(pack_id))
+        try:
+            entry = verified_pack_selection(selected, context_variables=context_variables)
+        except PackIntegrityError as exc:
+            if any(selected.get(key) for key in ("pack_source_path", "version", "digest")):
+                raise
+            unresolved.append((pack_id, exc))
+            continue
+        if entry is None or entry["capability_source"] != "managed_capability":
+            continue
+        root = Path(entry["source_path"])
+        descriptor = normalize_pack_descriptor(load_build_context(root / "context.yaml"), context_root=root)
+        if descriptor.get("status", "active") != "active":
+            continue
+        descriptors[pack_id] = dict(descriptor)
+    facade_ids = {
+        str(facade.get("module_id") or facade.get("facade_id") or "")
+        for descriptor in descriptors.values() for facade in _pack_facades(descriptor)
+    }
+    for pack_id, error in unresolved:
+        if pack_id not in facade_ids:
+            raise error
     return descriptors
 
 
@@ -1519,15 +1543,14 @@ def _managed_capability_backing_module_ids(
     *,
     context_variables: Any | None,
 ) -> frozenset[str]:
-    available_packs = _context_available_pack_map(context_variables)
+    descriptors = _selected_managed_capability_descriptors(capability_packs, context_variables=context_variables)
     module_ids: set[str] = set()
     managed_capability_ids = {
         str(pack.get("capability_pack_id") or pack.get("id") or pack.get("pack_id") or "").strip()
         for pack in capability_packs
         if isinstance(pack, dict) and pack.get("capability_source") == "managed_capability"
     } - {""}
-    for pack_id in managed_capability_ids:
-        available = available_packs.get(pack_id) or {}
+    for available in descriptors.values():
         for key in ("backing_module",):
             value = str(available.get(key) or "").strip()
             if value:

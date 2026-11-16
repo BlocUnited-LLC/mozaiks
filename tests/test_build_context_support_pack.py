@@ -136,6 +136,7 @@ def test_support_module_declares_expected_actions() -> None:
     module_yaml = _read_yaml(TEMPLATES / "modules" / "support" / "module.yaml")
 
     assert _action_ids(module_yaml) == {
+        "get_support_profile",
         "create_support_request",
         "list_support_requests",
         "get_support_conversation",
@@ -284,18 +285,13 @@ def test_support_notifications_schema_version() -> None:
 # UI contracts
 # ---------------------------------------------------------------------------
 
-def test_support_route_manifest_declares_support_page() -> None:
-    manifest = json.loads(
-        _read_text(TEMPLATES / "ui" / "route_manifest.json")
-    )
-    pages = manifest.get("pages") or []
-    page_ids = {p["id"] for p in pages}
-    assert "support" in page_ids
-
-
-def test_support_ui_component_exists() -> None:
-    component = TEMPLATES / "ui" / "pages" / "custom" / "Support.jsx"
-    assert component.exists(), "Support.jsx component is required by contract"
+def test_support_registers_profile_and_admin_surfaces() -> None:
+    assert not (TEMPLATES / "ui" / "route_manifest.json").exists()
+    profile = _read_yaml(TEMPLATES / "modules/support/contracts/profile.yaml")
+    assert profile["pages"][0]["action"] == "get_support_profile"
+    admin = _read_yaml(TEMPLATES / "modules/support/contracts/admin.yaml")
+    assert admin["panels"][0]["permissions"] == ["support.read"]
+    assert (TEMPLATES / "ui/components/SupportProfileTab.jsx").exists()
 
 
 # ---------------------------------------------------------------------------

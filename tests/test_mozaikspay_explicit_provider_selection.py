@@ -64,7 +64,8 @@ def test_explicit_mozaiks_pay_provider_includes_public_pack_contract() -> None:
     normalized = detach(context.get("app_build_plan"))
     assert isinstance(normalized, dict)
     assert normalized["monetization_provider"] == "mozaiks_pay"
-    assert {pack["capability_pack_id"] for pack in normalized["capability_packs"]} == {"mozaikspay"}
+    assert {pack["capability_pack_id"] for pack in normalized["capability_packs"]} == {"mozaikspay", "billing_portal"}
+    assert {page["route"] for page in normalized["pages"]} == {"/", "/billing", "/usage"}
 
 
 def test_mozaiks_pay_and_entitlement_dispatch_are_mutually_exclusive() -> None:
@@ -88,7 +89,8 @@ def test_explicit_mozaiks_pay_selection_is_cached_without_auto_account_activatio
     normalized = detach(context.get("app_build_plan"))
     assert isinstance(normalized, dict)
     assert normalized["monetization_provider"] == "mozaiks_pay"
-    assert {pack["capability_pack_id"] for pack in normalized["capability_packs"]} == {"mozaikspay"}
+    assert {pack["capability_pack_id"] for pack in normalized["capability_packs"]} == {"mozaikspay", "billing_portal"}
+    assert {page["route"] for page in normalized["pages"]} == {"/", "/billing", "/usage"}
 
 
 def test_explicit_self_managed_selection_uses_entitlement_dispatch_only() -> None:

@@ -987,6 +987,10 @@ async def build_shell_config(
     shell_shortcuts: dict[str, Any] | None = None
     shell_navigation: dict[str, Any] | None = None
     shell_chrome: dict[str, Any] | None = None
+    result["support_module"] = next((
+        module_id for module_id in ("workspace_support", "support")
+        if (app_root / "modules" / module_id / "module.yaml").is_file()
+    ), None)
 
     try:
         if app_manifest:
