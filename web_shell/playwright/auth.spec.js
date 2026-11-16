@@ -87,8 +87,85 @@ async function mockIdentityProvider(page) {
     }
     throw new Error(`Unexpected identity request: ${url.pathname}`);
   });
-  return { exchanges: () => exchanges };
+  return { exchanges: () => exchanges, authorization: () => authorization };
 }
+
+test('owner handoff continues through OIDC and confirms app-authorized Admin access', async ({ page }) => {
+  const config = shellConfig();
+  config.auth.contract = structuredClone(config.auth.contract);
+  config.auth.contract.routes.login = '/owner-sign-in';
+  config.pages = config.pages.map(route => route.component === 'LoginPage' ? { ...route, path: '/owner-sign-in' } : route);
+  await mockBackend(page, config);
+  const identity = await mockIdentityProvider(page);
+  let checks = 0;
+  await page.route('**/api/admin/config', route => {
+    expect(route.request().headers().authorization).toBe('Bearer browser-access-token');
+    checks += 1;
+    return route.fulfill({ json: { pages: [] } });
+  });
+  await page.goto('/?owner=1');
+  await expect(page.getByRole('heading', { name: 'Owner access confirmed', exact: true })).toBeVisible();
+  await expect(page).toHaveURL(`${appOrigin}/owner-sign-in?owner=1`);
+  expect(identity.exchanges()).toBe(1);
+  expect(identity.authorization().has('prompt')).toBe(false);
+  expect(checks).toBeGreaterThan(0);
+  await page.getByRole('button', { name: 'Open app', exact: true }).click();
+  await expect(page).toHaveURL(`${appOrigin}/apps`);
+});
+
+for (const mode of ['disabled', 'absent-route', 'unsafe-route']) {
+  test(`root owner entry refuses ${mode} authentication`, async ({ page }) => {
+    const config = mode === 'disabled' ? localModeShellConfig() : shellConfig();
+    config.auth.contract = structuredClone(config.auth.contract);
+    if (mode === 'absent-route') delete config.auth.contract.routes.login;
+    if (mode === 'unsafe-route') config.auth.contract.routes.login = '//untrusted.example/login';
+    await mockBackend(page, config);
+    await page.goto('/?owner=1');
+    await expect(page.getByRole('heading', { name: 'Unable to open this app' })).toBeVisible();
+    await expect(page).toHaveURL(`${appOrigin}/?owner=1`);
+    await expect(page.getByRole('heading', { name: 'Owner access confirmed', exact: true })).toHaveCount(0);
+  });
+}
+
+test('ordinary app routes keep their query and normal sign-in behavior', async ({ page }) => {
+  await mockBackend(page);
+  await mockIdentityProvider(page);
+  await page.goto('/apps?owner=1');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page).toHaveURL(`${appOrigin}/apps?owner=1`);
+  await expect(page.getByRole('heading', { name: 'Owner access confirmed', exact: true })).toHaveCount(0);
+});
+
+test('owner handoff respects app denial despite an admin role in the identity token', async ({ page }) => {
+  await mockBackend(page);
+  const identity = await mockIdentityProvider(page);
+  await page.route('**/api/admin/config', route => route.fulfill({ status: 403, json: { detail: 'Owner access required' } }));
+  await page.goto('/login?owner=1');
+  await expect(page.getByRole('alert')).toContainText('This account has no Admin access');
+  await expect(page.getByRole('heading', { name: 'Owner access confirmed', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Sign in again', exact: true }).click();
+  await expect.poll(() => identity.exchanges()).toBe(2);
+  expect(identity.authorization().get('prompt')).toBe('login');
+  await expect(page.getByRole('alert')).toContainText('This account has no Admin access');
+});
+
+test('owner verification failure remains retryable and malformed success cannot confirm access', async ({ page }) => {
+  await mockBackend(page);
+  await mockIdentityProvider(page);
+  let state = 'unavailable';
+  await page.route('**/api/admin/config', route => route.fulfill(state === 'unavailable'
+    ? { status: 503, json: { detail: 'Unavailable' } }
+    : { json: state === 'malformed' ? {} : { pages: [] } }));
+  await page.goto('/login?owner=1');
+  await expect(page.getByRole('alert')).toContainText('Owner access could not be checked');
+  state = 'malformed';
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Owner access could not be checked');
+  await expect(page.getByRole('heading', { name: 'Owner access confirmed', exact: true })).toHaveCount(0);
+  state = 'allowed';
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Owner access confirmed', exact: true })).toBeVisible();
+});
 
 test('Factory login follows discovery and PKCE callback, restores a protected route, and exposes the exchanged token', async ({ page }) => {
   await mockBackend(page);
@@ -184,7 +261,7 @@ test('with authentication disabled /me and public profiles say sign-in is not en
 
 test('a forged callback shows failure without authenticated identity', async ({ page }) => {
   await mockBackend(page);
-  await page.goto('/auth/callback?code=unsolicited&state=unknown');
+  await page.goto('/auth/callback?code=unsolicited&state=unknown&owner=1');
   await expect(page.getByRole('heading', { name: 'Sign-in unsuccessful' })).toBeVisible();
   expect(await page.evaluate(() => window.mozaiksAuth.getAccessToken())).toBeNull();
   await page.getByRole('button', { name: 'Return to sign in' }).click();

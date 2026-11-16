@@ -37,6 +37,17 @@ ENV_EXAMPLE_PATHS = [
 ]
 
 
+def test_authenticated_exports_include_provider_owned_owner_setup_in_every_environment():
+    result = generate_deployment_artifacts(app_id="owner_app", auth_required=True)
+    for name in ENV_EXAMPLE_PATHS:
+        source = result["artifacts"][name]
+        assert "# Owner account setup" in source
+        assert "?owner=1" in source
+        assert "Self-hosters select their own OIDC provider" in source
+        assert "Hosted SSO" in source
+        assert "verified email must match app/app.json admins" in source
+
+
 def test_deploy_target_spec_validates_generic_container() -> None:
     spec = build_deploy_target_spec(
         app_id="demo_app",

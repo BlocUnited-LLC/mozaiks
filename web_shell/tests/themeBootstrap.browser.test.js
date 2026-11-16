@@ -49,6 +49,7 @@ test('theme bootstrap paints the app only after its own brand is ready', async t
           import { ChatUIProvider } from ${JSON.stringify(path.join(chatUi, 'context/ChatUIContext.jsx'))};
           import ErrorBoundary from ${JSON.stringify(path.join(chatUi, 'components/ErrorBoundary.jsx'))};
           export { themeProvider };
+          export { safeReturnPath } from ${JSON.stringify(path.join(chatUi, 'auth/authAdapter.js'))};
           export const componentRegistry = { hasComponent: () => true };
           export class WebSocketApiAdapter {}
           export const LoginPage = () => null;

@@ -19,7 +19,7 @@ test("materialized profile controls send friend requests, accept them, and reply
     import React from 'react'; import {createRoot} from 'react-dom/client';
     import {FriendListTab} from ${JSON.stringify(path.join(root, "factory_app/build_context/social/templates/ui/components/SocialProfileTabs.jsx"))};
     import Messages from ${JSON.stringify(path.join(root, "factory_app/build_context/messaging/templates/ui/components/MessagingProfileTab.jsx"))};
-    import Owner from ${JSON.stringify(path.join(root, "factory_app/workflows/AppGenerator/ui/OwnerAccessCard.jsx"))};
+    import Owner from ${JSON.stringify(path.join(root, "factory_app/workflows/_shared/ui/app_preview/OwnerAccessCard.jsx"))};
     window.fetch=async()=>Response.json({user_id:'charlie'}); window.actions=[]; window.requests=[{request_id:'incoming',requester_name:'Bob'}]; window.friends=[];
     window.messages=[{message_id:'one',sender_id:'bob',body:'Hello Alice'}];
     const threads=[{thread_id:'thread',title:'Bob'}];
