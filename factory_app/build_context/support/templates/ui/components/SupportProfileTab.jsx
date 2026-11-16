@@ -14,6 +14,7 @@ export default function SupportProfileTab({ operator = false }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [replying, setReplying] = useState(false)
+  const [threadLoading, setThreadLoading] = useState(false)
   const replyPending = useRef(false)
   const mounted = useRef(true)
   const selectedRequest = useRef(activeRequestId)
@@ -46,11 +47,13 @@ export default function SupportProfileTab({ operator = false }) {
   }, [activeRequestId, operator])
 
   const loadThread = useCallback(async (request) => {
+    setActiveThread(null)
+    setMessages([])
     if (!request?.message_thread_id) {
-      setActiveThread(null)
-      setMessages([])
+      setThreadLoading(false)
       return
     }
+    setThreadLoading(true)
     try {
       const result = await moduleAction('support', 'get_support_conversation', {
         request_id: request.request_id,
@@ -64,6 +67,8 @@ export default function SupportProfileTab({ operator = false }) {
       setActiveThread(null)
       setMessages([])
       setError(err.message || 'Support conversation could not be loaded.')
+    } finally {
+      if (mounted.current && selectedRequest.current === request.request_id) setThreadLoading(false)
     }
   }, [])
 
@@ -78,7 +83,8 @@ export default function SupportProfileTab({ operator = false }) {
   async function handleReply(event) {
     event.preventDefault()
     const body = newMessage.trim()
-    if (!body || !activeRequest?.message_thread_id || replyPending.current) return
+    if (!body || !activeRequest?.message_thread_id || replyPending.current || threadLoading
+        || activeThread?.thread_id !== activeRequest.message_thread_id) return
     replyPending.current = true
     setReplying(true)
     try {
@@ -117,7 +123,13 @@ export default function SupportProfileTab({ operator = false }) {
                   key={request.request_id}
                   type="button"
                   disabled={replying}
-                  onClick={() => setActiveRequestId(request.request_id)}
+                  onClick={() => {
+                    setActiveThread(null)
+                    setMessages([])
+                    setNewMessage('')
+                    setThreadLoading(true)
+                    setActiveRequestId(request.request_id)
+                  }}
                   className={`block w-full px-4 py-3 text-left text-sm ${activeRequestId === request.request_id ? 'bg-primary/10' : 'hover:bg-muted/40'}`}
                 >
                   <div className="font-medium text-foreground">{titleForRequest(request)}</div>
@@ -134,7 +146,7 @@ export default function SupportProfileTab({ operator = false }) {
             {activeRequest && <div className="mt-1 text-xs text-muted-foreground">{activeRequest.request_id}</div>}
           </div>
           <div className="flex-1 space-y-3 overflow-auto p-4">
-            {!activeRequest ? (
+            {threadLoading ? <p>Loading conversation...</p> : !activeRequest ? (
               <p className="text-sm text-muted-foreground">Choose a request to view the conversation.</p>
             ) : messages.length === 0 ? (
               <p className="text-sm text-muted-foreground">No messages are linked to this request yet.</p>
@@ -147,7 +159,7 @@ export default function SupportProfileTab({ operator = false }) {
               ))
             )}
           </div>
-          {activeThread && (
+          {activeThread && !threadLoading && activeThread.thread_id === activeRequest?.message_thread_id && (
             <form onSubmit={handleReply} className="flex gap-3 border-t border-border p-4">
               <input
                 aria-label="Reply to support request"

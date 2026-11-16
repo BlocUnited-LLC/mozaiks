@@ -21,7 +21,8 @@ for (const operator of [false, true]) {
         builder.onResolve({filter:/moduleApi\.js$/},()=>({path:'api',namespace:'fixture'}));
         builder.onLoad({filter:/.*/,namespace:'fixture'},()=>({loader:'js',contents:`export async function moduleAction(module,action,params){
           window.actions.push({module,action,params});
-          if(action==='list_support_requests')return {requests:[{request_id:'ticket',subject:'Account issue',message_thread_id:'thread'}],total:1};
+          if(action==='list_support_requests')return {requests:[{request_id:'ticket',subject:'Account issue',message_thread_id:'thread'},{request_id:'second',subject:'Other issue',message_thread_id:'second-thread'}],total:2};
+          if(action==='get_support_conversation'&&params.request_id==='second')return new Promise(resolve=>{window.resolveSecond=()=>resolve({success:true,thread:{thread_id:'second-thread'},messages:[{message_id:'second-message',body:'Second conversation'}]});});
           if(action==='get_support_conversation')return {success:true,thread:{thread_id:'thread'},messages:window.messages};
           if(action==='reply_support_request'){window.messages.push({message_id:'reply',body:params.body});return {success:true};}
           throw new Error('Unexpected action '+action);
@@ -47,5 +48,13 @@ for (const operator of [false, true]) {
     assert.ok(actions.some(row=>row.action==='reply_support_request'&&row.params.request_id==='ticket'));
     assert.equal(actions.filter(row=>row.module!=='support').length,0);
     assert.equal(await page.getByLabel('New request').count(),0);
+    await page.getByRole('button',{name:/Other issue/}).click();
+    await expect(page.getByText('Loading conversation...', {exact:true})).toBeVisible();
+    await expect(page.getByLabel('Reply to support request')).toHaveCount(0);
+    await expect(page.getByText('Please help',{exact:true})).toHaveCount(0);
+    await page.waitForFunction(()=>typeof window.resolveSecond==='function');
+    await page.evaluate(()=>window.resolveSecond());
+    await expect(page.getByText('Second conversation',{exact:true})).toBeVisible();
+    await expect(page.getByLabel('Reply to support request')).toHaveValue('');
   });
 }
