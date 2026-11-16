@@ -6,9 +6,14 @@ import hashlib
 import json
 from typing import Any
 
+from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.generator_support.module_role_grants import validate_access_policy
+from mozaiksai.core.workflow.generator_support.module_role_grants import (
+    ReviewedPackIdentity,
+    validate_access_policy,
+    verified_pack_authorization,
+)
 
 
 def validate_design_page_roles(experience_spec: Any, policy: dict[str, Any]) -> dict[str, list[str] | None]:
@@ -38,8 +43,15 @@ def validate_design_page_roles(experience_spec: Any, policy: dict[str, Any]) -> 
     return dict(sorted(result.items()))
 
 
-def access_policy_sha256(policy: dict[str, Any], experience_spec: Any = None) -> str:
-    reviewed = {"access_policy": policy, "page_roles": validate_design_page_roles(experience_spec, policy)}
+def access_policy_sha256(
+    policy: dict[str, Any], experience_spec: Any = None, *, pack_identities: Any = None,
+) -> str:
+    reviewed: dict[str, Any] = {"access_policy": policy, "page_roles": validate_design_page_roles(experience_spec, policy)}
+    if pack_identities:
+        identities = [ReviewedPackIdentity.model_validate(row).model_dump() for row in pack_identities]
+        if len({row["pack_id"] for row in identities}) != len(identities):
+            raise ValueError("access_policy review repeats a pack identity")
+        reviewed["pack_identities"] = sorted(identities, key=lambda row: row["pack_id"])
     encoded = json.dumps(reviewed, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
@@ -80,14 +92,24 @@ def _resolve_reviewed_design(context: Any) -> tuple[dict[str, Any] | None, dict[
             raise ValueError("access_policy grants are absent from the reviewed design")
         validate_design_page_roles(summary.get("experience_spec"), {"roles": [], "grants": []})
         return None, None
+    pack_authorization = verified_pack_authorization(context)
+    review = summary.get("access_policy_review")
+    reviewed_packs = review.get("pack_identities") if isinstance(review, dict) else None
+    current_packs = [identity.model_dump() for identity in pack_authorization.identities]
+    raw_policy = summary["access_policy"]
+    if (isinstance(raw_policy, dict) and raw_policy.get("grants") and current_packs) or reviewed_packs:
+        recorded = [ReviewedPackIdentity.model_validate(row).model_dump() for row in (reviewed_packs or [])]
+        if sorted(recorded, key=lambda row: row["pack_id"]) != current_packs:
+            raise ValueError("access_policy review does not match the selected pack identities; review DesignDocs again")
     policy = validate_access_policy(
-        summary["access_policy"], data_contract=summary.get("data_contract"),
-        design_surface_map=summary.get("surface_map"),
+        raw_policy, data_contract=summary.get("data_contract"),
+        design_surface_map=summary.get("surface_map"), pack_authorization=pack_authorization,
     )
     page_roles = validate_design_page_roles(summary.get("experience_spec"), policy)
-    review = summary.get("access_policy_review")
     if not isinstance(review, dict) or (
-        review.get("policy_sha256") != access_policy_sha256(policy, summary.get("experience_spec"))
+        review.get("policy_sha256") != access_policy_sha256(
+            policy, summary.get("experience_spec"), pack_identities=reviewed_packs,
+        )
         or review.get("target_app_id") != binding.target_app_id
         or not review.get("build_id")
     ):
@@ -120,6 +142,22 @@ def _resolve_reviewed_design(context: Any) -> tuple[dict[str, Any] | None, dict[
 
 def resolve_design_access_policy(context: Any) -> dict[str, Any] | None:
     return _resolve_reviewed_design(context)[0]
+
+
+def resolve_authored_module_access_policy(context: Any) -> dict[str, Any] | None:
+    """Project the reviewed policy to generated modules; pack manifests remain pack-owned."""
+    policy, summary = _resolve_reviewed_design(context)
+    if policy is None or summary is None:
+        return policy
+    pack_modules = set(verified_pack_authorization(context).actions)
+    if not pack_modules:
+        return policy
+    owners = {
+        collection["name"]: owner
+        for owner, kind, collection in iter_data_contract_collections(summary.get("data_contract"))
+        if kind == "module"
+    }
+    return {**policy, "grants": [grant for grant in policy["grants"] if owners.get(grant["collection"]) not in pack_modules]}
 
 
 def resolve_design_page_roles(context: Any) -> dict[str, list[str] | None] | None:

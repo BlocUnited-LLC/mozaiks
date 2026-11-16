@@ -445,7 +445,7 @@ models:
           create_project_update/update_project_update/delete_project_update.
           Do not singularize collection reads or invent a custom alias for them.
           Granting either canonical read requires both across roles; custom read
-          grants imply no canonical read grants. Any granted collection with
+          grants imply no canonical read grants. Any granted authored collection with
           module_action writes still requires all three canonical write grants
           across roles, counted across grant rows rather than per row. For
           example, when the approved concept has submitter and approver roles,
@@ -453,6 +453,9 @@ models:
           update_<entity> and delete_<entity> for the same collection. Use this
           split only when it matches the approved roles. No permission strings
           or wildcards.
+          A verified selected pack uses its own declared module action ids instead
+          of synthetic canonical CRUD. Every action sharing a permission must be
+          explicitly granted to the same role before that permission is granted.
   DesignAccessPolicy:
     type: model
     fields:

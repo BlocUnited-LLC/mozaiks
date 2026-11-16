@@ -80,8 +80,8 @@ agents:
       get_project_updates; the writes are create_project_update,
       update_project_update, and delete_project_update. Do not singularize a
       collection read or use the collection name in place of the write entity.
-      A custom read grant does not grant either canonical read. If a collection uses module_action writes and
-      any role grant, cover all three canonical writes across the declared roles.
+      A custom read grant does not grant either canonical read. If an authored collection uses module_action
+      writes and any role grant, cover all three canonical writes across the declared roles.
       Omitting one is rejected, because an ungranted canonical write would
       otherwise be open to every signed-in user. When the concept keeps members
       from editing or deleting those records directly (for example, an approver
@@ -97,6 +97,13 @@ agents:
       changes. Bind each module action to exactly one collection across ALL roles;
       an action that accesses multiple collections still has one grant anchor.
       Multiple roles may grant that same action only under that same collection.
+      For a selected verified pack, use its real module action ids and the exact
+      pack-owned collection as the grant anchor; do not invent canonical CRUD
+      actions for the pack. A role receiving a pack permission must explicitly
+      list every action that shares that permission, including actions in other
+      selected modules. The owner reviews the actual actions and pack identities.
+      Leave selected pack data to deterministic composition; do not replace its
+      collections or field definitions with model-authored copies.
       Include every role that needs a protected action, including ordinary
       submitters; granting an action only to admin excludes other users.
       The reserved admin role uses verified identity claims or the app's existing
