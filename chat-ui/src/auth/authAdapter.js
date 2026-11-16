@@ -314,7 +314,8 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {}, aut
       notify();
       return () => { listeners.delete(callback); if (!listeners.size) clearTimeout(expirationTimer); };
     },
-    login: async ({ returnPath } = {}) => {
+    login: async ({ returnPath, reauthenticate = false } = {}) => {
+      if (typeof reauthenticate !== 'boolean') throw new Error('Reauthentication must be a boolean');
       if (authorizationTransport && authorizationPending) throw new Error('Authorization is already in progress');
       if (authorizationTransport) authorizationPending = true;
       const revision = sessionRevision;
@@ -331,6 +332,7 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {}, aut
         sessionStorage.setItem(transactionKey, JSON.stringify(pending));
         const url = new URL(document.authorization_endpoint);
         for (const [key, value] of Object.entries({ client_id: clientId, redirect_uri: redirectUri, response_type: 'code', scope, code_challenge: challenge, code_challenge_method: 'S256', state, nonce })) url.searchParams.set(key, value);
+        if (reauthenticate) url.searchParams.set('prompt', 'login');
         if (!authorizationTransport) { window.location.assign(url.href); return; }
         const callbackUrl = await authorizationTransport.open({ url: url.href, callbackUri: redirectUri });
         if (sessionRevision !== revision) throw new Error('Sign-in was cancelled. Restart sign-in.');

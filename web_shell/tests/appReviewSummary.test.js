@@ -518,9 +518,16 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
           finally { setStarting(false); }
         } };
       }`,
-    '../../_shared/ui/app_preview/useSandbox': `export const useSandbox = () => ({syncAndRestart(){}, stopPreview(){}});`,
-    './CodeEditorPane': `export default function Editor({content}) { return <output aria-label="Editor contents">{content}</output>; }`,
-    '../../_shared/ui/app_preview/PreviewPane': `export default function Preview({artifactVersionId}) { return <output aria-label="Preview version">{artifactVersionId}</output>; }`,
+    '../../_shared/ui/app_preview/useSandbox': `import {useState} from 'react';
+      export function useSandbox() { const [url,setUrl]=useState(null); return {
+        livePreviewUrl:url, previewArtifactId:url ? 'baseline' : null,
+        syncAndRestart(){setUrl('https://preview.example.test');}, stopPreview(){}}; }`,
+    './CodeEditorPane': `export default function Editor({content,onChange}) { return <>
+      <output aria-label="Editor contents">{content}</output>
+      <textarea aria-label="Edit fixture file" value={content} onChange={event=>onChange(event.target.value)}/></>; }`,
+    '../../_shared/ui/app_preview/PreviewPane': `export default function Preview({artifactVersionId,onStartPreview}) { return <>
+      <output aria-label="Preview version">{artifactVersionId}</output>
+      <button onClick={onStartPreview}>Start owner preview</button></>; }`,
     '../../adapters/api.js': `export const authFetch = (...args) => fetch(...args);`,
     '../../../app/admin/pages/studioApi.js': 'export const studioFetch = (...args) => fetch(...args);',
   };
@@ -544,6 +551,10 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
           {id:'close', label:'Return to editor'},
         ]} : {}),
         generated_files:{'README.md':'Original contents', 'notes.md':'Original notes',
+          ...(new URLSearchParams(location.search).has('owner-test') ? {
+            'app.json':JSON.stringify({authRequired:true,admins:['owner-a@example.test']}),
+            'ui/route_manifest.json':JSON.stringify({pages:[{path:'/original-login',component:'LoginPage'}]})
+          } : {}),
           ...(new URLSearchParams(location.search).has('theme')
             ? {'brand/theme_config.json':JSON.stringify({theme:{primary:'teal'}})} : {})}, app_validation_status:'passed',
         app_validation_strategy_used:'parent-only-strategy',
@@ -640,6 +651,25 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
   t.after(() => new Promise(resolve => {server.closeAllConnections(); server.close(resolve);}));
   const browser = await chromium.launch({headless:true});
   t.after(() => browser.close());
+  await t.test('editing draft owner or login route preserves native running-preview entry', async () => {
+    scenario = {status:'planned', validation:'passed', saved:true};
+    const page = await browser.newPage();
+    try {
+      await page.goto(`http://127.0.0.1:${server.address().port}/?owner-test=1`);
+      await page.getByRole('button', {name:'Start owner preview',exact:true}).click();
+      const action = page.getByRole('link', {name:'Open as owner',exact:true});
+      await expect(action).toHaveAttribute('href','https://preview.example.test/?owner=1');
+      await page.getByRole('button', {name:'Code',exact:true}).click();
+      await page.getByRole('button', {name:'app.json',exact:true}).click();
+      await page.getByRole('textbox', {name:'Edit fixture file'}).fill(JSON.stringify({authRequired:true,admins:['owner-b@example.test']}));
+      await expect(page.getByText('Draft owner email · owner-b@example.test', {exact:true})).toBeVisible();
+      await expect(page.getByText(/The running preview may differ from this draft/)).toBeVisible();
+      await page.getByRole('button', {name:'ui',exact:true}).click();
+      await page.getByRole('button', {name:'route_manifest.json',exact:true}).click();
+      await page.getByRole('textbox', {name:'Edit fixture file'}).fill(JSON.stringify({pages:[{path:'/unsaved-login',component:'LoginPage'}]}));
+      await expect(action).toHaveAttribute('href','https://preview.example.test/?owner=1');
+    } finally { await page.close(); }
+  });
   await t.test('mobile workbench panes use the available width in Split and Code', async () => {
     scenario = {status:'planned', validation:'passed', saved:true};
     const page = await browser.newPage({viewport:{width:390,height:664}});
