@@ -456,7 +456,7 @@ def load_trusted_build_context(
     shipped_root = factory_root is not None and (factory_root / "build_context").resolve() == root.resolve()
     projected: dict[str, Any] = {}
     workspace_pack_ids: set[str] = set()
-    shipped_packs: list[tuple[Path, Mapping[str, Any]]] = []
+    shipped_packs: list[tuple[Path, dict[str, Any]]] = []
     for context_path in discover_build_context_files(root, policy.workflow_name):
         config = load_build_context(context_path)
         if isinstance(config.get("pack"), Mapping):
