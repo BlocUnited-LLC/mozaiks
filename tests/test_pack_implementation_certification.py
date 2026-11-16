@@ -53,7 +53,7 @@ OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant", workspace_id="elsewher
 OTHER_TENANT = ExecutionAccessScopeRef(tenant_id="rival", workspace_id="workspace")
 
 EXPECTED_MODULE_COUNT = 11
-EXPECTED_ACTION_COUNT = 72
+EXPECTED_ACTION_COUNT = 73
 
 
 def _discover_split_modules() -> list[tuple[str, str]]:
@@ -197,7 +197,7 @@ async def _resolved_module_for(content_store, staged):
 
 
 def test_census_is_pinned() -> None:
-    """The canonical corpus is exactly 10 split modules carrying 67 actions."""
+    """Pin the corpus including the support profile hydration action."""
     assert len(SPLIT_MODULES) == EXPECTED_MODULE_COUNT, SPLIT_MODULES
     total_actions = 0
     for pack, module in SPLIT_MODULES:
