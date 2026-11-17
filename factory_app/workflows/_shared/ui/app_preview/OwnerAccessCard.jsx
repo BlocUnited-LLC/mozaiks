@@ -1,4 +1,4 @@
-function readJson(files, name) {
+export function readJson(files, name) {
   try {
     const value = JSON.parse(files?.[name] || files?.[`app/${name}`] || '{}');
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};

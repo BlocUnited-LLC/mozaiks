@@ -11,7 +11,8 @@ const factoryTheme = JSON.parse(readFileSync(new URL('../../factory_app/app/bran
 function shellConfig() {
   return {
     appName: 'Factory Auth Acceptance', appId: 'factory-auth-acceptance', landing_spot: '/apps',
-    pages: factoryRoutes.filter(route => ['/login', '/auth/callback', '/apps'].includes(route.path)),
+    pages: [...factoryRoutes.filter(route => ['/login', '/auth/callback', '/apps'].includes(route.path)),
+      { path: '/admin', component: 'AdminPortal', meta: { requiresAuth: true, appShell: false } }],
     auth: {
       required: true,
       contract: factoryContract,
@@ -109,8 +110,72 @@ test('owner handoff continues through OIDC and confirms app-authorized Admin acc
   expect(identity.exchanges()).toBe(1);
   expect(identity.authorization().has('prompt')).toBe(false);
   expect(checks).toBeGreaterThan(0);
-  await page.getByRole('button', { name: 'Open app', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Admin', exact: true }).click();
+  await expect(page).toHaveURL(`${appOrigin}/admin`);
+  await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
+});
+
+test('login inspection retains customer design and waits for an explicit click, including after sign-in', async ({ page }) => {
+  const config = shellConfig();
+  config.auth.contract = structuredClone(config.auth.contract);
+  config.auth.contract.routes.login = '/customer-login';
+  config.pages = config.pages.map(route => route.component === 'LoginPage' ? { ...route, path: '/customer-login' } : route);
+  await mockBackend(page, config);
+  const identity = await mockIdentityProvider(page);
+  const identityRequests = [];
+  page.on('request', request => { if (request.url().startsWith(issuer)) identityRequests.push(request.url()); });
+  await page.goto('/?inspect=login&owner=1');
+  await expect(page).toHaveURL(`${appOrigin}/customer-login?inspect=login`);
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+  expect(identityRequests).toEqual([]);
+  await expect(page.getByText('Set up your owner account', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page).toHaveURL(`${appOrigin}/apps`);
+  expect(identity.exchanges()).toBe(1);
+  expect(identity.authorization().has('prompt')).toBe(false);
+  await page.goto('/customer-login?inspect=login');
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible();
+  expect(identity.exchanges()).toBe(1);
+  await expect(page.getByRole('textbox')).toHaveCount(0);
+  await expect(page.getByText('browser-access-token', { exact: true })).toHaveCount(0);
+  await page.goto('/customer-login');
+  await expect(page).toHaveURL(`${appOrigin}/apps`);
+});
+
+test('login inspection survives cancellation, back navigation and repeated clicks', async ({ page }) => {
+  await mockBackend(page);
+  const identity = await mockIdentityProvider(page);
+  let attempts = 0;
+  await page.route(`${issuer}/authorize*`, async route => {
+    attempts += 1;
+    await route.fulfill({ contentType: 'text/html', body: '<h1>Provider account selection</h1>' });
+  });
+  await page.goto('/login?inspect=login');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).evaluate(button => { button.click(); button.click(); });
+  await expect(page.getByRole('heading', { name: 'Provider account selection' })).toBeVisible();
+  expect(attempts).toBe(1);
+  expect(identity.exchanges()).toBe(0);
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Provider account selection' })).toBeVisible();
+  expect(attempts).toBe(2);
+});
+
+test('inspection presentation cannot confirm denied Admin access', async ({ page }) => {
+  await mockBackend(page);
+  const identity = await mockIdentityProvider(page);
+  await page.route('**/api/admin/config', route => route.fulfill({ status: 403, json: { detail: 'Forbidden' } }));
+  await page.goto('/login?owner=1&inspect=login');
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+  expect(identity.exchanges()).toBe(0);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page).toHaveURL(`${appOrigin}/apps`);
+  await page.goto('/login?owner=1');
+  await expect(page.getByRole('alert')).toContainText('This account has no Admin access');
+  await expect(page.getByRole('button', { name: 'Open Admin', exact: true })).toHaveCount(0);
 });
 
 for (const mode of ['disabled', 'absent-route', 'unsafe-route']) {

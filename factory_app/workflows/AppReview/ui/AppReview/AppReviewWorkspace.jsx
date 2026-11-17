@@ -85,6 +85,7 @@ export default function AppReviewWorkspace({ payload = {} }) {
       {body && <OwnerAccessCard files={(selectedPreview || body).generated_files}
         previewUrl={preview.previewArtifactId === selectedPreview?.artifact_version_id ? preview.livePreviewUrl : null} />}
       <PreviewPane
+        files={(selectedPreview || body)?.generated_files}
         previewUrl={preview.livePreviewUrl}
         artifactVersionId={previewVersion}
         previewArtifactId={preview.previewArtifactId}
