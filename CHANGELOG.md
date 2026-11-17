@@ -15,6 +15,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Profile support tickets and app support inboxes keep reply fields usable on narrow mobile screens.
+
 - Signed-in Studio builders can open App Dashboard from their account menu and resolve the current build through its owner-scoped saved app binding.
 
 - Factory compiles selected-pack action permissions only from owner-reviewed
