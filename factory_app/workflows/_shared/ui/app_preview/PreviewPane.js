@@ -5,9 +5,11 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ExternalLink, Play, RefreshCw } from 'lucide-react';
+import { readJson } from './OwnerAccessCard.jsx';
 
 const PreviewPane = ({
   previewUrl,
+  files = null,
   sandboxStatus,
   sandboxSyncing,
   sandboxError,
@@ -29,6 +31,9 @@ const PreviewPane = ({
   const [iframeKey, setIframeKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showApp, setShowApp] = useState(false);
+  const hasLogin = readJson(files, 'app.json').authRequired === true;
+  const inspectLogin = hasLogin && !showApp;
 
   const url = useMemo(() => {
     if (!previewUrl || typeof previewUrl !== 'string') return null;
@@ -36,9 +41,19 @@ const PreviewPane = ({
     return trimmed.length ? trimmed : null;
   }, [previewUrl]);
 
+  const frameUrl = useMemo(() => {
+    if (!url || !inspectLogin) return url;
+    try {
+      return new URL('/?inspect=login', url).href;
+    } catch {
+      return url;
+    }
+  }, [url, inspectLogin]);
+
   useEffect(() => {
     setLoading(true);
     setError(null);
+    setShowApp(false);
   }, [url]);
 
   const refresh = useCallback(() => {
@@ -142,6 +157,10 @@ const PreviewPane = ({
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-black/40 border-b border-white/10">
         {previewIdentity}
         <div className="flex flex-wrap items-center gap-2">
+          {hasLogin && <button type="button" onClick={() => { setShowApp(value => !value); refresh(); }}
+            className="rounded-lg border border-border px-3 py-2 text-xs text-foreground">
+            {inspectLogin ? 'App screen' : 'Login screen'}
+          </button>}
           {stopControl}
           {onStartPreview && canStartPreview && !sandboxRecoveryError && (
             <button
@@ -220,7 +239,7 @@ const PreviewPane = ({
         )}
         <iframe
           key={iframeKey}
-          src={url}
+          src={frameUrl}
           title="Draft app preview"
           className="w-full h-full border-0"
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups"

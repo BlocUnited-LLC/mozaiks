@@ -6577,6 +6577,13 @@ const ChatPage = () => {
                     isEmbedded={isMobileView}
                     viewMode={isViewMode}
                     onExitView={exitViewMode}
+                    onExpand={() => {
+                      viewArtifactSnapshotRef.current = {
+                        layoutMode, isOpen: isSidePanelOpen,
+                      };
+                      setLayoutMode('view');
+                      setIsSidePanelOpen(true);
+                    }}
                     messages={currentArtifactMessages}
                     loading={artifactPanelLoading}
                     chatId={currentChatId}

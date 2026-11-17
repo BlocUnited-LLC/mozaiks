@@ -19,6 +19,12 @@ This project follows a practical pre-1.0 changelog format:
 
 - Signed-in Studio builders can open App Dashboard from their account menu and resolve the current build through its owner-scoped saved app binding.
 
+- Authenticated draft previews retain the customer login for inspection before
+  explicit sign-in, including when an app session already exists. Artifact
+  controls switch between login and app views without changing authorization.
+- ChatUI artifacts expose expand and return controls through existing workspace
+  view state, preserving the conversation and mounted preview.
+
 - Factory compiles selected-pack action permissions only from owner-reviewed
   role grants and the exact verified pack identities and action requirements.
 - Generated messaging uses the profile workspace for conversation creation and replies. App-owned support connects the widget, requester profile, and authorized Admin inbox through module manifests.

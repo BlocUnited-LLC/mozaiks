@@ -977,6 +977,56 @@ test('durable preview recovery preserves actual identity and cleanup across relo
   }
 });
 
+test('authenticated artifact initially inspects login and switches views through artifact chrome', async t => {
+  const bundle = await build({
+    stdin: { resolveDir: shell, loader: 'jsx', contents: `
+      import React from 'react'; import {createRoot} from 'react-dom/client';
+      import PreviewPane from ${JSON.stringify(pane)};
+      createRoot(document.getElementById('root')).render(<PreviewPane
+        files={{'app.json':'{"authRequired":true}'}} sandboxStatus="running"
+        previewUrl={new URLSearchParams(location.search).get('preview') || location.origin + '/app?session=owned-preview'} />);
+    ` },
+    bundle: true, write: false, jsx: 'automatic', loader: {'.js': 'jsx'},
+    nodePaths: [path.join(shell, 'node_modules')], define: {'process.env.NODE_ENV':'"test"'},
+  });
+  const server = http.createServer((req, res) => {
+    if (req.url === '/fixture.js') {
+      res.setHeader('Content-Type', 'text/javascript'); res.end(bundle.outputFiles[0].text); return;
+    }
+    res.setHeader('Content-Type', 'text/html');
+    if (req.url.startsWith('/?inspect=login')) { res.end('<h1>Customer sign in</h1>'); return; }
+    if (req.url.startsWith('/app')) { res.end('<h1>Customer app</h1>'); return; }
+    if (req.url === '/not-a-url') { res.end('<h1>Unresolved preview</h1>'); return; }
+    res.end('<div id="root"></div><script type="module" src="/fixture.js"></script>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => {server.closeAllConnections(); server.close(resolve);}));
+  const browser = await chromium.launch({headless:true});
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  await page.goto(origin);
+  const frame = page.frameLocator('iframe');
+  await expect(frame.getByRole('heading', {name:'Customer sign in'})).toBeVisible();
+  await expect(page.locator('iframe')).toHaveAttribute('src', origin + '/?inspect=login');
+  await expect(page.getByRole('button', {name:'App screen',exact:true})).toBeVisible();
+  await page.getByRole('button', {name:'App screen',exact:true}).click();
+  await expect(frame.getByRole('heading', {name:'Customer app'})).toBeVisible();
+  await page.getByRole('button', {name:'Login screen',exact:true}).click();
+  await expect(frame.getByRole('heading', {name:'Customer sign in'})).toBeVisible();
+  await page.getByRole('button', {name:'Refresh preview',exact:true}).click();
+  await expect(frame.getByRole('heading', {name:'Customer sign in'})).toBeVisible();
+  await expect(frame.getByRole('button', {name:'App screen'})).toHaveCount(0);
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  for (const preview of ['/app?session=relative', 'not-a-url']) {
+    await page.goto(origin + '/?preview=' + encodeURIComponent(preview));
+    await expect(page.getByRole('button', {name:'App screen',exact:true})).toBeVisible();
+    await expect(page.locator('iframe')).toHaveAttribute('src', preview);
+  }
+  assert.deepEqual(errors, []);
+});
+
 test('standalone shell identifies drafts through loading and navigation without blocking app controls', async (t) => {
   const bundles = {};
   for (const preview of [false, true]) {
