@@ -93,6 +93,7 @@ function renderShellComponent(file, navigation, props = {}) {
     '../../providers/NavigationProvider': { useNavigation: () => navigation },
     '../../navigation/useNavigationActions': { useNavigationActions: () => () => {} },
     '../../navigation/shellActions': shellActions,
+    '../../auth/authAdapter.js': { safeReturnPath: (path, fallback) => path || fallback },
     '../../context/ChatUIContext': { useChatUI: () => ({ user: localUser, login: () => {}, logout: () => {} }) },
     'react-icons/fi': { FiMessageCircle: () => React.createElement('span') },
     './ShellNavigationIcon.jsx': {

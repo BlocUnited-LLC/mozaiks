@@ -15,6 +15,7 @@ import {
   resolveShellActions,
 } from "../../navigation/shellActions";
 import { useChatUI } from "../../context/ChatUIContext";
+import { safeReturnPath } from "../../auth/authAdapter.js";
 import { useAppEventBus } from "../../ui/hooks/useAppEventBus.js";
 import { clearNotifications, fetchNotificationCount } from "./notificationApi.js";
 import "./header-styles.css";
@@ -165,7 +166,8 @@ const Header = ({
     pages,
   } = useNavigation();
   const handleNavigationItem = useNavigationActions();
-  const { login, logout } = useChatUI();
+  const { login, logout, api } = useChatUI();
+  const dashboardLocation = useRef(null);
 
   const headerConfig = {
     ...DEFAULT_HEADER_CONFIG,
@@ -177,6 +179,7 @@ const Header = ({
   const brandConfig = { name: "MozaiksAI", ...(chatTheme?.branding || {}) };
 
   const currentUser = user || { id: "anonymous", firstName: "Guest", userPhoto: null };
+  dashboardLocation.current = JSON.stringify([location.pathname, location.search, currentUser.id, currentUser.user_id]);
   const userRoles = useMemo(() => getUserRoles(currentUser), [currentUser]);
   const shellActionContext = useMemo(
     () => deriveShellActionContext({ location, route, shellMode, user: currentUser, roles: userRoles }),
@@ -215,7 +218,8 @@ const Header = ({
           .map((page) => ({ id: 'app-home', label: page.label || 'Home', action: 'navigate', path: page.path })),
         ...getDefaultProfileMenu(currentUser),
       ], profileConfig.menu)
-        .filter((item) => isShellItemVisible(item, userRoles)),
+        .filter((item) => isShellItemVisible(item, userRoles)
+          && (item.id !== 'app-dashboard' || isAuthenticatedUser(currentUser))),
       shellAuth,
     ),
     [currentUser, profileConfig.menu, userRoles, shellAuth, pages, landingSpot]
@@ -314,6 +318,22 @@ const Header = ({
   const executeAction = async (action) => {
     if (!action) return;
     const resolvedAction = resolveShellAction(action, shellActionContext);
+
+    if (resolvedAction.id === 'app-dashboard') {
+      const selectedLocation = dashboardLocation.current;
+      let path = '/apps';
+      const chatId = new URLSearchParams(location.search).get('chat_id');
+      if (shellActionContext.surface === 'workflow_session' && chatId) {
+        try {
+          const result = await api.get(`/api/studio/build/dashboard-link?chat_id=${encodeURIComponent(chatId)}`);
+          path = safeReturnPath(result?.path, '/apps');
+        } catch { /* An unavailable build context returns to this person's portfolio. */ }
+      }
+      if (selectedLocation !== dashboardLocation.current) return;
+      handleNavigationItem({ ...resolvedAction, path, href: undefined });
+      setIsProfileOpen(false);
+      return;
+    }
 
     if (resolvedAction.action === "signout" || resolvedAction.id === "signout") {
       await logout?.();

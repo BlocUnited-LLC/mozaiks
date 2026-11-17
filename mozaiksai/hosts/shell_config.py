@@ -152,6 +152,13 @@ _ADMIN_PORTAL_MENU_ITEM = {
     "requiresRole": "admin",
 }
 
+_APP_DASHBOARD_MENU_ITEM = {
+    "id": "app-dashboard",
+    "label": "App Dashboard",
+    "action": "navigate",
+    "path": "/apps",
+}
+
 
 _NAVIGATION_ITEM_FIELDS = {
     "id",
@@ -616,8 +623,10 @@ def _shell_shortcut_catalog(pages: list[dict], shortcuts: dict[str, Any]) -> dic
     return catalog
 
 
-def _inject_admin_portal(result: dict, *, path: str = "/apps", label: str = "Admin Portal") -> None:
-    """Project one authorized portal entry after shell navigation composition.
+def _inject_admin_portal(
+    result: dict, *, path: str = "/apps", label: str = "Admin Portal", item: dict | None = None,
+) -> None:
+    """Project one management entry after shell navigation composition.
 
     Called after the full shell config pipeline so nothing can suppress it.
     Inserts before signout, or appends if signout is absent.
@@ -632,12 +641,12 @@ def _inject_admin_portal(result: dict, *, path: str = "/apps", label: str = "Adm
         menu = []
         profile["menu"] = menu
 
+    portal_item = dict(item) if item is not None else {**_ADMIN_PORTAL_MENU_ITEM, "path": path, "label": label}
     menu[:] = [
         item for item in menu
         if not isinstance(item, dict)
-        or (item.get("id") != "admin-portal" and item.get("path") != path)
+        or (item.get("id") not in {"admin-portal", portal_item["id"]} and item.get("path") != portal_item["path"])
     ]
-    portal_item = {**_ADMIN_PORTAL_MENU_ITEM, "path": path, "label": label}
 
     signout_idx = next(
         (
@@ -1159,9 +1168,9 @@ async def build_shell_config(
     )
     result["chrome"] = _normalize_chrome_policy(shell_chrome)
 
-    # Admin Portal is a Studio guarantee — not injected into app or user surfaces.
+    # Studio provides the builder dashboard. App administration follows its registry.
     if is_studio:
-        _inject_admin_portal(result)
+        _inject_admin_portal(result, item=_APP_DASHBOARD_MENU_ITEM)
     elif not is_user and admin_entries:
         _inject_admin_portal(result, path=admin_entries[0]["path"], label="Admin")
 
