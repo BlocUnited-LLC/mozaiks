@@ -1753,6 +1753,7 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
         "POST /api/studio/apps/{app_id}/context/override",
     }
     existing_registry_gates = {
+        "GET /api/studio/build/dashboard-link": "get_app_record",
         "GET /api/studio/overview": "get_app_record",
         "GET /api/studio/build": "get_app_record",
         "GET /api/studio/analytics/apps/{app_id}": "_get_owned_app_record",
@@ -1796,7 +1797,7 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
         | execution_host_routes.keys()
         | routes_without_app_scope
     )
-    assert len(direct_route_list) == len(direct_routes) == 37
+    assert len(direct_route_list) == len(direct_routes) == 38
     assert direct_routes.keys() == classified
     assert len(owned_app_routes) == 17
     for key in owned_app_routes:
@@ -1804,6 +1805,9 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
     for gates in (existing_registry_gates, owner_scoped_registry_operations):
         for key, expected_call in gates.items():
             assert expected_call in named_calls(direct_routes[key].endpoint, awaited_only=True), key
+    assert "get_owned_chat_binding" in named_calls(
+        direct_routes["GET /api/studio/build/dashboard-link"].endpoint, awaited_only=True,
+    )
     for key, expected_call in execution_host_routes.items():
         assert expected_call in named_calls(direct_routes[key].endpoint, awaited_only=False), key
 
