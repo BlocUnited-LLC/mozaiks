@@ -252,8 +252,8 @@ def test_build_shell_config_platform_does_not_inject_admin_portal(monkeypatch, t
     )
 
 
-def test_build_shell_config_studio_injects_admin_portal(monkeypatch, tmp_path: Path) -> None:
-    """Studio shell config should still inject admin-portal for admins."""
+def test_build_shell_config_studio_injects_builder_dashboard(monkeypatch, tmp_path: Path) -> None:
+    """Studio projects the portfolio entry without a global administrator role."""
 
     app_root = tmp_path / "app"
     (app_root / "config").mkdir(parents=True)
@@ -277,7 +277,12 @@ def test_build_shell_config_studio_injects_admin_portal(monkeypatch, tmp_path: P
     profile = shell.get("profile", {})
     menu = profile.get("menu", [])
     ids = [item.get("id") for item in menu if isinstance(item, dict)]
-    assert "admin-portal" in ids, "admin-portal must appear in the Studio profile menu"
+    assert "app-dashboard" in ids
+    assert "admin-portal" not in ids
+    entry = next(item for item in menu if item.get("id") == "app-dashboard")
+    assert entry["path"] == "/apps"
+    assert entry["label"] == "App Dashboard"
+    assert "requiresRole" not in entry
 
 
 # ---------------------------------------------------------------------------

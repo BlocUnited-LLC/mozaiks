@@ -15,6 +15,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Profile support tickets and app support inboxes keep reply fields usable on narrow mobile screens.
+
+- Signed-in Studio builders can open App Dashboard from their account menu and resolve the current build through its owner-scoped saved app binding.
+
 - Factory compiles selected-pack action permissions only from owner-reviewed
   role grants and the exact verified pack identities and action requirements.
 - Generated messaging uses the profile workspace for conversation creation and replies. App-owned support connects the widget, requester profile, and authorized Admin inbox through module manifests.

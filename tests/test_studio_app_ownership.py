@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -289,3 +290,45 @@ def test_local_development_uses_the_single_developer_as_registry_owner(monkeypat
     finally:
         clear_auth_config_cache()
         auth_registry.reset_auth_adapter()
+
+
+def test_build_dashboard_link_validates_signed_identity_and_saved_target(studio_client, monkeypatch):
+    studio, client, headers, registry = studio_client
+    binding = {
+        "build_registry_id": "alice-registry", "target_app_id": "alice-app",
+        "build_id": "alice-build", "phase": "genesis",
+    }
+
+    async def owned_binding(*, app_id, owner_user_id, chat_id):
+        if (app_id, owner_user_id, chat_id) != ("factory", "alice", "alice-chat"):
+            return None
+        return binding
+
+    async def owned_record(*, build_registry_id, owner_user_id):
+        if (build_registry_id, owner_user_id) != ("alice-registry", "alice"):
+            return {"app": None}
+        return {"app": {"app_id": "alice-app", "chat_app_id": "factory"}}
+
+    monkeypatch.setattr(registry, "repo", SimpleNamespace(get_owned_chat_binding=owned_binding), raising=False)
+    monkeypatch.setattr(registry, "get_app_record", owned_record)
+    monkeypatch.setattr(studio, "resolve_app_root", lambda: Path(__file__).resolve().parents[1] / "factory_app/app")
+    path = "/api/studio/build/dashboard-link?chat_id=alice-chat&app_id=bob-app"
+    response = client.get(path, headers=headers("alice", "factory"))
+    assert response.status_code == 200
+    assert response.json() == {"path": "/apps/alice-app/overview"}
+    for user in ("joined-member", "bob"):
+        response = client.get(path, headers=headers(user, "factory"))
+        assert response.status_code == 404
+        assert "alice-app" not in response.text
+    assert client.get(path).status_code == 401
+    assert client.get(path, headers={"Authorization": "Bearer invalid"}).status_code == 401
+
+
+def test_host_bound_signed_builder_can_read_shared_dashboard_manifest(studio_client, monkeypatch):
+    studio, client, headers, registry = studio_client
+    monkeypatch.setattr(studio.app.state, "loaded_app_id", "factory", raising=False)
+    response = client.get("/api/studio/dashboard", headers=headers("builder", "factory"))
+    assert response.status_code == 200
+    assert registry.lookups == []
+    response = client.get("/api/studio/dashboard?app_id=alice-app", headers=headers("builder", "factory"))
+    assert response.status_code == 403

@@ -61,7 +61,7 @@ async def test_platform_app_exposes_console_routes_only_on_studio_surface(monkey
     assert console_pages["/apps/:appId/overview"]["component"] == "AppOverviewPage"
     assert console_pages["/apps/:appId/health"]["component"] == "AppHealthPage"
     assert console_pages["/apps/:appId/support"]["component"] == "AppSupportPage"
-    assert console_pages["/apps/:appId/overview"]["meta"]["requiresRole"] == "admin"
+    assert "requiresRole" not in console_pages["/apps/:appId/overview"]["meta"]
     assert "/apps/:appId/overview" not in platform_paths
     assert "/apps/:appId/health" not in platform_paths
     assert '_inject_header_page(result, path="/apps/:appId/overview"' not in platform_source
