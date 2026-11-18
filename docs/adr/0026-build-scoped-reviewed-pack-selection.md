@@ -183,6 +183,22 @@ widened by this decision.
 This document records a proposal, not completed implementation, accepted
 architecture or a successful live build.
 
+## Planner read lifetime
+
+The synchronous plan-review tool may reuse successful source resolution and
+pack-authorization reads within its invocation. The private operation memo is
+not context state, model input, persisted evidence or a process-wide cache.
+Readers receive defensive copies; errors are not cached, and `finally` removes
+the memo on success, rejection and exceptions. Nested operations own separate
+memos. No scope spans an await or background task.
+
+Receipt digest, author, app/build lineage and supplied design checks remain
+live on each read. Plan rendering/caching starts with a fresh read scope, and
+the final ready gate re-admits the complete expected selection in another fresh
+scope. A failed final gate clears the cached plan through the existing rejection
+path. Assembly, saved compilation replay and publication do not inherit the
+planner memo and retain their independent fresh verification boundaries.
+
 ## Archived corpus expectation migration
 
 The 91 recorded bodies, original context, hashes and labelled defaults are

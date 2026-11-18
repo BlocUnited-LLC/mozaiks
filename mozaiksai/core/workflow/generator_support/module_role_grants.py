@@ -63,6 +63,20 @@ class PackAuthorization:
 
 def verified_pack_authorization(context: Any, *, selection: list[dict[str, Any]] | None = None) -> PackAuthorization:
     """Read action prerequisites only from selected, verified static pack files."""
+    from factory_app.workflows._shared.pack_selection import _memoized_pack_read
+
+    if selection is None:
+        from mozaiksai.core.workflow.generator_support.design_access_policy import (
+            resolve_reviewed_pack_selection,
+        )
+
+        selection = resolve_reviewed_pack_selection(context)
+    pins = [ReviewedPackIdentity.model_validate(row) for row in selection]
+    key = ("authorization", tuple((row.pack_id, row.version, row.digest) for row in pins))
+    return _memoized_pack_read(context, key, lambda: _verify_pack_authorization(context, selection))
+
+
+def _verify_pack_authorization(context: Any, selection: list[dict[str, Any]]) -> PackAuthorization:
     from factory_app.workflows._shared.pack_selection import rows_for_pack_choices
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         declared_output_owners,
@@ -71,12 +85,6 @@ def verified_pack_authorization(context: Any, *, selection: list[dict[str, Any]]
     )
     from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
 
-    if selection is None:
-        from mozaiksai.core.workflow.generator_support.design_access_policy import (
-            resolve_reviewed_pack_selection,
-        )
-
-        selection = resolve_reviewed_pack_selection(context)
     selected = rows_for_pack_choices(context, selection)
     if not selected:
         return PackAuthorization((), (), {}, {})

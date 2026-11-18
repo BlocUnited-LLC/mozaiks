@@ -11,6 +11,7 @@ from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_role_grants import (
     DesignAccessPolicy,
+    PackAuthorization,
     ReviewedPackIdentity,
     validate_access_policy,
     verified_pack_authorization,
@@ -57,7 +58,9 @@ def access_policy_sha256(
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def _resolve_reviewed_design(context: Any) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+def _resolve_reviewed_design(context: Any) -> tuple[
+    dict[str, Any] | None, dict[str, Any] | None, PackAuthorization | None,
+]:
     """Ignore candidate state; only the immutable data-reference may grant roles.
 
     A CURRENT summary is not proof of owner review. Genesis summaries become
@@ -65,7 +68,7 @@ def _resolve_reviewed_design(context: Any) -> tuple[dict[str, Any] | None, dict[
     required. A reviewed refinement draft belongs only to its bound build.
     """
     if context is None:
-        return None, None
+        return None, None, None
     build_record = detach(context.get("design_docs_build_artifact"))
     record = build_record if build_record is not None else detach(context.get("design_docs_artifact"))
     candidate = detach(context.get("access_policy"))
@@ -75,7 +78,7 @@ def _resolve_reviewed_design(context: Any) -> tuple[dict[str, Any] | None, dict[
         spec = detach(context.get("experience_spec"))
         if isinstance(spec, dict) and any(page.get("roles") for page in spec.get("pages", []) if isinstance(page, dict)):
             raise ValueError("Page role restrictions have no reviewed DesignDocs artifact")
-        return None, None
+        return None, None, None
     binding = RunBuildBinding.model_validate(detach(context.get("run_build_binding")))
     if not isinstance(record, dict) or (
         record.get("app_id") != binding.target_app_id
@@ -92,7 +95,7 @@ def _resolve_reviewed_design(context: Any) -> tuple[dict[str, Any] | None, dict[
         if isinstance(candidate, dict) and candidate.get("grants"):
             raise ValueError("access_policy grants are absent from the reviewed design")
         validate_design_page_roles(summary.get("experience_spec"), {"roles": [], "grants": []})
-        return None, None
+        return None, None, None
     review = summary.get("access_policy_review")
     reviewed_packs = review.get("pack_identities") if isinstance(review, dict) else None
     if reviewed_packs is not None and not isinstance(reviewed_packs, list):
@@ -145,7 +148,7 @@ def _resolve_reviewed_design(context: Any) -> tuple[dict[str, Any] | None, dict[
         supplied = detach(context.get(key))
         if supplied is not None and supplied != summary.get(field):
             raise ValueError(f"access_policy approved design does not match {key}")
-    return policy, summary
+    return policy, summary, pack_authorization
 
 
 def resolve_design_access_policy(context: Any) -> dict[str, Any] | None:
@@ -158,7 +161,7 @@ def resolve_reviewed_pack_selection(context: Any) -> list[dict[str, Any]]:
     Legacy missing identities authorize no reusable packs. A later plan that
     wants to materialize any must obtain a new explicit design review.
     """
-    _, summary = _resolve_reviewed_design(context)
+    _, summary, _ = _resolve_reviewed_design(context)
     if summary is None:
         return []
     return detach(summary["access_policy_review"].get("pack_identities") or [])
@@ -166,10 +169,10 @@ def resolve_reviewed_pack_selection(context: Any) -> list[dict[str, Any]]:
 
 def resolve_authored_module_access_policy(context: Any) -> dict[str, Any] | None:
     """Project the reviewed policy to generated modules; pack manifests remain pack-owned."""
-    policy, summary = _resolve_reviewed_design(context)
+    policy, summary, authorization = _resolve_reviewed_design(context)
     if policy is None or summary is None:
         return policy
-    pack_modules = set(verified_pack_authorization(context).actions)
+    pack_modules = set(authorization.actions) if authorization is not None else set()
     if not pack_modules:
         return policy
     owners = {
@@ -181,7 +184,7 @@ def resolve_authored_module_access_policy(context: Any) -> dict[str, Any] | None
 
 
 def resolve_design_page_roles(context: Any) -> dict[str, list[str] | None] | None:
-    policy, summary = _resolve_reviewed_design(context)
+    policy, summary, _ = _resolve_reviewed_design(context)
     if policy is None or summary is None or summary.get("experience_spec") is None:
         return None
     return validate_design_page_roles(summary.get("experience_spec"), policy)

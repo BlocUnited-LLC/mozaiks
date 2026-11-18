@@ -13,7 +13,12 @@ import yaml
 from pydantic import ValidationError
 
 from factory_app.workflows._shared.hook_utils import workflow_context_path
-from factory_app.workflows._shared.pack_selection import selected_pack_rows
+from factory_app.workflows._shared.pack_selection import (
+    fresh_pack_reads,
+    reviewed_pack_read_operation,
+    selected_pack_rows,
+    validate_reviewed_pack_choices,
+)
 from factory_app.workflows._shared.surface_ownership import validate_surface_ownership
 from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _CANONICAL_INITIAL_AGENTS,
@@ -40,6 +45,9 @@ from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context impor
 )
 from factory_app.workflows.AppGenerator.tools.plan_page_data_sources import (
     drop_unapproved_page_data_sources,
+)
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    ManagedCapabilityTemplateError,
 )
 from mozaiksai.core.runtime.app.paths import is_safe_app_path, normalize_app_path
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
@@ -2186,7 +2194,7 @@ def validate_plan_dispatch(context: Any) -> None:
         raise ValueError("Task dispatch would refuse this plan:\n- " + "\n- ".join(errors))
 
 
-def _plan_validation_feedback(error: ValueError, payload: dict[str, Any] | None) -> str:
+def _plan_validation_feedback(error: ValueError | ManagedCapabilityTemplateError, payload: dict[str, Any] | None) -> str:
     locations: list[str] = []
     if isinstance(error, ValidationError) and isinstance(payload, dict):
         pages = payload.get("pages")
@@ -2212,6 +2220,7 @@ def _plan_validation_feedback(error: ValueError, payload: dict[str, Any] | None)
     return "\n".join([*locations, str(error)])[:6000]
 
 
+@reviewed_pack_read_operation
 def review_app_build_plan(
     *,
     AppBuildPlan: Annotated[dict[str, Any] | None, "Complete AppBuildPlan output"] = None,
@@ -2275,7 +2284,8 @@ def review_app_build_plan(
         validate_plan_dependencies(plan, context_variables)
         validate_plan_origins(plan, context_variables)
         validate_plan_coverage(plan, context_variables)
-        app_build_plan(AppBuildPlan=plan, context_variables=context_variables)
+        with fresh_pack_reads():
+            app_build_plan(AppBuildPlan=plan, context_variables=context_variables)
         cached = detach(context_variables.get("app_build_plan"))
         if not context_variables.get("app_plan_ready") or not isinstance(cached, dict):
             raise RuntimeError("Validated plan was not cached")
@@ -2284,7 +2294,9 @@ def review_app_build_plan(
         validate_plan_dependencies(cached, context_variables)
         validate_plan_coverage(cached, context_variables)
         validate_plan_dispatch(context_variables)
-    except ValueError as error:
+        with fresh_pack_reads():
+            validate_reviewed_pack_choices(context_variables, cached["capability_packs"])
+    except (ValueError, ManagedCapabilityTemplateError) as error:
         _clear_plan(context_variables)
         feedback = _plan_validation_feedback(error, AppBuildPlan)
         context_variables.set("app_plan_feedback", feedback)

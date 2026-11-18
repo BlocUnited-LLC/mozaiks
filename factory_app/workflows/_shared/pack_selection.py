@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
+from copy import deepcopy
+from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     PackIntegrityError,
@@ -24,6 +28,43 @@ from mozaiksai.core.session.build_context import (
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_role_grants import ReviewedPackIdentity
 from mozaiksai.resources import resolve_factory_app_root
+
+_T = TypeVar("_T")
+_PACK_READS: ContextVar[tuple[Any, dict[tuple, Any]] | None] = ContextVar("_pack_reads", default=None)
+
+
+def _memoized_pack_read(context: Any, key: tuple, reader: Callable[[], _T]) -> _T:
+    """Reuse successful immutable source reads only inside the owning operation."""
+    scope = _PACK_READS.get()
+    if scope is None or scope[0] is not context:
+        return reader()
+    memo = scope[1]
+    if key not in memo:
+        memo[key] = reader()
+    return deepcopy(memo[key])
+
+
+def reviewed_pack_read_operation(function):
+    """A tool invocation owns its memo; context/model data cannot provide one."""
+    @wraps(function)
+    def invoke(*args, **kwargs):
+        token = _PACK_READS.set((kwargs.get("context_variables"), {}))
+        try:
+            return function(*args, **kwargs)
+        finally:
+            _PACK_READS.reset(token)
+    return invoke
+
+
+@contextmanager
+def fresh_pack_reads():
+    """Re-admit sources at the final boundary, including within an operation."""
+    scope = _PACK_READS.get()
+    token = _PACK_READS.set((scope[0], {}) if scope is not None else None)
+    try:
+        yield
+    finally:
+        _PACK_READS.reset(token)
 
 
 def available_pack_rows(context: Any, *, pack_ids: set[str] | None = None) -> dict[str, dict[str, Any]]:
@@ -123,6 +164,11 @@ def rows_for_pack_choices(context: Any, identities: Any) -> list[dict[str, Any]]
         raise ValueError("Pack selection repeats an identity")
     if not choices:
         return []
+    key = ("rows", tuple((row.pack_id, row.version, row.digest) for row in choices))
+    return _memoized_pack_read(context, key, lambda: _resolve_pack_choices(context, choices))
+
+
+def _resolve_pack_choices(context: Any, choices: list[ReviewedPackIdentity]) -> list[dict[str, Any]]:
     available = available_pack_rows(context, pack_ids={choice.pack_id for choice in choices})
     rows: list[dict[str, Any]] = []
     for choice in choices:
