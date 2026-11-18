@@ -27,6 +27,7 @@ from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templat
 )
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_continuous_deterministic_materialization import _load_models
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +36,10 @@ NOTE = "Planned data sources removed because no approved action exists: "
 
 
 @pytest.fixture(autouse=True)
-def _load_factory_contracts():
+def _load_factory_contracts(monkeypatch, tmp_path):
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
     _load_models()
 
 
@@ -50,7 +54,7 @@ def _context(variables: dict) -> ContextVariablesBridge:
         source = ROOT / pack["pack_source_path"]
         metadata = verify_pack_integrity(source, pack["id"])
         pack.update(pack_source_path=str(source), version=metadata["version"], digest=metadata["digest"])
-    return ContextVariablesBridge(variables)
+    return ContextVariablesBridge(reviewed_pack_fixture(variables, ["mozaikspay"]))
 
 
 def _review(plan: dict) -> tuple[ContextVariablesBridge, dict]:

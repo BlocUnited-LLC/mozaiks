@@ -1,9 +1,32 @@
 """Explicit unit-test review inputs; never live owner approval evidence."""
 from copy import deepcopy
 
-from factory_app.workflows._shared.pack_selection import pin_pack_choices
+import yaml
+
+from factory_app.workflows._shared.pack_selection import available_pack_rows, pin_pack_choices
 from mozaiksai.core.workflow.generator_support.design_access_policy import access_policy_sha256
 from tests.factory_context import factory_context
+
+
+def registered_pack_fixture(tmp_path, monkeypatch, pack_id, capability_source, *, facades=()):
+    """Declare a real temporary offering; this alone never selects/reviews it."""
+    registry = tmp_path / "pack-registry"
+    root = registry / pack_id
+    root.mkdir(parents=True)
+    config = {
+        "context_id": pack_id, "applies_to_workflows": ["DesignDocs", "AppGenerator"],
+        "assets": [{"path": "contract.yaml", "kind": "contract"}],
+        "pack": {"id": pack_id, "version": "1.0.0", "status": "active", "capability_source": capability_source},
+        "projections": {"context_variables": {"capability_packs": {"from": "capability_packs"}}},
+    }
+    contract = {"contract_id": pack_id, "contract_type": "build_pack_instructions"}
+    if facades:
+        config["facades"] = contract["facades"] = deepcopy(list(facades))
+    (root / "context.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    (root / "contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
+    monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(registry))
+    return available_pack_rows({}, pack_ids={pack_id})[pack_id]
 
 
 def reviewed_pack_fixture(initial, pack_ids):
