@@ -54,8 +54,9 @@ managed_assignment_writer_contract:
   selection_mechanism: >
     The owner-reviewed DesignDocs selection chooses exactly one subscription
     assignment writer before app planning. This self-managed pack and a managed
-    pack that declares subscription_write_path are alternatives. Missing writer
-    selection requires renewed design review, not a late default.
+    pack that declares provides_capabilities: [subscription_write_path] are
+    alternatives. Missing writer selection requires renewed design review, not
+    a late default.
   replacement_rule: >
     A future managed monetization pack can replace the current write-path owner
     for this planning decision only if it explicitly declares

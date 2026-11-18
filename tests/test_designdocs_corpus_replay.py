@@ -75,7 +75,7 @@ _MARKDOWN = {
     "backend_markdown": "# Backend Design\nRecorded output.",
     "database_markdown": "# Database Design\nRecorded output.",
 }
-# Legacy recordings did not select reusable packs; replay explicitly selects none.
+# Archived recordings did not select reusable packs; replay explicitly selects none.
 _SAVE_SEED = {"workflow_name": "DesignDocs", "pack_selection": [], "design_docs_save_outcome": "blocked", "design_docs_save_attempts": 0, "design_docs_save_feedback": ""}
 
 

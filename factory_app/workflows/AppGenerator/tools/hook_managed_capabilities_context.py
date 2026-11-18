@@ -415,7 +415,7 @@ def inject_managed_capabilities_context(
             return
         # Live containers freeze reads (tuples and mapping proxies); every
         # formatter below type-tests plain lists and dicts.
-        if _MANAGED_CAP_HEADER in (getattr(agent, "system_message", None) or getattr(agent, "_system_message", "")):
+        if _MANAGED_CAP_HEADER in (getattr(agent, "system_message", None) or getattr(agent, "_system_message", "") or ""):
             update_agent_section(agent, _MANAGED_CAP_HEADER, "No current owner-reviewed reusable pack instructions.")
         update_agent_section(agent, "[REVIEWED PACK SELECTION]",
             "No reusable pack materialization is currently authorized. Resolve the existing DesignDocs owner review before selecting sources.")

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+from typing import Any, cast
 
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.session.build_binding import RunBuildBinding
@@ -158,13 +158,13 @@ def resolve_design_access_policy(context: Any) -> dict[str, Any] | None:
 def resolve_reviewed_pack_selection(context: Any) -> list[dict[str, Any]]:
     """Resolve choices through the same bound artifact and review as its grants.
 
-    Legacy missing identities authorize no reusable packs. A later plan that
+    Missing reviewed identities authorize no reusable packs. A later plan that
     wants to materialize any must obtain a new explicit design review.
     """
     _, summary, _ = _resolve_reviewed_design(context)
     if summary is None:
         return []
-    return detach(summary["access_policy_review"].get("pack_identities") or [])
+    return cast(list[dict[str, Any]], detach(summary["access_policy_review"].get("pack_identities") or []))
 
 
 def resolve_authored_module_access_policy(context: Any) -> dict[str, Any] | None:

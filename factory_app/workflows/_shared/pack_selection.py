@@ -8,7 +8,7 @@ from contextvars import ContextVar
 from copy import deepcopy
 from functools import wraps
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     PackIntegrityError,
@@ -41,7 +41,7 @@ def _memoized_pack_read(context: Any, key: tuple, reader: Callable[[], _T]) -> _
     memo = scope[1]
     if key not in memo:
         memo[key] = reader()
-    return deepcopy(memo[key])
+    return cast(_T, deepcopy(memo[key]))
 
 
 def reviewed_pack_read_operation(function):

@@ -44,7 +44,7 @@ def inject_selected_pack_design_context(agent: Any, messages: list[dict[str, Any
     if context is None:
         return
 
-    if _HEADER in (getattr(agent, "system_message", None) or getattr(agent, "_system_message", "")):
+    if _HEADER in (getattr(agent, "system_message", None) or getattr(agent, "_system_message", "") or ""):
         update_agent_section(agent, _HEADER, "No current selected-pack contracts. Select and validate the candidate before using reusable packs.")
     available = available_pack_rows(context)
     catalog = [{

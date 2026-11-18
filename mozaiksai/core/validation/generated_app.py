@@ -158,16 +158,19 @@ def validate_generated_app_bundle(
         except (ValueError, TypeError, AttributeError, ManagedCapabilityTemplateError) as exc:
             return GeneratedAppValidationResult(False, [_diagnostic("approved_compilation_invalid", str(exc))])
 
+    scanner_inputs: dict[str, Any] = {}
+    if compiler_context is not None:
+        scanner_inputs = {
+            "context_variables": physical_context,
+            "planned_data_contract": compiler_context.get("data_contract"),
+            "subscription_contract": compiler_context.get("subscription_contract"),
+        }
     scanner_errors = scan_generated_bundle(
         request.files,
         capability_packs=list(request.capability_packs),
         require_deployment_artifacts=request.require_deployment_artifacts,
         resolved_capability_packs=resolved_capability_packs,
-        **({
-            "context_variables": physical_context,
-            "planned_data_contract": compiler_context.get("data_contract"),
-            "subscription_contract": compiler_context.get("subscription_contract"),
-        } if compiler_context is not None else {}),
+        **scanner_inputs,
     )
     diagnostics.extend(
         _diagnostic("generated_bundle_contract_failed", error)

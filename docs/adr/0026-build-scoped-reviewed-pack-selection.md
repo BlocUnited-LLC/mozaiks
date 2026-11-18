@@ -84,7 +84,7 @@ consume that same selection.
    and artifact lineage provide the reference. A refinement may inherit only the
    same app's trusted selected ancestor/version under existing draft/current
    precedence. A different app, unrelated build, stale candidate, changed source
-   or changed selection requires a fresh review. Legacy missing receipts cannot
+   or changed selection requires a fresh review. Missing receipts cannot
    authorize materialized packs. There is no new durable ledger.
 
 The Support pack must declare DesignDocs applicability so that an explicitly
@@ -169,7 +169,7 @@ widened by this decision.
 - Role review, generated module permissions and app auth compilation consume
   the same selected sources. Non-holders and wrong-app actors remain denied.
 - Registry expansion, reconnect and replay cannot change an approved selection.
-- Explicit empty-selection replay; missing legacy receipts; a managed selection
+- Explicit empty-selection replay; previously saved receipts without identities; a managed selection
   with no grants; wrong app/build/draft/author; stale candidate approval; registry
   removal and digest drift; false/non-required or conflicting later provider.
 - Stock Support and Messaging design/rendering regression, including app-local

@@ -99,7 +99,7 @@ async def _assemble_from_payload(
             "evidence_mode": "local_no_spend",
             "capability_packs": _selected_packs(),
             "captured_theme_config": captured_theme_config,
-        }
+        }, reviewed_pack_ids=["operator_readiness"],
     )
     plan = typed_plan.AppBuildPlan.model_dump(mode="json")
     app_build_plan(AppBuildPlan=plan, context_variables=context)

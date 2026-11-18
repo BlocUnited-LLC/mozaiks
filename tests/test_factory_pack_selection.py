@@ -163,6 +163,13 @@ def test_physical_projection_cannot_fall_back_to_inventory_or_unreviewed_plan():
     context = ContextVariablesBridge({"capability_packs": [_managed_offering()],
                                       "app_build_plan": {"capability_packs": [_managed_offering()]}})
     before = context.snapshot()
+    with pytest.raises(ValueError, match="selected pack identities"):
+        PhysicalPackContext(context)
+    assert context.snapshot() == before
+
+    context = ContextVariablesBridge({"capability_packs": [_managed_offering()],
+                                      "app_build_plan": {"capability_packs": []}})
+    before = context.snapshot()
     projected = PhysicalPackContext(context)
     assert projected.get("capability_packs") == []
     assert projected.get("app_build_plan")["capability_packs"] == []
