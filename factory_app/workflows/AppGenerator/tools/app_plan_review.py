@@ -13,6 +13,7 @@ import yaml
 from pydantic import ValidationError
 
 from factory_app.workflows._shared.hook_utils import workflow_context_path
+from factory_app.workflows._shared.pack_selection import selected_pack_rows
 from factory_app.workflows._shared.surface_ownership import validate_surface_ownership
 from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _CANONICAL_INITIAL_AGENTS,
@@ -1474,9 +1475,8 @@ def _approved_surface_ids(context: Any) -> set[str]:
         surface["surface_id"] for surface in design.get("surfaces") or []
         if surface.get("surface_id")
     }
-    # This protected projection contains selected registry declarations. Neither
-    # the proposed plan nor an available-capability catalog grants approval.
-    for pack in detach(context.get("capability_packs")) or []:
+    # Only owner-reviewed sources extend the approved surface inventory.
+    for pack in selected_pack_rows(context):
         pack_id = _pack_id_from_descriptor(pack)
         if pack_id:
             approved.add(pack_id)
@@ -1780,17 +1780,10 @@ def _approved_ui_only_surfaces(context: Any) -> dict[str, dict[str, Any]]:
 
 
 def _selected_ui_provider_ids(context: Any) -> set[str]:
-    """Selected build-context packs that may bind an approved UI-only surface.
-
-    A selected pack descriptor (``normalize_pack_descriptor``) carries its
-    identity and registered capability_source, never a surface binding:
-    selection is the registration. The registered source decides, not the
-    plan's label, which ``_repair_selected_pack_sources`` normalizes later.
-    Generated module code and DesignDocs category hints are not providers.
-    """
+    """Reviewed packs that may bind an approved UI-only surface."""
     return {
         pack_id
-        for pack in detach(context.get("capability_packs")) or []
+        for pack in selected_pack_rows(context)
         if isinstance(pack, dict)
         and pack.get("capability_source") != "generated_module"
         and (pack_id := _pack_id_from_descriptor(pack))

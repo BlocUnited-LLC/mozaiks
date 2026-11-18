@@ -111,6 +111,11 @@ async def _context_from_inputs(
     settled_task_snapshot(context)
     # The existing owner verifies policy review and exact design/data identity.
     resolve_design_access_policy(context)
+    from factory_app.workflows._shared.pack_selection import validate_reviewed_pack_choices
+
+    validate_reviewed_pack_choices(context, inputs.app_build_plan.get("capability_packs") or [])
+    if capability_packs is not None:
+        validate_reviewed_pack_choices(context, capability_packs, recorded=True)
     if inputs.subscription_contract is not None:
         _, contract, digest = await _summary(
             store, app_id=inputs.binding.target_app_id, owner_user_id=owner_user_id,

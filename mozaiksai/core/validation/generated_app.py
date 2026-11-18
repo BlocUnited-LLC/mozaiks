@@ -151,13 +151,15 @@ def validate_generated_app_bundle(
                 raise ValueError("Candidate pack selection differs from its bound build")
         except (ValueError, TypeError, AttributeError) as exc:
             return GeneratedAppValidationResult(False, [_diagnostic("approved_compilation_invalid", str(exc))])
+    from factory_app.workflows._shared.pack_selection import PhysicalPackContext
+
     scanner_errors = scan_generated_bundle(
         request.files,
         capability_packs=list(request.capability_packs),
         require_deployment_artifacts=request.require_deployment_artifacts,
         resolved_capability_packs=resolved_capability_packs,
         **({
-            "context_variables": compiler_context,
+            "context_variables": PhysicalPackContext(compiler_context),
             "planned_data_contract": compiler_context.get("data_contract"),
             "subscription_contract": compiler_context.get("subscription_contract"),
         } if compiler_context is not None else {}),

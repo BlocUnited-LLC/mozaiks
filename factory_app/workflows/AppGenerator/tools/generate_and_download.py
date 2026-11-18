@@ -184,43 +184,9 @@ def _pack_id(pack: dict[str, Any]) -> str:
 
 
 def _selected_capability_packs(context_variables: Any | None) -> list[dict[str, Any]]:
-    selected: list[dict[str, Any]] = []
-    selected_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
+    from factory_app.workflows._shared.pack_selection import selected_pack_rows
 
-    def merge_missing(target: dict[str, Any], source: dict[str, Any]) -> None:
-        for key, value in source.items():
-            current = target.get(key)
-            if current in (None, "", [], {}):
-                target[key] = value
-            elif isinstance(current, dict) and isinstance(value, dict):
-                merge_missing(current, value)
-
-    def add_many(raw_packs: Any) -> None:
-        if not isinstance(raw_packs, list):
-            return
-        for pack in raw_packs:
-            if not isinstance(pack, dict):
-                continue
-            pack_id = _pack_id(pack)
-            if not pack_id:
-                continue
-            key = (
-                pack_id,
-                str(pack.get("capability_source") or "").strip(),
-                str(pack.get("pack_source_path") or "").strip(),
-            )
-            if key in selected_by_key:
-                merge_missing(selected_by_key[key], pack)
-                continue
-            normalized = dict(pack)
-            selected_by_key[key] = normalized
-            selected.append(normalized)
-
-    app_build_plan = _context_get(context_variables, "app_build_plan")
-    if isinstance(app_build_plan, dict):
-        add_many(app_build_plan.get("capability_packs"))
-    add_many(_context_get(context_variables, "capability_packs"))
-    return selected
+    return selected_pack_rows(context_variables)
 
 
 def _deployment_env_names(value: Any) -> list[str]:

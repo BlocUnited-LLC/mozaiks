@@ -13,6 +13,7 @@ import pytest
 import yaml
 
 from factory_app.workflows._shared import surface_ownership
+from factory_app.workflows._shared.pack_selection import pin_pack_choices
 from factory_app.workflows.AppGenerator.tools.app_plan_review import (
     review_app_build_plan,
     validate_plan_coverage,
@@ -29,6 +30,16 @@ from tests.test_app_plan_review import _plan
 from tests.test_continuous_deterministic_materialization import _load_models
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(autouse=True)
+def registered_offering_and_review(monkeypatch, tmp_path):
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
+    async def approve(_tool, payload, **kwargs):
+        return {"action": "approve", "approved": True, "review_id": payload["review_id"]}
+    monkeypatch.setattr(save_design_doc, "use_ui_tool", AsyncMock(side_effect=approve))
 
 
 def _bundle(*, pricing: bool, subscription: bool = False) -> dict:
@@ -86,9 +97,10 @@ def _bundle(*, pricing: bool, subscription: bool = False) -> dict:
 
 
 def _context(
-    *, monetized: bool, brownfield: str | None = None, subscription: bool = False,
+    *, monetized: bool, brownfield: str | None = None, subscription: bool = False, selected_provider: bool = False,
 ) -> ContextVariablesBridge:
-    return ContextVariablesBridge({
+    context = ContextVariablesBridge({
+        "workflow_name": "DesignDocs", "pack_selection": [],
         "run_build_binding": {
             "build_registry_id": "pricing_registry", "target_app_id": "reports-app",
             "build_id": "pricing_build", "phase": "genesis",
@@ -106,6 +118,9 @@ def _context(
         "design_docs_save_feedback": "", "app_plan_attempts": 0,
         "app_plan_outcome": "blocked",
     })
+    if selected_provider:
+        context.set("pack_selection", pin_pack_choices(context, ["mozaikspay"]))
+    return context
 
 
 def _save(context: ContextVariablesBridge, bundle: dict) -> dict:
@@ -116,7 +131,17 @@ def _save(context: ContextVariablesBridge, bundle: dict) -> dict:
     wrapped = wrap_tool_outcome(
         save_design_doc.save_design_docs_bundle, ToolOutcomeSpec.model_validate(entry["outcome"]),
     )
-    return asyncio.run(wrapped(context_variables=StructuredOutputOverlay(context, bundle)))
+    result = asyncio.run(wrapped(context_variables=StructuredOutputOverlay(context, bundle)))
+    if result.get("outcome") == "saved":
+        # This storage fixture records the same immutable summary downstream launch loads.
+        summary = deepcopy(save_design_doc.persist_summary_artifact.await_args.kwargs["summary_payload"])
+        context.set("design_docs_artifact", {
+            "app_id": context.get("run_build_binding")["target_app_id"],
+            "build_family": "design_docs", "build_key": "design_docs", "source_workflow": "DesignDocs",
+            "lifecycle_status": "current", "commit_metadata": {
+                "author_user_id": context.get("user_id"), "metadata": {"summary_payload": summary}},
+        })
+    return result
 
 
 @pytest.fixture
@@ -291,7 +316,7 @@ def test_refinement_preserves_existing_inventory_without_synthesizing_pages(pers
 def test_subscription_design_materializes_omitted_facade_pages(persistence):
     store, _, summary = persistence
     _load_models()
-    context = _context(monetized=True, subscription=True)
+    context = _context(monetized=True, subscription=True, selected_provider=True)
     bundle = _bundle(pricing=False)
     app_page = deepcopy(bundle["experience_spec"]["pages"][0])
 
@@ -340,7 +365,7 @@ def test_subscription_design_materializes_omitted_facade_pages(persistence):
     ("/pricing", "Subscriptions"), ("/billing", "Account"), ("/usage", "Consumption"),
 ])
 def test_subscription_design_keeps_existing_page_by_route_without_duplication(persistence, route, name):
-    context = _context(monetized=True, subscription=True)
+    context = _context(monetized=True, subscription=True, selected_provider=True)
     bundle = _bundle(pricing=True)
     bundle["experience_spec"]["pages"][1].update(name=name, route=route)
     bundle["surface_map"]["surfaces"][1]["owned_pages"] = [name]
@@ -360,7 +385,7 @@ def test_subscription_design_keeps_existing_page_by_route_without_duplication(pe
 
 
 def test_subscription_design_materialization_is_idempotent_on_resave(persistence):
-    context = _context(monetized=True, subscription=True)
+    context = _context(monetized=True, subscription=True, selected_provider=True)
     bundle = _bundle(pricing=False)
     assert _save(context, bundle)["outcome"] == "saved"
     experience = detach(context.get("experience_spec"))
@@ -368,7 +393,7 @@ def test_subscription_design_materialization_is_idempotent_on_resave(persistence
     bundle["experience_spec"] = deepcopy(experience)
     bundle["surface_map"] = deepcopy(surface_map)
 
-    next_context = _context(monetized=True, subscription=True)
+    next_context = _context(monetized=True, subscription=True, selected_provider=True)
     result = _save(next_context, bundle)
 
     assert result["outcome"] == "saved", result
@@ -378,7 +403,7 @@ def test_subscription_design_materialization_is_idempotent_on_resave(persistence
 
 def test_subscription_design_rejects_ambiguous_duplicate_routes(persistence):
     _, store_factory, _ = persistence
-    context = _context(monetized=True, subscription=True)
+    context = _context(monetized=True, subscription=True, selected_provider=True)
     bundle = _bundle(pricing=True)
     duplicate = deepcopy(bundle["experience_spec"]["pages"][1])
     duplicate["name"] = "Other pricing design"
@@ -393,7 +418,7 @@ def test_subscription_design_rejects_ambiguous_duplicate_routes(persistence):
 
 def test_subscription_design_rejects_page_name_collision_across_routes(persistence):
     _, store_factory, _ = persistence
-    context = _context(monetized=True, subscription=True)
+    context = _context(monetized=True, subscription=True, selected_provider=True)
     bundle = _bundle(pricing=False)
     bundle["experience_spec"]["pages"][0]["name"] = "Billing"
     bundle["surface_map"]["surfaces"][0]["owned_pages"] = ["Billing"]
@@ -458,7 +483,7 @@ def _monetized_plan(context: ContextVariablesBridge, *, subscription: bool = Fal
 ], ids=["omitted", "partial", "complete"])
 def test_saved_pricing_inventory_passes_planner_coverage_and_full_review(persistence, pricing, subscription):
     _load_models()
-    context = _context(monetized=True, subscription=True)
+    context = _context(monetized=True, subscription=True, selected_provider=True)
     models, _ = load_workflow_structured_outputs("DesignDocs")
     bundle = models["DesignDocsBundle"].model_validate(
         _bundle(pricing=pricing, subscription=subscription),
@@ -492,5 +517,5 @@ def test_subscription_contract_cannot_expand_the_approved_inventory(persistence,
         f"ui/pages/{invented}.yaml"
     )
 
-    with pytest.raises(ValueError, match="approved name/route inventory"):
+    with pytest.raises(ValueError, match="has no reviewed page|approved name/route inventory"):
         validate_plan_coverage(plan, context)

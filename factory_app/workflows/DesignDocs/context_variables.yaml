@@ -1,4 +1,12 @@
 definitions:
+  pack_selection:
+    type: array
+    authority_class: derived_information
+    authorization: false
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Verified candidate pack identity pins written by select_capability_packs; not owner approval. Null requires explicit selection before saving, [] selects none.
+    source: {type: state, default: null}
   access_policy:
     type: object
     authority_class: tool_only_information
@@ -409,6 +417,7 @@ definitions:
 agents:
   DesignDocsAgent:
     variables:
+    - pack_selection
     - design_docs_save_feedback
     - build_mode
     - workflow_sequence

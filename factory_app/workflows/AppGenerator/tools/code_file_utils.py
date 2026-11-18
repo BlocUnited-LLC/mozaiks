@@ -416,12 +416,10 @@ def _assembled_data_contract(context_variables: Any, subscription_contract: Any)
 
 
 def selected_capability_packs(context_variables: Any) -> list[dict[str, Any]] | None:
-    """The run's selected pack descriptors, else the approved plan's."""
-    packs = detach(context_variables.get("capability_packs"))
-    if not packs:
-        plan = detach(context_variables.get("app_build_plan"))
-        packs = plan.get("capability_packs") if isinstance(plan, dict) else None
-    return packs if isinstance(packs, list) else None
+    """The exact reviewed selection, independent of available offerings."""
+    from factory_app.workflows._shared.pack_selection import selected_pack_rows
+
+    return selected_pack_rows(context_variables)
 
 
 def _provenance(files: dict[str, str]) -> dict[str, Any]:

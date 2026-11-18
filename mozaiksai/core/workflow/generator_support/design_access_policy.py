@@ -10,6 +10,7 @@ from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_
 from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_role_grants import (
+    DesignAccessPolicy,
     ReviewedPackIdentity,
     validate_access_policy,
     verified_pack_authorization,
@@ -92,36 +93,43 @@ def _resolve_reviewed_design(context: Any) -> tuple[dict[str, Any] | None, dict[
             raise ValueError("access_policy grants are absent from the reviewed design")
         validate_design_page_roles(summary.get("experience_spec"), {"roles": [], "grants": []})
         return None, None
-    pack_authorization = verified_pack_authorization(context)
     review = summary.get("access_policy_review")
     reviewed_packs = review.get("pack_identities") if isinstance(review, dict) else None
+    if reviewed_packs is not None and not isinstance(reviewed_packs, list):
+        raise ValueError("access_policy review pack identities must be an explicit list")
+    raw_policy = DesignAccessPolicy.model_validate(
+        summary["access_policy"] if summary["access_policy"] is not None else {"roles": [], "grants": []},
+    ).model_dump()
+    if not isinstance(review, dict) or (
+        review.get("policy_sha256") != access_policy_sha256(
+            raw_policy, summary.get("experience_spec"), pack_identities=reviewed_packs,
+        )
+        or review.get("target_app_id") != binding.target_app_id
+        or not review.get("build_id")
+    ):
+        raise ValueError("access_policy review does not match the persisted policy and page roles or pack identities; review DesignDocs again")
+    # Only the reviewed choices select sources. An expanded workflow registry
+    # describes availability and cannot add packs to an existing approval.
+    pack_authorization = verified_pack_authorization(context, selection=reviewed_packs or [])
     current_packs = [identity.model_dump() for identity in pack_authorization.identities]
-    raw_policy = summary["access_policy"]
-    if (isinstance(raw_policy, dict) and raw_policy.get("grants") and current_packs) or reviewed_packs:
-        recorded = [ReviewedPackIdentity.model_validate(row).model_dump() for row in (reviewed_packs or [])]
-        if sorted(recorded, key=lambda row: row["pack_id"]) != current_packs:
-            raise ValueError("access_policy review does not match the selected pack identities; review DesignDocs again")
+    recorded = [ReviewedPackIdentity.model_validate(row).model_dump() for row in (reviewed_packs or [])]
+    if sorted(recorded, key=lambda row: row["pack_id"]) != current_packs:
+        raise ValueError("access_policy review does not match the selected pack identities; review DesignDocs again")
     policy = validate_access_policy(
         raw_policy, data_contract=summary.get("data_contract"),
         design_surface_map=summary.get("surface_map"), pack_authorization=pack_authorization,
     )
     page_roles = validate_design_page_roles(summary.get("experience_spec"), policy)
-    if not isinstance(review, dict) or (
-        review.get("policy_sha256") != access_policy_sha256(
-            policy, summary.get("experience_spec"), pack_identities=reviewed_packs,
-        )
-        or review.get("target_app_id") != binding.target_app_id
-        or not review.get("build_id")
-    ):
-        raise ValueError("access_policy review does not match the persisted policy and page roles; review DesignDocs again")
     if build_record is not None and review["build_id"] != binding.build_id:
         raise ValueError("access_policy projection belongs to a different build")
+    if binding.phase == "genesis" and review["build_id"] != binding.build_id:
+        raise ValueError("access_policy genesis review belongs to a different build")
     if record.get("lifecycle_status") == "draft":
         if review["build_id"] != binding.build_id:
             raise ValueError("access_policy draft belongs to a different build")
     elif record.get("lifecycle_status") != "current":
         raise ValueError("access_policy artifact is not current or this build's reviewed draft")
-    if policy["grants"] or any(page_roles.values()):
+    if current_packs or policy["grants"] or any(page_roles.values()):
         if (
             review.get("status") != "approved" or not review.get("review_id")
             or not review.get("reviewed_by")
@@ -142,6 +150,18 @@ def _resolve_reviewed_design(context: Any) -> tuple[dict[str, Any] | None, dict[
 
 def resolve_design_access_policy(context: Any) -> dict[str, Any] | None:
     return _resolve_reviewed_design(context)[0]
+
+
+def resolve_reviewed_pack_selection(context: Any) -> list[dict[str, Any]]:
+    """Resolve choices through the same bound artifact and review as its grants.
+
+    Legacy missing identities authorize no reusable packs. A later plan that
+    wants to materialize any must obtain a new explicit design review.
+    """
+    _, summary = _resolve_reviewed_design(context)
+    if summary is None:
+        return []
+    return detach(summary["access_policy_review"].get("pack_identities") or [])
 
 
 def resolve_authored_module_access_policy(context: Any) -> dict[str, Any] | None:

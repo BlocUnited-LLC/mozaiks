@@ -284,15 +284,16 @@ def _apply_module_handler_method_alignment(
     return [{"filename": path, "content": content} for path, content in sorted(file_map.items())]
 
 
-def _selected_capability_packs(app_build_plan: Any, context_variables: Any) -> list[dict[str, Any]] | None:
+def _selected_capability_packs(app_build_plan: Any, context_variables: Any) -> list[dict[str, Any]]:
+    from factory_app.workflows._shared.pack_selection import (
+        selected_pack_rows,
+        validate_reviewed_pack_choices,
+    )
+
     if not isinstance(app_build_plan, dict):
-        return None
-    capability_packs = None
-    if context_variables and hasattr(context_variables, "get"):
-        capability_packs = detach(context_variables.get("capability_packs"))
-    if not capability_packs:
-        capability_packs = app_build_plan.get("capability_packs")
-    return capability_packs if isinstance(capability_packs, list) else None
+        return []
+    validate_reviewed_pack_choices(context_variables, app_build_plan.get("capability_packs") or [])
+    return selected_pack_rows(context_variables)
 
 
 async def _verified_revision_source(app_build_plan: Any, context_variables: Any) -> dict[str, str] | None:
@@ -338,7 +339,7 @@ def _apply_managed_capability_templates(
     overlay_files: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
     capability_packs = _selected_capability_packs(app_build_plan, context_variables)
-    if capability_packs is None:
+    if not capability_packs:
         return code_files
 
     template_files = resolve_managed_capability_templates(

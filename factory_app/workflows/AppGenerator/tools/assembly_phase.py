@@ -382,10 +382,12 @@ def compiled_pack_module_templates(
     Integrity checks compare against this same compiler output; provenance or
     a candidate's own manifests cannot authorize a different implementation.
     """
+    from factory_app.workflows._shared.pack_selection import selected_pack_rows
+
     from .module_entitlement_gates import apply_entitlement_gates
 
     resolved = resolve_managed_capability_templates(
-        detach(context_variables.get("capability_packs")), context_variables=context_variables,
+        selected_pack_rows(context_variables), context_variables=context_variables,
     )
     templates = [
         file for file in resolved

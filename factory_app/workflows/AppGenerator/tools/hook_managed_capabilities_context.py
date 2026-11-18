@@ -3,23 +3,23 @@ Hook: Inject Managed Capabilities Context
 
 Fires as an prompt middleware function on AppPlanAgent.
 
-When ``capability_packs`` is present and non-empty in context_variables
-(populated by an operator at launch), this hook injects a compact
+When the owner-reviewed design selects reusable packs, this hook injects a compact
 [MANAGED CAPABILITIES CONTEXT] block into the AppPlanAgent system message.
 
 The existing header is retained for workflow integration. The body describes
 the supplied pack origins and declared output ownership; a generated_module
 pack can supply deterministic templates just as a managed pack can.
-When capability_packs is null or empty, this hook is a complete no-op.
+An empty reviewed selection injects no pack instructions.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
 from factory_app.workflows._shared.hook_utils import update_agent_section
-from mozaiksai.core.workflow.context.frozen import detach
+from factory_app.workflows._shared.pack_selection import selected_pack_rows
 
 logger = logging.getLogger(__name__)
 
@@ -403,9 +403,7 @@ def inject_managed_capabilities_context(
     """
     prompt middleware function for AppPlanAgent.
 
-    Reads ``capability_packs`` from context_variables. No-ops when the list is
-    null or empty (OSS mode). Injects [MANAGED CAPABILITIES CONTEXT] when packs
-    are present.
+    Reads the reviewed selection, preserving the existing integration header.
     """
     agent_name = getattr(agent, "name", "")
     if agent_name != "AppPlanAgent":
@@ -417,8 +415,24 @@ def inject_managed_capabilities_context(
             return
         # Live containers freeze reads (tuples and mapping proxies); every
         # formatter below type-tests plain lists and dicts.
-        capability_packs = detach(context_variables.get("capability_packs"))
-        operator_contracts = detach(context_variables.get("operator_contracts")) or []
+        if _MANAGED_CAP_HEADER in (getattr(agent, "system_message", None) or getattr(agent, "_system_message", "")):
+            update_agent_section(agent, _MANAGED_CAP_HEADER, "No current owner-reviewed reusable pack instructions.")
+        update_agent_section(agent, "[REVIEWED PACK SELECTION]",
+            "No reusable pack materialization is currently authorized. Resolve the existing DesignDocs owner review before selecting sources.")
+        capability_packs = selected_pack_rows(context_variables)
+        pins = [{"pack_id": row["id"], "version": row["version"], "digest": row["digest"]}
+                for row in capability_packs]
+        update_agent_section(agent, "[REVIEWED PACK SELECTION]",
+            "Preserve exactly this reusable pack selection from the bound DesignDocs review. "
+            "Catalogs and provider defaults are recommendations, not authorization to add packs. "
+            "Do not add, drop, replace or repin reusable packs; obtain renewed DesignDocs review if different packs are needed. "
+            "Ordinary app-owned logical modules remain governed by the approved surface_map. "
+            "Authorized reusable packs: " + json.dumps(pins, separators=(",", ":")))
+        from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+            _selected_packs,
+        )
+
+        operator_contracts = [contract for pack in _selected_packs(context_variables) for contract in pack.contracts]
 
         # No-op in OSS mode — no capability packs provided by the operator.
         if _is_empty(capability_packs):

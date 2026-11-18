@@ -672,35 +672,6 @@ def _context_get(context_variables: Any | None, key: str, default: Any = None) -
         return default
 
 
-class _PlanPackSelection:
-    """Read-only planning context whose pack selection is this plan's when the build context selects none.
-
-    Assembly applies the build context's ``capability_packs``, else the stored
-    plan's (an OSS SaaS plan's default id-only MozaiksPay row among them).
-    While a plan is being built it is not stored yet, so the pack ownership
-    planning releases and validates is read from the plan's own rows here,
-    through the same resolver assembly uses.
-    """
-
-    def __init__(self, base: Any, capability_packs: list[dict[str, Any]]) -> None:
-        self._base = base
-        self._plan = {"capability_packs": [dict(pack) for pack in capability_packs if isinstance(pack, dict)]}
-
-    def get(self, key: str, default: Any = None) -> Any:
-        if key == "app_build_plan":
-            return self._plan
-        return self._base.get(key, default)
-
-
-def _pack_selection_context(context_variables: Any | None, capability_packs: list[dict[str, Any]]) -> Any | None:
-    """The context pack ownership is read from while planning (see :class:`_PlanPackSelection`)."""
-    if context_variables is None or not hasattr(context_variables, "get") or _context_get(
-        context_variables, "capability_packs",
-    ):
-        return context_variables
-    return _PlanPackSelection(context_variables, capability_packs)
-
-
 def _context_available_pack_map(context_variables: Any | None) -> dict[str, dict[str, Any]]:
     raw_groups = [
         _context_get(context_variables, "capability_packs", []),
@@ -876,10 +847,12 @@ def _ensure_context_selected_capability_packs(
     *,
     context_variables: Any | None,
 ) -> list[dict[str, Any]]:
-    """Include packs projected by selected build_context even if the LLM omitted them."""
+    """Carry the reviewed choices forward even if the planner omitted their rows."""
+    from factory_app.workflows._shared.pack_selection import selected_pack_rows
+
     selected_packs = {
         _pack_id_from_descriptor(pack): pack
-        for pack in _normalize_object_list(_context_get(context_variables, "capability_packs", []))
+        for pack in selected_pack_rows(context_variables)
         if _pack_id_from_descriptor(pack)
     }
     if not selected_packs:
@@ -895,8 +868,6 @@ def _ensure_context_selected_capability_packs(
         if pack_id in existing:
             continue
         source = str(descriptor.get("capability_source") or "").strip()
-        if source not in {"managed_capability", "framework_pack", "operator_pack"}:
-            continue
         managed = source == "managed_capability"
         item = dict(descriptor)
         item.setdefault("capability_pack_id", pack_id)
@@ -909,42 +880,6 @@ def _ensure_context_selected_capability_packs(
         result.append(item)
         existing.add(pack_id)
     return result
-
-
-def _default_mozaikspay_descriptor(context_variables: Any | None) -> dict[str, Any]:
-    """Return the public MozaiksPay pack descriptor used for SaaS defaults."""
-    available_packs = _context_available_pack_map(context_variables)
-    configured = available_packs.get(MOZAIKSPAY_PACK_ID)
-    if isinstance(configured, dict):
-        descriptor = dict(configured)
-    else:
-        import yaml
-
-        from factory_app.workflows._shared.hook_utils import workflow_context_path
-
-        contract_path = workflow_context_path(MOZAIKSPAY_PACK_ID, "contract.yaml")
-        contract = yaml.safe_load(contract_path.read_text(encoding="utf-8")) or {}
-        descriptor = {
-            "id": MOZAIKSPAY_PACK_ID,
-            "display_name": "MozaiksPay",
-            "description": "Managed subscription billing provider for generated SaaS apps.",
-            "provides_capabilities": contract.get("provides_capabilities") or [],
-            "required_integrations": contract.get("required_integrations") or [],
-            "facades": contract.get("facades") or [],
-        }
-
-    descriptor.setdefault("capability_pack_id", MOZAIKSPAY_PACK_ID)
-    descriptor.setdefault("capability_source", "managed_capability")
-    descriptor.setdefault("surface_id", "mozaikspay_managed")
-    descriptor.setdefault("surface_kind", "external_integration")
-    descriptor.setdefault("implementation_mode", "external_integration")
-    descriptor.setdefault("pack_type", "mozaikspay")
-    descriptor.setdefault("label", descriptor.get("display_name") or "MozaiksPay")
-    descriptor.setdefault(
-        "summary",
-        descriptor.get("description") or "Managed subscription billing capability.",
-    )
-    return descriptor
 
 
 def _subscription_contract_required(context_variables: Any | None) -> bool:
@@ -972,7 +907,7 @@ def _resolve_monetization_provider(
         if isinstance(pack, dict)
     } - {""}
     if monetization_provider == MOZAIKS_PAY_PROVIDER_ID and MOZAIKSPAY_PACK_ID not in selected_ids:
-        return [*capability_packs, _default_mozaikspay_descriptor(context_variables)], monetization_provider
+        raise ValueError("Managed billing must be selected and owner-reviewed in DesignDocs before app planning")
     if monetization_provider:
         return capability_packs, monetization_provider
     if SELF_MANAGED_PROVIDER_ID in selected_ids:
@@ -993,6 +928,9 @@ def _validate_monetization_provider_selection(
 ) -> None:
     """Validate the resolved SaaS subscription-assignment provider selection."""
     if not contract_required:
+        if any(_pack_id_from_descriptor(pack) in {MOZAIKSPAY_PACK_ID, SELF_MANAGED_PROVIDER_ID}
+               for pack in capability_packs if isinstance(pack, dict)):
+            raise ValueError("Subscription assignment packs require an approved contract with contract_required=true")
         if monetization_provider:
             raise ValueError(
                 "AppBuildPlan.monetization_provider is only valid when the approved "
@@ -2321,15 +2259,21 @@ def app_build_plan(
         for p in capability_packs
         if isinstance(p, dict) and p.get("capability_source") == "managed_capability"
     ) - {""}
+    from factory_app.workflows._shared.pack_selection import validate_reviewed_pack_choices
+
+    validate_reviewed_pack_choices(context_variables, capability_packs)
+    _validate_monetization_provider_selection(
+        capability_packs,
+        contract_required=contract_required,
+        monetization_provider=monetization_provider,
+    )
     capability_packs, pages, build_tasks = _apply_selected_pack_files(
         capability_packs=capability_packs,
         pages=pages,
         build_tasks=build_tasks,
         context_variables=context_variables,
     )
-    # The cached plan never schedules model work for an output or facade module a selected pack owns,
-    # including a pack only this plan selects (the build context selecting none).
-    pack_selection = _pack_selection_context(context_variables, capability_packs)
+    pack_selection = context_variables
     released: dict[str, Any] = {"build_tasks": build_tasks, "generation_order": generation_order}
     for repair in (
         *release_pack_owned_paths(released, pack_selection),
@@ -2374,11 +2318,6 @@ def app_build_plan(
         build_tasks,
         managed_capability_ids=managed_capability_ids,
         pack_paths=pack_owned_output_paths(pack_selection),
-    )
-    _validate_monetization_provider_selection(
-        capability_packs,
-        contract_required=contract_required,
-        monetization_provider=monetization_provider,
     )
 
     task_ids: frozenset[str] = frozenset(

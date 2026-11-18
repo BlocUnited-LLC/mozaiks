@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
+from factory_app.workflows._shared.pack_selection import pin_pack_choices
 from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
 from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import materialize_auth_scaffold
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
@@ -50,6 +51,12 @@ saved = compilation.saved
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _candidate_authorization(context):
+    return verified_pack_authorization(context, selection=pin_pack_choices(
+        context, [row["id"] for row in context["capability_packs"]],
+    ))
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("pack_id,module_id,permission,collection,action", [
     ("social", "friends", "friends.manage", "requests", "send_friend_request"),
@@ -80,7 +87,7 @@ async def test_pack_review_survives_capture_registration_and_bound_replay(
         build_context_authority_policy(workflow_name="DesignDocs", definitions=definitions), build_context_root=root,
     )
     assert [row["id"] for row in selection["capability_packs"]] == [pack_id]
-    authorization = verified_pack_authorization(selection)
+    authorization = _candidate_authorization(selection)
     actions = [name for name, permissions in authorization.actions[module_id].items() if permission in permissions]
     policy = {"roles": [{"role_id": "member", "label": "Member", "description": "Use reviewed actions."}],
               "grants": [{"role_id": "member", "collection": collection, "actions": actions}]}
@@ -88,6 +95,7 @@ async def test_pack_review_survives_capture_registration_and_bound_replay(
     design_context = inventory._context(monetized=False)
     design_context.set("run_build_binding", context["run_build_binding"])
     design_context.set("capability_packs", selection["capability_packs"])
+    design_context.set("pack_selection", [row.model_dump() for row in authorization.identities])
     design_context.set("operator_contracts", selection.get("operator_contracts", []))
     prompt = await _prompt_runner(design_context)._run_prompt_middleware(SimpleNamespace(variables={}, prompt=[]))
     assert f"{module_id}.{action}" in prompt
@@ -121,7 +129,7 @@ async def test_pack_review_survives_capture_registration_and_bound_replay(
     roles = yaml.safe_load(next(row["content"] for row in assembled if row["filename"] == "config/auth.yaml"))["authorization"]["roles"]
     assert roles == [{"id": "member", "permissions": [permission]}]
     context.update(
-        app_build_plan={"capability_packs": [], "build_tasks": []},
+        app_build_plan={"capability_packs": deepcopy(selection["capability_packs"]), "build_tasks": []},
         capability_packs=deepcopy(selection["capability_packs"]),
         data_contract=summary["data_contract"], design_surface_map=summary["surface_map"],
         design_docs_artifact=design.model_dump(mode="json", by_alias=True),
@@ -133,7 +141,7 @@ async def test_pack_review_survives_capture_registration_and_bound_replay(
         app_id="target", user_id="owner", workflow_name="AppGenerator", chat_id="chat", bundle_name="bundle",
         zip_path=Path(parent.commit_metadata.metadata["artifact_path"]), context_variables=context, artifact_store=store,
     )
-    assert child.commit_metadata.metadata["compilation_inputs"]["inputs"]["app_build_plan"]["capability_packs"] == []
+    assert child.commit_metadata.metadata["compilation_inputs"]["inputs"]["app_build_plan"]["capability_packs"][0]["id"] == pack_id
     assert child.commit_metadata.metadata["capability_packs"][0]["id"] == pack_id
 
     async def replay(**overrides):
@@ -186,7 +194,7 @@ def social():
         "id": "social", "pack_source_path": str(root), "capability_source": "generated_module",
         "version": metadata["version"], "digest": metadata["digest"],
     }]}
-    authorization = verified_pack_authorization(context)
+    authorization = _candidate_authorization(context)
     surface_map = {"surfaces": []}
     data = _compose_reviewed_pack_data({"version": "1", "surfaces": [], "shared_collections": []}, surface_map, authorization)
     _validate_design_collections(data, surface_map, pack_authorization=authorization)
@@ -277,7 +285,7 @@ def test_authored_permission_collision_cannot_unlock_unreviewed_pack_actions(soc
     validate_pack_permission_consumers(manifest, validated, data_contract=data, pack_authorization=authorization)
 
 
-def test_pack_source_change_refuses_recorded_identity(tmp_path):
+def test_pack_source_change_refuses_recorded_identity(tmp_path, monkeypatch):
     root = tmp_path / "social"
     shutil.copytree(ROOT / "factory_app/build_context/social", root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     metadata = verify_pack_integrity(root, "social")
@@ -285,17 +293,18 @@ def test_pack_source_change_refuses_recorded_identity(tmp_path):
         "id": "social", "pack_source_path": str(root), "capability_source": "generated_module",
         "version": metadata["version"], "digest": metadata["digest"],
     }]}
-    verified_pack_authorization(context)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(tmp_path))
+    pins = pin_pack_choices(context, ["social"])
     manifest = root / "templates/modules/friends/module.yaml"
     manifest.write_text(manifest.read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8")
-    with pytest.raises(PackIntegrityError, match="digest does not match"):
-        verified_pack_authorization(context)
+    with pytest.raises(PackIntegrityError, match="renew design review"):
+        verified_pack_authorization(context, selection=pins)
 
 
 def test_messaging_permission_uses_only_reviewed_real_pack_actions():
     root = ROOT / "factory_app/build_context/messaging"
     metadata = verify_pack_integrity(root, "messaging")
-    authorization = verified_pack_authorization({"capability_packs": [{
+    authorization = _candidate_authorization({"capability_packs": [{
         "id": "messaging", "pack_source_path": str(root), "capability_source": "generated_module",
         "version": metadata["version"], "digest": metadata["digest"],
     }]})
@@ -339,6 +348,7 @@ def test_design_review_binds_pack_actions_and_source_identity(social, persistenc
     selection, authorization, _, _, policy = social
     context = inventory._context(monetized=False)
     context.set("capability_packs", selection["capability_packs"])
+    context.set("pack_selection", [row.model_dump() for row in authorization.identities])
     bundle = inventory._bundle(pricing=False)
     bundle["access_policy"] = policy
 
@@ -407,12 +417,14 @@ def test_changed_pack_after_owner_review_refuses_consumption(tmp_path, persisten
     metadata = verify_pack_integrity(root, "social")
     selection = [{"id": "social", "pack_source_path": str(root), "capability_source": "generated_module",
                   "version": metadata["version"], "digest": metadata["digest"]}]
-    authorization = verified_pack_authorization({"capability_packs": selection})
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(tmp_path))
+    authorization = _candidate_authorization({"capability_packs": selection})
     actions = [action for action, permissions in authorization.actions["friends"].items() if "friends.manage" in permissions]
     policy = {"roles": [{"role_id": "member", "label": "Member", "description": "Manage friends."}],
               "grants": [{"role_id": "member", "collection": "requests", "actions": actions}]}
     context = inventory._context(monetized=False)
     context.set("capability_packs", selection)
+    context.set("pack_selection", [row.model_dump() for row in authorization.identities])
     bundle = inventory._bundle(pricing=False)
     bundle["access_policy"] = policy
 
@@ -431,7 +443,7 @@ def test_changed_pack_after_owner_review_refuses_consumption(tmp_path, persisten
     assert resolve_design_access_policy(context) == policy
     manifest = root / "templates/modules/friends/module.yaml"
     manifest.write_text(manifest.read_text(encoding="utf-8") + "\n# modified after review\n", encoding="utf-8")
-    with pytest.raises(PackIntegrityError, match="digest does not match"):
+    with pytest.raises(PackIntegrityError, match="renew design review"):
         resolve_design_access_policy(context)
 
 
@@ -500,3 +512,30 @@ async def test_compiled_role_controls_real_module_dispatch(social, monkeypatch):
         if not allowed:
             assert result.error_code == "PERMISSION_DENIED" and handler.calls == 0
     assert handler.calls == 1
+
+
+def test_selected_pack_without_grants_still_requires_owner_review(social, persistence, monkeypatch):
+    _, authorization, _, _, _ = social
+    context = inventory._context(monetized=False)
+    context.set("pack_selection", [row.model_dump() for row in authorization.identities])
+
+    async def approve(_tool, payload, **kwargs):
+        assert any("Selected pack social" in checkpoint for checkpoint in payload["checkpoints"])
+        return {"action": "approve", "approved": True, "review_id": payload["review_id"]}
+
+    ui = AsyncMock(side_effect=approve)
+    monkeypatch.setattr(save_design_doc, "use_ui_tool", ui)
+    result = inventory._save(context, inventory._bundle(pricing=False))
+    assert result["outcome"] == "saved", result
+    ui.assert_awaited_once()
+    summary = persistence[2].await_args.kwargs["summary_payload"]
+    assert summary["access_policy"]["grants"] == []
+    assert summary["access_policy_review"]["status"] == "approved"
+    summary["access_policy_review"]["status"] = "not_required"
+    context.set("design_docs_artifact", {
+        "app_id": "reports-app", "build_family": "design_docs", "build_key": "design_docs",
+        "source_workflow": "DesignDocs", "lifecycle_status": "current",
+        "commit_metadata": {"author_user_id": "owner", "metadata": {"summary_payload": summary}},
+    })
+    with pytest.raises(ValueError, match="explicit owner approval"):
+        resolve_design_access_policy(context)

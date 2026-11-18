@@ -140,11 +140,15 @@ agents:
       within those pages. App planning must preserve that inventory exactly.
 
       For a greenfield initial build with monetization_enabled: true:
-      - When concept_blueprint.monetization_intent records both monetized: true
-        and subscription_contract_likely: true, the save boundary materializes
-        the MozaiksPay pack's declared Pricing (/pricing), Billing (/billing),
-        and Usage (/usage) facade pages and assigns them to billing_portal in
-        surface_map. You do not need to reproduce these pack-declared designs.
+      - Use concept_blueprint.monetization_intent to reason about the app's needs,
+        but do not infer provider selection from that signal. Choose canonical
+        reusable pack IDs with select_capability_packs before producing the design;
+        [] explicitly selects none. An available offering is not a build choice.
+      - Only when the actual candidate explicitly selects a verified managed
+        subscription provider, the save boundary materializes that pack's declared
+        facade pages and assigns their declared facade owners in surface_map.
+        The owner must affirmatively review the named provider and exact pins.
+        You do not need to reproduce these pack-declared designs.
         A page you already designed at the same route is preserved, not duplicated.
       - Otherwise, include Pricing at /pricing in experience_spec.pages, with
         explicit layout, navigation, primitive sections, and one primary
@@ -154,7 +158,8 @@ agents:
         The app-owned billing_portal facade owns no provider records,
         subscription assignment storage, or token ledger. The managed provider
         remains a separate hosted external_integration surface.
-      - Describe public plan browsing through billing_portal.list_plans, which
+      - For an explicitly selected MozaiksPay provider, describe public plan
+        browsing through billing_portal.list_plans, which
         reads config/subscriptions.yaml. Checkout and billing management use
         the managed provider client behind that facade. Usage and token reads
         may use the existing /api/me/usage, /api/me/tokens, and

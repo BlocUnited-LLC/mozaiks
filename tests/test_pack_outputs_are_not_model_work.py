@@ -40,15 +40,41 @@ from mozaiksai.core.workflow.generator_support.page_plan_utils import (
 )
 from mozaiksai.core.workflow.task_batches import _normalize_owned_page_files_from_plan
 from scripts.appgenerator_fixture_replay import execute_file_replay
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_app_plan_managed_facade_repair import _plan_and_context
-from tests.test_appgenerator_assembly_failures import _context as _assembly_context
-from tests.test_appgenerator_page_binding_construction import _bridge
+from tests.test_appgenerator_assembly_failures import _context as _unreviewed_assembly_context
+from tests.test_appgenerator_page_binding_construction import _bridge as _unreviewed_bridge
 from tests.test_continuous_deterministic_materialization import _load_models
 
 MOZAIKSPAY = Path(__file__).resolve().parents[1] / "factory_app" / "build_context" / "mozaikspay"
 PACK = {"id": "mozaikspay", "capability_source": "managed_capability", "status": "active",
         "pack_source_path": str(MOZAIKSPAY)}
 PACK_PAGES = {"ui/pages/billing.yaml", "ui/pages/pricing.yaml", "ui/pages/usage.yaml"}
+
+
+@pytest.fixture(autouse=True)
+def registered_provider(monkeypatch, tmp_path):
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
+
+
+def _reviewed_values(initial):
+    """Existing positive pack-output units explicitly choose their fixture provider."""
+    values = deepcopy(initial or {})
+    if not values.get("capability_packs"):
+        return values
+    if isinstance(values.get("app_build_plan"), dict):
+        values["app_build_plan"]["capability_packs"] = [PACK]
+    return reviewed_pack_fixture(values, ["mozaikspay"])
+
+
+def _bridge(initial=None):
+    return _unreviewed_bridge(_reviewed_values(initial))
+
+
+def _assembly_context(**overrides):
+    return _unreviewed_assembly_context(**_reviewed_values(overrides))
 
 
 def _templates() -> dict[str, str]:
@@ -200,84 +226,38 @@ async def test_assembly_takes_pack_owned_files_only_from_the_templates(caplog):
         assert path in discarded
 
 
-def _default_oss_mozaikspay_row() -> dict:
-    """The id-only row an OSS SaaS plan appends when no build context selects MozaiksPay."""
-    from factory_app.workflows.AppGenerator.tools.app_build_plan import (
-        _default_mozaikspay_descriptor,
+def test_standalone_physical_pack_api_still_resolves_an_explicit_id_only_row():
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        resolve_declared_pack_output_paths,
     )
 
-    row = _default_mozaikspay_descriptor(None)
-    assert "pack_source_path" not in row and row["capability_source"] == "managed_capability"
-    return row
+    row = {"id": "mozaikspay", "capability_source": "managed_capability"}
+    assert resolve_declared_pack_output_paths([row]) == resolve_declared_pack_output_paths([PACK])
 
 
-def test_the_default_oss_mozaikspay_row_owns_exactly_the_outputs_assembly_materializes():
-    """Plan coverage and the discard of worker copies resolve the id-only row as assembly does."""
-    default = pack_owned_output_paths(_bridge({"app_build_plan": {"capability_packs": [_default_oss_mozaikspay_row()]}}))
-    explicit = pack_owned_output_paths(_bridge({"capability_packs": [PACK]}))
-    assert default == explicit
-    assert PACK_PAGES | {"modules/billing_portal/module.yaml", "services/integrations/mozaikspay_client.py"} <= default
-
-
-def test_the_default_oss_saas_plan_releases_the_outputs_its_mozaikspay_row_owns():
-    """No build context selects MozaiksPay: app_build_plan appends the id-only row and releases its pack's outputs."""
+def test_factory_cannot_append_a_late_default_billing_pack():
     from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 
     _load_models()
     plan, context = _plan_and_context(collapsed=False)
     context.set("capability_packs", [])
-    plan["capability_packs"] = [pack for pack in plan["capability_packs"] if pack["capability_pack_id"] != "mozaikspay"]
-    plan["build_tasks"] = [task for task in plan["build_tasks"] if task["task_id"] not in {"2", "3", "4", "5"}]
-    plan["generation_order"] = [task["task_id"] for task in plan["build_tasks"]]
-    pages = next(task for task in plan["build_tasks"] if task["task_type"] == "page_bundle")
-    assert PACK_PAGES <= set(pages["owned_paths"])
-
-    app_build_plan(AppBuildPlan=plan, context_variables=context)
-
-    stored = detach(context.get("app_build_plan"))
-    [row] = [pack for pack in stored["capability_packs"] if (pack.get("id") or pack.get("capability_pack_id")) == "mozaikspay"]
-    assert "pack_source_path" not in row and row["capability_source"] == "managed_capability"
-    pack_paths = pack_owned_output_paths(context)
-    assert PACK_PAGES | {"modules/billing_portal/module.yaml", "services/integrations/mozaikspay_client.py"} <= pack_paths
-    assert not {path for task in stored["build_tasks"] for path in task["owned_paths"]} & pack_paths
+    context.set("design_docs_artifact", None)
+    plan["capability_packs"] = [pack for pack in plan["capability_packs"]
+                               if pack["capability_pack_id"] != "mozaikspay"]
+    with pytest.raises(ValueError, match="owner-reviewed in DesignDocs"):
+        app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert context.get("app_build_plan") is None
 
 
-@pytest.mark.asyncio
-async def test_assembly_of_the_default_oss_plan_takes_pack_outputs_only_from_the_templates(caplog):
-    from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
-        scan_generated_bundle,
+def test_factory_assembly_refuses_an_unreviewed_id_only_managed_row():
+    from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import (
+        _selected_capability_packs,
     )
 
-    templates = _templates()
-    row = _default_oss_mozaikspay_row()
-    dashboard = _page("dashboard", "/dashboard", [{"id": "hero", "primitive": "Panel", "config": {"title": "Overview"}}])
-    context = _assembly_context(
-        generated_files={}, capability_packs=[], app_build_plan={**_assembly_plan(), "capability_packs": [row]},
-        app_task_batch_results={
-            "page_bundle": {"_task_id": "page_bundle", "code_files": [
-                {"filename": "app.json", "content": '{"appName": "TaskTracker"}'},
-                {"filename": "ui/pages/dashboard.yaml", "content": yaml.safe_dump(dashboard)},
-                {"filename": "ui/pages/pricing.yaml", "content": yaml.safe_dump(_placeholder_pricing())},
-            ]},
-            "facade_contract": {"_task_id": "facade_contract", "code_files": []},
-        },
-    )
-
-    caplog.set_level(logging.INFO, logger="factory_app.workflows.AppGenerator.tools.assemble_app_tasks")
-    with _workflow_tool_invocation(context):
-        result = await assembly.assemble_app_tasks(context_variables=context)
-
-    assert result["success"] is True, result
-    files = detach(context.get("generated_files"))
-    for path in (*PACK_PAGES, "modules/billing_portal/module.yaml", "services/integrations/mozaikspay_client.py"):
-        assert files[path] == templates[path], path
-    assert any(
-        "PACK_OWNED_OUTPUT_DISCARDED" in record.getMessage() and "ui/pages/pricing.yaml" in record.getMessage()
-        for record in caplog.records
-    )
-    # The scan holds the same row to the same verified template content.
-    errors = scan_generated_bundle(files, capability_packs=[row])
-    assert not any("verified template" in error or "template-owned output" in error for error in errors), errors
+    row = {"id": "mozaikspay", "capability_source": "managed_capability"}
+    context = _bridge({"capability_packs": []})
+    with pytest.raises(ValueError, match="selected pack identities"):
+        _selected_capability_packs({"capability_packs": [row]}, context)
 
 
 def test_a_defective_template_page_fails_assembly_naming_its_pack_and_source():
