@@ -317,3 +317,21 @@ def test_clearing_subscription_contract_removes_previous_prompt_instructions():
     assert "OLD CONTRACT RATIONALE" not in agent.system_message
     assert "No approved subscription contract is available" in agent.system_message
     assert agent._mozaiks_base_system_message == agent.system_message
+
+
+def test_required_contract_without_reviewed_writer_cannot_publish_a_cached_plan(monkeypatch):
+    from unittest.mock import Mock
+
+    from factory_app.workflows.AppGenerator.tools import app_build_plan as planning
+    from tests.appgenerator_subscription_fixture import subscription_contract
+    from tests.test_app_plan_managed_facade_repair import _plan_and_context
+
+    plan, context = _plan_and_context(monetized=False)
+    context.set("subscription_contract", subscription_contract("task_management"))
+    renderer = Mock(side_effect=AssertionError("no writer was reviewed"))
+    monkeypatch.setattr(planning, "_apply_selected_pack_files", renderer)
+    with pytest.raises(ValueError, match="monetization_provider is required"):
+        planning.app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert context.get("app_build_plan") is None
+    assert context.get("app_plan_ready") is False
+    renderer.assert_not_called()
