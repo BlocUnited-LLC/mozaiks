@@ -17,6 +17,7 @@ from mozaiksai.core.session.build_context import (
     discover_build_context_files,
     discover_pack_descriptors,
     load_build_context,
+    load_contract_descriptors,
     load_trusted_build_context,
     resolve_build_context_root,
 )
@@ -181,3 +182,25 @@ class PhysicalPackContext:
         if key == "app_build_plan" and isinstance(value, Mapping):
             return {**detach(value), "capability_packs": detach(self._rows)}
         return value
+
+
+def subscription_assignment_writers(context: Any, *, rows: list[dict[str, Any]] | None = None) -> dict[str, str]:
+    """Classify assignment writers from verified contracts, never inline plan claims."""
+    selected = selected_pack_rows(context) if rows is None else rows
+    result: dict[str, str] = {}
+    for entry in verified_selected_pack_sources(selected, context_variables=context):
+        root = Path(entry["source_path"])
+        contracts = load_contract_descriptors(root, load_build_context(root / "context.yaml"))
+        if any("subscription_write_path" in (contract.get("provides_capabilities") or []) for contract in contracts):
+            result[entry["pack_id"]] = entry["capability_source"]
+    return result
+
+
+def validate_subscription_write_path(context: Any, contract: Any, *, rows: list[dict[str, Any]] | None = None) -> dict[str, str]:
+    """A pack review cannot replace the later approved subscription contract."""
+    writers = subscription_assignment_writers(context, rows=rows)
+    if writers and (not isinstance(contract, Mapping) or contract.get("contract_required") is not True):
+        raise ValueError("Subscription assignment packs require an approved contract with contract_required=true")
+    if len(writers) > 1:
+        raise ValueError(f"Multiple subscription assignment writers {sorted(writers)}; select exactly one")
+    return writers

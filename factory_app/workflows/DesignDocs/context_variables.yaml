@@ -16,15 +16,15 @@ definitions:
     source: {type: computed, default: null}
   operator_capabilities:
     type: array
-    description: Trusted operator-selected pack identifiers resolved against installed public build-context declarations.
+    description: Trusted operator-enabled offerings resolved against installed public build-context declarations; not the current build selection.
     source: {type: build_context, default: []}
   capability_packs:
     type: array
-    description: Trusted selected pack descriptors used to enforce facade ownership before saving design surfaces.
+    description: Trusted available offering descriptors. The explicit pack_selection candidate and owner-reviewed artifact determine this build’s reusable packs.
     source: {type: build_context, default: []}
   operator_contracts:
     type: array
-    description: Declared contracts of selected packs, including exact surface ownership boundaries.
+    description: Declared contracts of available offerings; selected-source contracts are freshly resolved from the explicit candidate or reviewed artifact.
     source: {type: build_context, default: []}
   design_docs_save_outcome:
     type: string

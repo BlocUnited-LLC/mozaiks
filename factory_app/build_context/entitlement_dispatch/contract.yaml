@@ -1,14 +1,13 @@
 contract_id: entitlement_dispatch
 contract_type: build_pack_instructions
 
-# entitlement_dispatch is not selected by LLM intent matching.
-# AppPlanAgent includes it automatically when:
-#   - config/subscriptions.yaml declares assignment_store
-#   - the build does NOT include a managed capability pack that owns
-#     subscription assignment writes
-# The selection rule is injected by subscription_contract_context.py.
+# Choose this self-managed writer explicitly in DesignDocs and review its exact
+# identity before subscription planning. Assembly owns the declared templates.
+provides_capabilities:
+  - subscription_write_path
+
 selection_rules:
-  - id: implicit_for_self_hosted_saas
+  - id: explicit_self_managed_assignment
     when:
       intent_any:
         - self-hosted subscription billing
@@ -53,11 +52,10 @@ managed_assignment_writer_contract:
     arrive through a trusted managed adapter or the OSS
     BillingFulfillmentCommand ingress.
   selection_mechanism: >
-    The planning system checks whether any selected managed_capability pack
-    declares provides_capabilities: [subscription_write_path] in its contract.
-    If found, that pack owns the subscription assignment write path and
-    entitlement_dispatch is not selected. The mechanism is pack-driven;
-    no specific pack name is hardcoded into the OSS planner.
+    The owner-reviewed DesignDocs selection chooses exactly one subscription
+    assignment writer before app planning. This self-managed pack and a managed
+    pack that declares subscription_write_path are alternatives. Missing writer
+    selection requires renewed design review, not a late default.
   replacement_rule: >
     A future managed monetization pack can replace the current write-path owner
     for this planning decision only if it explicitly declares

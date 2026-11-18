@@ -26,23 +26,27 @@ def _normalize(packs, context=None):
 
 
 @pytest.mark.parametrize("context", [None, {}, {"capability_packs": []}])
-def test_explicit_paid_selection_normalizes_and_materializes_without_operator_selection(context):
+def test_late_provider_choice_cannot_insert_an_unreviewed_pack(context):
+    with pytest.raises(ValueError, match="owner-reviewed in DesignDocs"):
+        _resolve_monetization_provider(
+            [], contract_required=True, monetization_provider="mozaiks_pay", context_variables=context,
+        )
+
+
+def test_explicit_standalone_pack_still_uses_the_canonical_physical_composer():
+    row = {"capability_pack_id": "mozaikspay", "capability_source": "managed_capability"}
     packs, provider = _resolve_monetization_provider(
-        [], contract_required=True, monetization_provider="mozaiks_pay", context_variables=context,
+        [row], contract_required=True, monetization_provider="mozaiks_pay", context_variables=None,
     )
-    normalized, pages, tasks = _normalize(packs, context)
+    normalized, pages, tasks = _normalize(packs)
     assert provider == "mozaiks_pay"
     facade = next(pack for pack in normalized if pack["capability_pack_id"] == "billing_portal")
     assert facade["capability_source"] == "generated_module"
     assert {page["route"] for page in pages} == {"/billing", "/usage"}
     assert tasks == []
-
-    files = resolve_managed_capability_templates(normalized, context_variables=context)
-    filenames = {file["filename"] for file in files}
-    assert "modules/billing_portal/module.yaml" in filenames
-    assert "modules/billing_portal/backend/handler.py" in filenames
-    assert "ui/pages/billing.yaml" in filenames
-    assert "services/integrations/mozaikspay_client.py" in filenames
+    filenames = {file["filename"] for file in resolve_managed_capability_templates(normalized)}
+    assert {"modules/billing_portal/module.yaml", "modules/billing_portal/backend/handler.py",
+            "ui/pages/billing.yaml", "services/integrations/mozaikspay_client.py"} <= filenames
     assert not any(path.startswith("modules/mozaikspay/") for path in filenames)
 
 

@@ -288,11 +288,13 @@ def _selected_capability_packs(app_build_plan: Any, context_variables: Any) -> l
     from factory_app.workflows._shared.pack_selection import (
         selected_pack_rows,
         validate_reviewed_pack_choices,
+        validate_subscription_write_path,
     )
 
     if not isinstance(app_build_plan, dict):
         return []
     validate_reviewed_pack_choices(context_variables, app_build_plan.get("capability_packs") or [])
+    validate_subscription_write_path(context_variables, resolve_subscription_contract(context_variables))
     return selected_pack_rows(context_variables)
 
 

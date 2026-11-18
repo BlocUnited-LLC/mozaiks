@@ -1101,9 +1101,13 @@ async def save_design_docs_bundle(
         if not isinstance(selection, list):
             raise ValueError("Call select_capability_packs before saving the design; [] explicitly selects none")
         pack_authorization = verified_pack_authorization(context_variables, selection=selection)
-        contract = selected_subscription_contract(context_variables)
-        if contract is not None and _cv_get(context_variables, "monetization_enabled") is not True:
-            raise ValueError("Managed subscription billing requires explicit monetization intent before owner review")
+        from factory_app.workflows._shared.pack_selection import subscription_assignment_writers
+
+        writers = subscription_assignment_writers(context_variables)
+        if writers and _cv_get(context_variables, "monetization_enabled") is not True:
+            raise ValueError("Subscription assignment requires explicit monetization intent before owner review")
+        if len(writers) > 1:
+            raise ValueError("Select exactly one subscription assignment writer before owner review")
         frontend_markdown = str(bundle.get("frontend_markdown") or "").strip()
         backend_markdown = str(bundle.get("backend_markdown") or "").strip()
         database_markdown = str(bundle.get("database_markdown") or "").strip()

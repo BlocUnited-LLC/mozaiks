@@ -221,3 +221,99 @@ def test_appgen_prompt_does_not_select_catalog_offerings_or_keep_stale_contracts
     assert "recommendations, not authorization" in agent.system_message
     assert "STALE PROVIDER INSTRUCTIONS" not in agent.system_message
     assert "mozaikspay" not in agent.system_message
+
+
+def test_subscription_renderer_requires_a_reviewed_writer_and_never_assigns_pack_tasks():
+    from factory_app.workflows._shared.subscription_contract_context import _render_contract
+
+    contract = {"contract_required": True, "app_generator_instructions": ["STALE MODEL OWNED TASKS"]}
+    absent = _render_contract(contract)
+    assert "Return to DesignDocs" in absent
+    assert "STALE MODEL OWNED TASKS" not in absent
+    for writer, source in (("entitlement_dispatch", "generated_module"), ("custom_billing", "managed_capability")):
+        rendered = _render_contract(contract, assignment_writers={writer: source})
+        assert "Reviewed subscription assignment writer: " + writer in rendered
+        assert "Do not create model-owned" in rendered
+        assert "must also include three" not in rendered
+        assert "STALE MODEL OWNED TASKS" not in rendered
+
+
+def test_custom_verified_writer_requires_a_later_required_contract(tmp_path, monkeypatch):
+    from factory_app.workflows._shared.pack_selection import (
+        rows_for_pack_choices,
+        validate_subscription_write_path,
+    )
+    from tests.test_designdocs_capability_ownership import _search_pack
+
+    _search_pack(tmp_path, monkeypatch)
+    path = tmp_path / "managed_search/contract.yaml"
+    contract = yaml.safe_load(path.read_text())
+    contract["provides_capabilities"] = ["subscription_write_path"]
+    path.write_text(yaml.safe_dump(contract))
+    rows = rows_for_pack_choices({}, pin_pack_choices({}, ["managed_search"]))
+    for approved in (None, {"contract_required": False}):
+        with pytest.raises(ValueError, match="contract_required=true"):
+            validate_subscription_write_path(None, approved, rows=rows)
+    assert validate_subscription_write_path(None, {"contract_required": True}, rows=rows) == {"managed_search": "managed_capability"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("approved_contract", [None, {"contract_required": False}])
+async def test_durable_compilation_gate_refuses_reviewed_writer_without_required_contract(tmp_path, monkeypatch, approved_contract):
+    import hashlib
+
+    from mozaiksai.core.artifacts.models import BuildRecord
+    from mozaiksai.core.artifacts.summary_artifacts import _summary_bytes
+    from mozaiksai.core.validation.compilation_inputs import _CompilerInputs, _context_from_inputs
+    from tests.reviewed_pack_fixture import reviewed_pack_fixture
+    from tests.test_app_compilation_inputs import Store
+    from tests.test_designdocs_capability_ownership import _search_pack
+
+    _search_pack(tmp_path, monkeypatch)
+    path = tmp_path / "managed_search/contract.yaml"
+    instructions = yaml.safe_load(path.read_text())
+    instructions["provides_capabilities"] = ["subscription_write_path"]
+    path.write_text(yaml.safe_dump(instructions))
+    rows = rows_for_pack_choices({}, pin_pack_choices({}, ["managed_search"]))
+    context = reviewed_pack_fixture({"app_build_plan": {"capability_packs": rows, "build_tasks": []}}, ["managed_search"])
+    binding = context["run_build_binding"]
+    summary = context["design_docs_artifact"]["commit_metadata"]["metadata"]["summary_payload"]
+    store = Store()
+
+    def record(record_id, family, workflow, payload):
+        raw = _summary_bytes(payload)
+        digest = hashlib.sha256(raw).hexdigest()
+        stored = BuildRecord(id=record_id, app_id=binding["target_app_id"], build_family=family, build_key=family,
+            version_number=1, lineage_root_id=record_id, source_workflow=workflow, lifecycle_status="current",
+            files_manifest=[{"path": family + ".json", "sha256": digest, "size_bytes": len(raw)}],
+            commit_metadata={"author_user_id": "fixture-owner", "metadata": {"summary_payload": payload}})
+        store.records[record_id] = stored
+        return {"record_id": record_id, "sha256": digest}
+
+    design = record("design", "design_docs", "DesignDocs", summary)
+    subscription = (record("subscription", "subscription_contract", "SubscriptionContractDesigner", approved_contract)
+                    if approved_contract is not None else None)
+    inputs = _CompilerInputs(binding=binding, app_build_plan=context["app_build_plan"],
+                             app_task_batch_items=[], app_task_batch_results={},
+                             design_docs=design, subscription_contract=subscription)
+    with pytest.raises(ValueError, match="contract_required=true"):
+        await _context_from_inputs(inputs, store=store, owner_user_id="fixture-owner", capability_packs=rows)
+
+
+def test_clearing_subscription_contract_removes_previous_prompt_instructions():
+    from types import SimpleNamespace
+
+    from factory_app.workflows._shared.subscription_contract_context import (
+        inject_subscription_contract_context,
+    )
+
+    context = {"subscription_contract": {"contract_required": False, "rationale": "OLD CONTRACT RATIONALE"}}
+    agent = SimpleNamespace(name="AppPlanAgent", context_variables=context, system_message="Base")
+    agent.update_system_message = lambda message: setattr(agent, "system_message", message)
+    inject_subscription_contract_context(agent, [])
+    assert "OLD CONTRACT RATIONALE" in agent.system_message
+    context["subscription_contract"] = None
+    inject_subscription_contract_context(agent, [])
+    assert "OLD CONTRACT RATIONALE" not in agent.system_message
+    assert "No approved subscription contract is available" in agent.system_message
+    assert agent._mozaiks_base_system_message == agent.system_message

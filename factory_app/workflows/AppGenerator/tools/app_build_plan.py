@@ -40,7 +40,6 @@ try:
         MOZAIKS_PAY_PROVIDER_ID,
         MOZAIKSPAY_PACK_ID,
         SELF_MANAGED_PROVIDER_ID,
-        SUBSCRIPTION_WRITE_PATH_CAPABILITY,
         normalize_monetization_provider,
     )
     from .managed_monetization_contract import (
@@ -51,7 +50,6 @@ except ImportError:
         MOZAIKS_PAY_PROVIDER_ID,
         MOZAIKSPAY_PACK_ID,
         SELF_MANAGED_PROVIDER_ID,
-        SUBSCRIPTION_WRITE_PATH_CAPABILITY,
         normalize_monetization_provider,
     )
     from factory_app.workflows.AppGenerator.tools.managed_monetization_contract import (
@@ -673,10 +671,9 @@ def _context_get(context_variables: Any | None, key: str, default: Any = None) -
 
 
 def _context_available_pack_map(context_variables: Any | None) -> dict[str, dict[str, Any]]:
-    raw_groups = [
-        _context_get(context_variables, "capability_packs", []),
-        _context_get(context_variables, "available_managed_capabilities", []),
-    ]
+    from factory_app.workflows._shared.pack_selection import selected_pack_rows
+
+    raw_groups = [selected_pack_rows(context_variables)]
     result: dict[str, dict[str, Any]] = {}
     for raw_packs in raw_groups:
         if not isinstance(raw_packs, list):
@@ -925,12 +922,16 @@ def _validate_monetization_provider_selection(
     *,
     contract_required: bool,
     monetization_provider: str | None,
+    context_variables: Any | None = None,
 ) -> None:
     """Validate the resolved SaaS subscription-assignment provider selection."""
+    from factory_app.workflows._shared.pack_selection import validate_subscription_write_path
+
+    writers = validate_subscription_write_path(
+        context_variables, {"contract_required": contract_required},
+        rows=capability_packs if context_variables is None else None,
+    )
     if not contract_required:
-        if any(_pack_id_from_descriptor(pack) in {MOZAIKSPAY_PACK_ID, SELF_MANAGED_PROVIDER_ID}
-               for pack in capability_packs if isinstance(pack, dict)):
-            raise ValueError("Subscription assignment packs require an approved contract with contract_required=true")
         if monetization_provider:
             raise ValueError(
                 "AppBuildPlan.monetization_provider is only valid when the approved "
@@ -945,15 +946,7 @@ def _validate_monetization_provider_selection(
     } - {""}
     has_mozaikspay = MOZAIKSPAY_PACK_ID in existing_ids
     has_entitlement_dispatch = SELF_MANAGED_PROVIDER_ID in existing_ids
-    managed_write_path_owners: list[str] = []
-    for pack in capability_packs:
-        if not isinstance(pack, dict):
-            continue
-        if str(pack.get("capability_source") or "").strip() != "managed_capability":
-            continue
-        inline = pack.get("provides_capabilities")
-        if isinstance(inline, list) and SUBSCRIPTION_WRITE_PATH_CAPABILITY in inline:
-            managed_write_path_owners.append(_pack_id_from_descriptor(pack))
+    managed_write_path_owners = [pack_id for pack_id, source in writers.items() if source == "managed_capability"]
 
     if not monetization_provider:
         raise ValueError(
@@ -2266,6 +2259,7 @@ def app_build_plan(
         capability_packs,
         contract_required=contract_required,
         monetization_provider=monetization_provider,
+        context_variables=context_variables,
     )
     capability_packs, pages, build_tasks = _apply_selected_pack_files(
         capability_packs=capability_packs,

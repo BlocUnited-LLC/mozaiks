@@ -105,6 +105,17 @@ choice. A false/non-required contract cannot materialize managed billing, and
 the existing self-managed assignment provider remains distinct. Selection
 implies no provider activation, provisioning, payment or entitlement grant.
 
+Assignment writers are classified from verified contract declarations of
+`subscription_write_path`, including custom managed packs, rather than inline
+plan labels or a list of built-in IDs. `entitlement_dispatch` 0.1.12 declares
+that same existing capability and applies to DesignDocs. A pack receipt alone
+cannot authorize assignment files: planning, assembly and the durable compiler
+input boundary require a later approved contract with `contract_required: true`.
+The shared subscription renderer names the reviewed writer, requests renewed
+design review when none exists, and assigns no model work to template-owned
+outputs. Model-authored implementation notes are not projected as compiler
+instructions; typed subscription facts remain in the prompt.
+
 AG2 continues to own model calls, tools, agent handoffs and structured-output
 transport. The existing prompted structured-output mode can address a provider's
 native schema-size limit while preserving the canonical local validation model.

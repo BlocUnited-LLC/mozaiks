@@ -40,6 +40,7 @@ from mozaiksai.core.workflow.generator_support.page_plan_utils import (
 )
 from mozaiksai.core.workflow.task_batches import _normalize_owned_page_files_from_plan
 from scripts.appgenerator_fixture_replay import execute_file_replay
+from tests.appgenerator_subscription_fixture import subscription_contract
 from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_app_plan_managed_facade_repair import _plan_and_context
 from tests.test_appgenerator_assembly_failures import _context as _unreviewed_assembly_context
@@ -66,6 +67,7 @@ def _reviewed_values(initial):
         return values
     if isinstance(values.get("app_build_plan"), dict):
         values["app_build_plan"]["capability_packs"] = [PACK]
+    values.setdefault("subscription_contract", subscription_contract("billing_portal"))
     return reviewed_pack_fixture(values, ["mozaikspay"])
 
 

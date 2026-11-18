@@ -111,7 +111,10 @@ async def _context_from_inputs(
     settled_task_snapshot(context)
     # The existing owner verifies policy review and exact design/data identity.
     resolve_design_access_policy(context)
-    from factory_app.workflows._shared.pack_selection import validate_reviewed_pack_choices
+    from factory_app.workflows._shared.pack_selection import (
+        validate_reviewed_pack_choices,
+        validate_subscription_write_path,
+    )
 
     validate_reviewed_pack_choices(context, inputs.app_build_plan.get("capability_packs") or [])
     if capability_packs is not None:
@@ -124,6 +127,7 @@ async def _context_from_inputs(
         if digest != inputs.subscription_contract.sha256:
             raise ValueError("Approved compilation subscription identity changed")
         context["subscription_contract"] = contract
+    validate_subscription_write_path(context, context.get("subscription_contract"))
     return context
 
 
