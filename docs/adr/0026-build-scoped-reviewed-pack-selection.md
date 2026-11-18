@@ -199,6 +199,13 @@ scope. A failed final gate clears the cached plan through the existing rejection
 path. Assembly, saved compilation replay and publication do not inherit the
 planner memo and retain their independent fresh verification boundaries.
 
+The physical-source projection retains the complete verified plan, including
+its approved customization inputs, after checking its source selection. Catalog
+descriptors do not replace those compiler inputs. Public replay validators return
+their native failed result for changed/removed sources; they do not execute or
+approve an invalid snapshot. Async acceptance input errors use a generic failure
+category rather than attributing every deterministic input error to pack drift.
+
 ## Archived corpus expectation migration
 
 The 91 recorded bodies, original context, hashes and labelled defaults are

@@ -509,28 +509,55 @@ async def test_public_facade_rejects_candidate_supplied_authority_and_selection(
 
 
 @pytest.mark.asyncio
-async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_tampered_output(tmp_path):
+async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_tampered_output(tmp_path, monkeypatch):
     from mozaiksai.core.workflow.context.frozen import detach
-    from tests.test_capability_pack_proof import PLAN_INPUTS, _assemble
+    from tests import test_capability_pack_proof as proof
+    from tests.reviewed_pack_fixture import reviewed_pack_fixture
 
-    files, context, _ = await _assemble("outcome_feedback")
+    owner = "fixture-owner"
+    container = proof.create_context_container
+
+    def reviewed_context(*, initial):
+        # Adapt this one no-permissions fixture's inputs, never the compiler or shared proof.
+        assert initial["run_build_binding"]["target_app_id"] == "pack_proof_outcome_feedback"
+        assert [row["id"] for row in initial["capability_packs"]] == ["outcome_feedback"]
+        assert proof.APP_PERMISSIONS["outcome_feedback"] == ()
+        reviewed = reviewed_pack_fixture(detach(initial), ["outcome_feedback"])
+        record = reviewed["design_docs_artifact"]
+        assert record["commit_metadata"]["author_user_id"] == owner
+        review = record["commit_metadata"]["metadata"]["summary_payload"]["access_policy_review"]
+        assert review["reviewed_by"] == owner
+        assert review["pack_identities"] == [
+            {"pack_id": row["id"], "version": row["version"], "digest": row["digest"]}
+            for row in initial["capability_packs"]
+        ]
+        assert [row["capability_pack_id"] for row in reviewed["app_build_plan"]["capability_packs"]] == ["outcome_feedback"]
+        selected = initial["capability_packs"][0]
+        reviewed["app_build_plan"]["capability_packs"][0].update({
+            key: selected[key] for key in ("pack_source_path", "version", "digest")
+        })
+        return container(initial=reviewed)
+
+    monkeypatch.setattr(proof, "create_context_container", reviewed_context)
+    files, context, _ = await proof._assemble("outcome_feedback")
+    assert yaml.safe_load(files["config/auth.yaml"])["authorization"] == {"roles": []}
     binding = detach(context.get("run_build_binding"))
     app_id = binding["target_app_id"]
     # Persist the fixed approved input used by the assembler, never candidate-derived authority.
-    payload = {"data_contract": deepcopy(PLAN_INPUTS["outcome_feedback"]["data_contract"]), "surface_map": None}
+    payload = deepcopy(detach(context.get("design_docs_artifact"))["commit_metadata"]["metadata"]["summary_payload"])
     raw = _summary_bytes(payload)
     store = Store()
     design = BuildRecord(
         id="design", app_id=app_id, build_family="design_docs", build_key="design_docs", version_number=1,
         lineage_root_id="design", source_workflow="DesignDocs", lifecycle_status="current",
         files_manifest=[{"path": "design_docs.json", "sha256": hashlib.sha256(raw).hexdigest(), "size_bytes": len(raw)}],
-        commit_metadata={"author_user_id": "owner", "metadata": {"summary_payload": payload}},
+        commit_metadata={"author_user_id": owner, "metadata": {"summary_payload": payload}},
     )
     store.records[design.id] = design
     approved_context = {
         "run_build_binding": binding, "app_plan_outcome": "ready",
         "app_build_plan": detach(context.get("app_build_plan")),
-        "data_contract": payload["data_contract"], "design_surface_map": None,
+        "data_contract": payload["data_contract"], "design_surface_map": payload.get("surface_map"),
         "design_docs_artifact": design.model_dump(mode="json", by_alias=True),
     }
     # This fixture assembles deterministic templates without model task execution.
@@ -541,7 +568,7 @@ async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_
             archive.writestr(f"bundle/{name}", content)
     sha = hashlib.sha256(path.read_bytes()).hexdigest()
     compilation = await capture_app_compilation_inputs(
-        approved_context, owner_user_id="owner", archive_sha256=sha, artifact_store=store,
+        approved_context, owner_user_id=owner, archive_sha256=sha, artifact_store=store,
     )
     packs = detach(context.get("capability_packs"))
     bundle = BuildRecord(
@@ -550,20 +577,20 @@ async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_
         canonical_inputs_version={"design_docs": design.id},
         files_manifest=[{"path": "bundle/bundle.zip", "sha256": sha, "size_bytes": path.stat().st_size,
                          "content_type": "application/zip"}],
-        commit_metadata={"author_user_id": "owner", "metadata": {
+        commit_metadata={"author_user_id": owner, "metadata": {
             **binding, "compilation_inputs": compilation, "capability_packs": packs,
             "bundle_name": "bundle", "artifact_path": str(path), "workspace_dir": str(tmp_path / "app"),
         }},
     )
     store.records[bundle.id] = bundle
     approval = await resolve_app_compilation_inputs(
-        app_id=app_id, build_record_id=bundle.id, owner_user_id="owner",
+        app_id=app_id, build_record_id=bundle.id, owner_user_id=owner,
         build_registry_id=binding["build_registry_id"], artifact_store=store,
     )
     result = validate_generated_app_bundle(GeneratedAppValidationRequest(
         files=files, capability_packs=packs, approved_compilation=approval,
     ))
-    assert result.passed, result.diagnostics
+    assert result.passed, "\n".join(item.message for item in result.diagnostics)
     assert [row["pack_id"] for row in result.resolved_capability_packs] == ["outcome_feedback"]
 
     service = "modules/outcome_feedback/backend/service.py"

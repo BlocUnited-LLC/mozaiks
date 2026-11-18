@@ -220,14 +220,16 @@ class PhysicalPackContext:
     def __init__(self, context: Any):
         self._context = context
         self._rows = selected_pack_rows(context)
+        self._plan = detach(context.get("app_build_plan"))
+        if isinstance(self._plan, dict):
+            validate_reviewed_pack_choices(context, self._plan.get("capability_packs") or [])
 
     def get(self, key: str, default: Any = None) -> Any:
         if key == "capability_packs":
             return detach(self._rows)
-        value = self._context.get(key, default)
-        if key == "app_build_plan" and isinstance(value, Mapping):
-            return {**detach(value), "capability_packs": detach(self._rows)}
-        return value
+        if key == "app_build_plan":
+            return deepcopy(self._plan) if self._plan is not None else default
+        return self._context.get(key, default)
 
 
 def subscription_assignment_writers(context: Any, *, rows: list[dict[str, Any]] | None = None) -> dict[str, str]:

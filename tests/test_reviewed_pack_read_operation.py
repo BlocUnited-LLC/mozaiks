@@ -144,3 +144,19 @@ def test_authored_policy_projects_the_same_fresh_authorization_once(managed_regi
     with pytest.raises(ValueError, match="no longer available"):
         policy.resolve_authored_module_access_policy(context)
     assert reader.call_count == 2
+
+
+def test_physical_projection_preserves_verified_plan_inputs_without_mutation(managed_registry):
+    from mozaiksai.core.workflow.context.frozen import detach
+
+    plan, context = _plan_and_context()
+    context.set("app_build_plan", plan)
+    view = selection.PhysicalPackContext(context)
+    original = detach(context.get("app_build_plan"))
+    assert view.get("app_build_plan") == original
+    projected = view.get("app_build_plan")
+    projected["capability_packs"][0]["primary_entities"] = ["caller mutation"]
+    assert view.get("app_build_plan") == original
+    context.set("app_build_plan", {**plan, "capability_packs": []})
+    with pytest.raises(ValueError, match="selected pack identities differ"):
+        selection.PhysicalPackContext(context)

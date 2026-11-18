@@ -132,8 +132,12 @@ def validate_generated_app_bundle(
     diagnostics: list[GeneratedAppValidationDiagnostic] = []
 
     from factory_app.workflows._shared.generated_ui_contract import audit_page_schemas
+    from factory_app.workflows._shared.pack_selection import PhysicalPackContext
     from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
         scan_generated_bundle,
+    )
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        ManagedCapabilityTemplateError,
     )
     from mozaiksai.core.validation.functional_generated_app import (
         scan_functional_generated_app,
@@ -141,6 +145,7 @@ def validate_generated_app_bundle(
 
     resolved_capability_packs: list[dict[str, str]] = []
     compiler_context = None
+    physical_context = None
     if request.approved_compilation is not None:
         try:
             if not isinstance(request.approved_compilation, ApprovedAppCompilation):
@@ -149,9 +154,9 @@ def validate_generated_app_bundle(
             compiler_context = request.approved_compilation.context_for(identity.get("appId"))
             if list(request.capability_packs) != compiler_context["capability_packs"]:
                 raise ValueError("Candidate pack selection differs from its bound build")
-        except (ValueError, TypeError, AttributeError) as exc:
+            physical_context = PhysicalPackContext(compiler_context)
+        except (ValueError, TypeError, AttributeError, ManagedCapabilityTemplateError) as exc:
             return GeneratedAppValidationResult(False, [_diagnostic("approved_compilation_invalid", str(exc))])
-    from factory_app.workflows._shared.pack_selection import PhysicalPackContext
 
     scanner_errors = scan_generated_bundle(
         request.files,
@@ -159,7 +164,7 @@ def validate_generated_app_bundle(
         require_deployment_artifacts=request.require_deployment_artifacts,
         resolved_capability_packs=resolved_capability_packs,
         **({
-            "context_variables": PhysicalPackContext(compiler_context),
+            "context_variables": physical_context,
             "planned_data_contract": compiler_context.get("data_contract"),
             "subscription_contract": compiler_context.get("subscription_contract"),
         } if compiler_context is not None else {}),
@@ -232,6 +237,9 @@ async def validate_generated_app_candidate(
         run_app_bundle_acceptance_gate,
         validate_app_build,
     )
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        ManagedCapabilityTemplateError,
+    )
     from mozaiksai.core.runtime.app.paths import APP_BINARY_ASSET_SUFFIXES, is_safe_app_path
     from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
         resolve_app_validation_strategy,
@@ -288,11 +296,23 @@ async def validate_generated_app_candidate(
             result["validation_status"] = "failed"
             result["errors"] = [str(exc)]
             return result
-    acceptance = await run_app_bundle_acceptance_gate(
-        files=dict(text_files), context_variables=compiler_context,
-        capability_packs=deepcopy(capability_packs or []),
-        **binary_kwargs,
-    )
+    try:
+        acceptance = await run_app_bundle_acceptance_gate(
+            files=dict(text_files), context_variables=compiler_context,
+            capability_packs=deepcopy(capability_packs or []),
+            **binary_kwargs,
+        )
+    except (ValueError, ManagedCapabilityTemplateError) as exc:
+        if approved_compilation is None:
+            raise
+        error = str(exc)
+        result["validation_status"] = "failed"
+        result["app_bundle_acceptance_result"] = {
+            "status": "failed", "passed": False,
+            "failed_tests": [{"gate": "acceptance", "test": "deterministic_inputs", "error": error}],
+        }
+        result["errors"] = [error]
+        return result
     result["app_bundle_acceptance_result"] = acceptance
     if acceptance.get("status") != "passed" or acceptance.get("passed") is not True:
         result["validation_status"] = "failed" if acceptance.get("status") == "failed" else "pending"

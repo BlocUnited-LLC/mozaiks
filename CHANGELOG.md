@@ -19,6 +19,8 @@ This project follows a practical pre-1.0 changelog format:
   pack selection in the owner-reviewed DesignDocs artifact. Planning, template
   composition and saved-bundle replay preserve that selection; changed sources
   and late unreviewed billing providers require renewed review.
+- Approved-compilation validation preserves verified plan inputs and reports
+  revoked or changed pack sources as failed validation before runtime execution.
 - Explicitly selected Support packs expose their verified actions and support
   surface boundaries to DesignDocs before generation, alongside Messaging.
 
