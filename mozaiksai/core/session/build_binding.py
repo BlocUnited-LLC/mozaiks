@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict, StringConstraints, model_serializer
 
 BuildIdentity = Annotated[str, StringConstraints(strict=True, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")]
+RefinementModel = Literal["gemini", "openai"]
+
+
+def refinement_model_config(model: RefinementModel) -> dict[str, str]:
+    if model == "gemini":
+        return {"api_type": "google", "model": "gemini-3.8-flash"}
+    if model == "openai":
+        return {"api_type": "openai", "model": "gpt-5-nano"}
+    raise ValueError("Unknown refinement model")
 
 
 class BuildTargetReference(BaseModel):
@@ -31,3 +40,11 @@ class RunBuildBinding(BaseModel):
     target_app_id: BuildIdentity
     build_id: BuildIdentity
     phase: Literal["genesis", "refinement"]
+    refinement_model: RefinementModel | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize_binding(self, handler: Any) -> dict[str, Any]:
+        payload = handler(self)
+        if self.refinement_model is None:
+            payload.pop("refinement_model", None)
+        return payload

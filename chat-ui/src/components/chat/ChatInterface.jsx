@@ -159,6 +159,7 @@ const ModernChatInterface = ({
   chatStatus = null,
   transportType,
   workflowName,
+  refinementModelPicker,
   workflowHasChildren = false,
   conversationMode = 'workflow',
   onConversationModeChange,
@@ -982,6 +983,7 @@ const ModernChatInterface = ({
             </button>
           )}
 
+          {refinementModelPicker}
           <button
             type="submit"
             disabled={!message.trim() || hasPendingHarnessDecision}

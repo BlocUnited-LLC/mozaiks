@@ -53,6 +53,26 @@ support temperature, use `llm_config.temperature`. Profile fields are strict:
 declared profile with a non-empty model; inline capability `llm_config` and
 unknown capability fields are rejected when the policy loads.
 
+### Studio AI models
+
+Open **AI models** in the Studio workspace navigation to set the default and
+allowed models for new Factory builds and refinements. This requires a signed-in
+workspace administrator. Configure provider keys in the workspace secret policy
+before enabling them. Studio displays provider availability without returning
+key values.
+
+Factory prefers Gemini 3.8 Flash. A workspace with only an allowed OpenAI key
+can start builds with GPT-5 Nano. Choose a model when starting an app build or
+submitting a change from App Review. Studio saves the choice with the build
+or refinement so routed workflows and approval continue with that model.
+
+For file-based configuration, `model_override: gemini` or
+`model_override: openai` in `app/config/refinement_policy.yaml` supplies
+the initial Studio default and selects the refinement engine's structured
+checkpoint model when no per-run choice exists. Without an override, the
+declared capability profiles apply to engine calls without a selection.
+ACP coding and media generation use their separate provider configuration.
+
 ### Model profiles and coding agents
 
 `llm_profiles` configures AG2 structured-output calls. A profile name describes

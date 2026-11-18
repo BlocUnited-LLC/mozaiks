@@ -128,6 +128,8 @@ test('ChatPage approvals preserve original request identity through real browser
           setConnectionStatus('connected');
         },[currentChatId,queryChatId]);
         const revisionHandoffRef=useRef(null),pendingTransitionIdRef=useRef(null);
+        const refinementModelRef=useRef('gemini');
+        const submittedRefinementModelRef=useRef({chatId:'review-chat', model:'openai'});
         const currentArtifactMessagesRef=useRef([{toolCall:{tool_call_id:'original-tool-call',
           payload:{build_registry_id:'owned-build',artifact_kind:'app_bundle',artifact_version_id:'baseline',target_app_id:'target-app'}}}]);
         const setCurrentChatId=id=>{currentChatIdRef.current=id;changeChat(id);};
@@ -252,6 +254,7 @@ test('ChatPage approvals preserve original request identity through real browser
       await expect.poll(()=>requests.length).toBe(2);
       const first=requests[0].body, approved=requests[1].body;
       assert.deepEqual(first.trigger_payload.coding_request,{});
+      assert.equal(first.trigger_payload.refinement_request.refinement_model,'openai');
       assert.equal(Object.hasOwn(approved.trigger_payload,'coding_request'),false,'Canonical decision payload replaces the initial opt-in');
       assert.equal(approved.build_registry_id,first.build_registry_id);
       assert.equal(approved.source_chat_id,first.source_chat_id);
@@ -344,6 +347,7 @@ async function routeRevisionResult(triggerData, {
     appId: 'studio-host', user: {id: 'owner'}, config: {}, auth: {fixture: true}, currentChatId: 'review-chat',
     currentChatIdRef, reviewContinuationRef, queryResumeHandledRef, currentArtifactMessagesRef: { current: artifactMessages },
     revisionHandoffRef, pendingTransitionIdRef,
+    refinementModelRef:{current:''}, submittedRefinementModelRef:{current:null},
     currentWorkflowName:'AppReview',currentWorkflowNameRef:{current:'AppReview'},workflowConfig:null,
     conversationModeRef:{current:'workflow'},applyChatProgressEvent,
     setChatStatusProgress:update=>{state.ChatStatusProgress=typeof update==='function'?update(state.ChatStatusProgress):update;},

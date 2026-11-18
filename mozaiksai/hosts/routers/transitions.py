@@ -12,12 +12,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.auth.dependencies import resolve_scope_from_principal
-from mozaiksai.core.session.build_binding import BuildIdentity
+from mozaiksai.core.session.build_binding import BuildIdentity, RefinementModel
 from mozaiksai.core.session.launcher import launch_transition
 from mozaiksai.hosts.source_path_policy import authorize_http_workflow_source_paths
 
@@ -50,6 +50,7 @@ class TransitionResolveRequest(BaseModel):
     user_id: str | None = None
     build_registry_id: BuildIdentity | None = None
     source_chat_id: BuildIdentity | None = None
+    refinement_model: RefinementModel | None = None
 
 
 class PendingDecisionActionPayload(BaseModel):
@@ -112,6 +113,7 @@ async def get_transition_by_id(transition_id: str):
 async def resolve_transition_route(
     body: TransitionResolveRequest,
     principal: UserPrincipal = Depends(require_user_scope),
+    request: Request = None,
 ):
     from logs.logging_config import get_workflow_logger
 
@@ -119,6 +121,22 @@ async def resolve_transition_route(
     authorize_http_workflow_source_paths(body.context_variables, principal=principal)
     try:
         app_id, user_id = resolve_scope_from_principal(principal, app_id=body.app_id, user_id=body.user_id)
+        selected_model = None
+        hosts = getattr(request.app.state, "mozaiks_repo_host_bootstrap_hosts", set()) if request else set()
+        studio_create = "studio" in hosts and body.transition_id in {
+            "app_type_selector", "brownfield_path_selector", "brownfield_repo_input",
+        }
+        if studio_create or body.refinement_model is not None:
+            from mozaiksai.core.auth.anonymous_access import (
+                ANONYMOUS_PROVENANCE,
+                STUDIO_PUBLIC_MESSAGE,
+            )
+
+            if "studio" not in hosts or principal.auth_provenance == ANONYMOUS_PROVENANCE:
+                raise HTTPException(status_code=403, detail=STUDIO_PUBLIC_MESSAGE)
+            from mozaiksai.hosts.studio_model_policy import select_studio_model
+
+            selected_model = await select_studio_model(principal, body.refinement_model)
         launch_result = await launch_transition(
             app_id=app_id,
             user_id=user_id,
@@ -128,7 +146,10 @@ async def resolve_transition_route(
             context_variables=body.context_variables or {},
             build_registry_id=body.build_registry_id,
             source_chat_id=body.source_chat_id,
+            **({"refinement_model": selected_model} if selected_model is not None else {}),
         )
+    except HTTPException:
+        raise
     except ValueError as route_err:
         raise HTTPException(status_code=400, detail=str(route_err)) from route_err
     except Exception as route_err:

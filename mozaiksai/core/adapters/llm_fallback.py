@@ -210,6 +210,12 @@ def resolve_model_api_key(
     return ""
 
 
+def resolve_configured_provider_key(api_type: str) -> str:
+    """Use a generic primary key only for its configured provider."""
+    primary_provider = _env("LLM_PRIMARY_API_TYPE", DEFAULT_LLM_API_TYPE).lower()
+    return resolve_model_api_key(api_type, include_primary_key=api_type == primary_provider)
+
+
 def build_fallback_config_list(
     *,
     primary_model: str | None = None,

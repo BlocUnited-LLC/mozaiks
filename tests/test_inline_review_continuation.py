@@ -118,6 +118,31 @@ async def test_saved_accepted_refinement_recovers_pending_generation_without_mod
 
 
 @pytest.mark.asyncio
+async def test_recovered_inline_review_restores_model_from_owned_candidate(continuation):
+    fixture = continuation
+    _saved_refinement(fixture)
+    fixture.versions["child"].commit_metadata.metadata["refinement_model"] = "openai"
+    fixture.registry.resolve_build_binding.side_effect = lambda **kw: RunBuildBinding.model_validate(kw["persisted_binding"])
+
+    await _recover(fixture)
+
+    saved_fields = fixture.persistence.persist_server_owned_session_fields.await_args.kwargs["fields"]
+    assert saved_fields["run_build_binding"]["refinement_model"] == "openai"
+
+
+@pytest.mark.asyncio
+async def test_recovered_inline_review_rejects_model_from_foreign_candidate(continuation):
+    fixture = continuation
+    metadata = fixture.versions["child"].commit_metadata.metadata
+    metadata.update(refinement_model="openai", build_registry_id="other")
+
+    with pytest.raises(ValueError, match="model does not match"):
+        await _recover(fixture)
+
+    fixture.persistence.create_chat_session.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_saved_surface_result_uses_its_persisted_success(continuation):
     fixture = continuation
     session, _ = _saved_refinement(fixture)

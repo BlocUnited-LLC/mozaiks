@@ -2484,6 +2484,29 @@ async def start_chat(
     context_variables = validate_context_for_workflow(workflow_name, requested_context)
     trigger_meta = data.get("trigger_meta") if isinstance(data.get("trigger_meta"), dict) else {}
 
+    # Studio's Factory build picker binds a model to a build session. Generic
+    # platform workflows keep their own provider configuration unchanged.
+    studio_factory_start = (
+        "studio" in getattr(getattr(getattr(request, "app", None), "state", None), "mozaiks_repo_host_bootstrap_hosts", set())
+        and workflow_name in {"ValueEngine", "ExistingAppDiscovery"}
+    )
+    requested_model = None
+    if studio_factory_start:
+        from pydantic import TypeAdapter, ValidationError
+
+        from mozaiksai.core.auth.anonymous_access import ANONYMOUS_PROVENANCE, STUDIO_PUBLIC_MESSAGE
+        from mozaiksai.core.session.build_binding import BuildTargetReference, RefinementModel
+
+        if principal.auth_provenance == ANONYMOUS_PROVENANCE:
+            raise HTTPException(status_code=403, detail=STUDIO_PUBLIC_MESSAGE)
+        try:
+            requested_model = TypeAdapter(RefinementModel | None).validate_python(trigger_meta.get("refinement_model"))
+            target_reference = BuildTargetReference(
+                source_chat_id=data.get("source_chat_id"), build_registry_id=data.get("build_registry_id"),
+            )
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail="Invalid model or build selection") from exc
+
     idempotency_window_sec = int(os.getenv("CHAT_START_IDEMPOTENCY_SEC", "15"))
     reuse_cutoff = datetime.now(UTC) - timedelta(seconds=idempotency_window_sec)
     coll = await runtime_app._chat_coll()
@@ -2498,8 +2521,17 @@ async def start_chat(
         }
         reused_doc = None
         if client_request_id:
-            reused_doc = await coll.find_one({**base_query, "client_request_id": client_request_id}, {"chat_id": 1})
+            reused_doc = await coll.find_one(
+                {**base_query, "client_request_id": client_request_id},
+                {"chat_id": 1, "run_build_binding": 1},
+            )
         if reused_doc:
+            if studio_factory_start and requested_model is not None:
+                from mozaiksai.core.session.build_binding import RunBuildBinding
+
+                binding = RunBuildBinding.model_validate(reused_doc.get("run_build_binding"))
+                if binding.refinement_model != requested_model:
+                    raise HTTPException(status_code=409, detail="The selected model does not match this build session")
             chat_id = reused_doc.get("chat_id") or reused_doc.get("_id")
             try:
                 cache_seed = await persistence_manager.get_or_assign_cache_seed(chat_id, app_id)
@@ -2534,6 +2566,47 @@ async def start_chat(
 
     from mozaiksai.core.session import get_session_router
 
+    session_fields = None
+    if studio_factory_start:
+        from factory_app.app.modules.app_registry.backend.service import AppRegistryService
+        from mozaiksai.core.session.build_binding import RunBuildBinding
+        from mozaiksai.hosts.studio_model_policy import select_studio_model
+
+        source_id = target_reference.source_chat_id
+        if not source_id and target_reference.build_registry_id:
+            registry = AppRegistryService()
+            record = (await registry.get_app_record(
+                owner_user_id=user_id, build_registry_id=target_reference.build_registry_id,
+            )).get("app")
+            if record and record.get("chat_app_id") == app_id:
+                source_id = record.get("active_chat_id")
+        source = await coll.find_one(
+            {"_id": source_id, "user_id": user_id, **build_app_scope_filter(app_id)},
+            {"run_build_binding": 1},
+        ) if source_id else None
+        prior_binding = RunBuildBinding.model_validate(source["run_build_binding"]) if source and source.get("run_build_binding") else None
+        if prior_binding is not None:
+            if requested_model is not None and requested_model != prior_binding.refinement_model:
+                raise HTTPException(status_code=409, detail="The selected model does not match this build session")
+            selected_model = prior_binding.refinement_model
+        else:
+            # Selection and key availability must fail before the Factory hook
+            # can reserve a new build in the registry.
+            selected_model = await select_studio_model(principal, requested_model)
+        session_fields = await get_platform_hooks().call_chat_session_fields(
+            app_id=app_id, user_id=user_id, workflow_name=workflow_name, chat_id=chat_id,
+            trigger_source="chat", build_registry_id=data.get("build_registry_id"),
+            source_chat_id=data.get("source_chat_id"),
+        )
+        binding = RunBuildBinding.model_validate(session_fields.get("run_build_binding"))
+        if prior_binding is not None and binding != prior_binding:
+            raise HTTPException(status_code=409, detail="The source build session changed")
+        if prior_binding is None:
+            if binding.refinement_model not in (None, selected_model):
+                raise HTTPException(status_code=409, detail="The selected model does not match this build session")
+            binding = RunBuildBinding.model_validate({**binding.model_dump(), "refinement_model": selected_model})
+            session_fields["run_build_binding"] = binding.model_dump()
+
     await create_routed_chat_session(
         persistence_manager=persistence_manager,
         chat_id=chat_id,
@@ -2545,6 +2618,7 @@ async def start_chat(
         session_router=get_session_router(),
         build_registry_id=data.get("build_registry_id"),
         source_chat_id=data.get("source_chat_id"),
+        session_fields=session_fields,
     )
 
     try:

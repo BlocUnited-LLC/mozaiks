@@ -183,6 +183,12 @@ from mozaiksai.hosts.source_path_policy import (
     authorize_http_workflow_source_paths,
     require_http_local_source_mode,
 )
+from mozaiksai.hosts.studio_model_policy import (
+    StudioModelPolicy,
+    save_studio_model_policy,
+    select_studio_model,
+    studio_model_options,
+)
 
 app = platform_app.app
 register_repo_host_bootstrap(app, "studio")
@@ -3841,11 +3847,42 @@ def _confirmed_refinement_decision(
         for field in (
             "app_id", "target_app_id", "user_id", "request_kind", "declared_change_class",
             "build_family", "build_key", "build_record_id", "raw_user_request",
-            "requested_workflow_id", "source_surface",
+            "requested_workflow_id", "source_surface", "refinement_model",
         )
     ):
         raise HTTPException(status_code=409, detail="The proposed scope belongs to a different request or artifact. Submit the change again.")
     return pending
+
+
+async def require_studio_model_admin(
+    principal: UserPrincipal = Depends(require_studio_user),
+) -> UserPrincipal:
+    if not principal.is_authenticated or not principal.has_role("admin"):
+        raise HTTPException(403, "Workspace administrator access required.")
+    return principal
+
+
+@app.get("/api/studio/refinement/models")
+async def list_refinement_models(
+    principal: UserPrincipal = Depends(require_studio_user),
+) -> dict[str, Any]:
+    return await studio_model_options(principal)
+
+
+@app.get("/api/studio/settings/ai-models")
+async def read_studio_model_policy(
+    principal: UserPrincipal = Depends(require_studio_model_admin),
+) -> dict[str, Any]:
+    return await studio_model_options(principal, admin=True)
+
+
+@app.put("/api/studio/settings/ai-models", status_code=204)
+async def update_studio_model_policy(
+    body: StudioModelPolicy,
+    principal: UserPrincipal = Depends(require_studio_model_admin),
+) -> Response:
+    await save_studio_model_policy(principal, body)
+    return Response(status_code=204)
 
 
 @app.post("/api/workflows/trigger")
@@ -3964,6 +4001,12 @@ async def trigger_workflow(
                 status_code=400,
                 detail="refinement triggers require trigger_payload.refinement_request.",
             )
+        if action_id is None:
+            selection = await select_studio_model(
+                principal, refinement_request.refinement_model, require_available=False,
+            )
+            if selection is not None:
+                refinement_request = refinement_request.model_copy(update={"refinement_model": selection})
         source_version = await get_artifact_store().get_build_record(
             app_id=artifact_app_id, build_record_id=refinement_request.build_record_id,
         ) if refinement_request.build_record_id else None
@@ -4152,6 +4195,10 @@ async def trigger_workflow(
                         owner_user_id=user_id, app_id=app_id, build_registry_id=build_registry_id,
                         workflow_name=refinement_decision.workflow_id,
                     )
+                    if refinement_request.refinement_model is not None:
+                        inline_binding = inline_binding.model_copy(update={
+                            "refinement_model": refinement_request.refinement_model,
+                        })
                     refinement_request = refinement_request.model_copy(update={
                         "usage_context": usage_context.model_copy(update={"run_build_binding": inline_binding}),
                     })
@@ -4223,6 +4270,10 @@ async def trigger_workflow(
                             build_registry_id=build_registry_id,
                             workflow_name=refinement_decision.workflow_id,
                         )
+                        if refinement_request.refinement_model is not None:
+                            inline_binding = inline_binding.model_copy(update={
+                                "refinement_model": refinement_request.refinement_model,
+                            })
                         # Server-derived, set after the request is built: the client
                         # payload cannot carry it.
                         coding_request = coding_request.model_copy(update={
@@ -4579,6 +4630,8 @@ async def trigger_workflow(
             build_registry_id=build_registry_id,
             source_chat_id=body.source_chat_id,
             session_router=session_router,
+            **({"refinement_model": refinement_request.refinement_model}
+               if refinement_request is not None and refinement_request.refinement_model is not None else {}),
             routing_contribution=(
                 TriggerRoutingContribution(
                     workflow_id=refinement_decision.workflow_id,

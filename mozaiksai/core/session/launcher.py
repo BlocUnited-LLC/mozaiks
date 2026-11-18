@@ -27,7 +27,7 @@ from mozaiksai.core.workflow.context.authority import (
 from mozaiksai.core.workflow.pack.config import get_transition, load_global_pack_graph
 from mozaiksai.core.workflow.pack.schema import WorkflowTransition
 
-from .build_binding import BuildIdentity, RunBuildBinding
+from .build_binding import BuildIdentity, RefinementModel, RunBuildBinding
 from .build_context import revalidate_build_context
 from .model import RoutingDecision, TriggerInput
 from .trigger_routing import TriggerRoutingContribution
@@ -323,6 +323,7 @@ async def prepare_routed_workflow_launch(
     build_registry_id: str | None = None,
     source_chat_id: str | None = None,
     routing_contribution: TriggerRoutingContribution | None = None,
+    refinement_model: RefinementModel | None = None,
 ) -> PreparedWorkflowLaunch:
     from .router import get_session_router
 
@@ -344,7 +345,16 @@ async def prepare_routed_workflow_launch(
     router = session_router or get_session_router()
     if session_fields.get("run_build_binding") is not None:
         binding = RunBuildBinding.model_validate(session_fields["run_build_binding"])
+        if refinement_model is not None:
+            if source_chat_id is not None and trigger_source != "refinement" and binding.refinement_model != refinement_model:
+                raise ValueError("The selected model does not match the source build session")
+            if binding.refinement_model not in (None, refinement_model):
+                raise ValueError("The selected model does not match this build session")
+            binding = RunBuildBinding.model_validate({**binding.model_dump(), "refinement_model": refinement_model})
+            session_fields["run_build_binding"] = binding.model_dump()
         router = router.for_target(binding.target_app_id)
+    elif refinement_model is not None:
+        raise ValueError("A model selection requires a registered build session")
     routing_decision = await router.route_trigger(
         TriggerInput(
             app_id=app_id,
@@ -452,6 +462,7 @@ async def launch_routed_workflow(
     extra_trigger_meta: dict[str, Any] | None = None,
     build_registry_id: str | None = None,
     source_chat_id: str | None = None,
+    refinement_model: RefinementModel | None = None,
 ) -> WorkflowLaunchResult:
     launch = await prepare_routed_workflow_launch(
         workflow_id=workflow_id,
@@ -465,6 +476,7 @@ async def launch_routed_workflow(
         extra_trigger_meta=extra_trigger_meta,
         build_registry_id=build_registry_id,
         source_chat_id=source_chat_id,
+        refinement_model=refinement_model,
     )
     return await launch_prepared_workflow(launch)
 
@@ -481,6 +493,7 @@ async def launch_transition(
     extra_trigger_meta: dict[str, Any] | None = None,
     build_registry_id: str | None = None,
     source_chat_id: str | None = None,
+    refinement_model: RefinementModel | None = None,
 ) -> TransitionLaunchResult:
     from .router import get_session_router, get_session_router_for_chat
 
@@ -546,6 +559,7 @@ async def launch_transition(
         session_router=router,
         build_registry_id=build_registry_id,
         source_chat_id=source_chat_id,
+        refinement_model=refinement_model,
         extra_trigger_meta={
             "transition_id": transition_id,
             "option_id": resolution.option_id,

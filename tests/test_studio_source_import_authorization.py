@@ -272,6 +272,9 @@ def test_shared_transition_route_requires_request_development_access_for_local_s
     monkeypatch.setenv("AUTH_ANON_ACCESS", access_mode)
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     monkeypatch.setattr(
+        "mozaiksai.hosts.studio_model_policy.select_studio_model", AsyncMock(return_value="gemini"),
+    )
+    monkeypatch.setattr(
         transitions, "resolve_scope_from_principal", lambda *_args, **_kwargs: ("app_1", "alice"),
     )
     workflow_launch = SimpleNamespace(

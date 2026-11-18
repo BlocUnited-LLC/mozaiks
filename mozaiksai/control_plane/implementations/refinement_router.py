@@ -7,8 +7,16 @@ from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
+from mozaiksai.control_plane.config import RefinementModel
 from mozaiksai.core.session.model import SessionLifecycle, TriggerInput
 from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
 from mozaiksai.core.usage.context import AuxiliaryUsageContext
@@ -263,6 +271,7 @@ class RefinementRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     request_kind: str = "refinement"
+    refinement_model: RefinementModel | None = None
     declared_change_class: ChangeClass | None = None
     build_family: str
     build_key: str | None = None
@@ -275,6 +284,13 @@ class RefinementRequest(BaseModel):
     usage_context: AuxiliaryUsageContext | None = Field(default=None, exclude=True, repr=False)
     requested_workflow_id: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def _serialize_request(self, handler: Any) -> dict[str, Any]:
+        payload = handler(self)
+        if self.refinement_model is None:
+            payload.pop("refinement_model", None)
+        return payload
 
     @property
     def artifact_app_id(self) -> str | None:
@@ -1472,6 +1488,7 @@ class RefinementTriggerRouteResolver:
             target_app_id=request.target_app_id,
             user_id=request.user_id,
             usage_context=request.usage_context,
+            **({"refinement_model": request.refinement_model} if request.refinement_model else {}),
             requested_workflow_id=request.requested_workflow_id,
             extra=request.extra,
         )

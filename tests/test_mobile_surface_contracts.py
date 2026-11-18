@@ -244,6 +244,7 @@ def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
         "WorkspaceUsagePage": "workspace usage route stays responsive across desktop and mobile widths",
         "WorkspaceUsersPage": "workspace users route stays responsive across desktop and mobile widths",
         "WorkspaceIntegrationsPage": "workspace integrations route stays responsive across desktop and mobile widths",
+        "WorkspaceAIModelsPage": "workspace AI models route stays responsive across desktop and mobile widths",
         "UserSupportPage": "workspace support route stays responsive across desktop and mobile widths",
         "StudioPage": "app Studio root redirects to manifest default portal",
         "AppOverviewPage": "app overview route stays responsive across desktop and mobile widths",
