@@ -677,21 +677,25 @@ async def _build_artifact_review_payload(
     refinement_metadata = _refinement_metadata_from_version(version)
     changed_files = _build_bundle_diff_summary(current_files=current_files, parent_files=parent_files)
     selected_paths = []
-    validation_result = None
+    validation_result = _version_metadata(version).get("validation_result")
     coding_summary = None
     if latest_session is not None and isinstance(latest_session.metadata, dict):
         worker_meta = latest_session.metadata.get("coding_worker") or {}
         if isinstance(worker_meta, dict):
             selected_paths = list(worker_meta.get("metadata", {}).get("selected_file_paths") or [])
-            validation_result = worker_meta.get("validation_result")
+            if validation_result is None:
+                validation_result = worker_meta.get("validation_result")
             coding_summary = (worker_meta.get("plan") or {}).get("summary")
     if not selected_paths:
         selected_paths = list((version.commit_metadata.metadata or {}).get("applied_paths") or [])
-    if validation_result is None:
-        validation_result = _version_metadata(version).get("validation_result")
 
     review_status = version.lifecycle_status.value
-    if latest_session is not None:
+    if (
+        _is_revalidatable_refinement_draft(version)
+        and version.validation_status == ArtifactValidationStatus.PASSED
+    ):
+        review_status = "validated"
+    elif latest_session is not None:
         review_status = latest_session.status.value
     elif version.lifecycle_status == ArtifactLifecycleStatus.DRAFT:
         review_status = "validated" if version.validation_status == ArtifactValidationStatus.PASSED else "needs_revision"
@@ -754,7 +758,11 @@ async def _build_artifact_review_payload(
         "parent_artifact_version": parent_version.model_dump(by_alias=False, mode="python") if parent_version else None,
         "change_request": change_request.model_dump(by_alias=False, mode="python") if change_request else None,
         "refinement_session": latest_session.model_dump(by_alias=False, mode="python") if latest_session else None,
-        "review": review_package.model_dump(mode="python"),
+        "review": {
+            **review_package.model_dump(mode="python"),
+            "can_revalidate": _is_revalidatable_refinement_draft(version)
+            and version.validation_status != ArtifactValidationStatus.PASSED,
+        },
     }
 
 configure_session_router(
@@ -2538,6 +2546,84 @@ async def accept_imported_genesis_artifact(
         "genesis_import": (await registry.get_app_record(
             owner_user_id=owner_user_id, build_registry_id=build_registry_id,
         ))["app"]["genesis_import"],
+    }
+
+
+def _is_revalidatable_refinement_draft(version) -> bool:  # noqa: ANN001
+    return (
+        version.build_family == "app_bundle"
+        and version.lifecycle_status == ArtifactLifecycleStatus.DRAFT
+        and _version_metadata(version).get("bundle_mode") == "staged_refinement_bundle"
+        and bool(version.parent_build_record_id)
+        and _refinement_metadata_from_version(version) is None
+    )
+
+
+@app.post("/api/studio/build/artifacts/{artifact_version_id}/revalidate")
+async def revalidate_refinement_draft(
+    artifact_version_id: str,
+    build_registry_id: BuildIdentity,
+    principal: UserPrincipal = Depends(require_studio_user),
+):
+    from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
+    from mozaiksai.core.validation.compilation_inputs import resolve_app_compilation_inputs
+    from mozaiksai.core.validation.generated_app import validate_generated_app_candidate
+
+    validate_path_id(artifact_version_id, "artifact_version_id")
+    app_id, owner = await _resolve_studio_artifact_scope(
+        principal, app_id=None, build_registry_id=build_registry_id,
+    )
+    store = get_artifact_store()
+    draft = await store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    metadata = _version_metadata(draft)
+    if (
+        not _is_revalidatable_refinement_draft(draft)
+        or metadata.get("build_registry_id") != build_registry_id
+        or draft.commit_metadata.author_user_id != owner
+    ):
+        raise HTTPException(status_code=409, detail="This build is not eligible for draft revalidation")
+    if draft.validation_status == ArtifactValidationStatus.PASSED:
+        return {
+            "validation_status": "passed",
+            **await get_build_artifact_review(
+                artifact_version_id, build_registry_id=build_registry_id, principal=principal,
+            ),
+        }
+    await _require_current_build_in_lineage(draft, app_id=app_id, artifact_store=store)
+    try:
+        files, diagnostics = await read_artifact_bundle(draft, include_binary=True)
+        compilation = await resolve_app_compilation_inputs(
+            app_id=app_id, build_record_id=draft.id, owner_user_id=owner,
+            build_registry_id=build_registry_id, artifact_store=store,
+        )
+    except (ValueError, OSError, ContentNotFoundError, zipfile.BadZipFile) as exc:
+        raise HTTPException(status_code=409, detail="Draft archive identity or compilation inputs could not be verified") from exc
+    if diagnostics:
+        raise HTTPException(status_code=409, detail="Draft contains files that cannot be revalidated")
+    result = await validate_generated_app_candidate(
+        files=files, app_id=app_id, validation_strategy="docker",
+        capability_packs=metadata.get("capability_packs", []), approved_compilation=compilation,
+    )
+    acceptance = result.get("app_bundle_acceptance_result")
+    build = result.get("app_validation_result")
+    if not isinstance(acceptance, dict) or not isinstance(build, dict):
+        raise HTTPException(status_code=503, detail="Draft validation evidence is incomplete")
+    if result["validation_status"] == "passed" and (
+        acceptance.get("passed") is not True or build.get("validation_status") != "passed"
+    ):
+        raise HTTPException(status_code=503, detail="Draft validation evidence is inconsistent")
+    async with _workspace_acceptance_guard(app_id, draft):
+        await _verified_app_bundle(draft)
+        await _require_current_build_in_lineage(draft, app_id=app_id, artifact_store=store)
+        if not await store.record_draft_revalidation(record=draft, validation=result):
+            raise HTTPException(status_code=409, detail="Draft changed during validation. Refresh the review.")
+    return {
+        "validation_status": result["validation_status"],
+        **await get_build_artifact_review(
+            artifact_version_id, build_registry_id=build_registry_id, principal=principal,
+        ),
     }
 
 

@@ -180,3 +180,8 @@ requested build has no fallback to current app evidence.
 - [AI Startup](ai-startup.md)
 - [Workflow Registry](../extending-ai-functionality/05-workflow-sequences.md)
 - [Refinement Harness Architecture](../../architecture/workflows/refinement-harness-architecture.md)
+
+Studio review can revalidate a saved inline refinement draft after an interrupted
+validation. Revalidate draft reads the saved bundle, verifies its archive digest,
+and runs the contained Docker checks. A passing result makes the draft eligible
+for the usual acceptance checks. The action does not run a coding agent.
