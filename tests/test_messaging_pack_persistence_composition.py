@@ -120,6 +120,32 @@ def test_messaging_compiles_exact_backend_and_admitted_data_without_new_public_c
 
 
 @pytest.mark.asyncio
+async def test_assembly_ignores_unreviewed_messaging_inventory():
+    from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+    from mozaiksai.core.workflow.context.adapter import create_context_container
+    from mozaiksai.core.workflow.context.frozen import detach
+
+    offered = _context()["capability_packs"]
+    approved = {"version": "1", "surfaces": [], "shared_collections": []}
+    manifest = {"appId": "unreviewed_messaging", "appName": "Free App", "authRequired": False}
+    context = create_context_container(initial=reviewed_pack_fixture({
+        "app_id": manifest["appId"],
+        "app_build_plan": {"capability_packs": []},
+        "capability_packs": offered,
+        "data_contract": approved,
+        "generated_files": {"app.json": json.dumps(manifest), "data/contract.json": json.dumps(approved)},
+    }, []))
+
+    result = await assemble_app_tasks(context_variables=context)
+
+    assert result["success"], result
+    files = {record["filename"]: record["content"] for record in result["code_files"]}
+    assert json.loads(files["data/contract.json"])["surfaces"] == []
+    assert not any(path.startswith("modules/messages/") for path in files)
+    assert detach(context.get("capability_packs")) == offered
+
+
+@pytest.mark.asyncio
 async def test_original_approved_context_reaches_assembly_and_acceptance_scanner_without_precompilation():
     from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
     from mozaiksai.core.workflow.context.adapter import create_context_container

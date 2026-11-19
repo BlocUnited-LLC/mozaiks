@@ -7,6 +7,7 @@ from typing import Annotated, Any
 import yaml
 from pydantic import Field
 
+from factory_app.workflows._shared.pack_selection import PhysicalPackContext
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     discard_pack_owned_outputs,
@@ -664,7 +665,7 @@ async def _assemble_app_tasks(
             if context_variables and hasattr(context_variables, "get") else None
         ),
         subscription_contract=resolve_subscription_contract(context_variables),
-        context_variables=context_variables,
+        context_variables=PhysicalPackContext(context_variables),
         # The bound revision source's contract is carried even when a later
         # copy replaced it in generated_files or the outputs.
         carried_contracts=tuple(
