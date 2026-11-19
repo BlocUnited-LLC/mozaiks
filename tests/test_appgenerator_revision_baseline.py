@@ -3,6 +3,7 @@ import importlib
 import io
 import json
 import zipfile
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, call
@@ -19,14 +20,25 @@ from factory_app.workflows.AppGenerator.tools import (
 )
 from factory_app.workflows.AppGenerator.tools import hydrate_app_revision_context as revision
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
+from factory_app.workflows.AppGenerator.tools.code_file_utils import save_generated_code
 from factory_app.workflows.AppGenerator.tools.generate_and_download import (
     _build_generated_files_manifest,
 )
+from factory_app.workflows.AppGenerator.tools.save_admin_registry import save_admin_registry
 from factory_app.workflows.AppGenerator.tools.task_integrity import artifact_snapshot_digest
 from mozaiksai.control_plane.contracts import build_acceptance_evidence
 from mozaiksai.core.artifacts import content_store
 from mozaiksai.core.artifacts.models import BuildRecord, resolve_canonical_bundle_entry
 from mozaiksai.core.workflow.context.adapter import create_context_container
+from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
+from mozaiksai.core.workflow.generator_support.code_files import extract_code_file_map_from_payload
+from mozaiksai.core.workflow.generator_support.module_revision import scoped_service_revision_paths
+from mozaiksai.core.workflow.task_batches import (
+    execute_task_batches_for_trigger,
+    parse_task_batches_config,
+)
 
 
 def _replace_archive(baseline, additions):
@@ -80,6 +92,269 @@ def baseline(monkeypatch):
         },
     }
     return SimpleNamespace(files=files, context=context, artifact=artifact, store=store, content=content)
+
+
+@pytest.fixture
+def scoped_module_revision(baseline):
+    """An admitted create-only module whose refinement owns two implementation files."""
+    backend = "modules/records/backend"
+    contract = {"version": "1", "surfaces": [{
+        "surface_id": "records", "surface_kind": "module", "collections": [{
+            "name": "records", "entity": "Record", "scope": "app", "tenancy": "per_user",
+            "owner_field": "user_id", "ownership": {"surface_id": "records", "surface_kind": "module"},
+            "fields": [{"name": name, "type": "string", "required": True} for name in ("id", "title", "user_id")],
+            "lifecycle": {"write_mode": "module_action", "migration_policy": "additive_only"},
+        }],
+    }]}
+    page = {
+        "schema_version": "mozaiks.app_page.v1", "name": "records", "route": "/records",
+        "title": "Records", "page_type": "settings", "layout": "full-width",
+        "sections": [{"id": "header", "primitive": "PageHeader", "config": {"title": "Records"}}],
+    }
+    baseline.files.update({
+        "modules/records/module.yaml": yaml.safe_dump({
+            "schema_version": "mozaiks.module.v1",
+            "module": {"id": "records", "handler": "backend.handler:RecordsHandler"},
+            "actions": [{"id": "create_record", "handler_method": "create_record", "permissions": [], "emits": []}],
+        }, sort_keys=False),
+        f"{backend}/handler.py": (
+            "from . import service\n\nclass RecordsHandler:\n"
+            "    async def create_record(self, ctx, **params):\n"
+            "        return await service.create_record(ctx, params['title'])\n"
+        ),
+        f"{backend}/service.py": (
+            "from . import repo\n\nasync def create_record(ctx, title):\n"
+            "    return {'item': await repo.create_record(ctx, {'title': title})}\n"
+        ),
+        f"{backend}/repo.py": (
+            "from . import policy\n\nasync def create_record(ctx, values):\n"
+            "    record = {**values, **policy.owner_values(ctx)}\n"
+            "    await ctx.persistence.collection('records', 'records').insert_one(record)\n"
+            "    return record\n"
+        ),
+        f"{backend}/policy.py": "def owner_values(ctx):\n    return {'user_id': ctx.user_id}\n",
+        f"{backend}/schemas.py": "from typing import TypedDict\n\nclass Record(TypedDict):\n    title: str\n    user_id: str\n",
+        "data/contract.json": json.dumps(contract),
+        "ui/pages/records.yaml": yaml.safe_dump(page, sort_keys=False),
+    })
+    _replace_archive(baseline, {})
+    authored = {
+        f"{backend}/repo.py": baseline.files[f"{backend}/repo.py"].replace(
+            "record = {**values, **policy.owner_values(ctx)}", "record = {**values, **policy.owner_values(ctx), 'id': 'authored-record'}",
+        ),
+        f"{backend}/service.py": baseline.files[f"{backend}/service.py"].replace("'title': title", "'title': title.strip()"),
+    }
+    task = {
+        "task_id": "repair_record_creation", "task_type": "business_services", "capability_pack_id": "records",
+        "surface_id": "records", "surface_kind": "module", "execution_target": "AppGenerator",
+        "initial_agent": "ServiceAgent", "initial_message": "Normalize record titles and assign record IDs.",
+        "owned_paths": list(authored), "depends_on": [],
+    }
+    plan = {
+        "pages": [page], "build_tasks": [task], "capability_packs": [{
+            "capability_pack_id": "records", "capability_source": "generated_module", "primary_entities": ["Record"],
+        }],
+    }
+    context = create_context_container(initial={
+        **baseline.context, "app_build_plan": plan, "app_task_batch_items": [task], "data_contract": contract,
+    })
+    return SimpleNamespace(baseline=baseline, context=context, authored=authored, task=task, plan=plan, contract=contract)
+
+
+async def _run_module_revision_task(case, *, output=None):
+    candidate = output if output is not None else {
+        "python_files": [{
+            "path": path, "kind": Path(path).stem, "purpose": "Correct record creation.",
+            "contract_refs": ["records.create_record"], "content": source,
+        } for path, source in case.authored.items()],
+        "agent_message": "Updated the two existing implementation files.",
+    }
+
+    class Worker:
+        async def ask(self, message, **kwargs):
+            return SimpleNamespace(body=json.dumps(candidate))
+
+    config = parse_task_batches_config({"version": 1, "batches": [{
+        "id": "app_build_tasks", "trigger_agent": "AppPlanAgent",
+        "source": {"kind": "context_variable", "path": "app_task_batch_items", "task_model": "AppBuildTask"},
+        "result": {"context_key": "app_task_batch_results", "status_key": "app_task_batch_status", "require_owned_paths": True},
+    }]})
+    snapshot = case.context.to_dict()
+    await execute_task_batches_for_trigger(
+        workflow_name="AppGenerator", trigger_agent="AppPlanAgent", batches_config=config,
+        agents={"ServiceAgent": Worker()}, context_variables=snapshot, fresh_agents_per_task=False,
+    )
+    for key in ("app_task_batch_results", "app_task_batch_status"):
+        case.context.set(key, snapshot[key])
+    return snapshot
+
+
+@pytest.mark.asyncio
+async def test_scoped_module_revision_admits_authored_two_file_patch(scoped_module_revision):
+    case = scoped_module_revision
+    hydrated = await revision.hydrate_app_revision_context(case.context)
+    assert hydrated["status"] == "hydrated"
+    snapshot = await _run_module_revision_task(case)
+    assert snapshot["app_task_batch_status"] == "completed"
+    output = snapshot["app_task_batch_results"][case.task["task_id"]]
+    assert extract_code_file_map_from_payload(output) == case.authored
+    assert detach(case.context.get("generated_files")) == case.baseline.files
+
+
+@pytest.mark.asyncio
+async def test_scoped_module_revision_assembly_preserves_create_only_contract_and_admin_registry(scoped_module_revision):
+    case = scoped_module_revision
+    case.context.set("app_task_batch_results", {case.task["task_id"]: {
+        "code_files": [{"filename": path, "content": source} for path, source in case.authored.items()],
+    }})
+    save_admin_registry(admin_registry={"schema_version": "mozaiks.admin.registry.v1", "pages": [{
+        "id": "overview", "label": "Overview", "path": "/admin", "icon": "dashboard",
+        "scope": "app", "order": 0, "enabled": True,
+    }]}, context_variables=case.context)
+    registry = detach(case.context.get("admin_registry"))
+    result = await assemble_app_tasks(context_variables=case.context)
+    assert result["success"], result
+    files = extract_code_file_map_from_payload(result)
+    for path, source in case.baseline.files.items():
+        if path not in {*case.authored, "app.json", "data/contract.json"}:
+            assert files[path] == source, path
+    assert {path: files[path] for path in case.authored} == case.authored
+    assert yaml.safe_load(files["modules/records/module.yaml"])["actions"] == [{
+        "id": "create_record", "handler_method": "create_record", "permissions": [], "emits": [],
+    }]
+    assert json.loads(files["data/contract.json"]) == case.contract
+    assert files["data/contract.json"] == case.baseline.files["data/contract.json"]
+    assert yaml.safe_load(files["admin/admin_registry.yaml"]) == registry
+    assert case.baseline.content.get_bundle.await_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_scoped_module_revision_repair_saves_authored_patch_without_synthesizing_reads(scoped_module_revision):
+    case = scoped_module_revision
+    await revision.hydrate_app_revision_context(case.context)
+    case.context.set("bundle_repair_target", "ServiceAgent")
+    case.context.set("bundle_repair_result", {"active": {
+        "task_id": case.task["task_id"], "target_agent": "ServiceAgent", "request_id": "record-repair",
+        "allowed_paths": list(case.authored), "status": "selected",
+    }})
+    result = save_generated_code(StructuredOutputOverlay(case.context, {
+        "python_files": [{
+            "path": path, "kind": Path(path).stem, "purpose": "Correct record creation.",
+            "contract_refs": ["records.create_record"], "content": source,
+        } for path, source in case.authored.items()],
+    }))
+    assert result["saved_files"] == sorted(case.authored), result
+    assert result["deleted_files"] == []
+    assert extract_code_file_map_from_payload({"code_files": detach(case.context.get("code_files"))}) == case.authored
+    assert detach(case.context.get("generated_files")) == case.baseline.files
+    assert case.context.get("bundle_repair_result")["active"]["status"] == "responded"
+
+
+@pytest.mark.asyncio
+async def test_scoped_module_revision_rejects_data_change_without_contract_owner(scoped_module_revision):
+    case = scoped_module_revision
+    changed = deepcopy(case.contract)
+    changed["surfaces"][0]["collections"][0]["fields"].append({
+        "name": "category", "type": "string", "required": True,
+    })
+    case.context.set("data_contract", changed)
+    case.context.set("app_task_batch_results", {case.task["task_id"]: {
+        "code_files": [{"filename": path, "content": source} for path, source in case.authored.items()],
+    }})
+    result = await assemble_app_tasks(context_variables=case.context)
+    assert result["success"] is False, result
+    assert "changed the carried data contract" in result["error"]
+
+
+@pytest.mark.parametrize("malformed", ["tasks_not_list", "task_not_object", "paths_not_list", "path_not_string"])
+def test_malformed_task_scope_never_selects_module_preservation(scoped_module_revision, malformed):
+    case = scoped_module_revision
+    plan = deepcopy(case.plan)
+    if malformed == "tasks_not_list":
+        plan["build_tasks"] = {"task_id": case.task["task_id"]}
+    elif malformed == "task_not_object":
+        plan["build_tasks"] = [None]
+    elif malformed == "paths_not_list":
+        plan["build_tasks"][0]["owned_paths"] = "modules/records/backend/repo.py"
+    else:
+        plan["build_tasks"][0]["owned_paths"] = [None]
+    case.context.set("app_build_plan", plan)
+    assert scoped_service_revision_paths(case.context, case.baseline.files) == frozenset()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lane", ["task_output", "repair_overlay", "hydrated_files", "deletion"])
+async def test_scoped_module_revision_assembly_rejects_unowned_existing_file_change(scoped_module_revision, lane):
+    case = scoped_module_revision
+    await revision.hydrate_app_revision_context(case.context)
+    foreign = "modules/records/backend/handler.py"
+    foreign_source = case.baseline.files[foreign].replace("params['title']", "'unapproved title'")
+    output = {"code_files": [{"filename": path, "content": source} for path, source in case.authored.items()]}
+    if lane == "task_output":
+        output["code_files"].append({"filename": foreign, "content": foreign_source})
+    elif lane == "repair_overlay":
+        case.context.set("code_files", [{"filename": foreign, "content": foreign_source}])
+    elif lane == "hydrated_files":
+        case.context.set("generated_files", {**case.baseline.files, foreign: foreign_source})
+    else:
+        case.context.set("deleted_files", [foreign])
+    case.context.set("app_task_batch_results", {case.task["task_id"]: output})
+    result = await assemble_app_tasks(context_variables=case.context)
+    assert result["success"] is False, result
+    assert foreign in result["error"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault,error", [
+    ("syntax", "service.py"), ("motor_api", "find"), ("unowned_file", "outside owned_paths"),
+])
+async def test_scoped_module_revision_admission_keeps_source_and_ownership_checks(scoped_module_revision, fault, error):
+    case = scoped_module_revision
+    await revision.hydrate_app_revision_context(case.context)
+    if fault == "syntax":
+        case.authored["modules/records/backend/service.py"] = "async def create_record(ctx, title)\n    return title\n"
+    elif fault == "motor_api":
+        case.authored["modules/records/backend/repo.py"] = case.authored["modules/records/backend/repo.py"].replace(
+            ".insert_one(record)", ".find({'title': record['title']}).to_list(length=10)",
+        )
+    else:
+        case.authored["modules/records/backend/handler.py"] = case.baseline.files["modules/records/backend/handler.py"] + "# unapproved edit\n"
+    with pytest.raises(RuntimeError, match=error):
+        await _run_module_revision_task(case)
+    assert detach(case.context.get("generated_files")) == case.baseline.files
+
+
+@pytest.mark.parametrize("scope", ["greenfield", "contract_owner", "data_owner", "new_implementation", "empty_plan"])
+def test_non_scoped_module_assembly_retains_canonical_synthesis(scoped_module_revision, scope):
+    case = scoped_module_revision
+    baseline_files = dict(case.baseline.files)
+    plan = deepcopy(case.plan)
+    if scope == "greenfield":
+        case.context.set("build_mode", "new")
+        case.context.set("workflow_sequence", "app_generation")
+    elif scope in {"contract_owner", "data_owner"}:
+        path = "modules/records/module.yaml" if scope == "contract_owner" else "data/contract.json"
+        plan["build_tasks"].append({
+            "task_id": "new_contract", "task_type": "module_contract" if scope == "contract_owner" else "data_contract",
+            "owned_paths": [path],
+        })
+    elif scope == "new_implementation":
+        baseline_files.pop("modules/records/backend/repo.py")
+    else:
+        plan["build_tasks"] = []
+    case.context.set("app_build_plan", plan)
+    case.context.set("generated_files", baseline_files)
+    files = {**baseline_files, **case.authored}
+    # Ordinary generation leaves code-owned layers to their canonical renderers.
+    files.pop("modules/records/backend/policy.py")
+    files.pop("modules/records/backend/schemas.py")
+    merged = _merge_code_files(
+        [{"code_files": [{"filename": path, "content": source} for path, source in files.items()]}],
+        app_build_plan=plan, data_contract=case.contract, context_variables=case.context,
+        revision_baseline=baseline_files,
+    )
+    actions = yaml.safe_load(extract_code_file_map_from_payload({"code_files": merged})["modules/records/module.yaml"])["actions"]
+    assert {"create_record", "update_record", "delete_record", "get_records", "list_records"} <= {action["id"] for action in actions}
 
 
 @pytest.mark.asyncio

@@ -209,6 +209,7 @@ def repository_references(sources: Mapping[str, str]) -> tuple[dict[str, str], b
 
 def prune_repository(
     path: str, source: str, *, module_id: str, code_owned: set[str], business_sources: Mapping[str, str],
+    prune_unused: bool = True,
 ) -> str:
     """Remove model-authored repo definitions no business logic references.
 
@@ -261,6 +262,8 @@ def prune_repository(
                 )
     if errors:
         raise ValueError("\n".join(dict.fromkeys(errors)))
+    if not prune_unused:
+        return source
     # An opaque use proves nothing dead. Otherwise only an undecorated top-level
     # function or class that nothing live reaches is removed.
     removed = [] if not provable else sorted(

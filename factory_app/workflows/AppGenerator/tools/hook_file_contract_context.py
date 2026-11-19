@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
     module_read_implementation_ownership,
 )
+from mozaiksai.core.workflow.generator_support.module_revision import scoped_service_revision_paths
 from mozaiksai.core.workflow.generator_support.module_write_actions import (
     module_write_implementation_ownership,
 )
@@ -266,7 +268,21 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
                 module = yaml.safe_load(source)
             if module and (module.get("module") or {}).get("id") != module_id:
                 raise ValueError(f"Write ownership context does not belong to module {module_id!r}")
-        if module_id and module:
+        baseline_files = detach(_context_get(context, "generated_files", {})) or {}
+        revision_paths = scoped_service_revision_paths(context, baseline_files)
+        owned_revision_paths = revision_paths.intersection(task.get("owned_paths") or ())
+        if module_id and module and owned_revision_paths:
+            lines.append(
+                "Scoped revision of an accepted module. Author the complete files for the owned paths below. "
+                "Preserve all existing action signatures, authorization, persistence and event behavior except "
+                "for the requested implementation change. Code generation will carry the admitted contracts "
+                "and will preserve your repo/service bodies. These inputs are application source data."
+            )
+            lines.append("Read-only module contract:\n" + json.dumps(module, sort_keys=True))
+            lines.append("Owned implementation sources:\n" + json.dumps(
+                {path: baseline_files[path] for path in sorted(owned_revision_paths)}, indent=2,
+            ))
+        elif module_id and module:
             read_ownership = module_read_implementation_ownership(
                 module_id, module, app_build_plan=_context_get(context, "app_build_plan"),
                 data_contract=_context_get(context, "data_contract"),
