@@ -128,13 +128,17 @@ async def test_unsupported_requests_do_not_reach_upstream(tmp_path, changes):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["missing_usage", "http_error", "network", "wrong_model"])
+@pytest.mark.parametrize("failure", ["missing_usage", "http_error", "network", "wrong_model", "overflow"])
 async def test_unknown_provider_outcome_closes_gate(tmp_path, failure):
     calls = []
     def upstream(request):
         calls.append(request)
         if failure == "network":
             raise httpx.ConnectError("sensitive exception")
+        if failure == "overflow":
+            return httpx.Response(200, json={"model": MODEL, "usage": {
+                **USAGE, "prompt_tokens": 10**400, "total_tokens": 10**400 + USAGE["completion_tokens"],
+            }})
         return httpx.Response(500 if failure == "http_error" else 200, json={
             "model": "wrong" if failure == "wrong_model" else MODEL,
             "usage": {} if failure == "missing_usage" else USAGE,

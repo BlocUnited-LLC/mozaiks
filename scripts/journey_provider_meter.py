@@ -51,6 +51,14 @@ class Limits:
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
                 raise ValueError("budget and rates must be finite non-negative numbers")
 
+    def estimated_total(self, subtotal: float, prompt: int, completion: int, cached: int) -> float:
+        total = (subtotal + (prompt - cached) * (self.input_per_million / 1_000_000)
+                 + cached * (self.cached_per_million / 1_000_000)
+                 + completion * (self.output_per_million / 1_000_000))
+        if not math.isfinite(total):
+            raise ValueError("estimated cost exceeds the supported range")
+        return total
+
 
 def usage_tuple(model: Any, usage: Any) -> tuple[str, int, int, int] | None:
     """Return validated provider usage; never infer absent usage as zero."""
@@ -61,7 +69,8 @@ def usage_tuple(model: Any, usage: Any) -> tuple[str, int, int, int] | None:
     total = usage.get("total_tokens")
     details = usage.get("prompt_tokens_details")
     cached = details.get("cached_tokens") if isinstance(details, dict) else None
-    if any(type(x) is not int or x < 0 for x in (prompt, completion, total, cached)):
+    # The Mongo ledger can represent at most a signed 64-bit integer.
+    if any(type(x) is not int or not 0 <= x < 2**63 for x in (prompt, completion, total, cached)):
         return None
     if total != prompt + completion or cached > prompt:
         return None
@@ -290,6 +299,8 @@ class ProviderGateway:
                             raise ValueError("provider response uses an unpriced service tier")
                     if response.status_code != 200 or usage is None or usage[0] != self.limits.model:
                         raise ValueError("provider response cannot be reconciled")
+                    _, prompt, completion, cached = usage
+                    self.usd = self.limits.estimated_total(self.usd, prompt, completion, cached)
             except asyncio.CancelledError:
                 self.stopped = True
                 self.record({"phase": "result", "attempt": number, "model": self.limits.model, "outcome": "unknown",
@@ -300,10 +311,6 @@ class ProviderGateway:
                 self.record({"phase": "result", "attempt": number, "model": self.limits.model, "outcome": "unknown",
                              "status": response_status, "partial_usage": partial})
                 return JSONResponse({"error": "provider call failed or usage unavailable"}, status_code=502)
-            _, prompt, completion, cached = usage
-            self.usd += ((prompt - cached) * self.limits.input_per_million
-                         + cached * self.limits.cached_per_million
-                         + completion * self.limits.output_per_million) / 1_000_000
             safe_usage = {"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": prompt + completion,
                           "prompt_tokens_details": {"cached_tokens": cached}}
             self.record({"phase": "result", "attempt": number, "model": self.limits.model,
@@ -352,8 +359,10 @@ def summarize_reconciliation(
         totals["prompt_tokens"] += prompt
         totals["completion_tokens"] += completion
         totals["cached_prompt_tokens"] += cached
-        subtotal += ((prompt - cached) * limits.input_per_million + cached * limits.cached_per_million
-                     + completion * limits.output_per_million) / 1_000_000
+        try:
+            subtotal = limits.estimated_total(subtotal, prompt, completion, cached)
+        except ValueError:
+            valid_config = False
     stages: dict[str, dict[str, int]] = {}
     seen: set[str] = set()
     for row in receipts:
