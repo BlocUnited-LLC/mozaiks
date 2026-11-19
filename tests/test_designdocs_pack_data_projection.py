@@ -16,16 +16,21 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    verify_pack_integrity,
+)
 from factory_app.workflows.DesignDocs.tools import save_design_doc
 from factory_app.workflows.DesignDocs.tools.select_capability_packs import select_capability_packs
 from mozaiksai.core.session.build_context import load_trusted_build_context
 from mozaiksai.core.workflow.context.authority import build_context_authority_policy
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.execution.middleware import MozaiksPromptMiddleware, _resolve_import
+from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
 from mozaiksai.core.workflow.generator_support.module_role_grants import (
     validate_reviewed_pack_data,
     verified_pack_authorization,
 )
+from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
 from tests import test_designdocs_capability_ownership as ownership
 from tests import test_designdocs_monetization_inventory as inventory
 from tests.test_designdocs_selected_pack_context import PACK, WORKFLOW, _prompt, _prompt_runner
@@ -116,11 +121,48 @@ def test_other_verified_pack_projects_its_own_module_collection_identities(conte
     assert result["status"] == "selected", result
     contract = json.loads((PACK.parent / "social/templates/data/contract.json").read_text(encoding="utf-8"))
 
-    assert _collections(_prompt(_prompt_runner(content_context))) == [
+    expected = [
         {"pack_id": "social", "module_id": group["surface_id"], "collection": collection["name"],
          "entity": collection["entity"], "tenancy": collection["tenancy"]}
         for group in contract["surfaces"] for collection in group["collections"]
     ]
+    assert sorted(_collections(_prompt(_prompt_runner(content_context))), key=lambda row: (row["module_id"], row["collection"])) == sorted(
+        expected, key=lambda row: (row["module_id"], row["collection"]),
+    )
+
+
+def test_invalid_refreshed_pack_shared_owner_suppresses_all_collection_hints(
+    content_context, tmp_path, caplog,
+):
+    copied = tmp_path / "build_context/content"
+    path = copied / "templates/data/contract.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    invalid = data["surfaces"][0]["collections"].pop()
+    invalid.update(
+        name="private_invalid_shared_marker", entity="ForeignSharedEntry",
+        ownership={"surface_id": "friends", "surface_kind": "module"},
+    )
+    data["shared_collections"] = [invalid]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    current = verify_pack_integrity(copied, "content")
+
+    selected = select_capability_packs(["content", "social"], context_variables=content_context)
+    assert selected["status"] == "selected", selected
+    pins = detach(content_context.get("pack_selection"))
+    assert next(row for row in pins if row["pack_id"] == "content")["digest"] == current["digest"]
+    authorization = verified_pack_authorization(content_context, selection=pins)
+    assert "friends" in authorization.actions and "content" in authorization.actions
+    assert any(contract.get("shared_collections") == [invalid] for contract in authorization.data_contracts)
+    with pytest.raises(ValueError, match="module-owned collection surfaces only"):
+        compile_data_contract({}, pack_data_contracts=list(authorization.data_contracts))
+
+    prompt = _prompt(_prompt_runner(content_context))
+
+    assert _collections(prompt) == []
+    assert "Selected pack collection ownership is unavailable" in prompt
+    assert "friends.send_friend_request" in prompt
+    assert "private_invalid_shared_marker" not in prompt
+    assert "private_invalid_shared_marker" not in caplog.text
 
 
 def test_deselection_removes_collection_anchors_from_the_next_prompt(content_context):
@@ -176,8 +218,9 @@ def test_duplicate_entries_rejection_names_owners_and_reaches_the_repair_prompt(
     assert _collections(prompt)[0]["module_id"] == "content"
 
 
-def test_distinct_app_owned_collection_saves_beside_verified_content_after_review(
-    content_context, persistence, monkeypatch,
+@pytest.mark.parametrize("pack_only", [False, True])
+def test_strict_design_saves_pack_data_and_optional_app_collection_after_review(
+    content_context, persistence, monkeypatch, pack_only,
 ):
     authorization = _select(content_context)
     shown = []
@@ -190,6 +233,16 @@ def test_distinct_app_owned_collection_saves_beside_verified_content_after_revie
 
     monkeypatch.setattr(save_design_doc, "use_ui_tool", approve)
     bundle = _bundle()
+    if pack_only:
+        bundle["data_contract"].update(surfaces=[], shared_collections=[])
+        page = bundle["experience_spec"]["pages"][0]
+        page.update(name="Entries", route="/entries", intent="Read the app's published editorial entries.")
+        bundle["surface_map"]["surfaces"] = [{
+            "surface_id": "content", "label": "Editorial content", "surface_kind": "module", "owner": "app",
+            "primary_entities": [], "owned_pages": ["Entries"], "source_capability_packs": ["content"],
+        }]
+    models, _ = load_workflow_structured_outputs("DesignDocs")
+    bundle = models["DesignDocsBundle"].model_validate(bundle).model_dump(mode="json")
     before = deepcopy(bundle)
     result = inventory._save(content_context, bundle)
 
@@ -199,8 +252,12 @@ def test_distinct_app_owned_collection_saves_beside_verified_content_after_revie
     contract = detach(content_context.get("data_contract"))
     assert validate_reviewed_pack_data(contract, authorization) == {("content", "entries")}
     groups = {group["surface_id"]: group for group in contract["surfaces"]}
-    assert groups["reports"]["collections"][0]["name"] == "reports"
-    assert groups["reports"]["collections"][0]["entity"] == "Report"
+    if pack_only:
+        assert bundle["data_contract"]["surfaces"] == bundle["data_contract"]["shared_collections"] == []
+        assert set(groups) == {"content"}
+    else:
+        assert groups["reports"]["collections"][0]["name"] == "reports"
+        assert groups["reports"]["collections"][0]["entity"] == "Report"
     assert groups["content"]["collections"][0]["entity"] == "ContentEntry"
     assert detach(content_context.get("access_policy")) == bundle["access_policy"]
     assert bundle == before

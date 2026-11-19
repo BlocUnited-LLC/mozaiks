@@ -41,7 +41,9 @@ collection in module `content` with entity `ContentEntry`. A recipe page and a
 portfolio page can both use those records with different layouts and labels.
 Design save composes the collection from the pack. An editor grant references
 `entries` and the relevant shipped actions. Apps can declare separate
-collections for additional records they own.
+collections for additional records they own. When packs supply all app data,
+the design leaves `data_contract.surfaces` and `shared_collections` empty and
+declares its presentation in the surface map and experience spec.
 Template files stay on disk for deterministic assembly. The owner reviews the
 pack identities alongside the proposed permissions and page roles. AppGenerator
 uses the selection recorded in the reviewed DesignDocs artifact.

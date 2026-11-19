@@ -15,6 +15,7 @@ from factory_app.workflows._shared.pack_selection import available_pack_rows
 from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     _selected_packs,
     pack_template_module_contracts,
@@ -153,6 +154,7 @@ def _pack_collection_context(context: Any) -> list[str]:
     """Project collection identities from the same pinned data used by design save."""
     try:
         authorization = verified_pack_authorization(context, selection=detach(context.get("pack_selection")))
+        contract = compile_data_contract({}, pack_data_contracts=list(authorization.data_contracts))
         rows = [
             {
                 "pack_id": authorization.module_packs[owner],
@@ -161,7 +163,6 @@ def _pack_collection_context(context: Any) -> list[str]:
                 "entity": collection["entity"],
                 "tenancy": collection["tenancy"],
             }
-            for contract in authorization.data_contracts
             for owner, kind, collection in iter_data_contract_collections(contract)
             if kind == "module" and owner in authorization.module_packs
         ]
