@@ -598,14 +598,14 @@ const AppWorkbench = ({
                 <summary className="cursor-pointer">Refinement details</summary>
                 {codingResult.plan?.summary && <div className="mt-1">{codingResult.plan.summary}</div>}
                 <div className="mt-1 break-words [overflow-wrap:anywhere]">
-                  Status: {codingResult.status}
+                  Status: {candidateStatus}
                   {savedDraftId ? ` • Draft ${savedDraftId}` : ''}
                 </div>
               </details>
-              {savedDraftId && codingResult.status !== 'validated' && (
+              {savedDraftId && artifactVersionId !== savedDraftId && (
                 <div className="mt-1">The editor and preview still show version {artifactVersionId}. Inspect the saved draft below.</div>
               )}
-              {codingResult.error && <div className="mt-1">{codingResult.error}</div>}
+              {codingResult.error && !reviewedValidation && <div className="mt-1">{codingResult.error}</div>}
               {savedDraftId && (
                 <button type="button" className="mt-2 underline" onClick={() => handleHarnessDecisionAction({ action_type: 'review_patch' })}>
                   Review patch
