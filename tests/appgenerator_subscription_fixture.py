@@ -15,6 +15,7 @@ def subscription_contract(
         },
         "subscription_config_file": {
             "schema_version": "mozaiks.subscriptions.v1",
+            "label": "Fixture plans",
             "default_plan_id": "free",
             "plans": [
                 {"plan_id": "free", "label": "Free", "capabilities": sorted(

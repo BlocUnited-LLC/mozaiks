@@ -28,6 +28,7 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
 from mozaiksai.core.workflow.outputs import structured
 from mozaiksai.core.workflow.outputs.runtime_validation import validate_agent_structured_output
 from tests.factory_context import factory_context
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / "factory_app/workflows/AppGenerator"
@@ -63,7 +64,7 @@ def context(tmp_path, monkeypatch):
     policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=config.definitions)
     projected = load_trusted_build_context(policy, build_context_root=root)
     assert [pack["id"] for pack in projected["capability_packs"]] == ["content"]
-    bridge = ContextVariablesBridge(factory_context(projected), authority_policy=policy)
+    bridge = ContextVariablesBridge(reviewed_pack_fixture(factory_context(projected), ["content"]), authority_policy=policy)
     bridge._bind_run(("AppGenerator", "pack-planning-app", "882cbad6-4cf3-45fa-9aca-70a1c263f533"), policy)
     return bridge
 

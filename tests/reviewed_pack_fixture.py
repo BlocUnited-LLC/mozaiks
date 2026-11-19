@@ -29,16 +29,18 @@ def registered_pack_fixture(tmp_path, monkeypatch, pack_id, capability_source, *
     return available_pack_rows({}, pack_ids={pack_id})[pack_id]
 
 
-def reviewed_pack_fixture(initial, pack_ids):
-    """Bind explicitly named test packs to a deterministic no-grants review.
+def reviewed_pack_fixture(initial, pack_ids, *, access_policy=None):
+    """Bind explicitly named test packs to a deterministic unit review.
 
     Callers register any managed offering through the real test registry first.
-    This supplies no roles, provider activation, payment or identity membership.
+    The default supplies no roles. Role tests may supply their predeclared
+    policy explicitly; never derive it from emitted candidate files. This
+    supplies no provider activation, payment or identity membership.
     Tests of approval/denial use the real review tool separately.
     """
     values = factory_context(deepcopy(initial))
     pins = pin_pack_choices(values, pack_ids)
-    policy = {"roles": [], "grants": []}
+    policy = deepcopy(access_policy) if access_policy is not None else {"roles": [], "grants": []}
     binding = values["run_build_binding"]
     summary = {
         "data_contract": values.get("data_contract"),

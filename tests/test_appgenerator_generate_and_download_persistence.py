@@ -15,6 +15,7 @@ from mozaiksai.core.workflow.context.authority import (
     build_context_authority_policy,
 )
 from tests.factory_context import factory_context
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 
 
 def _load_generate_and_download_module():
@@ -40,8 +41,10 @@ generate_and_download_module = _load_generate_and_download_module()
 
 
 class _Context:
-    def __init__(self, initial=None) -> None:
+    def __init__(self, initial=None, *, reviewed_pack_ids=None) -> None:
         self.data = factory_context(initial)
+        if reviewed_pack_ids is not None:
+            self.data = reviewed_pack_fixture(self.data, reviewed_pack_ids)
 
     def set(self, key, value) -> None:
         self.data[key] = value
@@ -171,6 +174,15 @@ def test_initial_app_bundle_is_parentless_with_upstream_artifacts(monkeypatch, t
 
 
 def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatch, tmp_path: Path) -> None:
+    from factory_app.workflows._shared.pack_selection import available_pack_rows
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        verified_selected_pack_sources,
+    )
+
+    # Use the real selected descriptor rather than an invented installed path
+    # and unsupported pack.config field.
+    selected = available_pack_rows({}, pack_ids={"operator_readiness"})["operator_readiness"]
+    identities = verified_selected_pack_sources([selected])
     fake_artifact_store = _FakeArtifactStore()
     artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
     monkeypatch.setattr(artifacts_mod, "get_artifact_store", lambda: fake_artifact_store)
@@ -197,19 +209,16 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
             },
             "build_id": "build_1",
             "build_registry_id": "appreg_1",
-            "app_build_plan": {"capability_packs": [{
-                "id": "operator_readiness", "capability_source": "config_file",
-                "pack_source_path": "/installed/operator_readiness",
-                "version": "1.0.0", "config": {"profile": "local"},
-            }]},
+            "app_build_plan": {"capability_packs": [selected]},
             "available_capability_packs": [{"id": "unselected_pack"}],
             "app_bundle_acceptance_status": "passed",
             "app_bundle_acceptance_result": {
                 "status": "passed",
+                "resolved_capability_packs": identities,
                 "validation_evidence": {"completed": ["bundle_scan"], "failed": []},
             },
             "app_bundle_validation_evidence": {"completed": ["bundle_scan"], "failed": []},
-        }
+        }, reviewed_pack_ids=["operator_readiness"],
     )
 
     artifact_version = asyncio.run(
@@ -244,8 +253,8 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     assert metadata["capability_packs"] == context.data["app_build_plan"]["capability_packs"]
     # A revision is saved as a draft for review: only its acceptance records one.
     assert "acceptance" not in metadata
-    context.data["app_build_plan"]["capability_packs"][0]["config"]["profile"] = "changed"
-    assert metadata["capability_packs"][0]["config"]["profile"] == "local"
+    context.data["app_build_plan"]["capability_packs"][0]["capabilities"][0]["capability_id"] = "changed"
+    assert metadata["capability_packs"][0]["capabilities"][0]["capability_id"] == "operator_readiness.profile.select"
     assert context.data["artifact_version_id"] == "av_bundle_1"
 
 
@@ -261,9 +270,13 @@ def test_a_recorded_build_pins_its_workspace_pack_rows_to_the_identity_acceptanc
     """
     import shutil
 
+    from factory_app.workflows._shared.pack_selection import available_pack_rows
     from factory_app.workflows.AppGenerator.tools import (
         resolve_managed_capability_templates as resolver,
     )
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path / "workspace", monkeypatch)
 
     fake_artifact_store = _FakeArtifactStore()
     artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
@@ -271,14 +284,15 @@ def test_a_recorded_build_pins_its_workspace_pack_rows_to_the_identity_acceptanc
     monkeypatch.setattr(
         artifacts_mod, "resolve_latest_artifact_version_refs", lambda **kwargs: asyncio.sleep(0, result={}),
     )
-    workspace = tmp_path / "workspace" / "build_context"
-    source = Path(__file__).resolve().parent / "fixtures/community_packs/greetings"
-    shutil.copytree(source, workspace / "greetings", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    row = {
-        "id": "greetings", "capability_source": "generated_module",
-        "pack_source_path": str((workspace / "greetings").resolve()), "version": "0.1.0",
-    }
-    catalog_row = {"id": "mozaikspay", "capability_source": "managed_capability"}
+    workspace = tmp_path / "workspace" / "registered-context"
+    # Use a current, fully typed module source for Factory review. The archived
+    # community example has an old module schema and remains untouched.
+    source = Path(__file__).resolve().parents[1] / "factory_app/build_context/content"
+    shutil.copytree(source, workspace / "content", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    offerings = available_pack_rows({}, pack_ids={"content", "mozaikspay"})
+    row = dict(offerings["content"])
+    row.pop("digest")  # Registry/version input; acceptance must provide the recorded pin.
+    catalog_row = dict(offerings["mozaikspay"])
     identities = [
         resolver.pack_identity(entry)
         for entry in resolver.verified_selected_pack_sources(
@@ -290,13 +304,14 @@ def test_a_recorded_build_pins_its_workspace_pack_rows_to_the_identity_acceptanc
 
     def register(acceptance_result):
         context = _Context({
+            "app_id": "app_123",
             "build_id": "build_1",
             "build_registry_id": "appreg_1",
             "build_context_root": str(workspace),
             "app_build_plan": {"capability_packs": [dict(row), dict(catalog_row)]},
             "app_bundle_acceptance_status": "passed",
             "app_bundle_acceptance_result": acceptance_result,
-        })
+        }, reviewed_pack_ids=["content", "mozaikspay"])
         return asyncio.run(
             generate_and_download_module._register_app_bundle_artifact_version(
                 app_id="app_123", user_id="user_123", workflow_name="AppGenerator", chat_id="chat_123",
@@ -306,13 +321,13 @@ def test_a_recorded_build_pins_its_workspace_pack_rows_to_the_identity_acceptanc
 
     register({"status": "passed", "resolved_capability_packs": identities})
     saved_row, saved_catalog = fake_artifact_store.calls[0]["commit_metadata"]["metadata"]["capability_packs"]
-    fresh = resolver.verify_pack_integrity(workspace / "greetings", "greetings")
+    fresh = resolver.verify_pack_integrity(workspace / "content", "content")
     assert saved_row == {**row, "digest": fresh["digest"]}
     assert saved_catalog == catalog_row
     assert resolver.verified_selected_pack_sources([saved_row], context_variables={"build_context_root": str(workspace)})
 
     # Edited in place at the same version, the pack no longer verifies against what the build recorded.
-    contract = workspace / "greetings" / "contract.yaml"
+    contract = workspace / "content" / "contract.yaml"
     contract.write_bytes(contract.read_bytes() + b"\n# edited in place\n")
     with pytest.raises(resolver.PackIntegrityError, match="selected digest does not match freshly verified source"):
         resolver.verified_selected_pack_sources([saved_row], context_variables={"build_context_root": str(workspace)})

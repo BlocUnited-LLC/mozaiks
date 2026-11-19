@@ -38,6 +38,7 @@ from mozaiksai.hosts.platform import _current_user_token_wallet_summary
 from scripts.appgenerator_fixture_replay import execute_file_replay
 from tests.factory_context import factory_context
 from tests.module_authority_test_helpers import enforce_authority
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_generated_saas_subscription_runtime_acceptance import (
     _Collection,
     _Database,
@@ -73,6 +74,8 @@ def _write_wallet_pack(root: Path) -> dict[str, Any]:
         yaml.safe_dump(
             {
                 "context_id": "wallet",
+                "applies_to_workflows": ["DesignDocs", "AppGenerator"],
+                "projections": {"context_variables": {"capability_packs": {"from": "capability_packs"}}},
                 "assets": [{"path": "templates/", "kind": "templates"}],
                 "pack": {
                     "id": "wallet",
@@ -655,17 +658,21 @@ def _mozaikspay_task_outputs() -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_managed_wallet_replay_normalizes_assembles_and_scans(tmp_path: Path) -> None:
+async def test_managed_wallet_replay_normalizes_assembles_and_scans(tmp_path: Path, monkeypatch) -> None:
     wallet_descriptor = _write_wallet_pack(tmp_path)
-    ctx = ContextVariablesBridge(factory_context(
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(tmp_path))
+    plan = _wallet_replay_plan()
+    plan["capability_packs"][0].update({key: wallet_descriptor[key] for key in ("pack_source_path", "version", "digest")})
+    ctx = ContextVariablesBridge(reviewed_pack_fixture(factory_context(
         {
             "app_id": "managed-wallet-replay",
             "capability_packs": [wallet_descriptor],
             "app_task_batch_results": _wallet_task_outputs(),
+            "experience_spec": {"pages": [{"name": page["name"], "route": page["route"]} for page in plan["pages"]]},
         }
-    ))
+    ), ["wallet"]))
 
-    app_build_plan(AppBuildPlan=_wallet_replay_plan(), context_variables=ctx)
+    app_build_plan(AppBuildPlan=plan, context_variables=ctx)
     cached_plan = detach(ctx.get("app_build_plan"))
 
     adapter_task = next(
@@ -695,6 +702,9 @@ async def test_managed_wallet_replay_normalizes_assembles_and_scans(tmp_path: Pa
 async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
     monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "skip")
     monkeypatch.setattr(
         validate_app_bundle_from_request.__globals__["app_runtime_smoke"], "resolve_smoke_mongo_uri", lambda: None,
@@ -710,11 +720,13 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     monkeypatch.syspath_prepend(str(prior_app))
 
     descriptor, contract = _load_mozaikspay_descriptor()
-    ctx = ContextVariablesBridge(factory_context(
+    plan = _mozaikspay_replay_plan()
+    ctx = ContextVariablesBridge(reviewed_pack_fixture(factory_context(
         {
             "app_id": "mozaikspay-replay",
             "capability_packs": [descriptor],
             "operator_contracts": [contract],
+            "experience_spec": {"pages": [{"name": page["name"], "route": page["route"]} for page in plan["pages"]]},
             "design_surface_map": {"surfaces": [
                 {
                     "surface_id": "reports", "surface_kind": "module", "owner": "app",
@@ -744,9 +756,9 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
             # permits integration files but does not own this root marker.
             "code_files": [{"filename": "services/__init__.py", "content": ""}],
         }
-    ))
+    ), ["mozaikspay"]))
 
-    app_build_plan(AppBuildPlan=_mozaikspay_replay_plan(), context_variables=ctx)
+    app_build_plan(AppBuildPlan=plan, context_variables=ctx)
     cached_plan = detach(ctx.get("app_build_plan"))
 
     tasks = {task["task_id"]: task for task in cached_plan["build_tasks"]}

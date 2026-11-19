@@ -17,6 +17,7 @@ from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
     resolve_design_access_policy,
+    resolve_reviewed_pack_selection,
 )
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
@@ -153,8 +154,8 @@ async def capture_app_compilation_inputs(
     page_review = isinstance(summary, dict) and isinstance(summary.get("access_policy_review"), dict) and bool(
         isinstance(experience, dict) and experience.get("pages")
     )
-    pack_inputs = bool(plan.get("capability_packs") or context.get("capability_packs")) and (
-        context.get("data_contract") is not None or contract is not None
+    pack_inputs = (context.get("data_contract") is not None or contract is not None) and bool(
+        plan.get("capability_packs") or resolve_reviewed_pack_selection(context)
     )
     if not pack_inputs and not page_review:
         return None

@@ -27,6 +27,40 @@ from mozaiksai.core.validation.compilation_inputs import (
 )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("inventory", [[], [{"id": "mozaikspay", "capability_source": "managed_capability"}]])
+async def test_empty_free_plan_does_not_capture_compilation_from_available_offerings(inventory):
+    context = {"app_build_plan": {"capability_packs": []}, "capability_packs": inventory,
+               "data_contract": {"version": "1", "surfaces": []}, "app_plan_outcome": "blocked"}
+    before = deepcopy(context)
+    assert await capture_app_compilation_inputs(
+        context, owner_user_id="fixture-owner", archive_sha256="0" * 64, artifact_store=object(),
+    ) is None
+    assert context == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome,reason", [("blocked", "validated ready"), ("ready", "approved app_build_plan.build_tasks")])
+async def test_reviewed_pack_with_empty_plan_still_reaches_compiler_admission(outcome, reason):
+    from tests.reviewed_pack_fixture import reviewed_pack_fixture
+
+    context = reviewed_pack_fixture({"app_build_plan": {"capability_packs": []},
+        "data_contract": {"version": "1", "surfaces": []}, "app_plan_outcome": outcome}, ["operator_readiness"])
+    with pytest.raises(ValueError, match=reason):
+        await capture_app_compilation_inputs(context, owner_user_id="fixture-owner",
+                                              archive_sha256="0" * 64, artifact_store=object())
+
+
+@pytest.mark.asyncio
+async def test_capture_without_data_or_contract_does_not_read_unused_pack_authority():
+    context = {"app_build_plan": {"capability_packs": []}, "data_contract": None,
+               "design_docs_artifact": {"commit_metadata": {"metadata": {"summary_payload": {
+                   "access_policy_review": {"status": "approved"},
+               }}}}}
+    assert await capture_app_compilation_inputs(context, owner_user_id="fixture-owner",
+                                               archive_sha256="0" * 64, artifact_store=object()) is None
+
+
 class Store:
     def __init__(self):
         self.records = {}

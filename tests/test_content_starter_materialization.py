@@ -33,7 +33,6 @@ from mozaiksai.core.runtime.persistence import collection_name_for
 from mozaiksai.core.validation import scan_functional_generated_app
 from mozaiksai.core.workflow.context.adapter import create_context_container
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.generator_support.design_access_policy import access_policy_sha256
 from mozaiksai.core.workflow.generator_support.module_smoke_fixtures import (
     load_module_smoke_fixtures,
 )
@@ -142,16 +141,10 @@ def _context(variant):
 
 
 def _reviewed_content_context(values):
-    values = reviewed_pack_fixture(values, ["content"])
     policy = {"roles": [{"role_id": EDITOR_ROLE, "label": "Content editor", "description": "Maintains content."}],
               "grants": [{"role_id": EDITOR_ROLE, "collection": "entries",
                           "actions": ["create_entry", "update_entry", "archive_entry"]}]}
-    summary = values["design_docs_artifact"]["commit_metadata"]["metadata"]["summary_payload"]
-    summary["access_policy"] = policy
-    review = summary["access_policy_review"]
-    review["policy_sha256"] = access_policy_sha256(policy, summary.get("experience_spec"),
-                                                   pack_identities=review["pack_identities"])
-    return create_context_container(initial=values)
+    return create_context_container(initial=reviewed_pack_fixture(values, ["content"], access_policy=policy))
 
 
 async def _assemble(context):

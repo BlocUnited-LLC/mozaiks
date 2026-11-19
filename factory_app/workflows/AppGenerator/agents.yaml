@@ -319,16 +319,16 @@ agents:
          - Do NOT invent extra `module` surfaces for concerns already marked `workflow`, `refinement`, `external_integration`, or `ui_only`.
          - When `owner == "hosted"`, do NOT plan a module_contract task or backend generation for that surface. Reference the managed capability via a facade module task or external_integration task instead.
          - When `owner == "platform"`, do NOT plan any generation tasks — reference it as an existing platform capability in `service_scope`.
-      4. Derive the minimum complete set of `capability_packs` required by the product before planning pages or files.
-         - Use `concept_blueprint.capability_pack_hints` and `build_plan.capability_packs` when available.
+      4. Derive app-owned capabilities from approved surfaces and preserve the exact owner-reviewed reusable pack selection before planning pages or files.
+         - Concept pack hints and capability catalogs are recommendations, not selection authority. Use the persisted DesignDocs review for reusable pack identities; return to DesignDocs to add, remove or repin one.
          - Capability packs remain planning units; they are not automatically modules.
          - Every capability pack must declare `surface_id` and `surface_kind`.
          - Keep the two identity fields distinct: `pack_type` is the product-category taxonomy (for example `crud_pack`, `commerce_pack`, `billing_pack`, `notifications_pack`, or `analytics_pack`), while `capability_pack_id` is the installed provider identity or the approved app-owned module `surface_id`. Never emit a category such as `billing_pack` as a managed `capability_pack_id`.
-         - For SaaS subscriptions, the canonical managed capability identity is `mozaikspay`; use `capability_source: managed_capability`, `capability_pack_id: mozaikspay`, and `monetization_provider: mozaiks_pay`. The self-managed assignment route is `entitlement_dispatch` only when explicitly selected. These provider identities are not interchangeable with pack categories.
+         - When the reviewed provider is MozaiksPay, the canonical managed capability identity is `mozaikspay`; use `capability_source: managed_capability`, `capability_pack_id: mozaikspay`, and `monetization_provider: mozaiks_pay`. Use `entitlement_dispatch` only when it was explicitly selected and reviewed. Availability and pack categories cannot select either provider.
          - For every approved app-owned module surface, emit exactly one `generated_module` capability with `capability_pack_id` equal to that surface's `surface_id`. Every module-local task must use that same ID and own paths under `modules/{surface_id}/`.
          - Preserve an approved module that owns multiple collections and their coordinated lifecycle; do not split it into one module per entity. Cross-module events/reactions must follow the approved design. If approved synchronous coordination requires an unavailable dispatcher or foreign action/event authority, report the design contract gap for review instead of inventing a bridge, silently merging owners, or weakening the business rules, roles or pages.
          - Use `commerce_pack` for storefronts, product catalogs, carts, checkout request flows, orders, and inventory. Keep payment provider mechanics outside the commerce module; pair with a selected managed payment pack or a user-requested provider adapter when checkout processing is required.
-         - Use the injected `[CAPABILITY DIRECTORY]` as the deterministic recommendation order for known build packs. For SaaS subscriptions, plan-gated access, seats, billing portal, AI credits, token top-ups, or usage budgets, default to the managed `mozaikspay` capability pack and `monetization_provider: mozaiks_pay` unless the user explicitly selects `entitlement_dispatch` for the self-managed OSS path. Generate only app-owned billing facades and clients that call the hosted MozaiksPay API; never generate provider internals. Do not emit decorative custom provider ids for subscription assignment. For ecommerce checkout, marketplace, sponsorship, contributions, campaign funding, revenue-share, or other product-specific money flows, set `revenue_model: custom` and use the relevant domain pack, custom_owned module, managed facade, or policy hook. Do not collapse all revenue into billing.
+         - Use the injected `[CAPABILITY DIRECTORY]` as recommendation context only. Subscription assignment requires one owner-reviewed writer and the later required subscription contract. Missing selection requires DesignDocs review; do not default or substitute a provider. Consume verified pack facade, client and page outputs and canonical subscription assembly; plan only additional app-owned work outside the closed ownership manifest, never template-owned paths or provider internals. Ecommerce checkout, marketplace, sponsorship, contributions, campaign funding and revenue-share remain product-specific money flows under `revenue_model: custom`; do not collapse them into SaaS billing.
          - **NEVER include these as capability packs** — they are first-class runtime features already provided by the Mozaiks platform host and must not be scaffolded:
            `user_management`, `auth`, `authentication`, `login`, `registration`, `profile`, `user_profile`, `admin_users`, `settings`, `notifications`, `websocket`, `token_usage_ledger`, `ai_token_metering`
            If the product spec mentions any of these, reference them as existing runtime capabilities in `service_scope`, not as packs to generate.
@@ -450,44 +450,13 @@ agents:
           Usage/billing page requirements may read the platform-owned endpoints
           `/api/me/usage`, `/api/me/tokens`, and `/api/me/tokens/ledger`; do
           not plan generated modules or custom ledgers just to back those pages.
-          Every required contract declares an `assignment_store`. When the build
-          does NOT include a managed capability
-          pack that owns subscription assignment writes, the app owns the
-          subscription assignment write path. The current default managed
-          assignment writer is the `mozaikspay` pack, but that default is
-          recommendation-only and must not become a runtime dependency. In that
-          case, also plan an `entitlement_dispatch` module task set alongside
-          the other module tasks:
-          - one `data_migrations` task: `capability_pack_id: "entitlement_dispatch"`,
-            `surface_kind: "module"`, `initial_agent: "DatabaseAgent"`,
-            `owned_paths: ["data/migrations/001_entitlement_dispatch_collections.json"]`.
-            This migration declares the `billing.subscriptions` data alias with
-            `mongo_collection: "entitlement_dispatch_subscriptions"`. It must run
-            before the business_services task because `repo.py` uses
-            `app_data_from_context(ctx).collection("billing.subscriptions")` which
-            resolves the alias from `data/contract.json` built from this migration.
-            `ConfiguredEntitlementAdapter` (the runtime read side) also resolves
-            the collection via this same alias.
-          - one `module_contract` task: `capability_pack_id: "entitlement_dispatch"`,
-            `surface_kind: "module"`, `initial_agent: "ConfigMiddlewareAgent"`,
-            `owned_paths: ["modules/entitlement_dispatch/module.yaml"]`. Its
-            `initial_message` must declare exactly two actions:
-            `activate_subscription` (writes a subscription assignment record to
-            the assignment_store collection so `ConfiguredEntitlementAdapter`
-            can grant capabilities for the plan) and `deactivate_subscription`
-            (marks the record inactive). No `entitlement_gate`, no `permissions`,
-            `capabilities: []`, `type: entitlement_dispatch`, `visibility: private`.
-          - one `business_services` task: `capability_pack_id: "entitlement_dispatch"`,
-            `initial_agent: "ServiceAgent"`, `owned_paths:
-            ["modules/entitlement_dispatch/backend/handler.py",
-            "modules/entitlement_dispatch/backend/service.py",
-            "modules/entitlement_dispatch/backend/repo.py"]`. The repo must use
-            `app_data_from_context(ctx).collection("billing.subscriptions")` to
-            write subscription assignment documents (not
-            `ctx.persistence.collection(...)`). Every document must include
-            `app_id` so `ConfiguredEntitlementAdapter` can scope queries by app.
-          The bundle scanner rejects the app bundle when `assignment_store` is
-          present without either this module or a managed assignment writer.
+          Every required contract declares an `assignment_store` and requires one
+          owner-reviewed subscription assignment writer. The deterministic pack
+          materializer owns the selected writer's declared template outputs.
+          Do not plan migration, module_contract or business_services tasks for
+          entitlement_dispatch or other pack-owned paths. A missing writer
+          requires renewed DesignDocs selection/review; it does not authorize a
+          default provider or model-authored assignment implementation.
         - If the resolved contract's `contract_required` is false, or neither
           `subscription_contract` nor `subscription_contract_artifact` carries a
           contract at all, leave `monetization_provider` JSON null; assembly emits no

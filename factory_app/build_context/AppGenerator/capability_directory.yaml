@@ -61,12 +61,12 @@ capabilities:
       - subscriptions
       - saas monetization
     generator_notes:
-      - Default to the mozaikspay capability pack for SaaS subscriptions when no different provider path is explicitly selected. Preserve monetization_provider=entitlement_dispatch as the self-managed OSS override.
-      - Generate the app-owned billing_portal facade, thin services/integrations/mozaikspay_client.py client, billing/usage pages, pricing page, and app/config/subscriptions.yaml plan contract.
+      - SaaS subscription assignment requires an explicit owner-reviewed writer plus the later required subscription contract. Use mozaikspay or entitlement_dispatch only when that exact pack was selected and reviewed; missing selection returns to DesignDocs without choosing a default.
+      - Consume the selected pack's verified billing_portal facade, services/integrations/mozaikspay_client.py client and pricing/billing/usage pages. Canonical subscription assembly emits app/config/subscriptions.yaml from the approved contract. Plan only additional app-owned work outside the closed ownership manifest; do not schedule model tasks for these template-owned outputs.
       - Do not generate provider-specific billing module internals or hosted service code.
       - Do not generate checkout, webhook handlers, invoice logic, customer/payment provider mapping, refunds, wallet, payout, or provider credential handling.
       - Do not generate custom token metering or balance storage; read measured runtime usage from /api/me/usage or /api/admin/usage and use the OSS token wallet ledger for balances.
-      - Use app/config/subscriptions.yaml when a generated SaaS app needs plan quotas, usage limits, token_wallets, or token_allowances.
+      - Canonical subscription assembly writes app/config/subscriptions.yaml when the approved SaaS contract needs plan quotas, usage limits, token_wallets, or token_allowances; do not plan a model-authored copy.
       - Pages must bind through app-owned facade modules, not directly to the hosted MozaiksPay API or any external billing endpoint.
     alternatives:
       - id: custom_payments_provider

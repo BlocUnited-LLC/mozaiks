@@ -342,3 +342,24 @@ def test_required_contract_without_reviewed_writer_cannot_publish_a_cached_plan(
     assert context.get("app_build_plan") is None
     assert context.get("app_plan_ready") is False
     renderer.assert_not_called()
+
+
+def test_static_planner_guidance_preserves_review_and_template_ownership():
+    workflow = yaml.safe_load((ROOT / "factory_app/workflows/AppGenerator/agents.yaml").read_text(encoding="utf-8"))
+    planner = next(agent for agent in workflow["agents"] if agent["name"] == "AppPlanAgent")
+    guidance = " ".join(section["content"] for section in planner["prompt_sections"])
+    assert "preserve the exact owner-reviewed reusable pack selection" in guidance
+    assert "do not default or substitute a provider" in guidance
+    assert "Do not plan migration, module_contract or business_services tasks" in guidance
+    assert "only additional app-owned work outside the closed ownership manifest" in guidance
+    assert 'one `business_services` task: `capability_pack_id: "entitlement_dispatch"`' not in guidance
+    for filename in ("capability_directory.yaml", "capability_routing.yaml"):
+        path = ROOT / "factory_app/build_context/AppGenerator" / filename
+        assert isinstance(yaml.safe_load(path.read_text(encoding="utf-8")), dict)
+        instructions = " ".join(path.read_text(encoding="utf-8").split())
+        assert "closed ownership manifest" in instructions
+        assert "do not schedule model tasks for these template-owned outputs" in instructions
+        assert "default for SaaS builds" not in instructions
+        assert "Default to the mozaikspay capability pack" not in instructions
+    routing = " ".join((ROOT / "factory_app/build_context/AppGenerator/capability_routing.yaml").read_text(encoding="utf-8").split())
+    assert "Separately approved app-owned capabilities retain their own module contracts" in routing
