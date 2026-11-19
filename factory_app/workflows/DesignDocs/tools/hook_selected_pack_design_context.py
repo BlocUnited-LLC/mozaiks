@@ -36,6 +36,42 @@ def _facade_projection(facade: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+def inject_pack_selection_context(agent: Any, messages: list[dict[str, Any]]) -> None:
+    """Expose only the verified choice catalog to the small selection stage."""
+    if getattr(agent, "name", "") != "DesignPackSelectionAgent":
+        return
+    context = getattr(agent, "context_variables", None)
+    if context is None:
+        return
+    available = available_pack_rows(context)
+    catalog = [{
+        "pack_id": pack_id, "capability_source": row.get("capability_source"),
+        "description": row.get("description") or "",
+        "capabilities": [
+            {key: capability[key] for key in ("capability_id", "description") if key in capability}
+            for capability in row.get("capabilities") or [] if isinstance(capability, Mapping)
+        ],
+        "providers": [
+            {key: integration[key] for key in ("service", "provider") if key in integration}
+            for integration in row.get("required_integrations") or [] if isinstance(integration, Mapping)
+        ],
+    } for pack_id, row in available.items()]
+    update_agent_section(
+        agent, "[AVAILABLE PACK CATALOG]",
+        "These verified offerings are available, not selected. Reason from the supplied approved "
+        "concept_blueprint, concept_overview and monetization_enabled. Return DesignPackSelection "
+        "with the exact reusable pack_ids this app needs; [] explicitly selects none. "
+        "Include declared dependencies; repair any missing dependency named in selection feedback. "
+        "Use stock packs for matching behavior and leave missing app-owned pieces to the design. "
+        "Capability-family hints are not pack IDs. "
+        "Do not select managed billing for a free/non-monetized app or treat an available provider "
+        "as owner intent. The tool records a candidate, not approval; an owner separately reviews "
+        "the selected sources and permissions. The subsequent design stage receives their exact "
+        "contracts and module actions. Unknown IDs, source changes and missing dependencies fail validation.\n"
+        + json.dumps(catalog, ensure_ascii=False, separators=(",", ":")),
+    )
+
+
 def inject_selected_pack_design_context(agent: Any, messages: list[dict[str, Any]]) -> None:
     """Expose verified selections and design boundaries, never template implementations."""
     if getattr(agent, "name", "") != "DesignDocsAgent":
@@ -43,28 +79,8 @@ def inject_selected_pack_design_context(agent: Any, messages: list[dict[str, Any
     context = getattr(agent, "context_variables", None)
     if context is None:
         return
-
     if _HEADER in (getattr(agent, "system_message", None) or getattr(agent, "_system_message", "") or ""):
-        update_agent_section(agent, _HEADER, "No current selected-pack contracts. Select and validate the candidate before using reusable packs.")
-    available = available_pack_rows(context)
-    catalog = [{
-        "pack_id": pack_id, "capability_source": row.get("capability_source"),
-        "capabilities": row.get("capabilities") or [],
-    } for pack_id, row in available.items()]
-    update_agent_section(
-        agent, "[AVAILABLE PACK CATALOG]",
-        "These verified offerings are available, not selected. Reason from the supplied approved "
-        "concept_blueprint, concept_overview and monetization_enabled. Before producing the design, "
-        "call select_capability_packs with the exact reusable pack IDs this app needs; call it with [] "
-        "when none apply. Include required pack dependencies. Use stock packs for matching behavior "
-        "and generate only missing app-owned pieces. Capability-family hints are not pack IDs. "
-        "Do not select managed billing for a free/non-monetized app or treat an available provider "
-        "as owner intent. The tool records a candidate, not approval; an owner separately reviews "
-        "the selected sources and permissions. After selection, use the exact selected contracts "
-        "and module actions below. Unknown IDs, source changes and missing dependencies fail validation.\n"
-        + json.dumps(catalog, ensure_ascii=False, separators=(",", ":")),
-    )
-
+        update_agent_section(agent, _HEADER, "No current selected-pack contracts. The candidate must be selected and validated before using reusable packs.")
     blocks: list[str] = []
     for selected in _selected_packs(context):
         # A bare generated_module ID is app-authored work, not a verified pack.

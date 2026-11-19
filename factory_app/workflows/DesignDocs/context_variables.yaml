@@ -1,4 +1,31 @@
 definitions:
+  pack_selection_outcome:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: blocked}
+  pack_selection_attempts:
+    type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: 0}
+  pack_selection_feedback:
+    type: string
+    authority_class: derived_information
+    authorization: false
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: null}
+  design_docs_failure_feedback:
+    type: string
+    authority_class: derived_information
+    authorization: false
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Latest selection or design rejection for the workflow failure display. Each rejection boundary writes its own diagnostic; this is not design or selection authority.
+    source: {type: state, default: ""}
   pack_selection:
     type: array
     authority_class: derived_information
@@ -415,6 +442,19 @@ definitions:
       type: state
       default: null
 agents:
+  DesignPackSelectionAgent:
+    variables:
+    - pack_selection
+    - pack_selection_feedback
+    - design_docs_save_feedback
+    - concept_overview
+    - concept_blueprint
+    - monetization_enabled
+    - build_mode
+    - revision_scope
+    - brownfield_build_path
+    - adoption_plan
+    - ownership_boundary
   DesignDocsAgent:
     variables:
     - pack_selection

@@ -141,9 +141,10 @@ agents:
 
       For a greenfield initial build with monetization_enabled: true:
       - Use concept_blueprint.monetization_intent to reason about the app's needs,
-        but do not infer provider selection from that signal. Choose canonical
-        reusable pack IDs with select_capability_packs before producing the design;
-        [] explicitly selects none. An available offering is not a build choice.
+        but do not infer provider selection from that signal. Consume the verified
+        reusable pack_selection candidate and its
+        selected contracts. An available offering is not a build choice. The
+        selection stage has already recorded exact pins; [] explicitly selects none.
       - Only when the actual candidate explicitly selects a verified managed
         subscription provider, the save boundary materializes that pack's declared
         facade pages and assigns their declared facade owners in surface_map.
@@ -734,4 +735,37 @@ agents:
   web_search: true
   max_consecutive_auto_reply: 12
   structured_outputs_required: true
+- name: DesignPackSelectionAgent
+  prompt_sections:
+  - id: role
+    heading: '[REUSABLE PACK SELECTION]'
+    content: |-
+      Select reusable foundations for the supplied approved app requirements.
+      concept_blueprint and concept_overview describe the requested behavior;
+      monetization_enabled constrains billing choices. The available pack catalog
+      lists verified offerings, not a selection or permission grant. Use its exact
+      pack IDs, include declared dependencies, and output only
+      {"pack_ids": ["canonical_pack_id"]}. Return {"pack_ids": []} when none apply.
+      The runtime invokes the deterministic selector, verifies the sources and
+      records their identity pins before the design stage receives their contracts.
+      Do not call tools manually or produce a design bundle in this stage.
 
+      Match stock packs to required behavior and leave missing app-owned behavior
+      to the design. A pack does not prescribe the app's layout or branding. Do not
+      infer a managed provider choice from an available offering or monetization
+      hints. Do not select managed billing for a free/non-monetized app.
+      For brownfield adoption and refinement, preserve the supplied adoption_plan,
+      ownership_boundary and revision_scope; do not replace existing owned surfaces
+      merely because a reusable offering exists.
+
+      pack_selection contains the current candidate pins when present. On an
+      owner correction in design_docs_save_feedback, preserve those pack IDs unless
+      the owner explicitly requests a pack/provider change. Otherwise leave the
+      requested design, role and page corrections for the design stage. For
+      pack_selection_feedback, repair the named selection error using the catalog.
+      A refused replacement clears the previous candidate. Never reset attempt
+      counters. The runtime stops after the bounded selection repair budget.
+      Selection remains a candidate: owner review of exact sources, grants and
+      page gates still occurs at the existing design save boundary.
+  max_consecutive_auto_reply: 12
+  structured_outputs_required: true

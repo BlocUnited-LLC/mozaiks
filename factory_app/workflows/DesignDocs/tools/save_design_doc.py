@@ -257,6 +257,7 @@ def _refused(
     value, so these have to be two different words.
     """
     _cv_set(context_variables, "design_docs_save_feedback", detail)
+    _cv_set(context_variables, "design_docs_failure_feedback", detail)
     return {"ok": False, "outcome": outcome, "reason": reason, "error": detail}
 
 

@@ -43,9 +43,12 @@ consume that same selection.
    resolver under the canonical workspace build-context root. Installation is
    availability, not a build choice; no new lifecycle or installation authority
    is introduced.
-2. **Selection is an explicit candidate.** An existing DesignDocs agent uses a
-   declared deterministic tool to choose canonical pack IDs from a compact
-   verified catalog. The tool resolves the source, pins version and digest,
+2. **Selection is an explicit candidate.** At the start of DesignDocs,
+   `DesignPackSelectionAgent` returns `pack_ids` from a compact verified
+   catalog. An explicit empty list selects no packs. AG2 delivers that
+   structured output to the automatic `select_capability_packs` tool before
+   `DesignDocsAgent` receives the selected contracts and writes its bundle.
+   The tool resolves the source, pins version and digest,
    validates dependency closure, and writes a tool-owned `pack_selection`
    candidate. It returns validation feedback for unknown or unusable references.
    It never chooses app roles, grants, provider activation or paid execution.

@@ -1,8 +1,16 @@
 schema_version: mozaiks.structured_outputs.v1
 registry:
+  DesignPackSelectionAgent: DesignPackSelection
   DesignDocsAgent: DesignDocsBundle
 
 models:
+  DesignPackSelection:
+    type: model
+    fields:
+      pack_ids:
+        type: list
+        items: str
+        description: Exact reusable pack IDs from the supplied available catalog, including declared dependencies. An explicit empty list selects none. The deterministic selector verifies and pins the candidate; this output grants no permissions or approval.
   DesignSurface:
     type: model
     fields:
