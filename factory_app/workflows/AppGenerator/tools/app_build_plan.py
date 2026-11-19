@@ -734,7 +734,8 @@ def _merge_available_pack_defaults(
         if required_integrations:
             merged["required_integrations"] = required_integrations
 
-    if not merged.get("pack_source_path") and available.get("pack_source_path"):
+    if (not merged.get("pack_source_path") and available.get("pack_source_path")
+        and not (merged.get("version") and merged.get("digest"))):
         merged["pack_source_path"] = available["pack_source_path"]
         # The source's pins travel with its path: an external source resolves only with them.
         for key in ("version", "digest"):
@@ -2252,7 +2253,11 @@ def app_build_plan(
         for p in capability_packs
         if isinstance(p, dict) and p.get("capability_source") == "managed_capability"
     ) - {""}
-    from factory_app.workflows._shared.pack_selection import validate_reviewed_pack_choices
+    from factory_app.workflows._shared.pack_selection import (
+        record_reviewed_pack_rows,
+        selected_pack_rows,
+        validate_reviewed_pack_choices,
+    )
 
     validate_reviewed_pack_choices(context_variables, capability_packs)
     _validate_monetization_provider_selection(
@@ -2361,7 +2366,7 @@ def app_build_plan(
         "profile_layout": profile_layout,
         "readiness_profile": readiness_profile,
         "monetization_provider": monetization_provider,
-        "capability_packs": capability_packs,
+        "capability_packs": record_reviewed_pack_rows(capability_packs, selected_pack_rows(context_variables)),
         "external_integrations": external_integrations,
         "agent_backend_required": agent_backend_required,
         "build_tasks": normalized_build_tasks,

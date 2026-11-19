@@ -69,6 +69,22 @@ def test_selected_id_reads_verified_contract_instead_of_inline_facades():
     assert "/invented" not in {page["route"] for page in pages}
 
 
+def test_reviewed_catalog_plan_keeps_its_location_when_enriching_managed_facades(monkeypatch, tmp_path):
+    from factory_app.workflows._shared.pack_selection import (
+        record_reviewed_pack_rows,
+        selected_pack_rows,
+    )
+    from tests.reviewed_pack_fixture import reviewed_pack_fixture
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
+    context = reviewed_pack_fixture({}, ["mozaikspay"])
+    reviewed = selected_pack_rows(context)
+    plan_rows = record_reviewed_pack_rows(reviewed, reviewed)
+    _, pages, _ = _normalize(plan_rows, context)
+    assert {page["route"] for page in pages} == {"/billing", "/usage"}
+
+
 @pytest.mark.parametrize("pin", [{"version": "0.0.0"}, {"digest": "sha256:incorrect"}])
 @pytest.mark.parametrize("projected", [False, True])
 def test_selected_pack_pin_mismatch_fails_before_facade_normalization(pin, projected):

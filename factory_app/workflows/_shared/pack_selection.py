@@ -67,17 +67,9 @@ def fresh_pack_reads():
         _PACK_READS.reset(token)
 
 
-def available_pack_rows(context: Any, *, pack_ids: set[str] | None = None) -> dict[str, dict[str, Any]]:
-    """Read shipped local packs and operator-enabled offerings, never caller paths.
-
-    Registry descriptors remain protected launch input. Public generated-module
-    packs already ship with the installed Factory; managed or external offerings
-    require an admitted descriptor rather than mere presence in that directory.
-    Source resolution, integrity and dependency semantics stay with the existing
-    canonical pack resolver.
-    """
+def catalog_pack_sources(root: Path | None, *, pack_ids: set[str] | None = None) -> dict[str, dict[str, Any]]:
+    """Find current physical sources in Factory's trusted catalog and workspace registry."""
     rows: dict[str, dict[str, Any]] = {}
-    root = resolve_factory_app_root()
     if root is not None:
         for path in discover_build_context_files(root / "build_context", "AppGenerator"):
             config = load_build_context(path)
@@ -116,8 +108,13 @@ def available_pack_rows(context: Any, *, pack_ids: set[str] | None = None) -> di
         registered_ids.add(row["id"])
         if row.get("status", "active") == "active":
             rows[row["id"]] = dict(row)
+    return rows
+
+
+def available_pack_rows(context: Any, *, pack_ids: set[str] | None = None) -> dict[str, dict[str, Any]]:
+    """Read verified shipped packs and operator-enabled offerings, never caller paths."""
     result: dict[str, dict[str, Any]] = {}
-    for pack_id, row in sorted(rows.items()):
+    for pack_id, row in sorted(catalog_pack_sources(resolve_factory_app_root(), pack_ids=pack_ids).items()):
         if pack_ids is not None and pack_id not in pack_ids:
             continue
         verified = verified_pack_selection(row, context_variables=context)
@@ -195,6 +192,22 @@ def selected_pack_rows(context: Any) -> list[dict[str, Any]]:
         resolve_reviewed_pack_selection,
     )
     return rows_for_pack_choices(context, resolve_reviewed_pack_selection(context))
+
+
+def record_reviewed_pack_rows(rows: list[dict[str, Any]], reviewed_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Persist selected catalog locations by identity, keeping all other row fields."""
+    if not any(row.get("pack_source_path") for row in rows):
+        return rows
+    selected = {selected_pack_id(row): row for row in reviewed_rows}
+    recorded = []
+    for row in rows:
+        source = selected.get(selected_pack_id(row))
+        if (source and row.get("pack_source_path") and row["pack_source_path"] == source.get("pack_source_path")
+            and all(row.get(key) in (None, "", source[key]) for key in ("version", "digest"))):
+            row = {**row, "version": source["version"], "digest": source["digest"]}
+            del row["pack_source_path"]
+        recorded.append(row)
+    return recorded
 
 
 def validate_reviewed_pack_choices(context: Any, rows: list[dict[str, Any]], *, recorded: bool = False) -> None:

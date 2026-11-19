@@ -250,7 +250,9 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     assert metadata["build_registry_id"] == "appreg_1"
     assert metadata["app_bundle_acceptance"]["status"] == "passed"
     assert metadata["validation_evidence"]["failed"] == []
-    assert metadata["capability_packs"] == context.data["app_build_plan"]["capability_packs"]
+    saved_pack = metadata["capability_packs"][0]
+    assert "pack_source_path" not in saved_pack
+    assert saved_pack["version"] and saved_pack["digest"]
     # A revision is saved as a draft for review: only its acceptance records one.
     assert "acceptance" not in metadata
     context.data["app_build_plan"]["capability_packs"][0]["capabilities"][0]["capability_id"] = "changed"
@@ -322,8 +324,9 @@ def test_a_recorded_build_pins_its_workspace_pack_rows_to_the_identity_acceptanc
     register({"status": "passed", "resolved_capability_packs": identities})
     saved_row, saved_catalog = fake_artifact_store.calls[0]["commit_metadata"]["metadata"]["capability_packs"]
     fresh = resolver.verify_pack_integrity(workspace / "content", "content")
-    assert saved_row == {**row, "digest": fresh["digest"]}
-    assert saved_catalog == catalog_row
+    assert saved_row == {**{key: value for key, value in row.items() if key != "pack_source_path"},
+                         "digest": fresh["digest"]}
+    assert saved_catalog == {key: value for key, value in catalog_row.items() if key != "pack_source_path"}
     assert resolver.verified_selected_pack_sources([saved_row], context_variables={"build_context_root": str(workspace)})
 
     # Edited in place at the same version, the pack no longer verifies against what the build recorded.

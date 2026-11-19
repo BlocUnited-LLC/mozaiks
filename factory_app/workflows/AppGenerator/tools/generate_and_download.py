@@ -22,6 +22,7 @@ from typing import Annotated, Any
 from pydantic import Field
 
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
+from factory_app.workflows._shared.pack_selection import record_reviewed_pack_rows
 from factory_app.workflows._shared.platform.build_target import require_build_binding
 from factory_app.workflows._shared.platform.current_build import resolve_current_build_artifact
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
@@ -649,14 +650,18 @@ async def _register_app_bundle_artifact_version(
     # Persist to content store if a non-local backend is configured.  The local
     # backend is skipped because artifact_path already covers that path.
     acceptance_result = _context_get(context_variables, "app_bundle_acceptance_result")
+    selected_packs = _selected_capability_packs(context_variables)
     bundle_content_metadata: dict[str, Any] = {
         "artifact_path": str(zip_path.resolve()),
         "bundle_name": bundle_name,
-        # Workspace packs are recorded with the identity acceptance verified, so later uses recheck it.
-        "capability_packs": pin_workspace_pack_selections(
-            _selected_capability_packs(context_variables),
-            acceptance_result.get("resolved_capability_packs") if isinstance(acceptance_result, dict) else None,
-            context_variables=context_variables,
+        # Pin the accepted bytes before removing local catalog paths.
+        "capability_packs": record_reviewed_pack_rows(
+            pin_workspace_pack_selections(
+                selected_packs,
+                acceptance_result.get("resolved_capability_packs") if isinstance(acceptance_result, dict) else None,
+                context_variables=context_variables,
+            ),
+            selected_packs,
         ),
     }
     if app_dir is not None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import zipfile
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
@@ -543,11 +544,24 @@ async def test_public_facade_rejects_candidate_supplied_authority_and_selection(
 
 
 @pytest.mark.asyncio
-async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_tampered_output(tmp_path):
+async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_tampered_output(tmp_path, monkeypatch):
+    from factory_app.workflows._shared.pack_selection import (
+        record_reviewed_pack_rows,
+        selected_pack_rows,
+    )
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        ManagedCapabilityTemplateError,
+        verified_selected_pack_sources,
+    )
+    from mozaiksai.control_plane.implementations.coding_worker import parent_pack_output_owners
     from mozaiksai.core.workflow.context.frozen import detach
     from tests import test_capability_pack_proof as proof
 
     owner = "fixture-owner"
+    source_registry = tmp_path / "source-registry"
+    initial_source = source_registry / "outcome_feedback"
+    shutil.copytree(proof.BUILD_CONTEXT / "outcome_feedback", initial_source)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(source_registry))
     files, context, identities = await proof._assemble("outcome_feedback")
     assert context.get("run_build_binding")["target_app_id"] == "pack_proof_outcome_feedback"
     assert proof.APP_PERMISSIONS["outcome_feedback"] == ()
@@ -579,6 +593,11 @@ async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_
     }
     # This fixture assembles deterministic templates without model task execution.
     approved_context["app_build_plan"]["build_tasks"] = []
+    physical_rows = selected_pack_rows(approved_context)
+    assert physical_rows[0]["pack_source_path"] == str(initial_source)
+    plan_row = approved_context["app_build_plan"]["capability_packs"][0]
+    plan_row["pack_source_path"] = str(initial_source)
+    approved_context["app_build_plan"]["capability_packs"] = record_reviewed_pack_rows([plan_row], physical_rows)
     path = tmp_path / "bundle.zip"
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, content in files.items():
@@ -587,7 +606,9 @@ async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_
     compilation = await capture_app_compilation_inputs(
         approved_context, owner_user_id=owner, archive_sha256=sha, artifact_store=store,
     )
-    packs = detach(context.get("capability_packs"))
+    packs = record_reviewed_pack_rows(physical_rows, physical_rows)
+    assert "pack_source_path" not in packs[0]
+    assert "pack_source_path" not in compilation["inputs"]["app_build_plan"]["capability_packs"][0]
     bundle = BuildRecord(
         id="bundle", app_id=app_id, build_family="app_bundle", build_key="app_bundle", version_number=1,
         lineage_root_id="bundle", source_workflow="AppGenerator", lifecycle_status="current",
@@ -600,10 +621,19 @@ async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_
         }},
     )
     store.records[bundle.id] = bundle
-    approval = await resolve_app_compilation_inputs(
-        app_id=app_id, build_record_id=bundle.id, owner_user_id=owner,
-        build_registry_id=binding["build_registry_id"], artifact_store=store,
-    )
+    saved_metadata = deepcopy(bundle.commit_metadata.metadata)
+    moved_registry = tmp_path / "moved-registry"
+    source_registry.rename(moved_registry)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(moved_registry))
+
+    async def replay():
+        return await resolve_app_compilation_inputs(
+            app_id=app_id, build_record_id=bundle.id, owner_user_id=owner,
+            build_registry_id=binding["build_registry_id"], artifact_store=store,
+        )
+
+    approval = await replay()
+    assert approval.context_for(app_id)["app_build_plan"] == approved_context["app_build_plan"]
     result = validate_generated_app_bundle(GeneratedAppValidationRequest(
         files=files, capability_packs=packs, approved_compilation=approval,
     ))
@@ -611,6 +641,10 @@ async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_
     assert [row["pack_id"] for row in result.resolved_capability_packs] == ["outcome_feedback"]
 
     service = "modules/outcome_feedback/backend/service.py"
+    assert parent_pack_output_owners(packs)[service] == "templates"
+    assert bundle.commit_metadata.metadata == saved_metadata
+    with pytest.raises(ManagedCapabilityTemplateError):
+        verified_selected_pack_sources(physical_rows)
     for candidate, authority in ((files, None), ({**files, service: files[service] + "\n# unapproved edit\n"}, approval)):
         rejected = validate_generated_app_bundle(GeneratedAppValidationRequest(
             files=candidate, capability_packs=packs, approved_compilation=authority,
@@ -618,6 +652,12 @@ async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_
         assert not rejected.passed
         assert any(item.code == "generated_bundle_contract_failed" and service in item.message
                    and "verified template" in item.message for item in rejected.diagnostics), rejected.diagnostics
+
+    moved_contract = moved_registry / "outcome_feedback/contract.yaml"
+    moved_contract.write_bytes(moved_contract.read_bytes() + b"\n# changed after review\n")
+    with pytest.raises(ManagedCapabilityTemplateError, match="changed; renew design review"):
+        await replay()
+    assert parent_pack_output_owners(packs) is None
 
 
 @pytest.mark.asyncio

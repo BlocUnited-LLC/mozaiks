@@ -564,23 +564,22 @@ def test_unreviewed_frozen_inventory_cannot_relabel_an_app_owned_module():
 
 def test_reviewed_operator_pack_survives_typed_plan_and_template_materialization(tmp_path, monkeypatch):
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        PackIntegrityError,
         resolve_managed_capability_templates,
+        verify_pack_integrity,
     )
 
     root = tmp_path / "reports"
     template = root / "templates/config/reports.yaml.j2"
     template.parent.mkdir(parents=True)
-    template.write_text("label: {{ report_label }}\n", encoding="utf-8")
+    template.write_text("label: {{ report_label }}\nversion: {{ app_build_plan.capability_packs[0].version }}\n",
+                        encoding="utf-8")
     (root / "context.yaml").write_text(yaml.safe_dump({
         "context_id": "reports", "applies_to_workflows": ["AppGenerator"],
         "assets": [{"path": "templates/", "kind": "templates"}],
         "pack": {"id": "reports", "version": "0.1.0", "status": "active", "capability_source": "operator_pack"},
         "projections": {"context_variables": {"capability_packs": {"from": "capability_packs"}}},
     }), encoding="utf-8")
-    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
-        verify_pack_integrity,
-    )
-
     # A registered pack outside the factory catalog is an external source: it is selected with its pins.
     metadata = verify_pack_integrity(root, "reports")
     monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(tmp_path))
@@ -597,15 +596,30 @@ def test_reviewed_operator_pack_survives_typed_plan_and_template_materialization
     assert result["outcome"] == "ready", result
     from mozaiksai.core.workflow.context.frozen import detach
 
-    packs = detach(context.get("app_build_plan"))["capability_packs"]
+    cached_plan = detach(context.get("app_build_plan"))
+    packs = cached_plan["capability_packs"]
     assert packs[0]["capability_source"] == "operator_pack"
-    # The source's pins travel with its path into the plan row.
-    assert (packs[0]["pack_source_path"], packs[0]["version"], packs[0]["digest"]) == (
-        str(root), metadata["version"], metadata["digest"],
-    )
-    rendered = resolve_managed_capability_templates(packs, context_variables={"report_label": "Reports"})
+    assert "pack_source_path" not in packs[0]
+    assert (packs[0]["version"], packs[0]["digest"]) == (metadata["version"], metadata["digest"])
+    template_context = {
+        "app_build_plan": cached_plan, "report_label": "Reports", "build_timestamp": "2026-01-01T00:00:00Z",
+    }
+    rendered = resolve_managed_capability_templates(packs, context_variables=template_context)
     files = {item["filename"]: item["content"] for item in rendered}
-    assert files["config/reports.yaml"] == "label: Reports"
+    assert files["config/reports.yaml"] == "label: Reports\nversion: 0.1.0"
+
+    moved_registry = tmp_path / "moved"
+    moved_registry.mkdir()
+    root.rename(moved_registry / root.name)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(moved_registry))
+    after_move = resolve_managed_capability_templates(packs, context_variables=template_context)
+    assert {item["filename"]: item["content"] for item in after_move} == files
+
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(tmp_path))
+    with pytest.raises(PackIntegrityError, match="cannot be resolved to a verified source"):
+        resolve_managed_capability_templates(packs, context_variables={
+            **template_context, "build_context_root": str(moved_registry),
+        })
 
 
 def test_unregistered_operator_pack_is_not_a_generated_module():

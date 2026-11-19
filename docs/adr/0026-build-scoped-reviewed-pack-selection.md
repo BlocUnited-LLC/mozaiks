@@ -85,7 +85,12 @@ consume that same selection.
    same app's trusted selected ancestor/version under existing draft/current
    precedence. A different app, unrelated build, stale candidate, changed source
    or changed selection requires a fresh review. Missing receipts cannot
-   authorize materialized packs. There is no new durable ledger.
+   authorize materialized packs. Saved compiler inputs and bundle metadata
+   record selected catalog packs by ID, version and digest. Replay discovers
+   the current trusted catalog source and verifies its bytes, so moving an
+   unchanged source between installs preserves approval. Explicit physical
+   paths still require the source at the named location. There is no new
+   durable ledger.
 
 The Support pack must declare DesignDocs applicability so that an explicitly
 selected Support/Messaging combination can expose its stock widget, inbox,

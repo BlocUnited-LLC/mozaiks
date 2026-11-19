@@ -582,6 +582,10 @@ def test_verified_installed_pin_trusts_complete_template_backend(tmp_path, monke
     [entry] = resolver.verified_selected_pack_sources(context_variables=context)
     assert (entry["resolution"], entry["authority"]) == ("installed", "installed")
     assert (entry["version"], entry["digest"]) == (installed.version, installed.digest)
+    [pinned] = resolver.verified_selected_pack_sources(
+        [{"id": "messaging", "version": installed.version, "digest": installed.digest}], context_variables=context,
+    )
+    assert pinned == entry
     inventory = resolver.verified_pack_template_inventory(context_variables=context)
     rendered = {file["filename"]: file["content"] for file in inventory[0]["files"]}
     assert resolver.verified_template_module_ids(rendered, inventory) == {"messages"}
