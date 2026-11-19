@@ -54,6 +54,10 @@ from .generator_support.module_entitlement_gates import (
 )
 from .generator_support.module_policy import materialize_task_module_policies
 from .generator_support.module_read_actions import materialize_module_read_implementations
+from .generator_support.module_revision import (
+    scoped_service_revision_paths,
+    validate_scoped_service_repositories,
+)
 from .generator_support.module_write_actions import (
     close_module_actions,
     code_owned_schema_paths,
@@ -1291,19 +1295,25 @@ async def _run_one_task(
                 for dependency in (task_context.get("dependency_task_outputs") or {}).values():
                     read_sources.update(extract_code_file_map_from_payload(dependency))
                 read_sources.update(canonical_file_map)
-                canonical_file_map.update(materialize_module_read_implementations(
-                    read_sources, app_build_plan=task_context.get("app_build_plan"),
-                    data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
-                    subscription_contract=subscription_contract,
-                ))
-                read_sources.update(canonical_file_map)
-                canonical_file_map.update(materialize_module_write_implementations(
-                    read_sources, app_build_plan=task_context.get("app_build_plan"),
-                    data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
-                    subscription_contract=subscription_contract,
-                    access_policy=approved_access_policy,
-                    design_surface_map=task_context.get("design_surface_map"),
-                ))
+                revision_paths = scoped_service_revision_paths(base_context, base_context.get("generated_files") or {})
+                if revision_paths:
+                    validate_scoped_service_repositories(
+                        read_sources, revision_paths.intersection(canonical_file_map),
+                    )
+                else:
+                    canonical_file_map.update(materialize_module_read_implementations(
+                        read_sources, app_build_plan=task_context.get("app_build_plan"),
+                        data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
+                        subscription_contract=subscription_contract,
+                    ))
+                    read_sources.update(canonical_file_map)
+                    canonical_file_map.update(materialize_module_write_implementations(
+                        read_sources, app_build_plan=task_context.get("app_build_plan"),
+                        data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
+                        subscription_contract=subscription_contract,
+                        access_policy=approved_access_policy,
+                        design_surface_map=task_context.get("design_surface_map"),
+                    ))
                 canonical_file_map = compile_module_entitlement_gates(
                     canonical_file_map,
                     gates_by_module=approved_subscription_gates(

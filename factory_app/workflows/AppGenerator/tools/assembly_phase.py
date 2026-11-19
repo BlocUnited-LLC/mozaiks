@@ -48,6 +48,7 @@ from mozaiksai.core.workflow.generator_support.module_policy import materialize_
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
     materialize_module_read_implementations,
 )
+from mozaiksai.core.workflow.generator_support.module_revision import scoped_service_revision_paths
 from mozaiksai.core.workflow.generator_support.module_role_grants import (
     validate_pack_permission_consumers,
     verified_pack_authorization,
@@ -216,6 +217,7 @@ def _merge_code_files(
     subscription_contract: dict[str, Any] | None = None,
     context_variables: Any = None,
     carried_contracts: tuple[str, ...] = (),
+    revision_baseline: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
     """Merge code_files from feature outputs, deduping by filename.
 
@@ -268,6 +270,7 @@ def _merge_code_files(
         )
         if assignment_contract.get("aliases"):
             data_contract = assignment_contract
+    scoped_revision = scoped_service_revision_paths(context_variables, revision_baseline or {})
     owned_paths = list(file_map)
     if pack_data_contracts:
         owned_paths.append("data/contract.json")
@@ -277,6 +280,13 @@ def _merge_code_files(
         file_map, data_contract=data_contract, owned_paths=owned_paths,
         subscription_contract=subscription_contract, context_variables=context_variables,
     )
+    if scoped_revision and revision_baseline is not None:
+        data_path = "data/contract.json"
+        before, after = revision_baseline.get(data_path), file_map.get(data_path)
+        if before != after:
+            if before is None or after is None or json.loads(before) != json.loads(after):
+                raise ValueError("Implementation-only revision changed the carried data contract")
+            file_map[data_path] = before
     file_map = materialize_collection_auth(file_map, data_contract=data_contract)
     # Selected pack manifests come from registered templates, never model tasks.
     pack_paths = pack_owned_outputs(context_variables)
@@ -287,11 +297,11 @@ def _merge_code_files(
         and file_map.get(item["filename"]) == item["content"]
     )
     template_modules = verified_template_module_ids(file_map, inventory)
-    # A complete verified template backend owns its participant-aware policy and
-    # action implementations. All other modules retain canonical CRUD synthesis.
+    # An implementation-only revision carries module contracts from the verified
+    # bundle and admits edits to the reviewed repo and service paths.
     synthesis_files = {
         path: content for path, content in file_map.items()
-        if not (path.startswith("modules/") and path.split("/")[1] in template_modules)
+        if not (path.startswith("modules/") and (scoped_revision or path.split("/")[1] in template_modules))
     }
     # Feature outputs may carry an auth edit alongside a module. Only the
     # pre-merge admitted bundle (or the canonical scaffold) can approve scopes.
@@ -364,7 +374,8 @@ def _merge_code_files(
                 raise ValueError("Generated assembly cannot author config/auth.yaml; only admitted auth and the approved scaffold may supply it")
         if app_build_plan is not None:
             final_grants = auth_contract_scopes(file_map, app_build_plan=app_build_plan, data_contract=data_contract)
-            for path, content in synthesis_files.items():
+            modules_to_check = file_map if scoped_revision else synthesis_files
+            for path, content in modules_to_check.items():
                 if path.startswith("modules/") and path.endswith("/module.yaml") and path not in pack_manifests:
                     assert_generated_action_permissions(path.split("/")[1], yaml.safe_load(content), app_build_plan, final_grants)
         file_map.setdefault("ui/lib/moduleApi.js", get_module_api_template())
@@ -414,6 +425,7 @@ async def assemble_features(
     subscription_contract: dict[str, Any] | None = None,
     context_variables: Any = None,
     carried_contracts: tuple[str, ...] = (),
+    revision_baseline: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """
     Merge feature outputs into a single workflow bundle.
@@ -441,6 +453,7 @@ async def assemble_features(
         subscription_contract=subscription_contract,
         context_variables=context_variables,
         carried_contracts=carried_contracts,
+        revision_baseline=revision_baseline,
     )
     logger.info(
         "Assembled %d feature outputs into %d files",

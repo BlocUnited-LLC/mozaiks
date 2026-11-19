@@ -166,6 +166,16 @@ graph prompt pack when a verified app bundle is available. A new app without
 a source build has no dependency assessment. An unavailable or invalid
 requested build has no fallback to current app evidence.
 
+## AppGenerator backend revisions
+
+When a reviewed app revision owns only existing module `backend/repo.py` and
+`backend/service.py` files, the worker receives their admitted sources and the
+module contract. Factory carries the existing action declarations and module
+files from the verified build and retains the scoped implementation edits.
+Assembly checks for changes outside that module scope before bundle validation.
+Edits that require changing a module contract must include that contract in
+the reviewed plan.
+
 ## Boundaries
 
 | Concern | File |
