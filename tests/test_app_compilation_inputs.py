@@ -543,37 +543,20 @@ async def test_public_facade_rejects_candidate_supplied_authority_and_selection(
 
 
 @pytest.mark.asyncio
-async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_tampered_output(tmp_path, monkeypatch):
+async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_tampered_output(tmp_path):
     from mozaiksai.core.workflow.context.frozen import detach
     from tests import test_capability_pack_proof as proof
-    from tests.reviewed_pack_fixture import reviewed_pack_fixture
 
     owner = "fixture-owner"
-    container = proof.create_context_container
-
-    def reviewed_context(*, initial):
-        # Adapt this one no-permissions fixture's inputs, never the compiler or shared proof.
-        assert initial["run_build_binding"]["target_app_id"] == "pack_proof_outcome_feedback"
-        assert [row["id"] for row in initial["capability_packs"]] == ["outcome_feedback"]
-        assert proof.APP_PERMISSIONS["outcome_feedback"] == ()
-        reviewed = reviewed_pack_fixture(detach(initial), ["outcome_feedback"])
-        record = reviewed["design_docs_artifact"]
-        assert record["commit_metadata"]["author_user_id"] == owner
-        review = record["commit_metadata"]["metadata"]["summary_payload"]["access_policy_review"]
-        assert review["reviewed_by"] == owner
-        assert review["pack_identities"] == [
-            {"pack_id": row["id"], "version": row["version"], "digest": row["digest"]}
-            for row in initial["capability_packs"]
-        ]
-        assert [row["capability_pack_id"] for row in reviewed["app_build_plan"]["capability_packs"]] == ["outcome_feedback"]
-        selected = initial["capability_packs"][0]
-        reviewed["app_build_plan"]["capability_packs"][0].update({
-            key: selected[key] for key in ("pack_source_path", "version", "digest")
-        })
-        return container(initial=reviewed)
-
-    monkeypatch.setattr(proof, "create_context_container", reviewed_context)
-    files, context, _ = await proof._assemble("outcome_feedback")
+    files, context, identities = await proof._assemble("outcome_feedback")
+    assert context.get("run_build_binding")["target_app_id"] == "pack_proof_outcome_feedback"
+    assert proof.APP_PERMISSIONS["outcome_feedback"] == ()
+    record = detach(context.get("design_docs_artifact"))
+    assert record["commit_metadata"]["author_user_id"] == owner
+    review = record["commit_metadata"]["metadata"]["summary_payload"]["access_policy_review"]
+    assert review["reviewed_by"] == owner
+    assert review["pack_identities"] == identities
+    assert [row["capability_pack_id"] for row in context.get("app_build_plan")["capability_packs"]] == ["outcome_feedback"]
     assert yaml.safe_load(files["config/auth.yaml"])["authorization"] == {"roles": []}
     binding = detach(context.get("run_build_binding"))
     app_id = binding["target_app_id"]
