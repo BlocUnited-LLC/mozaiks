@@ -39,7 +39,9 @@ def scoped_service_revision_paths(
             return frozenset()
         for raw in owned:
             path = safe_relpath(raw) if isinstance(raw, str) else None
-            match = _SERVICE_PATH.fullmatch(path or "")
+            if not path:
+                return frozenset()
+            match = _SERVICE_PATH.fullmatch(path)
             if not match or path not in baseline_files or f"modules/{match[1]}/module.yaml" not in baseline_files:
                 return frozenset()
             paths.add(path)
