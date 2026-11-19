@@ -676,9 +676,11 @@ class TestAgentsYamlManagedCapabilityRules:
         assert "[CAPABILITY DIRECTORY]" in self._text
         assert "{{CAPABILITY_DIRECTORY_CONTEXT}}" in self._text
 
-    def test_appplanagent_saas_prioritizes_mozaikspay_with_provider_alternatives(self):
-        assert "mozaikspay" in self._text
-        assert "hosted MozaiksPay API" in self._text
+    def test_appplanagent_saas_requires_an_owner_reviewed_provider(self):
+        assert "When the reviewed provider is MozaiksPay" in self._text
+        assert "Subscription assignment requires one owner-reviewed writer" in self._text
+        assert "Consume verified pack facade, client and page outputs" in self._text
+        assert "do not default or substitute a provider" in self._text
         assert "external_adapter" in self._text
 
 
