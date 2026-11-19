@@ -227,7 +227,18 @@ def validate_access_policy(
             continue
         name = collection["name"]
         if name in collections:
-            raise ValueError(f"access_policy collection {name!r} is ambiguous")
+            previous_owner = collections[name][0]
+            owners = (previous_owner, owner)
+            pack_owners = [module for module in owners if (module, name) in pack_collections]
+            detail = f"access_policy collection {name!r} is ambiguous between {previous_owner}.{name} and {owner}.{name}."
+            if len(pack_owners) == 1:
+                module = pack_owners[0]
+                detail += (
+                    f" Pack {pack_authorization.module_packs[module]!r} supplies {module}.{name} at save. "
+                    f"For those records, omit the authored copy and bind grants to {name!r}. "
+                    "Give distinct app-owned records their own collection name."
+                )
+            raise ValueError(detail)
         collections[name] = (owner, collection)
     canonical_owners: dict[tuple[str, str], str] = {}
     for name, (owner, collection) in collections.items():

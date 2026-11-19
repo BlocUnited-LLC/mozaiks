@@ -13,10 +13,13 @@ import yaml
 from factory_app.workflows._shared.hook_utils import update_agent_section
 from factory_app.workflows._shared.pack_selection import available_pack_rows
 from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
+from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     _selected_packs,
     pack_template_module_contracts,
 )
+from mozaiksai.core.workflow.generator_support.module_role_grants import verified_pack_authorization
 
 _HEADER = "[SELECTED PACK DESIGN CONTRACTS]"
 logger = logging.getLogger(__name__)
@@ -111,6 +114,7 @@ def inject_selected_pack_design_context(agent: Any, messages: list[dict[str, Any
         blocks.append("\n".join(lines))
 
     if blocks:
+        blocks.extend(_pack_collection_context(context))
         # Project action identities from the same verified static manifests used
         # by page binding. This is a compact schema view, never source code.
         for path, source in pack_template_module_contracts(context).items():
@@ -143,3 +147,35 @@ def inject_selected_pack_design_context(agent: Any, messages: list[dict[str, Any
             "a pack does not prescribe the app's layout or visual identity."
         )
         update_agent_section(agent, _HEADER, intro + "\n\n" + "\n\n".join(blocks))
+
+
+def _pack_collection_context(context: Any) -> list[str]:
+    """Project collection identities from the same pinned data used by design save."""
+    try:
+        authorization = verified_pack_authorization(context, selection=detach(context.get("pack_selection")))
+        rows = [
+            {
+                "pack_id": authorization.module_packs[owner],
+                "module_id": owner,
+                "collection": collection["name"],
+                "entity": collection["entity"],
+                "tenancy": collection["tenancy"],
+            }
+            for contract in authorization.data_contracts
+            for owner, kind, collection in iter_data_contract_collections(contract)
+            if kind == "module" and owner in authorization.module_packs
+        ]
+    except (ValueError, yaml.YAMLError) as exc:
+        logger.warning("Selected pack data contract is unavailable for design (%s)", type(exc).__name__)
+        return ["Selected pack collection ownership is unavailable. Resolve the pack contract before proposing grants."]
+    if not rows:
+        return []
+    lines = [
+        "Design save adds these collections. Bind app pages to their module actions, even when the UI uses a "
+        "different name for the records. If the pack supplies all app data, emit data_contract.surfaces=[] and "
+        "shared_collections=[]. Otherwise declare only additional app-owned records. For approved roles, grant "
+        "the permission-bearing actions on the exact app collection name."
+    ]
+    for row in rows:
+        lines.append("Pack-owned collection: " + json.dumps(row, separators=(",", ":")))
+    return ["\n".join(lines)]

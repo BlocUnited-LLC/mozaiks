@@ -35,6 +35,13 @@ returns to the selection step before the Factory spends a turn writing the
 design.
 
 `DesignDocsAgent` receives the verified contracts for the chosen packs.
+For each pack-owned module collection the prompt identifies its pack, module,
+collection, entity and tenancy. For example, Content supplies the `entries`
+collection in module `content` with entity `ContentEntry`. A recipe page and a
+portfolio page can both use those records with different layouts and labels.
+Design save composes the collection from the pack. An editor grant references
+`entries` and the relevant shipped actions. Apps can declare separate
+collections for additional records they own.
 Template files stay on disk for deterministic assembly. The owner reviews the
 pack identities alongside the proposed permissions and page roles. AppGenerator
 uses the selection recorded in the reviewed DesignDocs artifact.
