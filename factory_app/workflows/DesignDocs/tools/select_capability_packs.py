@@ -20,7 +20,12 @@ def select_capability_packs(
     try:
         choices = pin_pack_choices(context_variables, pack_ids)
     except (ValueError, ManagedCapabilityTemplateError) as exc:
-        return {"status": "revise", "error": str(exc)}
+        feedback = str(exc)
+        context_variables.set("pack_selection_feedback", feedback)
+        context_variables.set("design_docs_failure_feedback", feedback)
+        return {"status": "revise", "error": feedback}
     context_variables.set("pack_selection", choices)
+    context_variables.set("pack_selection_feedback", None)
+    context_variables.set("design_docs_failure_feedback", "")
     return {"status": "selected", "pack_selection": choices,
         "review_required": bool(choices), "approved": False}

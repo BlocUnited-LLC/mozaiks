@@ -1,4 +1,35 @@
 transition_rules:
+- source_agent: DesignPackSelectionAgent
+  target_agent: DesignDocsAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: pack_selection_outcome
+  condition_value: selected
+  transition_target: AgentTarget
+
+- source_agent: DesignPackSelectionAgent
+  target_agent: DesignPackSelectionAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: pack_selection_outcome
+  condition_value: revise
+  transition_target: AgentTarget
+
+- source_agent: DesignPackSelectionAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: pack_selection_outcome
+  condition_value: blocked
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
+
+- source_agent: DesignPackSelectionAgent
+  target_agent: terminate
+  transition_type: after_turn
+  transition_target: TerminateTarget
+  termination_reason: workflow_failed
+
 - source_agent: DesignDocsAgent
   target_agent: terminate
   transition_type: condition
@@ -19,7 +50,7 @@ transition_rules:
   transition_target: AgentTarget
 
 - source_agent: DesignDocsAgent
-  target_agent: DesignDocsAgent
+  target_agent: DesignPackSelectionAgent
   transition_type: condition
   condition_type: context_equals
   condition_key: design_docs_save_outcome

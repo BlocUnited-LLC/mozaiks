@@ -25,3 +25,20 @@ Factory catalog entries no longer become selected packs merely because the
 shipped catalog is the active build-context root. Select shipped pack IDs
 explicitly. Social and Messaging now support DesignDocs with the versions
 listed above; selections pinned to previous pack identities require review.
+
+## How the Factory uses a pack
+
+DesignDocs first asks `DesignPackSelectionAgent` for a list of pack IDs. That
+turn sees the app concept and a compact catalog. The deterministic selector
+checks the requested IDs, dependencies and source digests. An invalid choice
+returns to the selection step before the Factory spends a turn writing the
+design.
+
+`DesignDocsAgent` receives the verified contracts for the chosen packs.
+Template files stay on disk for deterministic assembly. The owner reviews the
+pack identities alongside the proposed permissions and page roles. AppGenerator
+uses the selection recorded in the reviewed DesignDocs artifact.
+
+When the owner requests changes, the replacement returns for review even if it
+removes every pack, grant and page-role requirement. An initial design with
+empty selections, grants and page gates can still proceed directly.

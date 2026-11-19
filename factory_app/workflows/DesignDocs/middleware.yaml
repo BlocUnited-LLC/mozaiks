@@ -1,4 +1,7 @@
 prompt_middleware:
+- agent: DesignPackSelectionAgent
+  filename: tools/hook_selected_pack_design_context.py
+  function: inject_pack_selection_context
 - agent: DesignDocsAgent
   filename: tools/hook_save_feedback_directive.py
   function: inject_save_feedback_directive
