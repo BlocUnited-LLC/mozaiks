@@ -328,9 +328,9 @@ Tracked links are rejected. Uncommitted changes or untracked files require a
 fresh clean checkout before the paid build. Dry-run mode does not stage or
 upload files.
 
-Only explicitly configured `MOZAIKS_PREVIEW_ENV_<NAME>` values become preview
-environment variables. Factory API keys, credentials, and database URLs are not
-inherited. The manager also supplies the canonical image's three nonsecret
+Use `MOZAIKS_PREVIEW_ENV_<NAME>` to configure the interactive preview
+environment. Factory API keys, credentials, and database URLs stay in Studio.
+The manager also supplies the canonical image's three nonsecret
 frontend/Factory resource paths, because E2B template-build ENV is not retained
 as session environment. Public apps may declare `authRequired: false`; authenticated apps
 cannot silently disable authentication. Configure their existing OIDC provider
@@ -342,13 +342,25 @@ MOZAIKS_PREVIEW_ENV_AUTH_PROVIDER=jwt
 MOZAIKS_PREVIEW_ENV_AUTH_ISSUER=http://localhost:8080/realms/local-preview
 MOZAIKS_PREVIEW_ENV_AUTH_JWKS_URL=http://host.docker.internal:8080/realms/local-preview/protocol/openid-connect/certs
 MOZAIKS_PREVIEW_ENV_VITE_OIDC_AUTHORITY=http://localhost:8080/realms/local-preview
+MOZAIKS_PREVIEW_ENV_AUTH_AUDIENCE=my-app-preview-api
+MOZAIKS_PREVIEW_ENV_VITE_OIDC_CLIENT_ID=my-app-preview
 ```
 
-These are example addresses, not provisioned services. Audience and frontend
-client ID are the generated app ID; callback paths follow its auth contract.
-Additional claims and app-owned AI credentials must be explicitly configured
-for the chosen provider and app. Test data survives a runtime restart within
-one session, but is discarded when that sandbox stops or expires.
+When Studio resolves to the native Keycloak adapter and the preview's
+`AUTH_ISSUER` and `VITE_OIDC_AUTHORITY` match that realm,
+the interactive preview automatically validates Keycloak's signed `typ=Bearer`
+claim. The preview API audience must differ from the preview browser client ID
+and the Studio API audience. Register the dedicated preview client and its exact
+callback URI in Keycloak, and configure its audience mapper so preview tokens
+exclude the Studio API audience. The callback path follows the app's auth
+contract. The browser can reuse the realm session to obtain a preview access
+token through OIDC. An explicitly configured token-type claim or value takes
+precedence over automatic configuration. Newly created previews pick up these
+settings.
+
+Configure additional claims and app-owned AI credentials for the chosen provider
+and app. Test data survives a runtime restart within one session and is discarded
+when that sandbox stops or expires.
 
 For a provider whose JWT carries permissions in the space-delimited `scope`
 claim, set `MOZAIKS_PREVIEW_ENV_AUTH_SCOPES_CLAIM=scope`; the generic JWT
@@ -470,7 +482,7 @@ artifact storage, provider limits, and expected traffic before broad rollout.
 | `SANDBOX_TEMPLATE` | provider default | artifact preview-session e2b template |
 | `MOZAIKS_PREVIEW_PROVIDER` | auto | `docker` (default) or explicit `e2b`; a key alone never selects E2B |
 | `SANDBOX_WORKDIR` | `/home/user/app` | e2b workspace root; Docker uses `/workspace` |
-| `MOZAIKS_PREVIEW_ENV_<NAME>` | unset | explicit preview-only environment, never implicit host inheritance |
+| `MOZAIKS_PREVIEW_ENV_<NAME>` | unset | explicit interactive preview environment, with signed token-type defaults for the shared Studio Keycloak realm as described above |
 | `APP_VALIDATION_BUILD_OUTPUT_MAX_CHARS` | `20000` | persisted build-output trim |
 
 ## Hosted provider boundary
