@@ -61,7 +61,8 @@ def test_shell_header_and_widget_stay_mobile_tolerant() -> None:
 
     assert 'hidden md:flex items-center gap-2' in header_source
     assert 'md:hidden inline-flex items-center justify-center' not in header_source
-    assert 'h-6 max-w-[10.5rem] object-contain opacity-90 sm:h-7 sm:max-w-[12rem]' in header_source
+    assert 'min-w-0 max-w-[10.5rem] sm:max-w-[12rem]' in header_source
+    assert 'h-6 max-w-full object-contain opacity-90 sm:h-7' in header_source
 
     assert 'pb-24 md:pb-10 lg:pb-0' in layout_source
     assert "function WorkspaceMobileNavTrigger" in layout_source

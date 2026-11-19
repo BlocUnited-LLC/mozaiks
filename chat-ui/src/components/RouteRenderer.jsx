@@ -313,7 +313,7 @@ function WorkflowEntryRoute({ route }) {
 
 function ShellChromeLayout({ children, route }) {
   const { user, config } = useChatUI();
-  const { chrome } = useNavigation();
+  const { chrome, mobile } = useNavigation();
   const defaultAppId = config?.chat?.defaultAppId || null;
   const { theme: chatTheme, loading: themeLoading } = useTheme(defaultAppId);
   const chatBackgroundSrc = getChatBackgroundSrc(chatTheme);
@@ -326,7 +326,8 @@ function ShellChromeLayout({ children, route }) {
   const showHeaderMobile = isChromeSlotVisible(mobileChrome.header, true);
   const showFooterDesktop = isChromeSlotVisible(desktopChrome.footer, false);
   const showFooterMobile = isChromeSlotVisible(mobileChrome.footer, false);
-  const showBottomBarMobile = isChromeSlotVisible(mobileChrome.bottomBar, false);
+  const showBottomBarMobile = isChromeSlotVisible(mobileChrome.bottomBar, false)
+    && mobile?.bottomBar?.visible !== false;
 
   const frameClassName = [
     'relative z-0 flex min-h-screen flex-col',
@@ -345,7 +346,14 @@ function ShellChromeLayout({ children, route }) {
       )}
       {(showHeaderDesktop || showHeaderMobile) && (
         <div className={headerClassName}>
-          <Header user={user} chatTheme={chatTheme} themeLoading={themeLoading} route={route} shellMode={shellMode} />
+          <Header
+            user={user}
+            chatTheme={chatTheme}
+            themeLoading={themeLoading}
+            route={route}
+            shellMode={shellMode}
+            hasMobileBottomBar={showBottomBarMobile}
+          />
         </div>
       )}
       <div className={frameClassName}>
