@@ -186,6 +186,8 @@ def selected_pack_rows(context: Any) -> list[dict[str, Any]]:
     """Use a design candidate only in DesignDocs; elsewhere require its review."""
     if context is None:
         return []
+    if isinstance(context, PhysicalPackContext):
+        return cast(list[dict[str, Any]], context.get("capability_packs"))
     if context.get("workflow_name") == "DesignDocs":
         candidate = detach(context.get("pack_selection"))
         return rows_for_pack_choices(context, candidate) if candidate is not None else []
@@ -223,6 +225,31 @@ class PhysicalPackContext:
         self._plan = detach(context.get("app_build_plan"))
         if isinstance(self._plan, dict):
             validate_reviewed_pack_choices(context, self._plan.get("capability_packs") or [])
+
+    @classmethod
+    def _from_verified_scan(cls, context: Any, rows: list[dict[str, Any]]) -> PhysicalPackContext:
+        """Project the scanner's resolved sources, never raw session inventory.
+
+        Standalone physical validation has no DesignDocs selection to resolve;
+        its caller explicitly supplies pack inputs to the canonical resolver.
+        The scanner invokes this only after those inputs have been verified.
+        """
+        projected = cls.__new__(cls)
+        projected._context = context if context is not None else {}
+        projected._rows = detach(rows)
+        projected._plan = detach(projected._context.get("app_build_plan"))
+        return projected
+
+    @property
+    def data(self) -> dict[str, Any]:
+        """Preserve dictionary template inputs without exposing mutable state."""
+        if not isinstance(self._context, dict):
+            raise AttributeError("The underlying context is not a dictionary")
+        values = deepcopy(self._context)
+        values["capability_packs"] = detach(self._rows)
+        if self._plan is not None:
+            values["app_build_plan"] = deepcopy(self._plan)
+        return values
 
     def get(self, key: str, default: Any = None) -> Any:
         if key == "capability_packs":

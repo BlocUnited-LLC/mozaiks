@@ -206,6 +206,14 @@ their native failed result for changed/removed sources; they do not execute or
 approve an invalid snapshot. Async acceptance input errors use a generic failure
 category rather than attributing every deterministic input error to pack drift.
 
+Standalone physical bundle validation carries the scanner's resolved, verified
+sources through the same read-only physical projection. That projection is not
+a DesignDocs receipt and never selects launch inventory. Ownership and planned
+data checks still read those verified contracts, including managed collection
+exclusions. Task workers derive template-owned paths from their authoritative
+parent context; task-local design changes remain subject to the existing bounded
+rejection and repair path before output compilation.
+
 ## Archived corpus expectation migration
 
 The 91 recorded bodies, original context, hashes and labelled defaults are

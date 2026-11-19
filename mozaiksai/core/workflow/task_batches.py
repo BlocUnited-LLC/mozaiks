@@ -1155,7 +1155,7 @@ async def _run_one_task(
     if getattr(agent, "_mozaiks_tool_outcome", None) is not None:
         raise ValueError(f"task agent {agent_name!r} declares a network-only tool outcome; use the task-batch failure policy")
     code_owned_output = _code_owned_task_output(task, task_context)
-    pack_paths = pack_owned_output_paths(task_context)
+    pack_paths = pack_owned_output_paths(base_context)
 
     async with semaphore:
         runner_result = None
