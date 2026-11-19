@@ -18,6 +18,10 @@ execution. Missing grants and unobserved role-holder execution remain failures.
 Managed Cloud and Pay facades use explicit loopback HTTP fixtures with synthetic
 credentials and a connector-absence IO double. Their receipts prove OSS client
 wiring and role enforcement, not real hosted-provider acceptance.
+Cloud and Pay Factory bundles are reviewed with no custom facade grants. Their
+role-holder runtime probes use separately authored test apps validated by the
+canonical authored-app validator, with byte-identical verified implementations.
+Those authored probes are not proof of Factory-generated facade role grants.
 A failure that needs an owner's decision is listed, with its reason, in
 BLOCKED_PACKS or KNOWN_RUNTIME_FAILURES; both lists fail when an entry stops
 failing, so they can only shrink.
@@ -44,11 +48,26 @@ from factory_app.workflows.AppGenerator.tools.app_validation import (
     run_app_bundle_acceptance_gate,
 )
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
+from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
+    _resolve_scan_packs,
+    _resolved_pack_context,
+    _resolved_pack_rows,
+)
+from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import materialize_auth_scaffold
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    resolve_managed_capability_templates,
+    verified_pack_data_contracts,
+    verified_pack_template_inventory,
     verify_pack_integrity,
 )
-from factory_app.workflows.AppGenerator.tools.save_admin_registry import save_admin_registry
+from mozaiksai.core.validation.workspace import (
+    registered_ui_components,
+    validate_authored_app_file_map,
+)
 from mozaiksai.core.workflow.context.adapter import create_context_container
+from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
+from mozaiksai.core.workflow.generator_support.module_role_grants import verified_pack_authorization
 from mozaiksai.core.workflow.outcome_feedback import WorkflowFeedbackEvidence
 from mozaiksai.version import __version__ as FRAMEWORK_VERSION
 from tests.appgenerator_subscription_fixture import subscription_contract
@@ -57,6 +76,7 @@ from tests.factory_context import factory_context
 from tests.pack_proof_action_sweep import _bad_params, run_action_sweep
 from tests.pack_proof_provider_fixture import PACKS as PROVIDER_FIXTURE_PACKS
 from tests.pack_proof_provider_fixture import run_provider_probe
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_app_runtime_smoke import (
     mongo,  # noqa: F401 - real MongoDB and its leaked-database guard
 )
@@ -273,44 +293,217 @@ def _required_packs(pack_id: str) -> list[str]:
     return [*ordered, pack_id]
 
 
-async def _assemble(pack_id: str) -> tuple[dict[str, str], Any, list[dict[str, str]]]:
+AUTHORED_ROLE_PACKS = frozenset({"mozaiks_cloud", "mozaikspay"})
+
+
+@pytest.fixture(autouse=True)
+def proof_offerings(tmp_path, monkeypatch):
+    """Offer the stock facades through a real disposable build-context registry.
+
+    Availability neither reviews selection nor activates a provider or account.
+    """
+    context = tmp_path / "build_context" / "proof_offerings"
+    context.mkdir(parents=True)
+    (context / "context.yaml").write_text(yaml.safe_dump({
+        "context_id": "proof_offerings", "applies_to_workflows": ["AppGenerator"], "assets": [],
+        "values": {"operator_capabilities": sorted(AUTHORED_ROLE_PACKS)},
+        "projections": {"context_variables": {"operator_capabilities": {"from": "operator_capabilities"}}},
+    }), encoding="utf-8")
+    monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(context.parent))
+
+# These are predeclared fixture grants, never inferred from emitted code.
+# Keys bind actions to their actual verified collection; values pin permissions.
+FIXTURE_ACTION_GRANTS = {
+    "files": {"records": {
+        "upload_file": ["files.write"], "get_file": ["files.read"],
+        "list_files": ["files.read"], "delete_file": ["files.write"],
+    }},
+    "messages": {
+        "threads": {"create_thread": ["messages.write"], "list_threads": ["messages.read"], "get_thread": ["messages.read"]},
+        "messages": {"send_message": ["messages.write"]},
+        "thread_reads": {"mark_thread_read": ["messages.write"]},
+    },
+    "content": {"entries": {action: ["content.manage"] for action in ("create_entry", "update_entry", "archive_entry")}},
+    "support": {"requests": {
+        "get_support_profile": ["support.submit"], "create_support_request": ["support.submit"],
+        "list_support_requests": ["support.submit"], "get_support_conversation": ["support.submit"],
+        "reply_support_request": ["support.submit"], "update_support_status": ["support.manage"],
+    }},
+    "friends": {"requests": {
+        **{action: ["friends.manage"] for action in ("send_friend_request", "accept_friend_request", "decline_friend_request", "withdraw_friend_request", "remove_friend")},
+        **{action: ["friends.read"] for action in ("list_friends", "list_friends_of", "list_friend_requests", "get_friendship_status", "get_friends_count")},
+    }},
+    "activity_feed": {"events": {
+        "get_feed": ["activity_feed.read"], "get_profile_activity": ["activity_feed.read"], "record_activity": ["activity_feed.admin"],
+    }},
+    "user_posts": {
+        "posts": {"create_post": ["user_posts.create"], "get_post": ["user_posts.read"], "delete_post": ["user_posts.create"],
+                  "list_posts": ["user_posts.read"], "list_user_posts": ["user_posts.read"]},
+        "reactions": {"react_to_post": ["user_posts.react"], "get_reaction_summary": ["user_posts.read"]},
+        "comments": {"add_comment": ["user_posts.create"], "delete_comment": ["user_posts.create"], "list_comments": ["user_posts.read"]},
+    },
+    "commerce": {
+        "products": {"list_products": ["commerce.catalog.read"], "get_product": ["commerce.catalog.read"],
+                     "create_product": ["commerce.catalog.manage"], "update_product": ["commerce.catalog.manage"],
+                     "archive_product": ["commerce.catalog.manage"], "adjust_inventory": ["commerce.inventory.manage"]},
+        "carts": {action: ["commerce.cart.manage"] for action in ("get_cart", "add_cart_item", "update_cart_item", "remove_cart_item", "clear_cart")},
+        "orders": {"list_orders": ["commerce.orders.read"], "get_order": ["commerce.orders.read"], "update_order_status": ["commerce.orders.manage"]},
+        "checkout_requests": {"start_checkout": ["commerce.checkout.start"]},
+    },
+}
+
+
+def _fixture_inputs(pack_id):
     rows, plan_rows, identities = [], [], []
     for member in _required_packs(pack_id):
-        root = BUILD_CONTEXT / member
-        identity = verify_pack_integrity(root, member)
-        source = yaml.safe_load((root / "context.yaml").read_text(encoding="utf-8"))["pack"].get("capability_source")
-        rows.append({"id": member, "pack_source_path": str(root), "capability_source": source,
-                     "version": identity["version"], "digest": identity["digest"]})
-        plan_rows.append({"capability_pack_id": member, "capability_source": source})
+        source_root = BUILD_CONTEXT / member
+        identity = verify_pack_integrity(source_root, member)
+        source = yaml.safe_load((source_root / "context.yaml").read_text(encoding="utf-8"))["pack"].get("capability_source")
+        row = {"id": member, "pack_source_path": str(source_root), "capability_source": source,
+               "version": identity["version"], "digest": identity["digest"]}
+        rows.append(row)
+        plan_rows.append({**row, "capability_pack_id": member})
         identities.append({key: identity[key] for key in ("pack_id", "version", "digest")})
     inputs = deepcopy(PLAN_INPUTS.get(pack_id, {}))
+    if pack_id == "entitlement_dispatch":
+        inputs["subscription_contract"] = _plan_catalog_contract()
     approved = inputs.pop("data_contract", deepcopy(EMPTY_DATA_CONTRACT))
+    entities = inputs.pop("primary_entities", {})
     for row in plan_rows:
-        if entities := inputs.get("primary_entities", {}).get(row["capability_pack_id"]):
-            row["primary_entities"] = entities
-    inputs.pop("primary_entities", None)
+        if row["id"] in entities:
+            row["primary_entities"] = entities[row["id"]]
+    seed = {**inputs, "capability_packs": rows, "app_build_plan": {"capability_packs": plan_rows},
+            "data_contract": approved, "build_timestamp": BUILD_TIMESTAMP}
+    physical = _resolved_pack_context(seed, _resolved_pack_rows(_resolve_scan_packs(rows, seed)))
+    inventory = verified_pack_template_inventory(rows, context_variables=physical)
+    seed["data_contract"] = compile_data_contract(approved,
+        subscription_contract=inputs.get("subscription_contract"), context_variables=physical,
+        pack_data_contracts=verified_pack_data_contracts(inventory))
+    return seed, identities
+
+
+def _expected_roles(pack_id):
+    permissions = sorted({permission for member in _required_packs(pack_id) for permission in APP_PERMISSIONS[member]})
+    return [{"id": PROOF_ROLE, "permissions": permissions}] if permissions else []
+
+
+def _reviewed_fixture_policy(pack_id, seed, identities):
+    authorization = verified_pack_authorization(seed, selection=identities)
+    allowed = {permission for row in _expected_roles(pack_id) for permission in row["permissions"]}
+    grants = []
+    surfaces = []
+    for surface in seed["data_contract"].get("surfaces", []):
+        if surface["surface_kind"] != "module":
+            continue
+        module_id = surface["surface_id"]
+        actions = authorization.actions.get(module_id, {})
+        surfaces.append({"surface_id": module_id, "surface_kind": "module", "owner": "app",
+                         "primary_entities": [row["entity"] for row in surface["collections"]],
+                         "owned_mutations": list(actions), "custom_reads": []})
+        declared = FIXTURE_ACTION_GRANTS.get(module_id, {})
+        assert declared or not any(actions.values()), f"Review explicit collection grants for {module_id}"
+        selected = [action for entries in declared.values() for action in entries]
+        if selected:
+            assert {action: sorted(permissions) for action, permissions in actions.items() if permissions} == {
+                action: sorted(permissions) for entries in declared.values() for action, permissions in entries.items()
+            }, "Verified pack actions changed: review the fixture declaration"
+            for collection, entries in declared.items():
+                assert collection in {row["name"] for row in surface["collections"]}
+                selected_actions = [action for action, permissions in entries.items() if set(permissions) <= allowed]
+                if selected_actions:
+                    grants.append({"role_id": PROOF_ROLE, "collection": collection, "actions": sorted(selected_actions)})
+    seed["design_surface_map"] = {"surfaces": surfaces}
+    if pack_id in AUTHORED_ROLE_PACKS:
+        return {"roles": [], "grants": []}
+    granted_modules = {surface["surface_id"] for surface in surfaces} & FIXTURE_ACTION_GRANTS.keys()
+    assert not {module for module, actions in authorization.actions.items()
+                if any(permissions and set(permissions) <= allowed for permissions in actions.values())
+                and module not in granted_modules}, "A collectionless module needs an explicit authored-proof lane"
+    return {"roles": [{"role_id": PROOF_ROLE, "label": "Pack proof operator",
+                       "description": "The repository fixture's predeclared permissions."}] if allowed else [],
+            "grants": grants}
+
+
+def _fixture_files(pack_id, seed):
     app_id = f"pack_proof_{pack_id}"
-    context = create_context_container(initial=factory_context({
-        **inputs,
-        "capability_packs": rows,
-        "app_build_plan": {"capability_packs": plan_rows},
-        "app_id": app_id,
-        "data_contract": approved,
-        "build_timestamp": BUILD_TIMESTAMP,
-        "generated_files": {
-            "app.json": json.dumps({"appId": app_id, "appName": f"{pack_id} proof", "authRequired": True}),
-            "config/auth.yaml": _auth_fixture(pack_id),
-            "data/contract.json": json.dumps(approved),
-        },
-    }))
-    page_ids = ["overview", *sorted({page for member in _required_packs(pack_id) for page in APP_ADMIN_PAGES.get(member, ())})]
-    save_admin_registry(admin_registry={"pages": [
-        {"id": page, "label": page.title(), "path": "/admin" if page == "overview" else "/admin/" + page}
-        for page in page_ids
-    ]}, context_variables=context)
+    auth = yaml.safe_load(_auth_fixture(pack_id))
+    pages = ["overview", *sorted({page for member in _required_packs(pack_id) for page in APP_ADMIN_PAGES.get(member, ())})]
+    return app_id, {"app.json": json.dumps({"appId": app_id, "appName": f"{pack_id} proof", "authRequired": True}),
+                    "config/auth.yaml": yaml.safe_dump(auth, sort_keys=False),
+                    "data/contract.json": json.dumps(seed["data_contract"]),
+                    "admin/admin_registry.yaml": yaml.safe_dump({"pages": [
+                        {"id": page, "label": page.title(), "path": "/admin" if page == "overview" else "/admin/" + page}
+                        for page in pages]})}
+
+
+async def _assemble(pack_id: str) -> tuple[dict[str, str], Any, list[dict[str, str]]]:
+    seed, identities = _fixture_inputs(pack_id)
+    policy = _reviewed_fixture_policy(pack_id, seed, identities)
+    app_id, files = _fixture_files(pack_id, seed)
+    seed.update(app_id=app_id, generated_files=files)
+    context = create_context_container(initial=reviewed_pack_fixture(factory_context(seed),
+        _required_packs(pack_id), access_policy=policy))
     result = await assemble_app_tasks(context_variables=context)
     assert result["success"], f"{pack_id} cannot be assembled alone: {result.get('error')}"
-    return {file["filename"]: file["content"] for file in result["code_files"]}, context, identities
+    files = {file["filename"]: file["content"] for file in result["code_files"]}
+    expected = [] if pack_id in AUTHORED_ROLE_PACKS else _expected_roles(pack_id)
+    assert yaml.safe_load(files["config/auth.yaml"])["authorization"]["roles"] == expected
+    return files, context, identities
+
+
+def _assemble_authored_role_fixture(pack_id):
+    assert pack_id in AUTHORED_ROLE_PACKS
+    seed, identities = _fixture_inputs(pack_id)
+    app_id, files = _fixture_files(pack_id, seed)
+    seed.update(app_id=app_id, generated_files=files)
+    physical = _resolved_pack_context(seed, _resolved_pack_rows(_resolve_scan_packs(seed["capability_packs"], seed)))
+    templates = resolve_managed_capability_templates(seed["capability_packs"], context_variables=physical)
+    output = _merge_code_files([{"code_files": templates}], app_build_plan=seed["app_build_plan"],
+        data_contract=seed["data_contract"], subscription_contract=seed.get("subscription_contract"),
+        context_variables=physical)
+    authored = {row["filename"]: row["content"] for row in output}
+    authored.update({path: text for path, text in files.items() if path not in authored})
+    authored.update(materialize_auth_scaffold(authored))
+    assert yaml.safe_load(authored["config/auth.yaml"])["authorization"]["roles"] == _expected_roles(pack_id)
+    diagnostics = validate_authored_app_file_map(authored,
+        inherited_components=registered_ui_components(BUILD_CONTEXT.parents[1] / "chat-ui/src"))
+    assert not [item for item in diagnostics if item.severity == "error"], diagnostics
+    return authored, identities
+
+
+def _runtime_fixture(pack_id, factory_files, factory_identities):
+    """Keep provider-role wiring evidence outside the approved Factory bundle."""
+    if pack_id not in AUTHORED_ROLE_PACKS:
+        return factory_files, "reviewed_factory_fixture"
+    authored, identities = _assemble_authored_role_fixture(pack_id)
+    assert identities == factory_identities
+    repeated, repeated_identities = _assemble_authored_role_fixture(pack_id)
+    assert authored == repeated and identities == repeated_identities
+    implementation_paths = {
+        path for path in factory_files
+        if path.startswith(("modules/", "services/"))
+    }
+    assert implementation_paths
+    assert implementation_paths == {path for path in authored if path.startswith(("modules/", "services/"))}
+    assert {path: factory_files[path] for path in implementation_paths} == {
+        path: authored[path] for path in implementation_paths
+    }
+    assert authored[".mozaiks/pack_provenance.json"] == factory_files[".mozaiks/pack_provenance.json"]
+    return authored, "authored_provider_role_fixture"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pack_id", sorted(AUTHORED_ROLE_PACKS))
+async def test_factory_review_does_not_adopt_candidate_provider_role(pack_id):
+    # _fixture_files supplies the predeclared candidate role; the empty reviewed
+    # grants must remove it rather than borrowing authority from candidate auth.
+    files, _context, _identities = await _assemble(pack_id)
+    assert yaml.safe_load(_auth_fixture(pack_id))["authorization"]["roles"] == _expected_roles(pack_id)
+    assert yaml.safe_load(files["config/auth.yaml"])["authorization"]["roles"] == []
+    runtime_files, origin = _runtime_fixture(pack_id, files, _identities)
+    assert origin == "authored_provider_role_fixture"
+    assert yaml.safe_load(runtime_files["config/auth.yaml"])["authorization"]["roles"] == _expected_roles(pack_id)
 
 
 @pytest.mark.parametrize("pack_id", SHIPPED_PACKS)
@@ -386,8 +579,9 @@ async def _prove(pack_id: str, mongo: Any, tmp_path: Path) -> None:  # noqa: F81
     }
     assert checks and not failed, f"{pack_id} fails the app-bundle acceptance gate: {failed}"
 
+    runtime_files, runtime_origin = _runtime_fixture(pack_id, files, identities)
     app_root = tmp_path / "app"
-    _write_files_to_dir(app_root, files)
+    _write_files_to_dir(app_root, runtime_files)
     provider_fixture = None
     if pack_id in PROVIDER_FIXTURE_PACKS:
         smoke = await run_provider_probe(app_root, mongo_uri=mongo.uri, pack_id=pack_id, mode="smoke")
@@ -399,7 +593,7 @@ async def _prove(pack_id: str, mongo: Any, tmp_path: Path) -> None:  # noqa: F81
         swept = await run_action_sweep(app_root, mongo_uri=mongo.uri)
     rows = smoke.get("results") or []
     assert rows and smoke.get("skipped_reason") is None, f"{pack_id} smoke did not run: {smoke.get('skipped_reason')}"
-    declared = _declared_actions(files)
+    declared = _declared_actions(runtime_files)
     assert {row["check"] for row in swept if row["check"].startswith("action.")} == declared, (
         f"{pack_id} action sweep did not reach exactly its declared actions"
     )
@@ -413,6 +607,9 @@ async def _prove(pack_id: str, mongo: Any, tmp_path: Path) -> None:  # noqa: F81
         "requires": identities[:-1],
         "bundle_sha256": hashlib.sha256(json.dumps(files, sort_keys=True).encode("utf-8")).hexdigest(),
         "acceptance_checks": sorted(checks),
+        "runtime_fixture_origin": runtime_origin,
+        "runtime_bundle_sha256": hashlib.sha256(json.dumps(runtime_files, sort_keys=True).encode("utf-8")).hexdigest(),
+        "factory_authorization": yaml.safe_load(files["config/auth.yaml"])["authorization"],
         "runtime_smoke": {
             "checks_passed": [row["check"] for row in rows if row.get("status") == "passed"],
             "not_run": [row["check"] for row in rows if row.get("status") == "not_run"],
@@ -423,7 +620,7 @@ async def _prove(pack_id: str, mongo: Any, tmp_path: Path) -> None:  # noqa: F81
                                        and row["check"].startswith("action.")),
             "not_run": sorted(row["check"] for row in swept if row.get("status") == "not_run"),
         },
-        "authorization": yaml.safe_load(files["config/auth.yaml"])["authorization"],
+        "authorization": yaml.safe_load(runtime_files["config/auth.yaml"])["authorization"],
         "provider_fixture": provider_fixture,
         "known_failures": {check: known[check] for check in sorted(known)},
         "outcome": "wiring_smoke_passed" if not known else "wiring_smoke_with_known_failures",
@@ -498,6 +695,8 @@ async def test_pack_proof_role_holder_and_non_holder_evidence(tmp_path, mongo): 
 @pytest.mark.parametrize("pack_id", sorted(PROVIDER_FIXTURE_PACKS))
 async def test_unconfigured_managed_pack_cannot_count_as_successful_execution(pack_id, tmp_path, mongo):  # noqa: F811
     files, _context, _identities = await _assemble(pack_id)
+    files, origin = _runtime_fixture(pack_id, files, _identities)
+    assert origin == "authored_provider_role_fixture"
     app_root = tmp_path / "app"
     _write_files_to_dir(app_root, files)
     result = await run_app_runtime_smoke(app_root, mongo_uri=mongo.uri)

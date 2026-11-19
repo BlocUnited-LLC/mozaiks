@@ -14,6 +14,7 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
 from factory_app.workflows.AppGenerator.tools.app_plan_review import review_app_build_plan
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
+from tests.reviewed_pack_fixture import registered_pack_fixture, reviewed_pack_fixture
 from tests.test_app_plan_review import _context, _plan
 from tests.test_continuous_deterministic_materialization import _load_models
 
@@ -99,10 +100,9 @@ def test_selected_task_construction_preserves_invalid_output_for_rejection():
         _validate_build_tasks(plan["build_tasks"])
 
 
-def test_registered_managed_adapter_kind_uses_registered_provider():
-    context = ContextVariablesBridge({"capability_packs": [{
-        "id": "provider", "capability_source": "managed_capability",
-    }]})
+def test_reviewed_managed_adapter_kind_uses_registered_provider(tmp_path, monkeypatch):
+    descriptor = registered_pack_fixture(tmp_path, monkeypatch, "provider", "managed_capability")
+    context = ContextVariablesBridge(reviewed_pack_fixture({"capability_packs": [descriptor]}, ["provider"]))
     plan = {
         "capability_packs": [{"capability_pack_id": "provider", "capability_source": "managed_capability"}],
         "build_tasks": [{
@@ -117,12 +117,12 @@ def test_registered_managed_adapter_kind_uses_registered_provider():
 
 
 @pytest.mark.parametrize("source", ["managed_capability", "framework_pack", "operator_pack"])
-def test_omitted_selected_packs_are_constructed_without_selecting_catalog_entries(source):
-    selected = {"id": "selected", "capability_source": source}
-    context = ContextVariablesBridge({
+def test_omitted_selected_packs_are_constructed_without_selecting_catalog_entries(source, tmp_path, monkeypatch):
+    selected = registered_pack_fixture(tmp_path, monkeypatch, "selected", source)
+    context = ContextVariablesBridge(reviewed_pack_fixture({
         "capability_packs": [selected],
         "available_managed_capabilities": [{"id": "catalog_only", "capability_source": "managed_capability"}],
-    })
+    }, ["selected"]))
     packs = _ensure_context_selected_capability_packs([], context_variables=context)
     assert len(packs) == 1
     assert packs[0]["capability_pack_id"] == "selected"
@@ -146,11 +146,12 @@ def _facade_dependency_tasks():
 
 
 @pytest.mark.parametrize("registered", [False, True])
-def test_facade_dependencies_require_registered_binding_not_prose_or_single_adapter(registered):
-    context = ContextVariablesBridge({"capability_packs": [{
-        "id": "provider", "capability_source": "managed_capability",
-        "facades": [{"module_id": "facade", "provider_module": "provider"}] if registered else [],
-    }]})
+def test_facade_dependencies_require_registered_binding_not_prose_or_single_adapter(registered, tmp_path, monkeypatch):
+    descriptor = registered_pack_fixture(
+        tmp_path, monkeypatch, "provider", "managed_capability",
+        facades=[{"module_id": "facade", "provider_module": "provider"}] if registered else [],
+    )
+    context = ContextVariablesBridge(reviewed_pack_fixture({"capability_packs": [descriptor]}, ["provider"]))
     result = _normalize_facade_task_dependencies(
         _facade_dependency_tasks(),
         capability_packs=[{"capability_pack_id": "provider", "capability_source": "managed_capability"}],
@@ -159,11 +160,12 @@ def test_facade_dependencies_require_registered_binding_not_prose_or_single_adap
     assert result[1]["depends_on"] == (["client"] if registered else [])
 
 
-def test_ambiguous_registered_adapter_dependency_remains_bounded_feedback():
-    context = ContextVariablesBridge({"capability_packs": [{
-        "id": "provider", "capability_source": "managed_capability",
-        "facades": [{"module_id": "facade", "provider_module": "provider"}],
-    }]})
+def test_ambiguous_registered_adapter_dependency_remains_bounded_feedback(tmp_path, monkeypatch):
+    descriptor = registered_pack_fixture(
+        tmp_path, monkeypatch, "provider", "managed_capability",
+        facades=[{"module_id": "facade", "provider_module": "provider"}],
+    )
+    context = ContextVariablesBridge(reviewed_pack_fixture({"capability_packs": [descriptor]}, ["provider"]))
     tasks = _facade_dependency_tasks()
     tasks.append({**tasks[0], "task_id": "second_client"})
     kwargs = {

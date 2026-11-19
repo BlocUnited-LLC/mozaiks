@@ -23,6 +23,7 @@ import pytest
 import yaml
 
 from factory_app.workflows._shared.hook_utils import workflow_context_path
+from factory_app.workflows._shared.pack_selection import pin_pack_choices
 from factory_app.workflows.AppGenerator.tools.app_plan_review import (
     review_app_build_plan,
     validate_plan_coverage,
@@ -52,6 +53,7 @@ MARKER = (
     "removed_pages=[Users@/users->admin:users]"
 )
 persistence = inventory.persistence
+registered_offering_and_review = inventory.registered_offering_and_review
 
 
 def _fixture() -> dict:
@@ -61,6 +63,9 @@ def _fixture() -> dict:
 def _save_attempt(index: int) -> tuple[ContextVariablesBridge, dict]:
     fixture = _fixture()
     context = ContextVariablesBridge(deepcopy(fixture["context_vars"]))
+    # Current replay inputs explicitly select the provider; the capture is unchanged.
+    context.set("workflow_name", "DesignDocs")
+    context.set("pack_selection", pin_pack_choices(context, ["mozaikspay"]))
     bundle = deepcopy(fixture["attempts"][index])
     submitted = deepcopy(bundle)
     result = inventory._save(context, bundle)
@@ -193,6 +198,7 @@ def test_plan_from_the_saved_live_design_passes_review(persistence):
     context, result = _save_attempt(0)
     assert result["outcome"] == "saved", result
     plan_context = ContextVariablesBridge({
+        **context.snapshot(), "workflow_name": "AppGenerator",
         "build_mode": "initial", "app_plan_attempts": 0, "app_plan_outcome": "blocked",
         "monetization_enabled": True,
         "design_surface_map": detach(context.get("design_surface_map")),

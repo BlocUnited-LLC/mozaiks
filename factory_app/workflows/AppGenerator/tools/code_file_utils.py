@@ -389,6 +389,8 @@ def _assembled_data_contract(context_variables: Any, subscription_contract: Any)
     replaced it with a composition it checked against that source; assembly
     checks the source's copy again (carried_contracts) whenever it runs.
     """
+    from factory_app.workflows._shared.pack_selection import PhysicalPackContext
+
     from .resolve_managed_capability_templates import (
         ManagedCapabilityTemplateError,
         verified_pack_data_contracts,
@@ -397,8 +399,9 @@ def _assembled_data_contract(context_variables: Any, subscription_contract: Any)
 
     contract = detach(context_variables.get("data_contract"))
     try:
+        pack_context = PhysicalPackContext(context_variables)
         pack_data_contracts = verified_pack_data_contracts(
-            verified_pack_template_inventory(context_variables=context_variables),
+            verified_pack_template_inventory(context_variables=pack_context),
         )
     except ManagedCapabilityTemplateError as exc:
         raise ValueError(f"The selected capability packs' data contributions cannot be verified: {exc}") from exc
@@ -408,7 +411,7 @@ def _assembled_data_contract(context_variables: Any, subscription_contract: Any)
     if not isinstance(contract, dict):
         return contract
     compiled = compile_data_contract(
-        contract, subscription_contract=subscription_contract, context_variables=context_variables,
+        contract, subscription_contract=subscription_contract, context_variables=pack_context,
         pack_data_contracts=pack_data_contracts,
     )
     if pack_only_base:
@@ -423,12 +426,10 @@ def _assembled_data_contract(context_variables: Any, subscription_contract: Any)
 
 
 def selected_capability_packs(context_variables: Any) -> list[dict[str, Any]] | None:
-    """The run's selected pack descriptors, else the approved plan's."""
-    packs = detach(context_variables.get("capability_packs"))
-    if not packs:
-        plan = detach(context_variables.get("app_build_plan"))
-        packs = plan.get("capability_packs") if isinstance(plan, dict) else None
-    return packs if isinstance(packs, list) else None
+    """The exact reviewed selection, independent of available offerings."""
+    from factory_app.workflows._shared.pack_selection import selected_pack_rows
+
+    return selected_pack_rows(context_variables)
 
 
 def _provenance(files: dict[str, str]) -> dict[str, Any]:

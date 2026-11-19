@@ -9,6 +9,8 @@ import yaml
 
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from tests.factory_context import factory_context
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
+from tests.test_factory_pack_selection import _enable_managed
 
 
 def _load_save_app_schema_module():
@@ -57,14 +59,10 @@ def _module_context():
     }})
 
 
-def test_standalone_save_discards_pack_owned_pages_by_their_route_stem(tmp_path, monkeypatch):
-    """The typed name is "Billing"; the file identity is billing.yaml, which the mozaikspay template writes.
-
-    The author's copy is discarded, never validated or persisted; the manifest still lists the page
-    and may land on it, because the app ships it from the pack.
-    """
+def test_factory_save_discards_reviewed_pack_page_by_its_route_stem(tmp_path, monkeypatch):
+    """The reviewed pack supplies billing.yaml and the manifest may land on /billing."""
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
-    pack = Path(__file__).resolve().parents[1] / "factory_app" / "build_context" / "mozaikspay"
+    _enable_managed(tmp_path, monkeypatch)
     placeholder_module = yaml.safe_dump({"module": {"id": "billing_portal"}, "actions": [
         {"id": "get_subscription_status", "api_surface": "public_readonly", "permissions": [],
          "output_schema": {"type": "object", "properties": {"subscription_status": {"type": "string"}}}},
@@ -77,27 +75,35 @@ def test_standalone_save_discards_pack_owned_pages_by_their_route_stem(tmp_path,
             "data_key": "billing_info", "selection": "single",
         }}],
     }
-    context = _Context({
+    initial = {
         "generated_files": {"modules/billing_portal/module.yaml": placeholder_module},
-        "capability_packs": [{"id": "mozaikspay", "capability_source": "managed_capability", "status": "active",
-                              "pack_source_path": str(pack)}],
-    })
+        "experience_spec": {"pages": [
+            {"name": "Dashboard", "route": "/dashboard", "ui_surface": "declarative_page"},
+            {"name": "Billing", "route": "/billing", "ui_surface": "declarative_page"},
+        ]},
+    }
+    manifest = {**_base_manifest(), "default_route": "/billing", "pages": ["Dashboard", "Billing"]}
+    pages = [_base_page(), billing]
+    context = ContextVariablesBridge(reviewed_pack_fixture(initial, ["mozaikspay"]))
     result = save_app_schema_module.save_app_schema(
-        manifest={**_base_manifest(), "default_route": "/billing", "pages": ["Dashboard", "Billing"]},
-        pages=[_base_page(), billing], context_variables=context,
+        manifest=manifest, pages=pages, context_variables=context,
     )
     assert "rejected" not in result, result
     assert context.get("app_schema_ready") is True
     assert [page["name"] for page in context.get("app_pages")] == ["Dashboard"]
-    assert context.get("app_manifest")["pages"] == ["Dashboard", "Billing"]
+    saved_manifest = context.get("app_manifest")
+    assert list(saved_manifest["pages"]) == ["Dashboard", "Billing"]
+    assert saved_manifest["default_route"] == "/billing"
     assert not list(tmp_path.rglob("billing.yaml"))
-    # Without the pack the same placeholder is a real binding error.
+
+    # Registration alone leaves the same placeholder subject to binding validation.
+    empty_selection = ContextVariablesBridge(reviewed_pack_fixture(initial, []))
     with pytest.raises(ValueError, match="'billing_info' must select a declared array"):
         save_app_schema_module.save_app_schema(
-            manifest={**_base_manifest(), "default_route": "/billing", "pages": ["Billing"]},
-            pages=[billing],
-            context_variables=_Context({"generated_files": {"modules/billing_portal/module.yaml": placeholder_module}}),
+            manifest=manifest, pages=pages, context_variables=empty_selection,
         )
+    assert empty_selection.get("app_schema_ready") is not True
+    assert not list(tmp_path.rglob("billing.yaml"))
 
 
 def _base_manifest():

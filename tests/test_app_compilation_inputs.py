@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import zipfile
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
@@ -25,6 +26,40 @@ from mozaiksai.core.validation.compilation_inputs import (
     capture_app_compilation_inputs,
     resolve_app_compilation_inputs,
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("inventory", [[], [{"id": "mozaikspay", "capability_source": "managed_capability"}]])
+async def test_empty_free_plan_does_not_capture_compilation_from_available_offerings(inventory):
+    context = {"app_build_plan": {"capability_packs": []}, "capability_packs": inventory,
+               "data_contract": {"version": "1", "surfaces": []}, "app_plan_outcome": "blocked"}
+    before = deepcopy(context)
+    assert await capture_app_compilation_inputs(
+        context, owner_user_id="fixture-owner", archive_sha256="0" * 64, artifact_store=object(),
+    ) is None
+    assert context == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome,reason", [("blocked", "validated ready"), ("ready", "approved app_build_plan.build_tasks")])
+async def test_reviewed_pack_with_empty_plan_still_reaches_compiler_admission(outcome, reason):
+    from tests.reviewed_pack_fixture import reviewed_pack_fixture
+
+    context = reviewed_pack_fixture({"app_build_plan": {"capability_packs": []},
+        "data_contract": {"version": "1", "surfaces": []}, "app_plan_outcome": outcome}, ["operator_readiness"])
+    with pytest.raises(ValueError, match=reason):
+        await capture_app_compilation_inputs(context, owner_user_id="fixture-owner",
+                                              archive_sha256="0" * 64, artifact_store=object())
+
+
+@pytest.mark.asyncio
+async def test_capture_without_data_or_contract_does_not_read_unused_pack_authority():
+    context = {"app_build_plan": {"capability_packs": []}, "data_contract": None,
+               "design_docs_artifact": {"commit_metadata": {"metadata": {"summary_payload": {
+                   "access_policy_review": {"status": "approved"},
+               }}}}}
+    assert await capture_app_compilation_inputs(context, owner_user_id="fixture-owner",
+                                               archive_sha256="0" * 64, artifact_store=object()) is None
 
 
 class Store:
@@ -509,64 +544,112 @@ async def test_public_facade_rejects_candidate_supplied_authority_and_selection(
 
 
 @pytest.mark.asyncio
-async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_tampered_output(tmp_path):
-    from mozaiksai.core.workflow.context.frozen import detach
-    from tests.test_capability_pack_proof import PLAN_INPUTS, _assemble
+async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_tampered_output(tmp_path, monkeypatch):
+    from httpx import ASGITransport, AsyncClient
 
-    files, context, _ = await _assemble("outcome_feedback")
+    from factory_app.workflows._shared.pack_selection import (
+        record_reviewed_pack_rows,
+        selected_pack_rows,
+    )
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        ManagedCapabilityTemplateError,
+        verified_selected_pack_sources,
+    )
+    from mozaiksai.control_plane.implementations.coding_worker import parent_pack_output_owners
+    from mozaiksai.core.artifacts.models import BuildRecordStatus, BuildRecordValidationStatus
+    from mozaiksai.core.validation import generated_app
+    from mozaiksai.core.workflow.context.frozen import detach
+    from mozaiksai.hosts import studio
+    from tests import test_capability_pack_proof as proof
+
+    owner = "fixture-owner"
+    source_registry = tmp_path / "source-registry"
+    initial_source = source_registry / "outcome_feedback"
+    shutil.copytree(proof.BUILD_CONTEXT / "outcome_feedback", initial_source)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(source_registry))
+    files, context, identities = await proof._assemble("outcome_feedback")
+    assert context.get("run_build_binding")["target_app_id"] == "pack_proof_outcome_feedback"
+    assert proof.APP_PERMISSIONS["outcome_feedback"] == ()
+    record = detach(context.get("design_docs_artifact"))
+    assert record["commit_metadata"]["author_user_id"] == owner
+    review = record["commit_metadata"]["metadata"]["summary_payload"]["access_policy_review"]
+    assert review["reviewed_by"] == owner
+    assert review["pack_identities"] == identities
+    assert [row["capability_pack_id"] for row in context.get("app_build_plan")["capability_packs"]] == ["outcome_feedback"]
+    assert yaml.safe_load(files["config/auth.yaml"])["authorization"] == {"roles": []}
     binding = detach(context.get("run_build_binding"))
     app_id = binding["target_app_id"]
     # Persist the fixed approved input used by the assembler, never candidate-derived authority.
-    payload = {"data_contract": deepcopy(PLAN_INPUTS["outcome_feedback"]["data_contract"]), "surface_map": None}
+    payload = deepcopy(detach(context.get("design_docs_artifact"))["commit_metadata"]["metadata"]["summary_payload"])
     raw = _summary_bytes(payload)
     store = Store()
     design = BuildRecord(
         id="design", app_id=app_id, build_family="design_docs", build_key="design_docs", version_number=1,
         lineage_root_id="design", source_workflow="DesignDocs", lifecycle_status="current",
         files_manifest=[{"path": "design_docs.json", "sha256": hashlib.sha256(raw).hexdigest(), "size_bytes": len(raw)}],
-        commit_metadata={"author_user_id": "owner", "metadata": {"summary_payload": payload}},
+        commit_metadata={"author_user_id": owner, "metadata": {"summary_payload": payload}},
     )
     store.records[design.id] = design
     approved_context = {
         "run_build_binding": binding, "app_plan_outcome": "ready",
         "app_build_plan": detach(context.get("app_build_plan")),
-        "data_contract": payload["data_contract"], "design_surface_map": None,
+        "data_contract": payload["data_contract"], "design_surface_map": payload.get("surface_map"),
         "design_docs_artifact": design.model_dump(mode="json", by_alias=True),
     }
     # This fixture assembles deterministic templates without model task execution.
     approved_context["app_build_plan"]["build_tasks"] = []
+    physical_rows = selected_pack_rows(approved_context)
+    assert physical_rows[0]["pack_source_path"] == str(initial_source)
+    plan_row = approved_context["app_build_plan"]["capability_packs"][0]
+    plan_row["pack_source_path"] = str(initial_source)
+    approved_context["app_build_plan"]["capability_packs"] = record_reviewed_pack_rows([plan_row], physical_rows)
     path = tmp_path / "bundle.zip"
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, content in files.items():
             archive.writestr(f"bundle/{name}", content)
     sha = hashlib.sha256(path.read_bytes()).hexdigest()
     compilation = await capture_app_compilation_inputs(
-        approved_context, owner_user_id="owner", archive_sha256=sha, artifact_store=store,
+        approved_context, owner_user_id=owner, archive_sha256=sha, artifact_store=store,
     )
-    packs = detach(context.get("capability_packs"))
+    packs = record_reviewed_pack_rows(physical_rows, physical_rows)
+    assert "pack_source_path" not in packs[0]
+    assert "pack_source_path" not in compilation["inputs"]["app_build_plan"]["capability_packs"][0]
     bundle = BuildRecord(
         id="bundle", app_id=app_id, build_family="app_bundle", build_key="app_bundle", version_number=1,
         lineage_root_id="bundle", source_workflow="AppGenerator", lifecycle_status="current",
         canonical_inputs_version={"design_docs": design.id},
         files_manifest=[{"path": "bundle/bundle.zip", "sha256": sha, "size_bytes": path.stat().st_size,
                          "content_type": "application/zip"}],
-        commit_metadata={"author_user_id": "owner", "metadata": {
+        commit_metadata={"author_user_id": owner, "metadata": {
             **binding, "compilation_inputs": compilation, "capability_packs": packs,
             "bundle_name": "bundle", "artifact_path": str(path), "workspace_dir": str(tmp_path / "app"),
         }},
     )
     store.records[bundle.id] = bundle
-    approval = await resolve_app_compilation_inputs(
-        app_id=app_id, build_record_id=bundle.id, owner_user_id="owner",
-        build_registry_id=binding["build_registry_id"], artifact_store=store,
-    )
+    saved_metadata = deepcopy(bundle.commit_metadata.metadata)
+    moved_registry = tmp_path / "moved-registry"
+    source_registry.rename(moved_registry)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(moved_registry))
+
+    async def replay():
+        return await resolve_app_compilation_inputs(
+            app_id=app_id, build_record_id=bundle.id, owner_user_id=owner,
+            build_registry_id=binding["build_registry_id"], artifact_store=store,
+        )
+
+    approval = await replay()
+    assert approval.context_for(app_id)["app_build_plan"] == approved_context["app_build_plan"]
     result = validate_generated_app_bundle(GeneratedAppValidationRequest(
         files=files, capability_packs=packs, approved_compilation=approval,
     ))
-    assert result.passed, result.diagnostics
+    assert result.passed, "\n".join(item.message for item in result.diagnostics)
     assert [row["pack_id"] for row in result.resolved_capability_packs] == ["outcome_feedback"]
 
     service = "modules/outcome_feedback/backend/service.py"
+    assert parent_pack_output_owners(packs)[service] == "templates"
+    assert bundle.commit_metadata.metadata == saved_metadata
+    with pytest.raises(ManagedCapabilityTemplateError):
+        verified_selected_pack_sources(physical_rows)
     for candidate, authority in ((files, None), ({**files, service: files[service] + "\n# unapproved edit\n"}, approval)):
         rejected = validate_generated_app_bundle(GeneratedAppValidationRequest(
             files=candidate, capability_packs=packs, approved_compilation=authority,
@@ -574,6 +657,36 @@ async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_
         assert not rejected.passed
         assert any(item.code == "generated_bundle_contract_failed" and service in item.message
                    and "verified template" in item.message for item in rejected.diagnostics), rejected.diagnostics
+
+    moved_contract = moved_registry / "outcome_feedback/contract.yaml"
+    moved_contract.write_bytes(moved_contract.read_bytes() + b"\n# changed after review\n")
+    draft = bundle.model_copy(deep=True, update={
+        "id": "draft",
+        "parent_build_record_id": bundle.id,
+        "lifecycle_status": BuildRecordStatus.DRAFT,
+        "validation_status": BuildRecordValidationStatus.FAILED,
+    })
+    draft.commit_metadata.metadata.update(
+        bundle_mode="staged_refinement_bundle", compilation_inputs=approval.for_child(sha),
+    )
+    store.records[draft.id] = draft
+    monkeypatch.setattr(studio, "get_artifact_store", lambda: store)
+    monkeypatch.setattr(studio, "_resolve_studio_artifact_scope", AsyncMock(return_value=(app_id, owner)))
+    monkeypatch.setattr(studio, "_require_current_build_in_lineage", AsyncMock())
+    monkeypatch.setitem(studio.app.dependency_overrides, studio.require_studio_user, lambda: object())
+    validator = AsyncMock()
+    monkeypatch.setattr(generated_app, "validate_generated_app_candidate", validator)
+    async with AsyncClient(transport=ASGITransport(app=studio.app, raise_app_exceptions=False),
+                           base_url="http://test") as client:
+        response = await client.post(f"/api/studio/build/artifacts/{draft.id}/revalidate",
+                                     params={"build_registry_id": binding["build_registry_id"]})
+    assert response.status_code == 409, response.text
+    assert response.json() == {"detail": "Draft archive identity or compilation inputs could not be verified"}
+    validator.assert_not_awaited()
+    assert draft.validation_status == BuildRecordValidationStatus.FAILED
+    with pytest.raises(ValueError, match="pack sources could not be verified"):
+        await replay()
+    assert parent_pack_output_owners(packs) is None
 
 
 @pytest.mark.asyncio

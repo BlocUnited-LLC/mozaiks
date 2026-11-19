@@ -47,6 +47,7 @@ from mozaiksai.core.workflow.task_batches import (
     load_task_batches_config,
     optional_task_output_paths,
 )
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_app_plan_managed_facade_repair import _plan_and_context, _task
 from tests.test_continuous_deterministic_materialization import _load_models
 
@@ -57,7 +58,10 @@ FACADE = "modules/billing_portal/"
 
 
 @pytest.fixture(autouse=True)
-def _load_factory_contracts():
+def _load_factory_contracts(monkeypatch, tmp_path):
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
     _load_models()
 
 
@@ -72,7 +76,7 @@ def _live_context() -> ContextVariablesBridge:
         source = ROOT / pack["pack_source_path"]
         metadata = verify_pack_integrity(source, pack["id"])
         pack.update(pack_source_path=str(source), version=metadata["version"], digest=metadata["digest"])
-    return ContextVariablesBridge(variables)
+    return ContextVariablesBridge(reviewed_pack_fixture(variables, ["mozaikspay"]))
 
 
 def _dispatch_preflight(items: list[dict]) -> None:

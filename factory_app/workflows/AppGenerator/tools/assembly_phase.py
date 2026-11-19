@@ -18,6 +18,7 @@ from typing import Any
 
 import yaml
 
+from factory_app.workflows._shared.pack_selection import reviewed_pack_read_operation
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     admitted_module_file_map,
     extract_code_file_entries_from_payload,
@@ -207,6 +208,7 @@ def _carried_contract_conflict(content: str, composed: dict[str, Any]) -> str | 
     return None
 
 
+@reviewed_pack_read_operation
 def _merge_code_files(
     feature_outputs: list[dict[str, Any]],
     *,
@@ -290,18 +292,22 @@ def _merge_code_files(
     file_map = materialize_collection_auth(file_map, data_contract=data_contract)
     # Selected pack manifests come from registered templates, never model tasks.
     pack_paths = pack_owned_outputs(context_variables)
-    pack_manifests = frozenset(
+    verified_pack_inputs = frozenset(
         item["filename"] for pack in inventory for item in pack["files"]
         if item["filename"] in pack_paths
-        and item["filename"].startswith("modules/") and item["filename"].endswith("/module.yaml")
         and file_map.get(item["filename"]) == item["content"]
     )
+    pack_manifests = frozenset(
+        path for path in verified_pack_inputs if path.startswith("modules/") and path.endswith("/module.yaml")
+    )
     template_modules = verified_template_module_ids(file_map, inventory)
-    # An implementation-only revision carries module contracts from the verified
-    # bundle and admits edits to the reviewed repo and service paths.
+    # Scoped revisions carry authored module contracts. Verified partial pack
+    # templates still need canonical compilation after assembly re-renders them.
     synthesis_files = {
         path: content for path, content in file_map.items()
-        if not (path.startswith("modules/") and (scoped_revision or path.split("/")[1] in template_modules))
+        if not path.startswith("modules/") or (
+            path.split("/")[1] not in template_modules and (not scoped_revision or path in verified_pack_inputs)
+        )
     }
     # Feature outputs may carry an auth edit alongside a module. Only the
     # pre-merge admitted bundle (or the canonical scaffold) can approve scopes.
@@ -393,10 +399,12 @@ def compiled_pack_module_templates(
     Integrity checks compare against this same compiler output; provenance or
     a candidate's own manifests cannot authorize a different implementation.
     """
+    from factory_app.workflows._shared.pack_selection import selected_pack_rows
+
     from .module_entitlement_gates import apply_entitlement_gates
 
     resolved = resolve_managed_capability_templates(
-        detach(context_variables.get("capability_packs")), context_variables=context_variables,
+        selected_pack_rows(context_variables), context_variables=context_variables,
     )
     templates = [
         file for file in resolved

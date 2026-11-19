@@ -51,6 +51,7 @@ from mozaiksai.hosts import platform
 from mozaiksai.hosts import runtime as runtime_host
 from tests.factory_context import factory_context
 from tests.page_plan_fixtures import _page_from_plan
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS_ROOT = ROOT / "factory_app" / "workflows"
@@ -714,6 +715,7 @@ def _app_task_output(spec: _ArchetypeSpec, *, task_type: str, task: Mapping[str,
 
 
 async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[str, str], Path, Any]:
+    plan = deepcopy(spec.plan)
     ctx = ContextVariablesBridge(factory_context(
         {
             "app_id": spec.app_id,
@@ -746,7 +748,15 @@ async def _materialize_spec(spec: _ArchetypeSpec, tmp_path: Path) -> tuple[dict[
                  "entitlement_gate": "feature.module.reports.export_report"},
             ],
         })
-    app_build_plan(AppBuildPlan=spec.plan, context_variables=ctx)
+        reviewed = reviewed_pack_fixture(ctx.snapshot(), ["entitlement_dispatch"])
+        ctx.set("design_docs_artifact", reviewed["design_docs_artifact"])
+        ctx.set("workflow_name", "AppGenerator")
+        identity = reviewed["design_docs_artifact"]["commit_metadata"]["metadata"]["summary_payload"]["access_policy_review"]["pack_identities"][0]
+        for pack in plan["capability_packs"]:
+            if pack["capability_pack_id"] == "entitlement_dispatch":
+                pack.update(pack_source_path=str(ROOT / "factory_app/build_context/entitlement_dispatch"),
+                            **{key: identity[key] for key in ("version", "digest")})
+    app_build_plan(AppBuildPlan=plan, context_variables=ctx)
     assert ctx.get("app_plan_ready") is True, f"PLAN_LOSS archetype={spec.archetype_id}"
 
     task_batches = load_task_batches_config("AppGenerator", workflows_root=WORKFLOWS_ROOT)

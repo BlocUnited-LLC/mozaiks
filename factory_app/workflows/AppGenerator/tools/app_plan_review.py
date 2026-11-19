@@ -13,6 +13,12 @@ import yaml
 from pydantic import ValidationError
 
 from factory_app.workflows._shared.hook_utils import workflow_context_path
+from factory_app.workflows._shared.pack_selection import (
+    fresh_pack_reads,
+    reviewed_pack_read_operation,
+    selected_pack_rows,
+    validate_reviewed_pack_choices,
+)
 from factory_app.workflows._shared.surface_ownership import validate_surface_ownership
 from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _CANONICAL_INITIAL_AGENTS,
@@ -39,6 +45,9 @@ from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context impor
 )
 from factory_app.workflows.AppGenerator.tools.plan_page_data_sources import (
     drop_unapproved_page_data_sources,
+)
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    ManagedCapabilityTemplateError,
 )
 from mozaiksai.core.runtime.app.paths import is_safe_app_path, normalize_app_path
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
@@ -1474,9 +1483,8 @@ def _approved_surface_ids(context: Any) -> set[str]:
         surface["surface_id"] for surface in design.get("surfaces") or []
         if surface.get("surface_id")
     }
-    # This protected projection contains selected registry declarations. Neither
-    # the proposed plan nor an available-capability catalog grants approval.
-    for pack in detach(context.get("capability_packs")) or []:
+    # Only owner-reviewed sources extend the approved surface inventory.
+    for pack in selected_pack_rows(context):
         pack_id = _pack_id_from_descriptor(pack)
         if pack_id:
             approved.add(pack_id)
@@ -1780,17 +1788,10 @@ def _approved_ui_only_surfaces(context: Any) -> dict[str, dict[str, Any]]:
 
 
 def _selected_ui_provider_ids(context: Any) -> set[str]:
-    """Selected build-context packs that may bind an approved UI-only surface.
-
-    A selected pack descriptor (``normalize_pack_descriptor``) carries its
-    identity and registered capability_source, never a surface binding:
-    selection is the registration. The registered source decides, not the
-    plan's label, which ``_repair_selected_pack_sources`` normalizes later.
-    Generated module code and DesignDocs category hints are not providers.
-    """
+    """Reviewed packs that may bind an approved UI-only surface."""
     return {
         pack_id
-        for pack in detach(context.get("capability_packs")) or []
+        for pack in selected_pack_rows(context)
         if isinstance(pack, dict)
         and pack.get("capability_source") != "generated_module"
         and (pack_id := _pack_id_from_descriptor(pack))
@@ -2193,7 +2194,7 @@ def validate_plan_dispatch(context: Any) -> None:
         raise ValueError("Task dispatch would refuse this plan:\n- " + "\n- ".join(errors))
 
 
-def _plan_validation_feedback(error: ValueError, payload: dict[str, Any] | None) -> str:
+def _plan_validation_feedback(error: ValueError | ManagedCapabilityTemplateError, payload: dict[str, Any] | None) -> str:
     locations: list[str] = []
     if isinstance(error, ValidationError) and isinstance(payload, dict):
         pages = payload.get("pages")
@@ -2219,6 +2220,7 @@ def _plan_validation_feedback(error: ValueError, payload: dict[str, Any] | None)
     return "\n".join([*locations, str(error)])[:6000]
 
 
+@reviewed_pack_read_operation
 def review_app_build_plan(
     *,
     AppBuildPlan: Annotated[dict[str, Any] | None, "Complete AppBuildPlan output"] = None,
@@ -2282,7 +2284,8 @@ def review_app_build_plan(
         validate_plan_dependencies(plan, context_variables)
         validate_plan_origins(plan, context_variables)
         validate_plan_coverage(plan, context_variables)
-        app_build_plan(AppBuildPlan=plan, context_variables=context_variables)
+        with fresh_pack_reads():
+            app_build_plan(AppBuildPlan=plan, context_variables=context_variables)
         cached = detach(context_variables.get("app_build_plan"))
         if not context_variables.get("app_plan_ready") or not isinstance(cached, dict):
             raise RuntimeError("Validated plan was not cached")
@@ -2291,7 +2294,9 @@ def review_app_build_plan(
         validate_plan_dependencies(cached, context_variables)
         validate_plan_coverage(cached, context_variables)
         validate_plan_dispatch(context_variables)
-    except ValueError as error:
+        with fresh_pack_reads():
+            validate_reviewed_pack_choices(context_variables, cached["capability_packs"])
+    except (ValueError, ManagedCapabilityTemplateError) as error:
         _clear_plan(context_variables)
         feedback = _plan_validation_feedback(error, AppBuildPlan)
         context_variables.set("app_plan_feedback", feedback)

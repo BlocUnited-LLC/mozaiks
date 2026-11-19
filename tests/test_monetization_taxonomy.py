@@ -80,7 +80,8 @@ def test_capability_routing_distinguishes_money_flow_from_subscription_contract(
     rule = monetization["rule"]
     assert "monetized as \"revenue model unresolved\"" in rule
     assert "true only for subscriptions, plan gates, seats, quotas, credits, token" in rule
-    assert "instead of inventing provider internals" in rule
+    assert "missing selection requires renewed DesignDocs selection/review" in rule
+    assert "never invent provider internals" in rule
     assert "AppBuildPlan.revenue_model is set to free, subscriptions, usage_based" in rule
 
 

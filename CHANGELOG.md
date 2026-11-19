@@ -15,6 +15,15 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Factory distinguishes available pack offerings from the explicit, versioned
+  pack selection in the owner-reviewed DesignDocs artifact. Planning, template
+  composition and saved-bundle replay preserve that selection; changed sources
+  and late unreviewed billing providers require renewed review.
+- Approved-compilation validation preserves verified plan inputs and reports
+  revoked or changed pack sources as failed validation before runtime execution.
+- Explicitly selected Support packs expose their verified actions and support
+  surface boundaries to DesignDocs before generation, alongside Messaging.
+
 - Profile support tickets and app support inboxes keep reply fields usable on narrow mobile screens.
 
 - Signed-in Studio builders can open App Dashboard from their account menu and resolve the current build through its owner-scoped saved app binding.

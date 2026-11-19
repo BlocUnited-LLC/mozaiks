@@ -45,6 +45,7 @@ from mozaiksai.core.runtime.persistence.mongo import (
 )
 from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
 from mozaiksai.core.workflow.generator_support.ui_registry_composition import compose_ui_registry
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_appgenerator_revision_baseline import _replace_archive
 from tests.test_appgenerator_revision_baseline import baseline as revision_baseline  # noqa: F401
 from tests.test_runtime_database_migrations import FakeCursor, FakeDatabase, FakeMongoClient
@@ -79,6 +80,25 @@ def _assembled_files(root=PACK):
     )}
 
 
+def _reviewed_messaging_context(initial: dict[str, Any]) -> dict[str, Any]:
+    physical = _context()
+    pack = physical["capability_packs"][0]
+    plan = {**physical["app_build_plan"], **initial.get("app_build_plan", {})}
+    plan["capability_packs"] = [
+        *plan["capability_packs"],
+        {
+            "capability_pack_id": pack["id"],
+            "capability_source": pack["capability_source"],
+            "version": pack["version"],
+            "digest": pack["digest"],
+        },
+    ]
+    reviewed = reviewed_pack_fixture({**initial, "app_build_plan": plan}, ["messaging"])
+    if "run_build_binding" in initial:
+        reviewed["app_id"] = initial["app_id"]
+    return reviewed
+
+
 def test_messaging_compiles_exact_backend_and_admitted_data_without_new_public_crud():
     files = _assembled_files()
     assert validate_module_implementation_contract(files)["passed"] is True
@@ -100,16 +120,41 @@ def test_messaging_compiles_exact_backend_and_admitted_data_without_new_public_c
 
 
 @pytest.mark.asyncio
+async def test_assembly_ignores_unreviewed_messaging_inventory():
+    from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+    from mozaiksai.core.workflow.context.adapter import create_context_container
+    from mozaiksai.core.workflow.context.frozen import detach
+
+    offered = _context()["capability_packs"]
+    approved = {"version": "1", "surfaces": [], "shared_collections": []}
+    manifest = {"appId": "unreviewed_messaging", "appName": "Free App", "authRequired": False}
+    context = create_context_container(initial=reviewed_pack_fixture({
+        "app_id": manifest["appId"],
+        "app_build_plan": {"capability_packs": []},
+        "capability_packs": offered,
+        "data_contract": approved,
+        "generated_files": {"app.json": json.dumps(manifest), "data/contract.json": json.dumps(approved)},
+    }, []))
+
+    result = await assemble_app_tasks(context_variables=context)
+
+    assert result["success"], result
+    files = {record["filename"]: record["content"] for record in result["code_files"]}
+    assert json.loads(files["data/contract.json"])["surfaces"] == []
+    assert not any(path.startswith("modules/messages/") for path in files)
+    assert detach(context.get("capability_packs")) == offered
+
+
+@pytest.mark.asyncio
 async def test_original_approved_context_reaches_assembly_and_acceptance_scanner_without_precompilation():
     from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
     from mozaiksai.core.workflow.context.adapter import create_context_container
     from mozaiksai.core.workflow.context.frozen import detach
-    from tests.factory_context import factory_context
 
     approved = {"version": "1", "surfaces": [], "shared_collections": []}
     original = deepcopy(approved)
-    context = create_context_container(initial=factory_context({
-        **_context(), "app_id": "ordinary_messaging", "data_contract": approved,
+    context = create_context_container(initial=_reviewed_messaging_context({
+        "app_id": "ordinary_messaging", "data_contract": approved,
         "generated_files": {
             "app.json": json.dumps({"appId": "ordinary_messaging", "appName": "Messages", "authRequired": True}),
             "data/contract.json": json.dumps(approved),
@@ -128,6 +173,10 @@ async def test_original_approved_context_reaches_assembly_and_acceptance_scanner
     ) == []
     acceptance = await run_app_bundle_acceptance_gate(files=files, context_variables=context)
     assert acceptance["bundle_scan"]["passed"], acceptance["bundle_scan"]
+    selected = next(row for row in plan_modules if row["capability_pack_id"] == "messaging")
+    assert [
+        (row["pack_id"], row["version"], row["digest"]) for row in acceptance["resolved_capability_packs"]
+    ] == [("messaging", selected["version"], selected["digest"])]
     assert detach(context.get("data_contract")) == original
 
 
@@ -245,14 +294,15 @@ def test_persistence_repair_save_keeps_the_verified_pack_data_contributions(repa
         "execution_target": "AppGenerator", "description": "Data contract", "initial_message": "Data contract",
         "owned_paths": ["data/contract.json", migration], "depends_on": [],
     }
-    context = _context()
-    context["app_build_plan"] = {**context["app_build_plan"], "build_tasks": [task]}
-    templates = resolve_managed_capability_templates(context["capability_packs"], context_variables=context)
+    physical = _context()
+    plan = {**physical["app_build_plan"], "build_tasks": [task]}
+    templates = resolve_managed_capability_templates(physical["capability_packs"], context_variables=physical)
     assembled = {file["filename"]: file["content"] for file in _merge_code_files(
-        [{"code_files": templates}], app_build_plan=context["app_build_plan"], data_contract=approved,
-        context_variables={**context, "data_contract": approved},
+        [{"code_files": templates}], app_build_plan=plan, data_contract=approved,
+        context_variables={**physical, "data_contract": approved},
     )}
-    context.update({
+    context = _reviewed_messaging_context({
+        "app_build_plan": plan,
         "data_contract": approved, "generated_files": assembled,
         "app_task_batch_results": {"data_contract": {"code_files": []}},
     })
@@ -296,11 +346,14 @@ def test_the_save_compiles_the_contract_from_the_bundle_copy_never_the_process_m
     """
     from factory_app.workflows.AppGenerator.tools import code_file_utils
 
-    context = {
-        **_context(), "user_id": "user-1", "revision_source_artifact_version_id": "version-1",
-        "run_build_binding": {"target_app_id": "customer-app", "build_registry_id": "registry-1"},
+    context = _reviewed_messaging_context({
+        "app_id": "factory-host", "user_id": "user-1", "revision_source_artifact_version_id": "version-1",
+        "run_build_binding": {
+            "target_app_id": "customer-app", "build_registry_id": "registry-1",
+            "build_id": "revision-build", "phase": "refinement",
+        },
         "generated_files": {"app.json": json.dumps({"appId": "customer-app"})},
-    }
+    })
     code_file_utils.remember_revision_baseline(context, {"data/contract.json": json.dumps(CARRIED_APP_CONTRACT)})
     try:
         assert json.loads(code_file_utils._cached_revision_baseline(context)["data/contract.json"]) == CARRIED_APP_CONTRACT
@@ -309,6 +362,23 @@ def test_the_save_compiles_the_contract_from_the_bundle_copy_never_the_process_m
         code_file_utils._REVISION_UI_BASELINES.clear()
     # The packs' contribution on an empty base, with no guard error raised from the memo's 'projects' surface.
     assert [surface["surface_id"] for surface in compiled["surfaces"]] == ["messages"]
+
+
+def test_workflow_save_does_not_compile_unreviewed_pack_data():
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import _assembled_data_contract
+
+    offered = _context()["capability_packs"]
+    approved = {"version": "1", "surfaces": [], "shared_collections": []}
+    context = reviewed_pack_fixture({
+        "app_build_plan": {"capability_packs": []},
+        "capability_packs": offered,
+        "data_contract": approved,
+    }, [])
+
+    compiled = _assembled_data_contract(context, None)
+
+    assert compiled["surfaces"] == []
+    assert context["capability_packs"] == offered
 
 
 @pytest.mark.asyncio
@@ -326,7 +396,8 @@ async def test_revision_without_approved_contract_never_replaces_the_carried_app
         "data/contract.json": json.dumps(CARRIED_APP_CONTRACT),
     }
     _replace_archive(saved, {})
-    context = create_context_container(initial={**saved.context, **(_context() if with_pack else {})})
+    initial = _reviewed_messaging_context(saved.context) if with_pack else saved.context
+    context = create_context_container(initial=initial)
     result = await assemble_app_tasks(context_variables=context)
     assert not result["success"], [file["filename"] for file in result["code_files"]]
     assert "data/contract.json requires the approved DesignDocs data_contract" in result["error"]
@@ -355,9 +426,11 @@ def _imported_revision_without_an_approved_contract(request):
     }
     selected = _context()
     selected["app_build_plan"] = {**selected["app_build_plan"], "build_tasks": [task]}
-    context = create_context_container(initial={
-        **saved.context, **selected, "app_task_batch_results": {"data_contract": {"code_files": []}},
-    })
+    context = create_context_container(initial=_reviewed_messaging_context({
+        **saved.context,
+        "app_build_plan": selected["app_build_plan"],
+        "app_task_batch_results": {"data_contract": {"code_files": []}},
+    }))
     return context, selected, assemble_app_tasks
 
 
@@ -663,7 +736,6 @@ def test_complete_template_implementation_requires_a_declared_handler():
 @pytest.mark.parametrize("has_admitted_handler", [True, False])
 async def test_actual_assembly_preserves_admitted_workspace_handler_and_restores_templates(has_admitted_handler):
     from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
-    from tests.factory_context import factory_context
 
     class Context(dict):
         def set(self, key, value):
@@ -673,8 +745,8 @@ async def test_actual_assembly_preserves_admitted_workspace_handler_and_restores
     policy = "modules/messages/backend/policy.py"
     admitted_handler = (PACK / "templates" / handler).read_text(encoding="utf-8") + "\n# App-owned handler extension retained across assembly.\n"
     contract = {"version": "1", "surfaces": [], "shared_collections": []}
-    context = Context(factory_context({
-        **_context(), "app_id": "workspace_handler_test",
+    context = Context(_reviewed_messaging_context({
+        "app_id": "workspace_handler_test",
         "data_contract": contract,
         "generated_files": {**({handler: admitted_handler} if has_admitted_handler else {}),
                             policy: "# injected policy must be discarded\n",
@@ -707,15 +779,15 @@ async def test_actual_revision_assembly_retains_verified_archive_workspace_handl
     })}
     saved_baseline.files[handler] += "\n    workspace_marker = 'retained from verified archive'\n"
     _replace_archive(saved_baseline, {})
-    context = create_context_container(initial={
-        **saved_baseline.context, **_context(),
+    context = create_context_container(initial=_reviewed_messaging_context({
+        **saved_baseline.context,
         "data_contract": json.loads(saved_baseline.files["data/contract.json"]),
         "app_task_batch_items": [{"task_id": "old_worker"}],
         "app_task_batch_results": {"old_worker": {"code_files": [
             {"filename": handler, "content": "# raw task copy must not replace admitted handler\n"},
             {"filename": policy, "content": "# raw task copy must not replace template policy\n"},
         ]}},
-    })
+    }))
     result = await assemble_app_tasks(context_variables=context)
     assert result["success"], result
     files = {file["filename"]: file["content"] for file in result["code_files"]}

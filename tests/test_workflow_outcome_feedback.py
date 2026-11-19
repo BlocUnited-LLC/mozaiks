@@ -326,7 +326,11 @@ async def test_generated_repository_recovers_only_typed_scoped_uniqueness_confli
 async def _compile_feedback_app():
     """Run production assembly with a selected pack and no model-owned feedback paths."""
     from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        verify_pack_integrity,
+    )
     from tests.factory_context import factory_context
+    from tests.reviewed_pack_fixture import reviewed_pack_fixture
 
     collection = {
         "name": "records", "entity": "WorkflowFeedback", "scope": "app", "tenancy": "per_user",
@@ -346,17 +350,21 @@ async def _compile_feedback_app():
         "primary_entities": ["WorkflowFeedback"],
     }]}
     root = Path(__file__).parents[1] / "factory_app/build_context/outcome_feedback"
+    metadata = verify_pack_integrity(root, "outcome_feedback")
+    plan["capability_packs"][0].update(pack_source_path=str(root),
+        **{key: metadata[key] for key in ("version", "digest")})
 
     class Context(dict):
         def set(self, key, value):
             self[key] = value
 
-    context = Context(factory_context({
+    context = Context(reviewed_pack_fixture(factory_context({
         "app_id": "feedback-fixture", "app_build_plan": plan, "data_contract": contract,
         "build_timestamp": "2026-10-06T12:00:00Z",
         "capability_packs": [{"id": "outcome_feedback", "capability_source": "generated_module", "pack_source_path": str(root)}],
-        "generated_files": {"data/contract.json": json.dumps(contract)},
-    }))
+        "generated_files": {"data/contract.json": json.dumps(contract),
+                            "app.json": json.dumps({"appId": "feedback-fixture", "appName": "Feedback fixture", "authRequired": True})},
+    }), ["outcome_feedback"]))
     result = await assemble_app_tasks(context_variables=context)
     assert result["success"], result
     files = {item["filename"]: item["content"] for item in result["code_files"]}

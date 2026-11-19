@@ -19,7 +19,6 @@ from mozaiksai.core.session.build_context import (
     resolve_context_asset_path,
 )
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.resources import resolve_factory_app_root
 
 logger = logging.getLogger(__name__)
 
@@ -244,38 +243,10 @@ def approved_workflow_surface_ids(context_variables: Any) -> list[str]:
 
 
 def managed_pack_contracts(context_variables: Any) -> list[dict[str, Any]]:
-    """The contract declarations of the selected managed packs, read only from verified sources.
+    """Read managed ownership only from the selected, verified pack sources."""
+    from factory_app.workflows._shared.pack_selection import selected_pack_rows
 
-    Each selected row (and each managed pack a design surface references from
-    the installed factory catalog without selecting it) goes through the
-    canonical resolver first (:func:`_verified_pack_entry`: pins compared,
-    authority recorded). A resolved pack is managed when its own context
-    declares ``managed_capability``, whatever the row claims, as the bundle
-    scanner decides, and its declarations come from the verified source's
-    declared contract assets. A row that claims ``managed_capability`` always
-    claims a pack, so it either verifies or refuses.
-    A row's own inline ``facades`` are never read. Its consumers enforce what
-    a managed pack owns (surface ownership, managed data owners, facade
-    actions), so a row claiming ``managed_capability`` that the resolver refuses is never silently
-    omitted: this raises ``ValueError`` with the resolver's diagnostic.
-    """
-    if context_variables is None:
-        return []
-    packs = [dict(pack) for pack in detach(context_variables.get("capability_packs")) or [] if isinstance(pack, Mapping)]
-    surface_map = detach(context_variables.get("design_surface_map")) or {}
-    referenced = {
-        pack_id for surface in surface_map.get("surfaces") or []
-        for pack_id in surface.get("source_capability_packs") or []
-    }
-    selected = {_row_pack_id(pack) for pack in packs}
-    factory_root = resolve_factory_app_root()
-    for pack_id in referenced - selected:
-        if not isinstance(pack_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", pack_id) or factory_root is None:
-            continue
-        registry = factory_root / "build_context" / pack_id / "context.yaml"
-        if registry.is_file():
-            config = load_build_context(registry)
-            packs.append({**config.get("pack", {}), "pack_source_path": str(registry.parent)})
+    packs = selected_pack_rows(context_variables)
     result: list[dict[str, Any]] = []
     for pack in packs:
         if pack.get("status", "active") != "active":
@@ -352,35 +323,20 @@ def _verified_pack_entry(pack: Mapping[str, Any], context_variables: Any) -> tup
 
 
 def _selected_packs(context_variables: Any) -> list[_SelectedPack]:
-    """Every selected pack whose templates assembly applies, with its contract declarations.
-
-    Assembly reads the selected packs from ``capability_packs`` and falls back to
-    the approved plan's packs, and resolves and verifies each row with its
-    canonical pack resolver (:func:`_verified_pack_entry`): the row's own source
-    path, the workspace's installed component, or, for an id-only row that
-    claims a pack (such as the default MozaiksPay row of an OSS SaaS plan), the
-    installed factory catalog. A verified pack is read from its verified
-    source, and its own ``context.yaml`` says whether it is active. A row the
-    resolver refuses contributes nothing: no unverified source or contract
-    stands in for it. A row that selects no pack is read from the
-    ``operator_contracts`` the build context projected.
-    """
+    """Read contracts from the same reviewed sources that assembly applies."""
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         pack_identity,
     )
 
     if context_variables is None:
         return []
-    packs = detach(context_variables.get("capability_packs")) or []
-    if not packs:
-        plan = detach(context_variables.get("app_build_plan")) or {}
-        packs = plan.get("capability_packs") or [] if isinstance(plan, Mapping) else []
-    projected = detach(context_variables.get("operator_contracts")) or []
+    from factory_app.workflows._shared.pack_selection import selected_pack_rows
+
+    packs = selected_pack_rows(context_variables)
     result: list[_SelectedPack] = []
     for pack in packs:
         if not isinstance(pack, Mapping):
             continue
-        pack_id = _row_pack_id(pack)
         entry, refusal = _verified_pack_entry(pack, context_variables)
         if refusal is not None:
             continue
@@ -399,13 +355,6 @@ def _selected_packs(context_variables: Any) -> list[_SelectedPack]:
                 # Assembly reports an unusable pack; nothing unverified stands in for it.
                 logger.warning("selected pack %s could not be read: %s", root, exc)
             continue
-        result.append(_SelectedPack(pack_id, None, None, [
-            dict(contract) for contract in projected
-            if isinstance(contract, Mapping) and pack_id and (
-                contract.get("contract_id") == pack_id
-                or (contract.get("canonical_provider") or {}).get("provider_pack_id") == pack_id
-            )
-        ]))
     return result
 
 

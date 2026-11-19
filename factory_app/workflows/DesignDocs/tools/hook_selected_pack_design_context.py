@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 
 from factory_app.workflows._shared.hook_utils import update_agent_section
+from factory_app.workflows._shared.pack_selection import available_pack_rows
 from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     _selected_packs,
@@ -40,10 +41,29 @@ def inject_selected_pack_design_context(agent: Any, messages: list[dict[str, Any
     if getattr(agent, "name", "") != "DesignDocsAgent":
         return
     context = getattr(agent, "context_variables", None)
-    # DesignDocs uses the current trusted launch selection, not a stale
-    # AppBuildPlan fallback that the downstream assembly helper also supports.
-    if context is None or not context.get("capability_packs"):
+    if context is None:
         return
+
+    if _HEADER in (getattr(agent, "system_message", None) or getattr(agent, "_system_message", "") or ""):
+        update_agent_section(agent, _HEADER, "No current selected-pack contracts. Select and validate the candidate before using reusable packs.")
+    available = available_pack_rows(context)
+    catalog = [{
+        "pack_id": pack_id, "capability_source": row.get("capability_source"),
+        "capabilities": row.get("capabilities") or [],
+    } for pack_id, row in available.items()]
+    update_agent_section(
+        agent, "[AVAILABLE PACK CATALOG]",
+        "These verified offerings are available, not selected. Reason from the supplied approved "
+        "concept_blueprint, concept_overview and monetization_enabled. Before producing the design, "
+        "call select_capability_packs with the exact reusable pack IDs this app needs; call it with [] "
+        "when none apply. Include required pack dependencies. Use stock packs for matching behavior "
+        "and generate only missing app-owned pieces. Capability-family hints are not pack IDs. "
+        "Do not select managed billing for a free/non-monetized app or treat an available provider "
+        "as owner intent. The tool records a candidate, not approval; an owner separately reviews "
+        "the selected sources and permissions. After selection, use the exact selected contracts "
+        "and module actions below. Unknown IDs, source changes and missing dependencies fail validation.\n"
+        + json.dumps(catalog, ensure_ascii=False, separators=(",", ":")),
+    )
 
     blocks: list[str] = []
     for selected in _selected_packs(context):

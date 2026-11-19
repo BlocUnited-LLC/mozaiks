@@ -46,7 +46,7 @@ def test_capability_directory_separates_conversation_support_and_social_capabili
     assert "requires messaging_pack" in support_notes
 
 
-def test_capability_directory_prioritizes_mozaikspay_for_saas_monetization() -> None:
+def test_capability_directory_recommends_mozaikspay_without_selecting_it() -> None:
     directory = _read_yaml("factory_app/build_context/AppGenerator/capability_directory.yaml")
     by_id = {capability["id"]: capability for capability in directory["capabilities"]}
 
@@ -56,8 +56,11 @@ def test_capability_directory_prioritizes_mozaikspay_for_saas_monetization() -> 
     assert mozaikspay["recommendation_rank"] == 1
     assert mozaikspay["capability_kind"] == "operator_pack"
     assert {"billing", "subscriptions", "usage", "saas"} <= set(mozaikspay["domains"])
-    assert "Default to the mozaikspay capability pack" in notes
-    assert "monetization_provider=entitlement_dispatch" in notes
+    assert "explicit owner-reviewed writer" in notes
+    assert "without choosing a default" in notes
+    assert "Default to the mozaikspay capability pack" not in notes
+    assert "Consume the selected pack's verified" in notes
+    assert "do not schedule model tasks for these template-owned outputs" in notes
     assert "billing_portal facade" in notes
     assert "mozaikspay_client.py" in notes
     assert "Do not generate checkout, webhook handlers" in notes

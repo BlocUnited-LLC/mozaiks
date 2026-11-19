@@ -8,14 +8,23 @@ from pathlib import Path
 import pytest
 import yaml
 
+from factory_app.workflows._shared.pack_selection import pin_pack_choices
 from factory_app.workflows._shared.surface_ownership import validate_surface_ownership
 from factory_app.workflows.AppGenerator.tools.app_plan_review import validate_plan_origins
 from mozaiksai.core.session.build_context import load_trusted_build_context, merge_build_context
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.authority import build_context_authority_policy
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 PAYMENTS_CONTEXT = ROOT / "factory_app/build_context/mozaikspay"
+
+
+def _chosen_provider(context, workflow_name="AppGenerator"):
+    if workflow_name == "DesignDocs":
+        return ContextVariablesBridge({**context, "workflow_name": workflow_name,
+                                       "pack_selection": pin_pack_choices(context, ["mozaikspay"])})
+    return ContextVariablesBridge(reviewed_pack_fixture(context, ["mozaikspay"]))
 
 
 def _policy(workflow_name: str = "AppGenerator"):
@@ -74,7 +83,9 @@ def test_registered_public_subscription_descriptor_is_admitted_to_factory(
     assert descriptor["pack_source_path"] == str(registered_payments_root / "mozaikspay")
     assert descriptor["required_integrations"][0]["provider"] == "mozaiks_pay"
     assert descriptor["facades"][0]["module_id"] == "billing_portal"
-    validate_plan_origins(_provider_plan(), ContextVariablesBridge(context))
+    with pytest.raises(ValueError, match="unapproved surface 'mozaikspay_managed'"):
+        validate_plan_origins(_provider_plan(), ContextVariablesBridge(context))
+    validate_plan_origins(_provider_plan(), _chosen_provider(context))
 
 
 def test_registry_only_subscription_claim_does_not_register_a_provider(tmp_path: Path) -> None:
@@ -117,9 +128,10 @@ def test_billing_category_cannot_alias_the_registered_subscription_provider(
 ) -> None:
     context = load_trusted_build_context(_policy(), build_context_root=registered_payments_root)
 
-    validate_plan_origins(_provider_plan(), ContextVariablesBridge(context))
+    chosen = _chosen_provider(context)
+    validate_plan_origins(_provider_plan(), chosen)
     with pytest.raises(ValueError, match="unapproved surface 'billing_pack_managed'"):
-        validate_plan_origins(_provider_plan("billing_pack"), ContextVariablesBridge(context))
+        validate_plan_origins(_provider_plan("billing_pack"), chosen)
 
 
 def test_pack_projection_does_not_register_provider_for_another_workflow(
@@ -150,17 +162,17 @@ def test_plan_cannot_change_registered_provider_source(registered_payments_root:
     plan["capability_packs"][0]["capability_source"] = "generated_module"
 
     with pytest.raises(ValueError, match="must match the registered pack"):
-        validate_plan_origins(plan, ContextVariablesBridge(context))
+        validate_plan_origins(plan, _chosen_provider(context))
 
 
 @pytest.mark.parametrize("workflow_name", ["AppGenerator", "DesignDocs"])
 def test_trusted_selection_resolves_only_the_selected_registered_pack(
-    tmp_path: Path, workflow_name: str,
+    tmp_path: Path, monkeypatch, workflow_name: str,
 ) -> None:
     root = tmp_path / "build_context"
     _write_context(root, "SelectedCapabilities", {
         "context_id": "selected_capabilities",
-        "applies_to_workflows": [workflow_name],
+        "applies_to_workflows": ["DesignDocs", "AppGenerator"],
         "assets": [],
         "values": {"operator_capabilities": ["mozaikspay"]},
         "projections": {"context_variables": {
@@ -169,18 +181,20 @@ def test_trusted_selection_resolves_only_the_selected_registered_pack(
     })
 
     context = load_trusted_build_context(_policy(workflow_name), build_context_root=root)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(root))
 
     assert context["operator_capabilities"] == ["mozaikspay"]
     assert [pack["id"] for pack in context["capability_packs"]] == ["mozaikspay"]
     assert context["capability_packs"][0]["pack_source_path"] == str(PAYMENTS_CONTEXT)
-    validate_plan_origins(_provider_plan(), ContextVariablesBridge(context))
+    chosen = _chosen_provider(context, workflow_name)
+    validate_plan_origins(_provider_plan(), chosen)
     with pytest.raises(ValueError, match="MozaiksPay"):
         validate_surface_ownership(
             {"surfaces": [{
                 "surface_id": "subscription_management", "surface_kind": "module",
                 "owner": "app", "primary_entities": ["Subscription"],
             }]},
-            context_variables=ContextVariablesBridge(context),
+            context_variables=chosen,
         )
 
 

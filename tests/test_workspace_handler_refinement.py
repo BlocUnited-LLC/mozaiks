@@ -72,7 +72,12 @@ from mozaiksai.core.workflow.context.adapter import create_context_container
 from tests.test_app_ui_composition import component, compose
 from tests.test_appgenerator_revision_baseline import _replace_archive
 from tests.test_appgenerator_revision_baseline import baseline as revision_baseline  # noqa: F401
-from tests.test_messaging_pack_persistence_composition import PACK, _assembled_files, _context
+from tests.test_messaging_pack_persistence_composition import (
+    PACK,
+    _assembled_files,
+    _context,
+    _reviewed_messaging_context,
+)
 
 HANDLER = "modules/messages/backend/handler.py"
 POLICY = "modules/messages/backend/policy.py"
@@ -561,9 +566,9 @@ async def test_later_ui_refinement_keeps_the_accepted_handler(tmp_path):
 
 
 def _revision_context(saved, files, **extra):
-    return create_context_container(initial={
-        **saved.context, **_context(), "data_contract": json.loads(files["data/contract.json"]), **extra,
-    })
+    return create_context_container(initial=_reviewed_messaging_context({
+        **saved.context, "data_contract": json.loads(files["data/contract.json"]), **extra,
+    }))
 
 
 @pytest.mark.asyncio

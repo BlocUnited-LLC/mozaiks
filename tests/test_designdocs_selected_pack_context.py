@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
+from factory_app.workflows._shared.pack_selection import pin_pack_choices
 from mozaiksai.core.session.build_context import load_trusted_build_context
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.authority import build_context_authority_policy
@@ -21,6 +22,10 @@ WORKFLOW = ROOT / "factory_app/workflows/DesignDocs"
 PACK = ROOT / "factory_app/build_context/content"
 MANAGED_PACK = ROOT / "factory_app/build_context/mozaikspay"
 HEADER = "[SELECTED PACK DESIGN CONTRACTS]"
+
+
+def _choose(context, ids):
+    return {**context, "workflow_name": "DesignDocs", "pack_selection": pin_pack_choices(context, ids)}
 
 
 def _prompt_runner(context):
@@ -49,7 +54,7 @@ def test_trusted_content_contract_reaches_the_real_design_prompt_without_templat
     policy = build_context_authority_policy(workflow_name="DesignDocs", definitions=definitions)
     trusted = load_trusted_build_context(policy, build_context_root=root)
     trusted["operator_contracts"].append({"contract_id": "unselected", "runtime_boundaries": [{"rule": "UNSELECTED SECRET"}]})
-    bridge = ContextVariablesBridge(trusted)
+    bridge = ContextVariablesBridge(_choose(trusted, ["content"]))
     before = bridge.snapshot()
 
     prompt = _prompt(_prompt_runner(bridge))
@@ -69,24 +74,28 @@ def test_trusted_content_contract_reaches_the_real_design_prompt_without_templat
     assert bridge.snapshot() == before
 
 
-def test_unverified_or_unselected_descriptors_do_not_supply_prompt_contracts(tmp_path, monkeypatch):
+def test_context_descriptors_cannot_replace_the_explicit_candidate_sources(tmp_path, monkeypatch):
     root = tmp_path / "build_context"
     shutil.copytree(PACK, root / "content", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(root))
     definitions = yaml.safe_load((WORKFLOW / "context_variables.yaml").read_text(encoding="utf-8"))["definitions"]
     policy = build_context_authority_policy(workflow_name="DesignDocs", definitions=definitions)
     trusted = load_trusted_build_context(policy, build_context_root=root)
+    chosen = _choose(trusted, ["content"])
     trusted["capability_packs"][0]["version"] = "999.0.0"
-    bridge = ContextVariablesBridge(trusted)
-    assert HEADER not in _prompt(_prompt_runner(bridge))
+    bridge = ContextVariablesBridge(chosen)
+    prompt = _prompt(_prompt_runner(bridge))
+    assert HEADER in prompt
+    assert "999.0.0" not in prompt
 
     # A bare generated_module ID describes ordinary authored work, not a pack.
-    bridge = ContextVariablesBridge({**trusted, "capability_packs": [{"id": "content", "capability_source": "generated_module"}]})
-    assert HEADER not in _prompt(_prompt_runner(bridge))
+    bridge = ContextVariablesBridge({**chosen, "capability_packs": [{"id": "content", "capability_source": "generated_module"}]})
+    assert HEADER in _prompt(_prompt_runner(bridge))
 
     # DesignDocs must not infer a current selection from an old build plan.
     bridge = ContextVariablesBridge({
-        "capability_packs": [], "app_build_plan": {"capability_packs": load_trusted_build_context(policy, build_context_root=root)["capability_packs"]},
+        "workflow_name": "DesignDocs", "pack_selection": [], "capability_packs": [],
+        "app_build_plan": {"capability_packs": load_trusted_build_context(policy, build_context_root=root)["capability_packs"]},
     })
     assert HEADER not in _prompt(_prompt_runner(bridge))
 
@@ -97,10 +106,10 @@ def test_recomputed_prompt_drops_pack_guidance_when_selection_disappears(tmp_pat
     monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(root))
     definitions = yaml.safe_load((WORKFLOW / "context_variables.yaml").read_text(encoding="utf-8"))["definitions"]
     policy = build_context_authority_policy(workflow_name="DesignDocs", definitions=definitions)
-    bridge = ContextVariablesBridge(load_trusted_build_context(policy, build_context_root=root))
+    bridge = ContextVariablesBridge(_choose(load_trusted_build_context(policy, build_context_root=root), ["content"]))
     runner = _prompt_runner(bridge)
     assert HEADER in _prompt(runner)
-    bridge.set("capability_packs", [])
+    bridge.set("pack_selection", [])
     assert HEADER not in _prompt(runner)
 
 
@@ -111,7 +120,7 @@ def test_managed_facade_and_local_pack_keep_their_distinct_design_boundaries(tmp
     monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(root))
     definitions = yaml.safe_load((WORKFLOW / "context_variables.yaml").read_text(encoding="utf-8"))["definitions"]
     policy = build_context_authority_policy(workflow_name="DesignDocs", definitions=definitions)
-    bridge = ContextVariablesBridge(load_trusted_build_context(policy, build_context_root=root))
+    bridge = ContextVariablesBridge(_choose(load_trusted_build_context(policy, build_context_root=root), ["content", "mozaikspay"]))
 
     prompt = _prompt(_prompt_runner(bridge))
 
@@ -136,7 +145,7 @@ def test_same_pack_preserves_distinct_approved_experience_inputs(tmp_path, monke
         "A quiet, image-led architecture portfolio with a generous grid.",
         "A dense, high-contrast investigative newsroom with a compact index.",
     ]
-    prompts = [_prompt(_prompt_runner(ContextVariablesBridge({**trusted, "concept_overview": brief}))) for brief in briefs]
+    prompts = [_prompt(_prompt_runner(ContextVariablesBridge({**_choose(trusted, ["content"]), "concept_overview": brief}))) for brief in briefs]
 
     for prompt, brief, other in zip(prompts, briefs, reversed(briefs), strict=True):
         assert brief in prompt
@@ -163,17 +172,17 @@ def test_operator_selection_resolves_the_shipped_pack_before_prompting(tmp_path,
     trusted = load_trusted_build_context(policy, build_context_root=root)
 
     assert [pack["id"] for pack in trusted["capability_packs"]] == ["content"]
-    prompt = _prompt(_prompt_runner(ContextVariablesBridge(trusted)))
+    prompt = _prompt(_prompt_runner(ContextVariablesBridge(_choose(trusted, ["content"]))))
     assert "Pack: content (source: generated_module)" in prompt
     assert "content.list_entries" in prompt
     assert "Pack: mozaikspay" not in prompt
 
 
-@pytest.mark.parametrize("selected", [[], ["content"], ["social"], ["messaging"], ["social", "messaging"]])
+@pytest.mark.parametrize("selected", [[], ["content"], ["social"], ["messaging"], ["social", "messaging"], ["support", "messaging"]])
 def test_shipped_root_selection_controls_design_prompt(tmp_path, monkeypatch, selected):
     factory = tmp_path / "factory_app"
     root = factory / "build_context"
-    for name in ("content", "social", "messaging"):
+    for name in ("content", "social", "messaging", "support"):
         shutil.copytree(ROOT / "factory_app/build_context" / name, root / name)
     selection = root / "selection"
     selection.mkdir()
@@ -189,12 +198,13 @@ def test_shipped_root_selection_controls_design_prompt(tmp_path, monkeypatch, se
     definitions = yaml.safe_load((WORKFLOW / "context_variables.yaml").read_text(encoding="utf-8"))["definitions"]
     policy = build_context_authority_policy(workflow_name="DesignDocs", definitions=definitions)
     trusted = load_trusted_build_context(policy, build_context_root=root)
-    prompt = _prompt(_prompt_runner(ContextVariablesBridge(trusted)))
+    prompt = _prompt(_prompt_runner(ContextVariablesBridge(_choose(trusted, selected))))
 
     for pack, action in {
         "content": "content.list_entries",
         "social": "friends.send_friend_request",
         "messaging": "messages.send_message",
+        "support": "support.create_support_request",
     }.items():
         assert (action in prompt) == (pack in selected)
     assert (HEADER in prompt) == bool(selected)
@@ -211,7 +221,7 @@ def test_invalid_template_module_is_reported_without_exposing_its_payload(tmp_pa
     monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(root))
     definitions = yaml.safe_load((WORKFLOW / "context_variables.yaml").read_text(encoding="utf-8"))["definitions"]
     policy = build_context_authority_policy(workflow_name="DesignDocs", definitions=definitions)
-    bridge = ContextVariablesBridge(load_trusted_build_context(policy, build_context_root=root))
+    bridge = ContextVariablesBridge(_choose(load_trusted_build_context(policy, build_context_root=root), ["content"]))
 
     prompt = _prompt(_prompt_runner(bridge))
 
@@ -234,6 +244,7 @@ def test_selected_pack_guidance_composes_with_all_declared_design_middleware(tmp
         "design_docs_save_outcome": "revise",
         "design_docs_save_feedback": "Use the approved editor role.",
     }
+    context = _choose(context, ["content"])
     bridge = ContextVariablesBridge(context)
     middleware = yaml.safe_load((WORKFLOW / "middleware.yaml").read_text(encoding="utf-8"))["prompt_middleware"]
     functions = [

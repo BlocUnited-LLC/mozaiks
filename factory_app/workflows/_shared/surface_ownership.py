@@ -331,18 +331,13 @@ def _get(context: Any, key: str, default: Any = None) -> Any:
     return detach(context.get(key, default)) if context is not None else default
 
 
-def default_subscription_contract(context: Any) -> dict[str, Any] | None:
-    """The same default pack used to complete greenfield subscription pages."""
-    if _get(context, "brownfield_build_path") or _get(context, "monetization_enabled") is not True:
-        return None
-    binding = _get(context, "run_build_binding", {}) or {}
-    if binding.get("phase", "genesis") != "genesis":
-        return None
-    blueprint = _get(context, "concept_blueprint", {}) or {}
-    intent = blueprint.get("monetization_intent") or {}
-    if intent.get("monetized") is not True or intent.get("subscription_contract_likely") is not True:
-        return None
-    return dict(yaml.safe_load(workflow_context_path("mozaikspay", "contract.yaml").read_text(encoding="utf-8")))
+def selected_subscription_contract(context: Any) -> dict[str, Any] | None:
+    """Read a subscription provider only from the actual build selection."""
+    contracts = [contract for contract in managed_pack_contracts(context)
+                 if "subscription_write_path" in (contract.get("provides_capabilities") or [])]
+    if len(contracts) > 1:
+        raise ValueError("Select exactly one subscription assignment provider")
+    return contracts[0] if contracts else None
 
 
 def _identifiers(values: Any) -> set[str]:
@@ -732,16 +727,13 @@ def _account_listing(
 
 
 def _ownership_rules(
-    context_variables: Any, *, include_default_subscription: bool,
+    context_variables: Any,
 ) -> tuple[list[SurfaceOwnershipRule], dict[str, dict[str, Any]]]:
     catalog = yaml.safe_load(
         workflow_context_path("AppGenerator", "capability_routing.yaml").read_text(encoding="utf-8"),
     )
     declarations = list(catalog["layers"]["runtime_provided"]["surface_ownership"])
     contracts = managed_pack_contracts(context_variables)
-    default = default_subscription_contract(context_variables) if include_default_subscription else None
-    if default and not any(contract.get("contract_id") == default["contract_id"] for contract in contracts):
-        contracts.append(default)
     facades: dict[str, dict[str, Any]] = {}
     for contract in contracts:
         ownership = contract.get("surface_ownership", [])
@@ -1023,10 +1015,9 @@ def validate_surface_ownership(
     *,
     context_variables: Any,
     data_contract: dict[str, Any] | None = None,
-    include_default_subscription: bool = False,
 ) -> None:
     """Reject duplicate owners in approved designs; late planning never rewrites them."""
-    rules, facades = _ownership_rules(context_variables, include_default_subscription=include_default_subscription)
+    rules, facades = _ownership_rules(context_variables)
     facade_actions = {module_id: _facade_actions(facade) for module_id, facade in facades.items()}
 
     surfaces = surface_map.get("surfaces") or []
@@ -1498,7 +1489,7 @@ def _redirect_navigation(
 
 
 def entity_ownership_facts(
-    context_variables: Any, *, include_default_subscription: bool = False,
+    context_variables: Any,
 ) -> tuple[Any, set[str]]:
     """What feedback about an entity needs: a platform/provider-entity test and the managed facade ids.
 
@@ -1506,7 +1497,7 @@ def entity_ownership_facts(
     identity (a credential-gated one only where the record signs in) or a
     selected provider's entity, which can never be an app entity.
     """
-    rules, facades = _ownership_rules(context_variables, include_default_subscription=include_default_subscription)
+    rules, facades = _ownership_rules(context_variables)
     names = _keys(entity for rule in rules for entity in [*rule.entity_names, *rule.surface_entity_names])
 
     def reserved(collection: dict[str, Any]) -> bool:
@@ -1528,7 +1519,6 @@ def declare_collection_entities(
     *,
     context_variables: Any,
     data_contract: dict[str, Any],
-    include_default_subscription: bool = False,
 ) -> list[dict[str, Any]]:
     """Add a module-owned collection's explicit entity to the module's primary_entities.
 
@@ -1542,7 +1532,7 @@ def declare_collection_entities(
     in one group but owned by another surface. Returns one record per completed
     surface.
     """
-    rules, _ = _ownership_rules(context_variables, include_default_subscription=include_default_subscription)
+    rules, _ = _ownership_rules(context_variables)
     reserved = _keys(entity for rule in rules for entity in [*rule.entity_names, *rule.surface_entity_names])
     surfaces = {str(surface.get("surface_id")): surface for surface in surface_map.get("surfaces") or []}
     groups = [(str(group.get("surface_id")), group.get("collections") or []) for group in data_contract.get("surfaces") or []]
@@ -1602,7 +1592,6 @@ def normalize_surface_ownership(
     context_variables: Any,
     data_contract: dict[str, Any],
     experience_spec: dict[str, Any] | None = None,
-    include_default_subscription: bool = False,
 ) -> list[dict[str, Any]]:
     """Apply only contract-determined corrections, atomically, before design approval.
 
@@ -1631,7 +1620,7 @@ def normalize_surface_ownership(
     but authentication (``_only_platform_authentication``), is removed the same
     way and recorded on that surface, which keeps everything else it owns.
     """
-    rules, facades = _ownership_rules(context_variables, include_default_subscription=include_default_subscription)
+    rules, facades = _ownership_rules(context_variables)
     normalized_map, normalized_data = deepcopy(surface_map), deepcopy(data_contract)
     normalized_spec = deepcopy(experience_spec) if experience_spec is not None else None
     records: dict[tuple[str, str], dict[str, Any]] = {}
@@ -2620,7 +2609,6 @@ def normalize_surface_ownership(
     ]
     validate_surface_ownership(
         normalized_map, context_variables=context_variables, data_contract=normalized_data,
-        include_default_subscription=include_default_subscription,
     )
     surface_map.update(normalized_map)
     data_contract.update(normalized_data)

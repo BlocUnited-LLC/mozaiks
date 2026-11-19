@@ -44,7 +44,10 @@ PAGE_PATHS = {
 
 
 @pytest.fixture(autouse=True)
-def _load_factory_contracts():
+def _load_factory_contracts(monkeypatch, tmp_path):
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
     _load_models()
 
 
@@ -60,7 +63,9 @@ def _live_inputs():
         source = Path(__file__).resolve().parents[1] / "factory_app/build_context" / pack["id"]
         metadata = verify_pack_integrity(source, pack["id"])
         pack.update(pack_source_path=str(source), version=metadata["version"], digest=metadata["digest"])
-    return fixture["plan"], ContextVariablesBridge(values)
+    from tests.reviewed_pack_fixture import reviewed_pack_fixture
+
+    return fixture["plan"], ContextVariablesBridge(reviewed_pack_fixture(values, ["mozaikspay"]))
 
 
 def _domain_inputs():
@@ -130,6 +135,9 @@ def _domain_inputs():
     task_collection = next(surface for surface in data["surfaces"] if surface["surface_id"] == "tasks")["collections"][0]
     task_collection.update(entity="Task", tenancy="per_user", owner_field="user_id")
     context.set("data_contract", data)
+    from tests.reviewed_pack_fixture import reviewed_pack_fixture
+
+    context = ContextVariablesBridge(reviewed_pack_fixture(context.snapshot(), ["mozaikspay"]))
     return plan, context
 
 

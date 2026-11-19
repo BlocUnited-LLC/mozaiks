@@ -18,12 +18,15 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_owned_output_paths,
 )
 from tests.test_app_plan_managed_facade_repair import _task
-from tests.test_app_plan_task_identity_repair import _live_plan
+from tests.test_app_plan_task_identity_repair import _live_plan, _review_fixture_design
 from tests.test_continuous_deterministic_materialization import _load_models
 
 
 @pytest.fixture(autouse=True)
-def _load_factory_contracts():
+def _load_factory_contracts(monkeypatch, tmp_path):
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
     _load_models()
 
 
@@ -37,6 +40,7 @@ def _reported_plan(label="task_registry"):
     design = detach(context.get("design_surface_map"))
     design["surfaces"][0]["surface_id"] = "tasks"
     context.set("design_surface_map", design)
+    _review_fixture_design(context)
     ids = {"6": "module_contract", "7": "data_models", "8": "business_services"}
     for task in plan["build_tasks"]:
         # This identity-only fixture declares no collection ownership.
@@ -313,6 +317,7 @@ def test_capability_repair_requires_an_approved_app_module(surface):
     design = detach(context.get("design_surface_map"))
     design["surfaces"][0] = surface
     context.set("design_surface_map", design)
+    _review_fixture_design(context)
     before = deepcopy(plan)
 
     assert _repair_module_task_capabilities(plan, context) == []

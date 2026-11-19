@@ -11,7 +11,8 @@ from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble
 from factory_app.workflows.AppGenerator.tools.code_file_utils import admitted_app_file_map
 from mozaiksai.core.workflow.context.adapter import create_context_container
 from mozaiksai.core.workflow.generator_support.code_files import data_contract_requires_auth
-from tests.factory_context import factory_context, planned_tasks
+from tests.factory_context import planned_tasks
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_app_ui_composition import component, compose, contribution, retitled
 from tests.test_appgenerator_revision_baseline import _replace_archive
 from tests.test_appgenerator_revision_baseline import baseline as revision_baseline  # noqa: F401
@@ -52,16 +53,30 @@ def make_route_ownership_pack(root):
     return root
 
 
-@pytest.fixture(scope="module", autouse=True)
-def route_ownership_pack(tmp_path_factory):
+@pytest.fixture(autouse=True)
+def route_ownership_pack(tmp_path, monkeypatch):
     global _route_pack
-    _route_pack = make_route_ownership_pack(tmp_path_factory.mktemp("pack-owned-route") / "messaging")
+    _route_pack = make_route_ownership_pack(tmp_path / "pack-owned-route" / "messaging")
+    monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(_route_pack.parent))
     yield
     _route_pack = None
 
 
 def _context(root=None, *, pinned=True):
     return _messaging_context(root or _route_pack, pinned=pinned)
+
+
+def _reviewed_context(initial):
+    """Bind workflow inputs to the disposable pack; physical fixture inputs stay raw."""
+    context = reviewed_pack_fixture(initial, ["messaging"])
+    if "run_build_binding" in initial:
+        context["app_id"] = initial["app_id"]
+    plan = context["app_build_plan"]
+    plan["capability_packs"].extend(
+        {**pack, "capability_pack_id": pack["id"]} for pack in context["capability_packs"]
+    )
+    return context
 
 
 def _assembled_files():
@@ -98,10 +113,10 @@ async def _assemble_revision(saved, revised, *, pages=("board",), **extra):
     selected = _context()
     plan = {**selected["app_build_plan"], "pages": [{"name": name, "route": f"/{name}", "ui_surface": "custom_react_page"} for name in pages],
             "build_tasks": [{"task_id": "pages", "task_type": "page_bundle", "owned_paths": list(revised)}]}
-    context = create_context_container(initial={
+    context = create_context_container(initial=_reviewed_context({
         **saved.context, **selected, "app_build_plan": plan, "data_contract": EMPTY_CONTRACT,
         "app_task_batch_results": {"pages": {"code_files": contribution("task:pages", revised)["files"]}}, **extra,
-    })
+    }))
     return await assemble_app_tasks(context_variables=context)
 
 
@@ -163,7 +178,7 @@ async def test_genesis_repair_overlay_reaches_the_composed_roots(fault):
     repair = {"ui/route_manifest.json": retitled(component(path="ui/pages/custom/board.jsx")["ui/route_manifest.json"], "board", "Repaired board")}
 
     def context(code_files):
-        return Context(factory_context({
+        return Context(_reviewed_context({
             **_context(), "app_id": "genesis_repair", "data_contract": EMPTY_CONTRACT, "code_files": code_files,
             "app_task_batch_items": planned_tasks("pages"),
             "app_task_batch_results": {"pages": {"code_files": contribution("task:pages", task)["files"]}},
@@ -185,7 +200,7 @@ def _genesis_context(task, **extra):
     results = extra.pop("app_task_batch_results", {"pages": {"code_files": contribution("task:pages", task)["files"]}})
     # The batch ran the plan's tasks: one planned item per result key.
     extra.setdefault("app_task_batch_items", planned_tasks(*results))
-    return Context(factory_context({
+    return Context(_reviewed_context({
         **_context(), "app_id": "genesis_repair", "data_contract": EMPTY_CONTRACT,
         "app_task_batch_results": results, **extra,
     }))
@@ -253,7 +268,7 @@ def test_admitted_map_keeps_last_writer_wins_without_pack_composition(caplog):
 async def test_repair_overlay_cannot_change_a_pack_route():
     task, pack = component(path="ui/pages/custom/board.jsx"), _assembled_files()
     repair = {"ui/route_manifest.json": retitled(compose(task, pack)["ui/route_manifest.json"], "messages", "Hijacked")}
-    result = await assemble_app_tasks(context_variables=Context(factory_context({
+    result = await assemble_app_tasks(context_variables=Context(_reviewed_context({
         **_context(), "app_id": "pack_route_repair", "data_contract": EMPTY_CONTRACT,
         "code_files": contribution("repair", repair)["files"], "app_task_batch_items": planned_tasks("pages"),
         "app_task_batch_results": {"pages": {"code_files": contribution("task:pages", task)["files"]}},
@@ -267,7 +282,7 @@ async def test_pack_ui_assembly_renders_provenance_from_the_pinned_build_timesta
     pinned = "2020-01-02T03:04:05+00:00"
     provenance = []
     for _ in range(2):
-        result = await assemble_app_tasks(context_variables=Context(factory_context({
+        result = await assemble_app_tasks(context_variables=Context(_reviewed_context({
             **_context(), "app_id": "pinned_provenance", "build_timestamp": pinned, "data_contract": EMPTY_CONTRACT,
             "app_task_batch_items": planned_tasks("shell", "pages"),
             "app_task_batch_results": {
@@ -289,10 +304,10 @@ async def test_revision_plan_task_edit_of_workspace_pack_path_fails_assembly_exp
     handler = "modules/messages/backend/handler.py"
     selected = _context()
     plan = {**selected["app_build_plan"], "build_tasks": [{"task_id": "svc", "task_type": "business_services", "owned_paths": [handler]}]}
-    context = create_context_container(initial={
+    context = create_context_container(initial=_reviewed_context({
         **saved.context, **selected, "app_build_plan": plan, "data_contract": EMPTY_CONTRACT,
         "app_task_batch_results": {"svc": {"code_files": [{"filename": handler, "content": saved.files[handler] + "\n# revision edit\n"}]}},
-    })
+    }))
     result = await assemble_app_tasks(context_variables=context)
     # The planned change is neither shipped nor silently dropped behind a success.
     assert not result["success"] and "WorkspacePackOutputChangeUnsupported" in result["error"]
@@ -310,10 +325,10 @@ def _revision_context(saved, revised, *, pages=("board",), **extra):
     selected = _context()
     plan = {**selected["app_build_plan"], "pages": [{"name": name, "route": f"/{name}", "ui_surface": "custom_react_page"} for name in pages],
             "build_tasks": [{"task_id": "pages", "task_type": "page_bundle", "owned_paths": list(revised)}]}
-    return create_context_container(initial={
+    return create_context_container(initial=_reviewed_context({
         **saved.context, **selected, "app_build_plan": plan, "data_contract": EMPTY_CONTRACT,
         "app_task_batch_results": {"pages": {"code_files": contribution("task:pages", revised)["files"]}}, **extra,
-    })
+    }))
 
 
 def _stale_baseline_copy(saved):
@@ -528,7 +543,7 @@ async def test_revision_app_schema_repair_restoring_the_baseline_supersedes_the_
     task = {"task_id": "pages", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent",
             "owned_paths": sorted(revised), "depends_on": []}
     selected = _context()
-    context = create_context_container(initial={
+    context = create_context_container(initial=_reviewed_context({
         **saved.context, **selected, "app_task_batch_items": [task],
         "app_build_plan": {**selected["app_build_plan"], "build_tasks": [task], "pages": [
             {"name": "board", "route": "/board", "ui_surface": "custom_react_page"},
@@ -537,7 +552,7 @@ async def test_revision_app_schema_repair_restoring_the_baseline_supersedes_the_
         # save keeps the bundle's compiled data/contract.json.
         "data_contract": json.loads(pack["data/contract.json"]) if approved == "lists_the_pack_surface" else EMPTY_CONTRACT,
         "app_task_batch_results": {"pages": {"code_files": contribution("task:pages", revised)["files"]}},
-    })
+    }))
     first = await assemble_app_tasks(context_variables=context)
     assert first["success"], first
     assert _routes(_files(first))["board"]["meta"]["title"] == "Faulty title"
@@ -873,14 +888,14 @@ async def test_auth_required_messaging_revision_repair_reaches_validation_and_ex
     revised = {**board, "ui/route_manifest.json": retitled(board["ui/route_manifest.json"], "board", "Faulty title")}
     task = {"task_id": "pages", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent",
             "owned_paths": sorted(revised), "depends_on": []}
-    context = create_context_container(initial={
+    context = create_context_container(initial=_reviewed_context({
         **saved.context, **selected, "chat_id": "revision-chat", "app_task_batch_items": [task],
         "app_build_plan": {**selected["app_build_plan"], "build_tasks": [task], "pages": [
             {"name": "board", "route": "/board", "ui_surface": "custom_react_page"},
         ]},
         "data_contract": approved,
         "app_task_batch_results": {"pages": {"code_files": contribution("task:pages", revised)["files"]}},
-    })
+    }))
 
     assembled = await assemble_app_tasks(context_variables=context)
     assert assembled["success"], assembled
@@ -945,7 +960,7 @@ async def test_genesis_app_schema_save_keeps_the_assembled_data_contributions_in
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
     approved = deepcopy(CARRIED_APP_CONTRACT)
     selected = _context()
-    context = Context(factory_context({
+    context = Context(_reviewed_context({
         **selected, "app_id": "genesis_schema", "chat_id": "genesis-chat", "data_contract": approved,
         "app_build_plan": {**selected["app_build_plan"], "pages": [
             {"name": "board", "route": "/board", "ui_surface": "custom_react_page"},
@@ -988,7 +1003,7 @@ async def test_genesis_app_schema_save_leaves_pack_data_contract_failures_to_ass
 
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
     approved, selected, expected = _pack_data_contract_failure(failure)
-    context = Context(factory_context({
+    context = Context(_reviewed_context({
         **selected, "app_id": "genesis_schema", "chat_id": "genesis-chat", "data_contract": approved,
         "app_build_plan": {**selected["app_build_plan"], "pages": [
             {"name": "board", "route": "/board", "ui_surface": "custom_react_page"},
@@ -1053,7 +1068,7 @@ def test_a_page_repair_is_not_rejected_for_a_pack_data_contract_failure(tmp_path
     allowed = sorted([*board, "app.json"])
     task = {"task_id": "pages", "task_type": "page_bundle", "initial_agent": "AppSchemaAgent",
             "owned_paths": allowed, "depends_on": []}
-    context = Context(factory_context({
+    context = Context(_reviewed_context({
         **selected, "app_id": "repair_schema", "chat_id": "repair-chat", "data_contract": approved,
         "app_build_plan": {**selected["app_build_plan"], "build_tasks": [task], "pages": [
             {"name": "board", "route": "/board", "ui_surface": "custom_react_page"},

@@ -1323,11 +1323,12 @@ definitions:
   capability_packs:
     type: array
     description: >
-      Prompt-safe capability pack descriptors discovered from the active
+      Trusted available offering descriptors discovered from the active
       build_context/{context_name}/context.yaml when it declares pack:. Each
       entry is a CapabilityPack dict with fields such as id, capabilities,
       facades, pack_source_path, and capability_source.
-      Empty list in OSS mode.
+      These offerings are not the build selection. The bound owner-reviewed
+      DesignDocs artifact determines reusable sources for planning and assembly.
     source:
       type: build_context
       default: []
@@ -1359,7 +1360,7 @@ definitions:
   operator_contracts:
     type: array
     description: >
-      Prompt-safe typed operator contract descriptors loaded from the selected
+      Typed operator offering contracts loaded from the registered
       build_context/{context_name}/contract.yaml file and projected for this
       workflow.
     source:

@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import yaml
 
+from factory_app.workflows._shared.pack_selection import selected_pack_rows
 from factory_app.workflows.AppGenerator.tools.hook_primitive_catalog import inject_primitive_catalog
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge, _workflow_tool_invocation
 from mozaiksai.core.workflow.generator_support.code_files import extract_code_file_map_from_payload
@@ -17,7 +19,7 @@ from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     module_action_index_from_context,
     normalize_planned_page_content,
 )
-from tests.factory_context import factory_context
+from tests.reviewed_pack_fixture import registered_pack_fixture, reviewed_pack_fixture
 
 
 def _files():
@@ -173,7 +175,7 @@ def test_canonical_read_schema_exposes_actual_service_projection_fields_to_pages
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("template_key,passed", [("count", True), ("invented", False)])
-async def test_assembly_validates_actual_pack_page_and_action_outputs(monkeypatch, template_key, passed):
+async def test_assembly_validates_actual_pack_page_and_action_outputs(tmp_path, monkeypatch, template_key, passed):
     from factory_app.workflows.AppGenerator.tools import assemble_app_tasks as assembly
 
     page = {
@@ -192,23 +194,54 @@ async def test_assembly_validates_actual_pack_page_and_action_outputs(monkeypatc
     }
     final_page = deepcopy(page)
     final_page["sections"][0]["config"]["value_key"] = template_key
-    template_files = {**original_files, "ui/pages/dashboard.yaml": yaml.safe_dump(final_page)}
-    monkeypatch.setattr(assembly, "resolve_managed_capability_templates", lambda *args, **kwargs: [
-        {"filename": path, "content": content} for path, content in template_files.items()
-    ])
-    context = ContextVariablesBridge(factory_context({
-        "generated_files": original_files, "capability_packs": [], "app_build_plan": {
+    template_manifest = {
+        "schema_version": "mozaiks.module.v1",
+        "module": {"id": "reports", "handler": "backend.handler:ReportsHandler"},
+        "actions": [{
+            **manifest["actions"][0],
+            "description": "Read the report count.",
+            "handler_method": "summary",
+            "api_surface": "public_readonly",
+        }],
+    }
+    template_files = {
+        "modules/reports/module.yaml": yaml.safe_dump(template_manifest),
+        "ui/pages/dashboard.yaml": yaml.safe_dump(final_page),
+    }
+    pack_id = "reporting_dashboard"
+    pack = registered_pack_fixture(tmp_path, monkeypatch, pack_id, "generated_module")
+    root = Path(pack["pack_source_path"])
+    config_path = root / "context.yaml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["assets"].append({"path": "templates", "kind": "templates"})
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    contract_path = root / "contract.yaml"
+    contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    contract["required_outputs"] = [{"path": path, "owner": "templates"} for path in template_files]
+    contract_path.write_text(yaml.safe_dump(contract), encoding="utf-8")
+    for path, content in template_files.items():
+        template = root / "templates" / path
+        template.parent.mkdir(parents=True, exist_ok=True)
+        template.write_text(content, encoding="utf-8")
+
+    values = reviewed_pack_fixture({
+        "generated_files": original_files,
+        "app_build_plan": {
             "pages": [{"name": "dashboard", "route": "/dashboard"}],
-            "capability_packs": [], "build_tasks": [{
+            "build_tasks": [{
                 "task_id": "page", "task_type": "page_bundle", "owned_paths": ["ui/pages/dashboard.yaml"],
             }],
         },
-    }))
+    }, [pack_id])
+    values["app_build_plan"]["capability_packs"] = selected_pack_rows(values)
+    context = ContextVariablesBridge(values)
     with _workflow_tool_invocation(context):
         result = await assembly.assemble_app_tasks(context_variables=context)
     assert result["success"] is passed, result
     if passed:
-        assert yaml.safe_load(context.get("generated_files")["ui/pages/dashboard.yaml"])["sections"][0]["config"]["value_key"] == "count"
+        assembled = context.get("generated_files")
+        assert assembled["modules/reports/module.yaml"] == template_files["modules/reports/module.yaml"]
+        assert yaml.safe_load(assembled["ui/pages/dashboard.yaml"])["sections"][0]["config"]["value_key"] == "count"
     else:
         assert "invented" in result["error"] and "Valid fields: count" in result["error"]
         assert context.get("generated_files") == original_files

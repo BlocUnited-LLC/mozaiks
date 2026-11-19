@@ -12,11 +12,8 @@ Covers helpers not in test_app_build_plan_helpers.py or test_app_build_plan_help
 
   _context_available_pack_map:
     - None → {}
-    - capability_packs list → mapped by pack_id
-    - available_managed_capabilities list → merged into map
-    - duplicate pack_ids → merged (later values win for non-existing keys)
-    - packs with id / pack_id / capability_pack_id fields → all accepted
-    - non-dict packs → skipped
+    - unreviewed inventory cannot supply a selected source
+    - id aliases and duplicate inventory cannot supply review authority
 
   _context_managed_capability_ids:
     - None → empty frozenset
@@ -99,6 +96,7 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _validate_user_facing_managed_capability_tasks,
 )
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
 
 # ---------------------------------------------------------------------------
@@ -115,7 +113,10 @@ def projected_descriptor_unit(monkeypatch):
     from factory_app.workflows.AppGenerator.tools import app_build_plan as module
 
     def descriptors(packs, *, context_variables):
-        available = _context_available_pack_map(context_variables)
+        available = {
+            row.get("id") or row.get("pack_id") or row.get("capability_pack_id"): detach(row)
+            for row in context_variables.get("available_managed_capabilities", [])
+        }
         return {
             pack["capability_pack_id"]: available[pack["capability_pack_id"]]
             for pack in packs
@@ -162,44 +163,41 @@ class TestContextAvailablePackMap:
     def test_none_context_returns_empty(self):
         assert _context_available_pack_map(None) == {}
 
-    def test_capability_packs_mapped_by_pack_id(self):
+    def test_unreviewed_capability_inventory_is_not_selected(self):
         ctx = _ctx({"capability_packs": [{"capability_pack_id": "wallet", "label": "Wallet"}]})
         result = _context_available_pack_map(ctx)
-        assert "wallet" in result
-        assert result["wallet"]["label"] == "Wallet"
+        assert result == {}
 
-    def test_available_managed_capabilities_merged(self):
+    def test_managed_availability_is_not_selected(self):
         ctx = _ctx({
             "capability_packs": [],
             "available_managed_capabilities": [{"id": "billing", "label": "Billing"}],
         })
         result = _context_available_pack_map(ctx)
-        assert "billing" in result
+        assert result == {}
 
-    def test_id_field_accepted(self):
+    def test_inventory_id_does_not_supply_review(self):
         ctx = _ctx({"capability_packs": [{"id": "payment_provider", "label": "payment provider"}]})
         result = _context_available_pack_map(ctx)
-        assert "payment_provider" in result
+        assert result == {}
 
-    def test_pack_id_field_accepted(self):
+    def test_inventory_pack_id_does_not_supply_review(self):
         ctx = _ctx({"capability_packs": [{"pack_id": "auth0"}]})
         result = _context_available_pack_map(ctx)
-        assert "auth0" in result
+        assert result == {}
 
-    def test_duplicate_pack_ids_merged(self):
+    def test_duplicate_inventory_does_not_supply_review(self):
         ctx = _ctx({
             "capability_packs": [{"id": "wallet", "from_caps": True}],
             "available_managed_capabilities": [{"id": "wallet", "from_hosted": True}],
         })
         result = _context_available_pack_map(ctx)
-        # Both keys merged — both present
-        assert result["wallet"]["from_caps"] is True
-        assert result["wallet"]["from_hosted"] is True
+        assert result == {}
 
     def test_non_dict_packs_skipped(self):
         ctx = _ctx({"capability_packs": ["not_a_dict", None, {"id": "valid"}]})
         result = _context_available_pack_map(ctx)
-        assert list(result.keys()) == ["valid"]
+        assert result == {}
 
     def test_packs_without_id_fields_skipped(self):
         ctx = _ctx({"capability_packs": [{"no_id_field": "x"}]})
@@ -870,13 +868,17 @@ class TestValidateMonetizationProviderSelection:
                 monetization_provider="entitlement_dispatch",
             )
 
-    def test_multiple_managed_write_path_owners_rejected(self):
+    def test_inline_custom_writer_does_not_replace_source_verification(self):
+        from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+            PackIntegrityError,
+        )
+
         custom = {
             "capability_pack_id": "custom_billing",
             "capability_source": "managed_capability",
             "provides_capabilities": ["subscription_write_path"],
         }
-        with pytest.raises(ValueError, match="Multiple managed capability packs"):
+        with pytest.raises(PackIntegrityError, match="cannot be resolved"):
             _validate_monetization_provider_selection(
                 [_MOZAIKSPAY_DESCRIPTOR, custom],
                 contract_required=True,

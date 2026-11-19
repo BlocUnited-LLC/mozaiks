@@ -20,8 +20,10 @@ To generate the fixture for CI replay:
     3. Commit tests/fixtures/appplan_saas_entitlement_dispatch_output.json.
     4. Future CI runs validate the saved plan without calling the LLM.
 
-Validated invariants (fixture replay):
-    1. Plan validates with app_build_plan.py without raising.
+Replay with a reviewed entitlement_dispatch selection releases template-owned paths.
+
+Validated invariants in the original capture:
+    1. The captured plan can be replayed with app_build_plan.py.
     2. No managed assignment writer such as the mozaikspay managed_capability pack.
     3. No task owns config/subscriptions.yaml; assembly writes it from the contract.
     4. entitlement_dispatch module_contract task present.
@@ -34,15 +36,19 @@ Validated invariants (fixture replay):
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from factory_app.workflows._shared.pack_selection import subscription_assignment_writers
+from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.context.frozen import detach
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
+
 _WORKSPACE = Path(__file__).resolve().parents[1]
-_TOOLS_DIR = _WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "tools"
 _FIXTURE_PATH = _WORKSPACE / "tests" / "fixtures" / "appplan_saas_entitlement_dispatch_output.json"
 
 _FIXTURE_PRESENT = _FIXTURE_PATH.exists()
@@ -51,35 +57,6 @@ _FIXTURE_PRESENT = _FIXTURE_PATH.exists()
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _load_module(relative_path: str, module_name: str):
-    file_path = _WORKSPACE / relative_path
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-class _Context:
-    def __init__(self) -> None:
-        self.data: dict[str, Any] = {}
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return self.data.get(key, default)
-
-    def set(self, key: str, value: Any) -> None:
-        self.data[key] = value
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        self.data[key] = value
-
-
-def _load_fixture() -> dict[str, Any]:
-    raw = json.loads(_FIXTURE_PATH.read_text(encoding="utf-8"))
-    if "AppBuildPlan" in raw:
-        return raw["AppBuildPlan"]
-    return raw
 
 
 def _get_tasks_by_type(build_tasks: list[dict[str, Any]], task_type: str) -> list[dict[str, Any]]:
@@ -152,25 +129,36 @@ class TestAppPlanAgentSaasFixtureReplay:
 
     @pytest.fixture(autouse=True)
     def _load(self) -> None:
-        self.plan = _load_fixture()
+        capture = json.loads(_FIXTURE_PATH.read_text(encoding="utf-8"))
+        self.plan = capture.get("AppBuildPlan", capture)
+        self.data_contract = (capture.get("context") or {}).get("data_contract")
         self.capability_packs = self.plan.get("capability_packs") or []
         self.build_tasks = self.plan.get("build_tasks") or []
 
     # --- Plan-level structure ---
 
     def test_fixture_plan_validates_with_app_build_plan_tool(self) -> None:
-        """Plan must pass app_build_plan.py validation without raising."""
-        mod = _load_module(
-            "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
-            f"tests.saas_dispatch_fixture_validation.{id(self)}",
-        )
-        ctx = _Context()
-        # The approved contract, not a planned task, makes this a subscription build.
-        ctx.set("subscription_contract", {"contract_required": True})
-        result = mod.app_build_plan(AppBuildPlan=self.plan, context_variables=ctx)
-        assert ctx.data.get("app_plan_ready") is True, (
-            f"app_plan_ready expected True, got {ctx.data.get('app_plan_ready')!r}. "
-            f"Validation result: {result}"
+        context = ContextVariablesBridge(reviewed_pack_fixture(
+            {
+                "data_contract": self.data_contract,
+                "subscription_contract": {"contract_required": True},
+            },
+            ["entitlement_dispatch"],
+        ))
+        result = app_build_plan(AppBuildPlan=self.plan, context_variables=context)
+        assert context.get("app_plan_ready") is True, result
+
+        normalized = detach(context.get("app_build_plan"))
+        assert normalized["monetization_provider"] == "entitlement_dispatch"
+        assert subscription_assignment_writers(context) == {"entitlement_dispatch": "generated_module"}
+        assert {pack["capability_pack_id"] for pack in normalized["capability_packs"]} == {
+            "analytics_pack", "entitlement_dispatch",
+        }
+        assert _get_tasks_by_type(normalized["build_tasks"], "page_bundle")
+        assert all(
+            path != "config/subscriptions.yaml" and not path.startswith("modules/entitlement_dispatch/")
+            for task in normalized["build_tasks"]
+            for path in task["owned_paths"]
         )
 
     def test_fixture_has_capability_packs(self) -> None:
@@ -214,7 +202,7 @@ class TestAppPlanAgentSaasFixtureReplay:
         tasks = _get_tasks_by_cap(self.build_tasks, "module_contract", "entitlement_dispatch")
         assert tasks, (
             "Missing module_contract task for entitlement_dispatch. "
-            "AppPlanAgent must include this when assignment_store is declared without a managed assignment writer."
+            "The capture predates template ownership of the self-managed assignment module."
         )
 
     def test_entitlement_dispatch_module_contract_owns_module_yaml(self) -> None:

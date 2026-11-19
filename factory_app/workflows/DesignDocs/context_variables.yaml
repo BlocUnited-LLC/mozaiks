@@ -1,4 +1,12 @@
 definitions:
+  pack_selection:
+    type: array
+    authority_class: derived_information
+    authorization: false
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Verified candidate pack identity pins written by select_capability_packs; not owner approval. Null requires explicit selection before saving, [] selects none.
+    source: {type: state, default: null}
   access_policy:
     type: object
     authority_class: tool_only_information
@@ -8,15 +16,15 @@ definitions:
     source: {type: computed, default: null}
   operator_capabilities:
     type: array
-    description: Trusted operator-selected pack identifiers resolved against installed public build-context declarations.
+    description: Trusted operator-enabled offerings resolved against installed public build-context declarations; not the current build selection.
     source: {type: build_context, default: []}
   capability_packs:
     type: array
-    description: Trusted selected pack descriptors used to enforce facade ownership before saving design surfaces.
+    description: Trusted available offering descriptors. The explicit pack_selection candidate and owner-reviewed artifact determine this build’s reusable packs.
     source: {type: build_context, default: []}
   operator_contracts:
     type: array
-    description: Declared contracts of selected packs, including exact surface ownership boundaries.
+    description: Declared contracts of available offerings; selected-source contracts are freshly resolved from the explicit candidate or reviewed artifact.
     source: {type: build_context, default: []}
   design_docs_save_outcome:
     type: string
@@ -409,6 +417,7 @@ definitions:
 agents:
   DesignDocsAgent:
     variables:
+    - pack_selection
     - design_docs_save_feedback
     - build_mode
     - workflow_sequence

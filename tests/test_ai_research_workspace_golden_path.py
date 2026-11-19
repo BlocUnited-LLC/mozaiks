@@ -38,6 +38,7 @@ from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.workflow_manager import UnifiedWorkflowManager
 from scripts.appgenerator_fixture_replay import execute_file_replay
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MOZAIKSPAY_CONTEXT_ROOT = REPO_ROOT / "factory_app" / "build_context" / "mozaikspay"
@@ -574,6 +575,9 @@ async def test_ai_research_workspace_offline_golden_path(
     live MozaiksPay fulfillment, or monthly execution-count enforcement.
     """
     monkeypatch.setenv("MOZAIKS_APP_VALIDATION_STRATEGY", "skip")
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
     product_request = (
         "Build an AI Research Workspace with saved results, Free and Pro plans, "
         "MozaiksPay billing, Pro-only AI research, usage visibility, and deployment output."
@@ -584,7 +588,7 @@ async def test_ai_research_workspace_offline_golden_path(
     assert mozaikspay_pack["id"] == "mozaikspay"
     assert mozaikspay_pack["capability_source"] == "managed_capability"
 
-    context = ContextVariablesBridge(
+    context = ContextVariablesBridge(reviewed_pack_fixture(
         {
             "workflow_name": "SubscriptionContractDesigner",
             "app_id": "research",
@@ -610,8 +614,9 @@ async def test_ai_research_workspace_offline_golden_path(
             "workflow_integration_metadata": _workflow_metadata(),
             "generated_workflow_name": "ResearchWorkflow",
             "generated_workflow_capability_id": "research.execute",
-        }
-    )
+        }, ["mozaikspay"]
+    ))
+    context.set("workflow_name", "SubscriptionContractDesigner")
 
     async def approve_review(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         return {"action": "confirm", "approved": True, "status": "approved"}

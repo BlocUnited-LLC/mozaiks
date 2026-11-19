@@ -9,7 +9,11 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_appgenerator_managed_capability_smoke import pack_sources as pack_sources
+from tests.test_appgenerator_managed_capability_smoke import (
+    registered_wallet_pack as registered_wallet_pack,
+)
 from tests.test_appgenerator_managed_capability_smoke import wallet_pack_root as wallet_pack_root
 
 WORKSPACE = Path(__file__).resolve().parents[1]
@@ -124,7 +128,9 @@ def test_app_plan_agent_prompt_requires_capability_first_planning() -> None:
     assert "Do NOT plan a second raw-frontend lane inside AppGenerator." in content
     assert "domain-specific profile records" in content
     assert "host-owned `/api/me` account/profile contract" in content
-    assert "minimum complete set of `capability_packs`" in content
+    assert "Derive app-owned capabilities from approved surfaces" in content
+    assert "preserve the exact owner-reviewed reusable pack selection" in content
+    assert "return to DesignDocs to add, remove or repin one" in content
     assert "surface_id for capability_pack_id" in content
     assert "AppBuildPlanOutput JSON" in content
     assert '\n        "workflows": [' not in content
@@ -786,7 +792,7 @@ def test_app_build_plan_tool_accepts_service_foundation_provider_adapter_lane() 
     assert task["owned_paths"] == ["services/adapters/search/vector_provider.py"]
 
 
-def test_app_build_plan_tool_rejects_managed_capability_backend_adapter_lane(pack_sources) -> None:
+def test_app_build_plan_tool_rejects_managed_capability_backend_adapter_lane(registered_wallet_pack) -> None:
     module = _load_module(
         "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
         "tests.app_build_plan_tool_hosted_backend_adapter_reject",
@@ -817,7 +823,9 @@ def test_app_build_plan_tool_rejects_managed_capability_backend_adapter_lane(pac
 
     with pytest.raises(ValueError, match="Managed capability adapters must be thin API clients"):
         module.app_build_plan(
-            AppBuildPlan=plan, context_variables=_Context(available_managed_capabilities=pack_sources),
+            AppBuildPlan=plan, context_variables=_Context(**reviewed_pack_fixture(
+                {"capability_packs": registered_wallet_pack}, ["wallet"],
+            )),
         )
 
 
