@@ -237,4 +237,3 @@ Affected fixture IDs: `85fb9714-1a8618cc`, `d190027d-0647769c`, `68008d69-460938
 These two outputs relied on implicit provider ownership of subscription_status. With no selected provider, separating platform identity leaves ambiguous app ownership that requires an explicit design decision.
 
 Affected fixture IDs: `b964a0a1-be75b249`, `b964a0a1-ad81fc1a`.
-
