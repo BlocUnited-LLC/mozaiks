@@ -80,7 +80,8 @@ async def _review_access_policy(
         "target_app_id": binding.target_app_id, "build_id": binding.build_id,
         "pack_identities": identities,
     }
-    if not identities and not policy["grants"] and not any(page_roles.values()):
+    empty_scope = not identities and not policy["grants"] and not any(page_roles.values())
+    if empty_scope and not context_variables.get("design_docs_review_requested_changes"):
         return receipt
     user_id, chat_id = _cv_get(context_variables, "user_id"), _cv_get(context_variables, "chat_id")
     if not user_id or not chat_id:
@@ -88,6 +89,8 @@ async def _review_access_policy(
     review_id = uuid4().hex
     labels = {role["role_id"]: role["label"] for role in policy["roles"]}
     checkpoints = [f"{role['label']} ({role['role_id']}): {role['description']}" for role in policy["roles"]]
+    if empty_scope:
+        checkpoints.append("The revised design selects no reusable packs, grants no role permissions and has no role-gated pages.")
     checkpoints.extend(
         f"{labels[grant['role_id']]} may {', '.join(grant['actions'])} on {grant['collection']}."
         for grant in policy["grants"]
@@ -1275,6 +1278,8 @@ async def save_design_docs_bundle(
             if detach(context_variables.get("pack_selection")) != selection:
                 raise ValueError("Pack selection changed during owner review; renew DesignDocs review")
             verified_pack_authorization(context_variables, selection=selection)
+        elif access_policy_review["status"] == "request_changes":
+            context_variables.set("design_docs_review_requested_changes", True)
     except Exception as err:
         return _refused(context_variables, "access_policy_review_failed", str(err), outcome="blocked")
     if access_policy_review["status"] == "request_changes":
@@ -1381,6 +1386,8 @@ async def save_design_docs_bundle(
     _cv_set(context_variables, "design_surface_map", surface_map)
     _cv_set(context_variables, "data_contract", data_contract)
     _cv_set(context_variables, "access_policy", access_policy)
+    if access_policy_review["status"] == "approved" and context_variables.get("design_docs_review_requested_changes"):
+        context_variables.set("design_docs_review_requested_changes", False)
     for message in normalization_messages:
         logger.info(message)
 

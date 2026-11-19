@@ -34,6 +34,15 @@ definitions:
     persisted: true
     description: Verified candidate pack identity pins written by select_capability_packs; not owner approval. Null requires explicit selection before saving, [] selects none.
     source: {type: state, default: null}
+  design_docs_review_requested_changes:
+    type: boolean
+    authority_class: closed_writer_routing_state
+    authorization: false
+    model_visible: false
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: The owner requested a revised proposal. Require a fresh review until the approved replacement is saved.
+    source: {type: state, default: false}
   access_policy:
     type: object
     authority_class: tool_only_information
@@ -452,6 +461,7 @@ agents:
     - monetization_enabled
     - build_mode
     - revision_scope
+    - refinement_request
     - brownfield_build_path
     - adoption_plan
     - ownership_boundary

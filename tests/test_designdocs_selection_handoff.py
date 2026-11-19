@@ -22,7 +22,12 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_role_grants import verified_pack_authorization
 from mozaiksai.core.workflow.outputs import structured
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
+from tests import test_design_access_policy as access_tests
+from tests import test_designdocs_capability_ownership as ownership
+from tests import test_designdocs_monetization_inventory as inventory
 from tests.test_designdocs_selected_pack_context import _prompt_runner
+
+persistence = inventory.persistence
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / "factory_app/workflows/DesignDocs"
@@ -210,3 +215,100 @@ async def test_factory_agent_requests_strict_selection_and_its_output_dispatches
         assert requests[0]["response_format"]["json_schema"]["schema"]["required"] == ["pack_ids"]
         await dispatch(handler, bridge, payload, 1)
         assert [row["pack_id"] for row in bridge.get("pack_selection")] == ["content"]
+
+
+@pytest.mark.parametrize("second_action", ["approve", "request_changes"])
+def test_owner_changes_then_structural_refusal_still_requires_empty_policy_review(monkeypatch, persistence, second_action):
+    context = ownership._context(managed=False)
+    cards = []
+
+    async def respond(_tool, payload, **_kwargs):
+        cards.append(payload)
+        action = "request_changes" if len(cards) == 1 else second_action
+        return {"action": action, "approved": action == "approve", "review_id": payload["review_id"],
+                "rationale": "Remove the grants and retain public pages."}
+
+    monkeypatch.setattr(save_design_doc, "use_ui_tool", AsyncMock(side_effect=respond))
+    assert inventory._save(context, access_tests._bundle())["outcome"] == "review_changes"
+    assert context.get("design_docs_review_requested_changes") is True
+    invalid = access_tests._bundle()
+    invalid["access_policy"]["grants"][0]["actions"] = ["create_report"]
+    assert inventory._save(context, invalid)["outcome"] == "revise"
+    assert context.get("design_docs_review_requested_changes") is True
+    assert len(cards) == 1
+    context.set("pack_selection", [])
+    result = inventory._save(context, inventory._bundle(pricing=False))
+    assert len(cards) == 2 and cards[0]["review_id"] != cards[1]["review_id"]
+    assert "The revised design selects no reusable packs, grants no role permissions and has no role-gated pages." in cards[1]["checkpoints"]
+    if second_action == "request_changes":
+        assert result["outcome"] == "review_changes", result
+        assert context.get("design_docs_review_requested_changes") is True
+        persistence[1].assert_not_called()
+        persistence[2].assert_not_awaited()
+        return
+    assert result["outcome"] == "saved", result
+    assert context.get("design_docs_review_requested_changes") is False
+    summary = persistence[2].await_args.kwargs["summary_payload"]
+    assert summary["access_policy_review"]["status"] == "approved"
+    assert summary["access_policy_review"]["review_id"] == cards[1]["review_id"]
+    assert summary["access_policy_review"]["pack_identities"] == []
+
+
+def test_initial_empty_policy_still_needs_no_owner_review(monkeypatch, persistence):
+    context = ownership._context(managed=False)
+    ui = AsyncMock(side_effect=AssertionError("Initial empty policy should not require review"))
+    monkeypatch.setattr(save_design_doc, "use_ui_tool", ui)
+    assert inventory._save(context, inventory._bundle(pricing=False))["outcome"] == "saved"
+    ui.assert_not_awaited()
+    assert persistence[2].await_args.kwargs["summary_payload"]["access_policy_review"]["status"] == "not_required"
+
+
+def test_owner_removing_content_pack_must_review_the_empty_replacement(selector, monkeypatch, persistence):
+    import asyncio
+
+    handler, selection_context = selector
+    context = ownership._context(managed=False)
+    for key, value in selection_context.snapshot().items():
+        if key not in {"run_build_binding", "chat_id", "user_id", "app_id", "pack_selection"}:
+            context.set(key, value)
+    context.set("pack_selection_outcome", "blocked")
+    context.set("pack_selection_attempts", 0)
+    asyncio.run(dispatch(handler, context, {"pack_ids": ["content"]}, 1))
+    assert [row["pack_id"] for row in context.get("pack_selection")] == ["content"]
+    cards = []
+
+    async def respond(_tool, payload, **_kwargs):
+        cards.append(payload)
+        action = "request_changes" if len(cards) == 1 else "approve"
+        return {"action": action, "approved": action == "approve", "review_id": payload["review_id"],
+                "rationale": "Remove Content and keep a public page."}
+
+    monkeypatch.setattr(save_design_doc, "use_ui_tool", AsyncMock(side_effect=respond))
+    result = inventory._save(context, inventory._bundle(pricing=False))
+    assert result["outcome"] == "review_changes", result
+    assert any("Selected pack content version" in item for item in cards[0]["checkpoints"])
+    asyncio.run(dispatch(handler, context, {"pack_ids": []}, 2))
+    assert detach(context.get("pack_selection")) == []
+    result = inventory._save(context, inventory._bundle(pricing=False))
+    assert result["outcome"] == "saved", result
+    assert len(cards) == 2 and cards[0]["review_id"] != cards[1]["review_id"]
+    assert any("selects no reusable packs" in item for item in cards[1]["checkpoints"])
+
+
+def test_review_latch_is_owned_by_deterministic_tool():
+    from mozaiksai.core.workflow.context.authority import (
+        PERSISTED_REPLAY_WRITER,
+        ContextAuthorityError,
+    )
+
+    definitions = yaml.safe_load((WORKFLOW / "context_variables.yaml").read_text())["definitions"]
+    policy = build_context_authority_policy(workflow_name="DesignDocs", definitions=definitions)
+    policy.require_can_write("design_docs_review_requested_changes", writer_id="deterministic_tool")
+    for writer in ("agent_text", "ui_response"):
+        with pytest.raises(ContextAuthorityError):
+            policy.require_can_write("design_docs_review_requested_changes", writer_id=writer)
+    assert policy.filter_for_replay({"design_docs_review_requested_changes": True}, writer_id=PERSISTED_REPLAY_WRITER) == {
+        "design_docs_review_requested_changes": True,
+    }
+    with pytest.raises(ContextAuthorityError):
+        policy.filter_for_replay({"design_docs_review_requested_changes": "true"}, writer_id=PERSISTED_REPLAY_WRITER)

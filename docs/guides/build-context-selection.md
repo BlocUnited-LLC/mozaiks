@@ -38,3 +38,7 @@ design.
 Template files stay on disk for deterministic assembly. The owner reviews the
 pack identities alongside the proposed permissions and page roles. AppGenerator
 uses the selection recorded in the reviewed DesignDocs artifact.
+
+When the owner requests changes, the replacement returns for review even if it
+removes every pack, grant and page-role requirement. An initial design with
+empty selections, grants and page gates can still proceed directly.
