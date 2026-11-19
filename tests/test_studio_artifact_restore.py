@@ -1035,14 +1035,25 @@ async def test_revalidate_saved_refinement_uses_verified_archive(tmp_path, monke
     )
     draft = draft.model_copy(update={"parent_build_record_id": "parent_1"})
     owner = draft.commit_metadata.author_user_id
-    store = SimpleNamespace(
-        get_build_record=AsyncMock(return_value=draft),
-        record_draft_revalidation=AsyncMock(return_value=True),
-    )
+    session = _session(artifact_version_id=draft.id, status=RefinementSessionStatus.FAILED)
+    session.metadata["coding_worker"] = {
+        "validation_result": {"validation_status": "failed"},
+    }
+    store = _PromoteStore(draft, sessions=[session])
+
+    async def write_validation(*, record, validation):
+        store.version = record.model_copy(update={
+            "validation_status": ArtifactValidationStatus.PASSED,
+            "commit_metadata": record.commit_metadata.model_copy(update={
+                "metadata": {**record.commit_metadata.metadata, "validation_result": validation},
+            }),
+        })
+        return True
+
+    store.record_draft_revalidation = AsyncMock(side_effect=write_validation)
     monkeypatch.setattr(studio, "get_artifact_store", lambda: store)
     monkeypatch.setattr(studio, "_resolve_studio_artifact_scope", AsyncMock(return_value=("app_1", owner)))
     monkeypatch.setattr(studio, "_require_current_build_in_lineage", AsyncMock())
-    monkeypatch.setattr(studio, "get_build_artifact_review", AsyncMock(return_value={"review": {}}))
     monkeypatch.setattr(compilation_inputs, "resolve_app_compilation_inputs", AsyncMock(return_value=None))
     validation = {
         "validation_status": "passed",
@@ -1055,8 +1066,14 @@ async def test_revalidate_saved_refinement_uses_verified_archive(tmp_path, monke
     result = await studio.revalidate_refinement_draft("draft_1", "appreg_1", object())
 
     assert result["validation_status"] == "passed"
+    assert result["review"]["review_status"] == "validated"
+    assert result["review"]["can_accept"] is True
+    assert result["review"]["can_revalidate"] is False
+    assert result["review"]["validation_result"] == validation
+    assert result["refinement_session"]["status"] == "failed"
     assert validator.call_args.kwargs["files"] == {"app.json": '{"appId":"app_1"}'}
     store.record_draft_revalidation.assert_awaited_once_with(record=draft, validation=validation)
+    store.version = draft
     archive.write_bytes(b"changed")
     with pytest.raises(studio.HTTPException, match="archive identity"):
         await studio.revalidate_refinement_draft("draft_1", "appreg_1", object())

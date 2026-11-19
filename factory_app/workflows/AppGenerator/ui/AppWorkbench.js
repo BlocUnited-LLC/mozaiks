@@ -87,9 +87,15 @@ const AppWorkbench = ({
       { id: 'close', label: 'Close', variant: 'secondary' },
     ]).map((action) => action.id === 'download_complete' ? { ...action, label: 'Confirm app bundle' } : action),
   } : payload;
-  const codingResultTone = codingResult?.status === 'validated' && savedDraftId
+  const reviewedValidation = artifactReview?.artifact_version_id === (savedDraftId || activeArtifactVersionId)
+    ? artifactReview?.validation_result
+    : null;
+  const candidateStatus = reviewedValidation?.validation_status === 'passed' ? 'validated'
+    : reviewedValidation?.validation_status === 'failed' ? 'failed'
+      : codingResult?.status;
+  const codingResultTone = candidateStatus === 'validated' && savedDraftId
     ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
-    : codingResult?.status === 'failed'
+    : candidateStatus === 'failed'
       ? 'border-red-500/30 bg-red-500/10 text-red-200'
       : 'border-amber-400/30 bg-amber-400/10 text-amber-100';
   const codingResultMessage = {
@@ -97,7 +103,7 @@ const AppWorkbench = ({
     planned: savedDraftId ? 'Draft saved; validation is incomplete.' : 'Refinement planned; no draft was saved.',
     failed: savedDraftId ? 'Draft saved; validation failed.' : 'Refinement failed; no draft was saved.',
     ineligible: 'This change is not eligible for scoped refinement.',
-  }[codingResult?.status] || 'Refinement has not completed.';
+  }[candidateStatus] || 'Refinement has not completed.';
 
   // Preview ownership follows the persisted artifact version and build target.
   const artifactVersionId = activeArtifactVersionId;
@@ -127,7 +133,9 @@ const AppWorkbench = ({
     validationStrategy,
     integrationTestResult,
     integrationPassed,
-  } = useAppValidationWorkbench(payload, config, codingResult, activeArtifactVersionId);
+  } = useAppValidationWorkbench(
+    payload, config, codingResult, activeArtifactVersionId, reviewedValidation
+  );
 
   const {
     sandboxStatus,
