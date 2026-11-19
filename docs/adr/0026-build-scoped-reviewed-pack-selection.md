@@ -89,8 +89,10 @@ consume that same selection.
    record selected catalog packs by ID, version and digest. Replay discovers
    the current trusted catalog source and verifies its bytes, so moving an
    unchanged source between installs preserves approval. Explicit physical
-   paths still require the source at the named location. There is no new
-   durable ledger.
+   paths still require the source at the named location. Scoped implementation
+   revisions preserve carried authored module contracts and still compile
+   verified partial pack templates against the approved data contract.
+   There is no new durable ledger.
 
 The Support pack must declare DesignDocs applicability so that an explicitly
 selected Support/Messaging combination can expose its stock widget, inbox,

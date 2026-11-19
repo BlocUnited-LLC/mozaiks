@@ -229,6 +229,65 @@ async def test_scoped_module_revision_assembly_preserves_create_only_contract_an
 
 
 @pytest.mark.asyncio
+async def test_scoped_module_revision_preserves_compiled_partial_pack(scoped_module_revision):
+    from factory_app.workflows._shared.pack_selection import PhysicalPackContext, selected_pack_rows
+    from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
+        scan_generated_bundle,
+    )
+    from factory_app.workflows.AppGenerator.tools.module_entitlement_gates import (
+        apply_entitlement_gates,
+    )
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        resolve_managed_capability_templates,
+    )
+    from tests.reviewed_pack_fixture import reviewed_pack_fixture
+    from tests.test_capability_pack_proof import _fixture_inputs
+
+    case = scoped_module_revision
+    pack_id = "outcome_feedback"
+    seed, _ = _fixture_inputs(pack_id)
+    contract = {**case.contract, "surfaces": case.contract["surfaces"] + seed["data_contract"]["surfaces"]}
+    plan = {**case.plan, "capability_packs": case.plan["capability_packs"] + seed["app_build_plan"]["capability_packs"]}
+    case.baseline.artifact.commit_metadata.author_user_id = "fixture-owner"
+    context = create_context_container(initial=reviewed_pack_fixture({
+        **case.baseline.context,
+        "user_id": "fixture-owner",
+        "app_build_plan": plan,
+        "data_contract": contract,
+        "app_task_batch_items": [case.task],
+        "app_task_batch_results": {case.task["task_id"]: {
+            "code_files": [{"filename": path, "content": source} for path, source in case.authored.items()],
+        }},
+    }, [pack_id]))
+    pack_context = PhysicalPackContext(context)
+    packs = selected_pack_rows(context)
+    templates = resolve_managed_capability_templates(packs, context_variables=pack_context)
+    baseline_sources = [*templates, {"filename": "data/contract.json", "content": json.dumps(contract)}]
+    compiled = _merge_code_files([{"code_files": baseline_sources}], app_build_plan=plan,
+                                 data_contract=contract, context_variables=pack_context)
+    compiled = apply_entitlement_gates(compiled, context_variables=context)
+    compiled_files = {item["filename"]: item["content"] for item in compiled}
+    pack_service = "modules/outcome_feedback/backend/service.py"
+    assert compiled_files[pack_service] != next(item["content"] for item in templates if item["filename"] == pack_service)
+    case.baseline.files.update(compiled_files)
+    _replace_archive(case.baseline, {})
+
+    result = await assemble_app_tasks(context_variables=context)
+
+    assert result["success"], result
+    files = extract_code_file_map_from_payload(result)
+    assert {path: files[path] for path in case.authored} == case.authored
+    assert files["modules/records/module.yaml"] == case.baseline.files["modules/records/module.yaml"]
+    assert files["data/contract.json"] == case.baseline.files["data/contract.json"]
+    compiled_pack_files = {path: source for path, source in compiled_files.items()
+                           if path.startswith("modules/outcome_feedback/")}
+    assert {path: files[path] for path in compiled_pack_files} == compiled_pack_files
+    errors = scan_generated_bundle(files, capability_packs=packs, planned_data_contract=contract,
+                                   context_variables=pack_context)
+    assert not errors, errors
+
+
+@pytest.mark.asyncio
 async def test_scoped_module_revision_repair_saves_authored_patch_without_synthesizing_reads(scoped_module_revision):
     case = scoped_module_revision
     await revision.hydrate_app_revision_context(case.context)

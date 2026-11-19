@@ -292,18 +292,22 @@ def _merge_code_files(
     file_map = materialize_collection_auth(file_map, data_contract=data_contract)
     # Selected pack manifests come from registered templates, never model tasks.
     pack_paths = pack_owned_outputs(context_variables)
-    pack_manifests = frozenset(
+    verified_pack_inputs = frozenset(
         item["filename"] for pack in inventory for item in pack["files"]
         if item["filename"] in pack_paths
-        and item["filename"].startswith("modules/") and item["filename"].endswith("/module.yaml")
         and file_map.get(item["filename"]) == item["content"]
     )
+    pack_manifests = frozenset(
+        path for path in verified_pack_inputs if path.startswith("modules/") and path.endswith("/module.yaml")
+    )
     template_modules = verified_template_module_ids(file_map, inventory)
-    # An implementation-only revision carries module contracts from the verified
-    # bundle and admits edits to the reviewed repo and service paths.
+    # Scoped revisions carry authored module contracts. Verified partial pack
+    # templates still need canonical compilation after assembly re-renders them.
     synthesis_files = {
         path: content for path, content in file_map.items()
-        if not (path.startswith("modules/") and (scoped_revision or path.split("/")[1] in template_modules))
+        if not path.startswith("modules/") or (
+            path.split("/")[1] not in template_modules and (not scoped_revision or path in verified_pack_inputs)
+        )
     }
     # Feature outputs may carry an auth edit alongside a module. Only the
     # pre-merge admitted bundle (or the canonical scaffold) can approve scopes.
