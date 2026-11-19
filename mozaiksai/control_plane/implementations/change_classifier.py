@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
+from enum import Enum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from logs.logging_config import get_core_logger
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 from mozaiksai.control_plane.contracts import ControlPlaneToolCall, ControlPlaneToolContext
 from mozaiksai.control_plane.executor import ControlPlaneToolExecutor
@@ -14,10 +17,26 @@ from mozaiksai.core.adapters.ag2_agent_runner import (
     AG2StructuredAgentRunner,
     StructuredAgentFactory,
 )
+from mozaiksai.core.adapters.llm_fallback import resolve_model_api_key
 from mozaiksai.core.usage.context import AuxiliaryUsageContext, resolve_auxiliary_usage_context
+from mozaiksai.core.usage.middleware import build_ag2_usage_middleware
 
 ChangeClassLiteral = Literal["patch", "design", "feature", "core"]
 _CHECKPOINT_EVENT = "request_submitted"
+_LOGGER = get_core_logger("change_classifier")
+_TYPO_ONLY = re.compile(
+    r"Fix (?:the|a) typo in the "
+    r"(?:(?:welcome|dashboard|projects page|dashboard empty state|archive button|"
+    r"billing navigation|project settings) )?(?:headline|title|message|label)\.",
+    re.IGNORECASE | re.ASCII,
+)
+
+
+class _TypoDecision(Enum):
+    """Is this request solely a correction to existing display text?"""
+
+    PATCH = "patch"
+    OTHER = "other"
 
 
 class ChangeClassifierResult(BaseModel):
@@ -70,6 +89,20 @@ class LLMChangeClassifier:
 
         llm_config = control_plane.resolve_capability_llm_config("classifier")
 
+        usage = resolve_auxiliary_usage_context(
+            app_id=app_id, user_id=user_id, context=usage_context,
+            target_app_id=target_app_id or app_id,
+        )
+        if (
+            control_plane.classifier.typo_decisions_enabled
+            and build_family == "app_bundle"
+            and declared_change_class in (None, "patch")
+            and _TYPO_ONLY.fullmatch(raw_user_request.strip())
+        ):
+            result = await self._try_typo_decision(raw_user_request.strip(), usage)
+            if result is not None:
+                return result
+
         user_prompt = self._build_user_prompt(
             build_family=build_family,
             raw_user_request=raw_user_request,
@@ -94,10 +127,7 @@ class LLMChangeClassifier:
         )
 
         result = await self._agent_runner.run(
-            usage_context=resolve_auxiliary_usage_context(
-                app_id=app_id, user_id=user_id, context=usage_context,
-                target_app_id=target_app_id or app_id,
-            ),
+            usage_context=usage,
             agent_name="ChangeClassifier",
             system_prompt=self._load_system_prompt(),
             user_prompt=user_prompt,
@@ -105,6 +135,45 @@ class LLMChangeClassifier:
             response_schema=ChangeClassifierResult,
         )
         return result
+
+    @staticmethod
+    async def _try_typo_decision(
+        request: str, usage: AuxiliaryUsageContext,
+    ) -> ChangeClassifierResult | None:
+        from ag2 import Agent
+        from ag2.config import OpenAIDecisionsConfig
+
+        try:
+            key = resolve_model_api_key("openai", include_primary_key=False)
+            if not key:
+                return None
+            name = "ChangeClassifierTypoDecision"
+            agent = Agent(
+                name,
+                config=OpenAIDecisionsConfig(api_key=key),
+                middleware=[build_ag2_usage_middleware(
+                    agent_name=name,
+                    workflow_name=usage.workflow_name,
+                    context_variables=usage.model_dump(mode="python"),
+                    execution_kind="auxiliary",
+                )],
+            )
+            reply = await agent.ask(request, response_schema=_TypoDecision)
+            if await reply.content() is not _TypoDecision.PATCH:
+                return None
+            confidence = next(
+                item["probability"] for item in reply.response.metadata["probabilities"]
+                if item["value"] == _TypoDecision.PATCH.value
+            )
+            return ChangeClassifierResult(
+                change_class="patch",
+                rationale="The request specifies a typo correction to existing display text.",
+                confidence=confidence,
+                signals=[],
+            )
+        except Exception as exc:
+            _LOGGER.warning("Typo decision unavailable; using the configured classifier (%s)", type(exc).__name__)
+            return None
 
     def _load_config(self) -> ControlPlaneConfig:
         config = self._config_loader()

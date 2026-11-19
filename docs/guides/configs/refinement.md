@@ -180,3 +180,7 @@ requested build has no fallback to current app evidence.
 - [AI Startup](ai-startup.md)
 - [Workflow Registry](../extending-ai-functionality/05-workflow-sequences.md)
 - [Refinement Harness Architecture](../../architecture/workflows/refinement-harness-architecture.md)
+
+### Opt-in typo classification
+
+Set `classifier.typo_decisions_enabled: true` in `app/config/refinement_policy.yaml` to let OpenAI Decisions confirm narrowly matched display-text typo requests for app bundles. Set `OPENAI_API_KEY` through the app secret policy. Only the matched request text is sent to Decisions. The configured classifier (Gemini in Factory) handles other requests and any failed or non-patch decision. A confirmed patch uses a fixed rationale and no scope signals. Compare actual routes and affected paths before enabling this on a live workload.
