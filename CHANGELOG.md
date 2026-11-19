@@ -46,6 +46,9 @@ This project follows a practical pre-1.0 changelog format:
 
 - Social friendships derive from atomic request states, fencing competing accept, decline, withdrawal, and removal actions. Profile tabs expose friend requests and messaging, with nullable pagination cursors and failed message sends preserving drafts.
 
+- Local journey evidence deduplicates scoped usage receipts and can reconcile
+  them against a bounded OpenAI provider journal. An isolated Windows harness
+  stops the Studio, driver and gateway process trees on exit or timeout.
 - Generated task-based apps retain admin registries, app-owned assistant settings,
   brand identity and approved signup intent; app menus show one authorized Admin entry.
 - App role projection uses backend-authorized grants, and generated owner bootstrap

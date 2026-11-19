@@ -65,7 +65,7 @@ SCRIPT: dict[str, Any] = {
         {
             "workflow": "ValueEngine",
             "component": "ConceptBlueprint",
-            "response": {"status": "submitted", "action": "approve", "approved": True},
+            "response": {"action": "approve", "approved": True, "review_id": {"$pending": "review_id"}},
         }
     ],
 }
@@ -115,7 +115,7 @@ def says(chat_id: str, agent: str, content: str) -> dict[str, Any]:
 
 def usage(chat_id: str, *, model: str = "gpt-4o-mini", prompt: int = 1000, completion: int = 100) -> dict[str, Any]:
     return envelope({
-        "kind": "usage_delta", "chat_id": chat_id, "model_name": model, "prompt_tokens": prompt,
+        "kind": "usage_delta", "event_id": "test-receipt", "chat_id": chat_id, "model_name": model, "prompt_tokens": prompt,
         "completion_tokens": completion, "total_tokens": prompt + completion, "cached_prompt_tokens": 0,
     })
 
@@ -229,6 +229,15 @@ class FakeHost:
     })
     accept: tuple[int, dict[str, Any]] = (200, ACCEPTED)
     promote: tuple[int, dict[str, Any]] = (200, PROMOTED)
+    usage_events: list[dict[str, Any]] = field(default_factory=lambda: [{
+        "event_id": "test-receipt", "app_id": "target-app", "user_id": USER, "chat_id": "c-value",
+        "model_name": "gpt-4o-mini", "prompt_tokens": 1000, "completion_tokens": 100,
+        "total_tokens": 1100, "cached_prompt_tokens": 0,
+    }])
+    usage_status: int = 200
+    apps: list[dict[str, Any]] = field(default_factory=lambda: [
+        {"build_registry_id": BUILD, "app_id": "target-app", "chat_app_id": APP}
+    ])
     transitions: dict[str, dict[str, Any]] = field(default_factory=lambda: {
         "app_review": {"id": "app_review", "transition_type": "chat_session", "route_to": "AppReview"},
     })
@@ -266,6 +275,15 @@ class FakeHost:
         async def session_state(request: Request) -> Any:
             self.log.append({"event": "session_state", "params": dict(request.query_params)})
             return {"session_state": dict(self.session_state)}
+
+        @app.get("/api/admin/usage")
+        async def admin_usage(request: Request) -> Any:
+            self.log.append({"event": "admin_usage", "params": dict(request.query_params)})
+            return JSONResponse({"events": self.usage_events}, status_code=self.usage_status)
+
+        @app.get("/api/studio/apps")
+        async def studio_apps() -> Any:
+            return {"apps": self.apps}
 
         @app.post("/api/studio/build/artifacts/{artifact_version_id}/accept")
         async def accept(artifact_version_id: str, request: Request) -> Any:
@@ -450,8 +468,9 @@ def full_journey(
                 Expect("the prompt", submits(PROMPT)),
                 Send(ui_event("chat.input_ack", chat_id="c-value", status="accepted")),
                 Send(usage("c-value")),
-                Send(tool_call("concept-1", "ConceptBlueprint", awaiting=True, agent="GapAnalysisAgent")),
-                Expect("the concept approval", responds("concept-1", action="approve")),
+                Send(tool_call("concept-1", "ConceptBlueprint", awaiting=True, agent="GapAnalysisAgent",
+                               payload={"review_id": "fresh-1"})),
+                Expect("the concept approval", responds("concept-1", action="approve", review_id="fresh-1")),
                 Send(ack("concept-1")),
                 Send(run_complete("c-value", "ValueEngine", RunStatus.COMPLETED)),
                 Send(context_switched("c-value", "c-theme", "ThemeCapture")),
@@ -603,6 +622,7 @@ async def test_the_wall_clock_limit_stops_a_silent_journey(tmp_path: Path) -> No
 
 async def test_the_spend_limit_stops_the_driver(tmp_path: Path) -> None:
     host = single_step("c-1", "ValueEngine", Send(usage("c-1", prompt=2_000_000, completion=0)))
+    host.usage_events[0].update(chat_id="c-1", prompt_tokens=2_000_000, completion_tokens=0, total_tokens=2_000_000)
     run = await drive(host, tmp_path, max_usd=0.25)
 
     assert (run.exit_code, run.report["reason"]) == (driver.EXIT_LIMIT, "spend_limit")
@@ -612,10 +632,52 @@ async def test_the_spend_limit_stops_the_driver(tmp_path: Path) -> None:
 
 async def test_usage_the_pricing_file_cannot_price_stops_the_driver(tmp_path: Path) -> None:
     host = single_step("c-1", "ValueEngine", Send(usage("c-1", model="unpriced-model")))
+    host.usage_events[0].update(chat_id="c-1", model_name="unpriced-model")
     run = await drive(host, tmp_path)
 
     assert (run.exit_code, run.report["reason"]) == (driver.EXIT_INVALID, "spend_unpriceable")
     assert run.elapsed < 60
+
+
+@pytest.mark.parametrize("wrong_owner", [False, True])
+async def test_redacted_usage_is_matched_to_the_operator_ledger(tmp_path: Path, wrong_owner: bool) -> None:
+    raw = {"kind": "usage_delta", "event_id": "receipt-1", "chat_id": "c-1",
+           "prompt_tokens": 1000, "completion_tokens": 100, "total_tokens": 1100}
+    host = single_step("c-1", "ValueEngine", Send(envelope(raw)))
+    host.usage_events = [{**raw, "app_id": "target-app", "user_id": "other" if wrong_owner else USER,
+                          "model_name": "gpt-4o-mini", "cached_prompt_tokens": 200}]
+    run = await drive(host, tmp_path, max_usd=0.00001)
+    assert run.report["reason"] == ("spend_unpriceable" if wrong_owner else "spend_limit")
+    assert host.events("admin_usage")[0]["params"] == {"app_id": APP, "user_id": USER, "limit": "1000"}
+    if not wrong_owner:
+        assert run.report["spend"]["cached_prompt_tokens"] == 200
+        assert run.report["spend"]["usd"] == pytest.approx(0.000195)
+
+
+@pytest.mark.parametrize("problem", ["target", "chat", "count", "cache", "total", "duplicate", "missing", "forbidden"])
+async def test_redacted_usage_fails_closed_for_unmatched_receipts(tmp_path: Path, problem: str) -> None:
+    raw = {"kind": "usage_delta", "event_id": "receipt-1", "chat_id": "c-1",
+           "prompt_tokens": 1000, "completion_tokens": 100, "total_tokens": 1100}
+    host = single_step("c-1", "ValueEngine", Send(envelope(raw)))
+    receipt = {**raw, "app_id": "target-app", "user_id": USER,
+               "model_name": "gpt-4o-mini", "cached_prompt_tokens": 0}
+    if problem == "target":
+        host.apps = []
+    elif problem == "forbidden":
+        host.usage_status = 403
+    elif problem == "chat":
+        receipt["chat_id"] = "other-chat"
+    elif problem == "count":
+        receipt["prompt_tokens"] = 999
+    elif problem == "cache":
+        receipt["cached_prompt_tokens"] = None
+    elif problem == "total":
+        raw["total_tokens"] = receipt["total_tokens"] = 1
+        host = single_step("c-1", "ValueEngine", Send(envelope(raw)))
+    host.usage_events = [] if problem == "missing" else [receipt] * (2 if problem == "duplicate" else 1)
+    run = await drive(host, tmp_path)
+    assert run.report["reason"] == "spend_unpriceable"
+    assert run.report["spend"]["requires_provider_reconciliation"] is True
 
 
 async def test_the_fresh_session_resume_defect_is_named_not_worked_around(tmp_path: Path) -> None:
@@ -873,8 +935,46 @@ def test_invalid_prompt_files_are_refused(tmp_path: Path, change: dict[str, Any]
 def test_the_packaged_pricing_catalog_prices_the_default_model() -> None:
     prices = driver.load_pricing(ROOT / "mozaiksai" / "core" / "usage" / "catalogs" / "usage-pricing.generated.json")
     meter = driver.SpendMeter(prices, limit_usd=1.0)
-    cost = meter.add({"model_name": "openai/gpt-4o-mini", "prompt_tokens": 1_000_000, "completion_tokens": 0})
+    cost = meter.add({"model_name": "openai/gpt-4o-mini", "prompt_tokens": 1_000_000, "completion_tokens": 0,
+                      "total_tokens": 1_000_000, "cached_prompt_tokens": 0})
     assert cost > 0 and not meter.over_limit()
+    assert meter.rates_for("unrelated/gpt-4o-mini") is None
+
+
+async def test_receipt_replay_counts_once_and_named_frames_require_proof(tmp_path: Path) -> None:
+    host = single_step(
+        "c-value", "ValueEngine", Send(usage("c-value")), Send(usage("c-value")),
+        Send(usage("c-value", model="forged")),
+    )
+    run = await drive(host, tmp_path)
+    assert run.report["reason"] == "spend_unpriceable"
+    assert run.report["spend"]["prompt_tokens"] == 1000
+    assert [row["event_id"] for row in run.report["usage_receipts"]] == ["test-receipt"]
+
+
+@pytest.mark.parametrize("value", [None, True, "20", 1.5, -1, float("inf")])
+def test_unusable_token_counts_never_become_zero(value: Any) -> None:
+    meter = driver.SpendMeter({}, limit_usd=1)
+    with pytest.raises(driver.JourneyStop, match="inconsistent token counts"):
+        meter.add({"model_name": "m", "prompt_tokens": value, "cached_prompt_tokens": 0,
+                   "total_tokens": 0, "completion_tokens": 0})
+
+
+@pytest.mark.parametrize("value", ["inf", "-inf", "nan"])
+def test_limits_and_prices_must_be_finite(value: str) -> None:
+    import argparse
+
+    for parse in (driver._positive, driver._non_negative):
+        with pytest.raises(argparse.ArgumentTypeError):
+            parse(value)
+    assert driver._rate(value) is None
+
+
+async def test_missing_pending_review_id_keeps_review_open(tmp_path: Path) -> None:
+    host = single_step("c-value", "ValueEngine", Send(tool_call("concept-1", "ConceptBlueprint", awaiting=True)))
+    run = await drive(host, tmp_path)
+    assert run.report["human_assists"][0]["kind"] == "missing_review_id"
+    assert host.received() == []
 
 
 async def test_a_used_evidence_directory_is_refused(tmp_path: Path) -> None:

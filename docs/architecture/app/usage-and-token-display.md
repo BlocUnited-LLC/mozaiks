@@ -7,6 +7,55 @@ mozaiks-app platform track their own consumption.
 
 These are three distinct concerns. Do not conflate them.
 
+## Measuring an isolated Studio journey
+
+The live journey driver checks each socket usage event against its admin ledger
+receipt. It verifies the registered target, user, chat, model when supplied,
+and token counts. Replayed IDs count once. The exit report includes the scoped
+receipts and their estimated subtotal. A quiet socket can yield an empty list
+even after a provider call.
+
+For each new app, start a disposable Studio target with its own Mongo instance.
+For a revision, preserve the accepted artifact and its lineage. Snapshot the
+isolated ledger before starting the revision and reconcile only new receipt IDs
+against a fresh provider journal.
+The Windows operator harness in `scripts/isolated_journey_supervisor.py` starts
+new processes in a private Job. Use its context manager to own the Studio
+host, gateway and driver. Its deadline and cleanup apply to processes in that
+Job. Mark long-running hosts and gateways with `service=True` when starting
+them. Containers launched by a Docker daemon have a separate lifetime. Keep
+their exact task-owned IDs, stop them and verify their removal independently.
+
+Start `python scripts/journey_provider_meter.py serve --help` for gateway
+arguments. Give only the gateway process the upstream OpenAI key through
+`JOURNEY_UPSTREAM_OPENAI_API_KEY`. Generate a fresh `JOURNEY_GATEWAY_TOKEN`.
+The isolated Studio process receives that local token as its OpenAI credential,
+the gateway's loopback `/v1` URL as `LLM_PRIMARY_BASE_URL` and
+`OPENAI_BASE_URL`, the exact dated model, and an explicit `LLM_MAX_TOKENS`.
+Start from an allowlisted environment with dotenv disabled, a private database,
+and a single provider route. Set `MOZAIKS_LLM_CONFIG_SKIP_MONGO=1` to select the
+environment configuration. Use a fresh, empty evidence directory and the same
+pricing catalog for both processes.
+
+The gateway serializes upstream text Chat Completions and journals each
+attempt before forwarding it. Streaming requests require terminal provider
+usage. The call count and output limit bound individual attempts. The dollar
+threshold is checked between calls, so the final response can cross it.
+These controls cover requests through this gateway. Verify that every
+credentialed route in the isolated workload goes through it.
+
+After stopping the workers, read the scoped records from the private usage
+ledger, including auxiliary calls and any last receipts that arrived after the
+socket closed. Run `python scripts/journey_provider_meter.py reconcile --help`
+for the evidence inputs. The ledger and provider use different event identities.
+Reconciliation checks scope, unique receipt IDs and the multiset of exact model
+and token counts. Missing usage, unmatched receipts and ambiguous matches must
+remain visible in the result. Report cached input as part of input tokens, and
+label the catalog-derived dollar amount as an estimate. Scope any chatless
+auxiliary work to its dedicated app, user and measurement interval. When
+the entire revision runs inline, supply the explicit chatless auxiliary flag
+and omit the chat ID.
+
 ---
 
 ## Background: What the OSS Runtime Tracks
