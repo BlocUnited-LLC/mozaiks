@@ -848,6 +848,7 @@ async def test_design_docs_exhausted_save_reports_its_last_rejection() -> None:
         "design_docs_save_feedback": "",
     }), authority_policy=policy)
     agent = _DeterministicAgent("DesignDocsAgent", body="A malformed design proposal.")
+    selector = _DeterministicAgent("DesignPackSelectionAgent", body='{"pack_ids":[]}')
     agent._mozaiks_context_bridge = bridge
     agent._mozaiks_tool_outcome = contract
     invoke = _wrap_tool_with_context(wrap_tool_outcome(save_design_docs_bundle, contract), bridge)
@@ -859,7 +860,7 @@ async def test_design_docs_exhausted_save_reports_its_last_rejection() -> None:
 
     result = await AG2NetworkRunner().run(AG2NetworkRunnerRequest(
         workflow_name="DesignDocs", app_id="design-failure", chat_id="design-failure",
-        agents={agent.name: agent}, initial_agent_name=agent.name,
+        agents={agent.name: agent, selector.name: selector}, initial_agent_name=agent.name,
         initial_message="Generate the design.", transition_rules=rules,
         context_variables=bridge.snapshot(), context_authority_policy=policy,
         max_turns=config["orchestrator"]["max_turns"], agent_output_handler=output_hook,
@@ -870,6 +871,7 @@ async def test_design_docs_exhausted_save_reports_its_last_rejection() -> None:
         assert result.status is RunStatus.FAILED
         assert result.close_reason == "workflow_failed"
         assert len(rejections) == contract.max_attempts
+        assert not selector.ask_calls
         assert rejections[-1]["outcome_error"] == "attempts_exhausted"
         assert result.failure_message == rejections[-1]["error"]
         event = _run_complete_event(
