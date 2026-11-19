@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import json
 import shutil
 from copy import deepcopy
 from pathlib import Path
@@ -12,6 +13,7 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
+from factory_app.workflows._shared.design_access_policy import inject_design_access_policy
 from factory_app.workflows._shared.pack_selection import pin_pack_choices
 from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
 from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import materialize_auth_scaffold
@@ -34,6 +36,7 @@ from mozaiksai.core.runtime.composition import (
     dispatch_module_action,
 )
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_authored_module_access_policy,
     resolve_design_access_policy,
 )
 from mozaiksai.core.workflow.generator_support.module_role_grants import (
@@ -204,6 +207,214 @@ def social():
         "grants": [{"role_id": "member", "collection": "requests", "actions": actions}],
     }
     return context, authorization, data, surface_map, policy
+
+
+@pytest.fixture(scope="module")
+def request_pack_authorization():
+    context = {}
+    selection = pin_pack_choices(context, ["messaging", "social", "support"])
+    return verified_pack_authorization(context, selection=selection)
+
+
+@pytest.fixture
+def notes_with_request_packs(request_pack_authorization):
+    bundle = inventory._bundle(pricing=False)
+    surface = bundle["surface_map"]["surfaces"][0]
+    surface["primary_entities"].append("Note")
+    group = bundle["data_contract"]["surfaces"][0]
+    group["collections"].append({
+        "name": "notes", "scope": "app", "entity": "Note", "tenancy": "app_wide", "owner_field": None,
+        "ownership": {"surface_id": group["surface_id"], "surface_kind": "module"},
+        "fields": [{"name": "id", "type": "string", "required": True}], "indexes": [],
+        "search_by": "id", "lifecycle": {"write_mode": "workflow_write", "migration_policy": "additive_only"},
+    })
+    surface_map = deepcopy(bundle["surface_map"])
+    data = _compose_reviewed_pack_data(bundle["data_contract"], surface_map, request_pack_authorization)
+    return bundle, {
+        "data_contract": data, "design_surface_map": surface_map, "pack_authorization": request_pack_authorization,
+    }
+
+
+def _request_policy():
+    return {
+        "roles": [
+            {"role_id": "reader", "label": "Reader", "description": "Read notes."},
+            {"role_id": "member", "label": "Member", "description": "Manage friendships."},
+            {"role_id": "moderator", "label": "Moderator", "description": "Update support request status."},
+        ],
+        "grants": [
+            {"role_id": "reader", "collection": "notes", "actions": ["get_notes", "list_notes"]},
+            {"role_id": "member", "collection": "friends.requests", "actions": [
+                "send_friend_request", "accept_friend_request", "decline_friend_request",
+                "withdraw_friend_request", "remove_friend",
+            ]},
+            {"role_id": "moderator", "collection": "support.requests", "actions": ["update_support_status"]},
+        ],
+    }
+
+
+def test_shared_prompt_keeps_authored_permissions_without_a_projected_data_contract(monkeypatch, persistence):
+    from tests.test_design_access_policy import _approved_context
+
+    reviewed, summary = _approved_context(monkeypatch, persistence)
+    current = reviewed.snapshot()
+    current.pop("data_contract", None)
+    assert summary["data_contract"] and not summary["access_policy_review"].get("pack_identities")
+    agent = SimpleNamespace(name="ConfigMiddlewareAgent", context_variables=current, _system_message="")
+    inject_design_access_policy(agent, [])
+    assert json.loads(agent._system_message.splitlines()[-1]) == [{
+        "id": "coordinator", "permissions": ["reports.create_report", "reports.delete_report", "reports.update_report"],
+    }]
+
+
+def test_stock_request_collections_do_not_block_unrelated_notes_access(notes_with_request_packs):
+    _, inputs = notes_with_request_packs
+    policy = _request_policy()
+    policy["grants"] = policy["grants"][:1]
+    assert validate_access_policy(policy, **inputs) == policy
+    roles = compiled_role_grants(
+        policy, data_contract=inputs["data_contract"], pack_authorization=inputs["pack_authorization"],
+    )
+    assert roles[0] == {"id": "reader", "permissions": ["notes.get_notes", "notes.list_notes"]}
+    assert all(not role["permissions"] for role in roles[1:])
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_bare_request_grant_reports_both_stock_owners(notes_with_request_packs, reverse):
+    _, inputs = notes_with_request_packs
+    if reverse:
+        inputs["data_contract"]["surfaces"].reverse()
+    policy = _request_policy()
+    policy["grants"][1]["collection"] = "requests"
+    with pytest.raises(ValueError) as rejected:
+        validate_access_policy(policy, **inputs)
+    assert "friends.requests" in str(rejected.value)
+    assert "support.requests" in str(rejected.value)
+
+
+def test_scoped_stock_request_grants_compile_only_the_reviewed_permissions(notes_with_request_packs):
+    _, inputs = notes_with_request_packs
+    policy = _request_policy()
+    validated = validate_access_policy(policy, **inputs)
+    assert validated == policy
+    roles = compiled_role_grants(
+        validated, data_contract=inputs["data_contract"], pack_authorization=inputs["pack_authorization"],
+    )
+    assert roles == [
+        {"id": "reader", "permissions": ["notes.get_notes", "notes.list_notes"]},
+        {"id": "member", "permissions": ["friends.manage"]},
+        {"id": "moderator", "permissions": ["support.manage"]},
+    ]
+    invalid = deepcopy(policy)
+    invalid["grants"][1]["actions"].remove("remove_friend")
+    with pytest.raises(ValueError, match="shared pack permission"):
+        validate_access_policy(invalid, **inputs)
+    invalid = deepcopy(policy)
+    invalid["grants"][2]["collection"] = "friends.requests"
+    with pytest.raises(ValueError, match="update_support_status"):
+        validate_access_policy(invalid, **inputs)
+
+
+@pytest.mark.parametrize("reference", ["requests", "reports.requests", "friends.requests", "support.requests"])
+def test_authored_and_pack_request_homonyms_are_not_grant_targets(notes_with_request_packs, reference):
+    _, inputs = notes_with_request_packs
+    group = next(s for s in inputs["data_contract"]["surfaces"] if s["surface_id"] == "reports")
+    extra = deepcopy(group["collections"][0])
+    extra.update(name="requests", entity="ApprovalRequest")
+    group["collections"].append(extra)
+    surface = next(s for s in inputs["design_surface_map"]["surfaces"] if s["surface_id"] == "reports")
+    surface["primary_entities"].append("ApprovalRequest")
+    policy = _request_policy()
+    policy["grants"] = policy["grants"][:1]
+    assert validate_access_policy(policy, **inputs) == policy
+    valid_actions = {grant["collection"]: grant["actions"] for grant in _request_policy()["grants"]}
+    actions = valid_actions.get(reference, ["get_requests", "list_requests"])
+    policy["grants"] = [{"role_id": "reader", "collection": reference, "actions": actions}]
+    with pytest.raises(ValueError) as rejected:
+        validate_access_policy(policy, **inputs)
+    assert "requests" in str(rejected.value)
+    assert "authored" in str(rejected.value) or "reports.requests" in str(rejected.value)
+
+
+@pytest.mark.parametrize("reference", ["notes", "reports.notes", "imports.notes"])
+def test_two_authored_note_collections_require_unique_grant_names(notes_with_request_packs, reference):
+    _, inputs = notes_with_request_packs
+    reports = next(group for group in inputs["data_contract"]["surfaces"] if group["surface_id"] == "reports")
+    imports = deepcopy(reports)
+    imports["surface_id"] = "imports"
+    imported_notes = imports["collections"][0]
+    imported_notes["ownership"]["surface_id"] = "imports"
+    imported_notes["entity"] = "ImportedNote"
+    inputs["data_contract"]["surfaces"].append(imports)
+    inputs["design_surface_map"]["surfaces"].append({
+        "surface_id": "imports", "surface_kind": "module", "owner": "app", "primary_entities": ["ImportedNote"],
+    })
+    policy = _request_policy()
+    note_grant = policy["grants"].pop(0)
+    assert validate_access_policy(policy, **inputs) == policy
+    note_grant["collection"] = reference
+    policy["grants"].append(note_grant)
+    with pytest.raises(ValueError) as rejected:
+        validate_access_policy(policy, **inputs)
+    assert "notes" in str(rejected.value)
+    assert "authored" in str(rejected.value) or "reports.notes" in str(rejected.value)
+
+
+def test_owner_review_and_authored_projection_keep_stock_request_owners(notes_with_request_packs, persistence, monkeypatch):
+    bundle, inputs = notes_with_request_packs
+    context = inventory._context(monetized=False)
+    context.set("pack_selection", [row.model_dump() for row in inputs["pack_authorization"].identities])
+    policy = _request_policy()
+    notes = bundle["data_contract"]["surfaces"][0]["collections"][0]
+    notes["lifecycle"]["write_mode"] = "module_action"
+    policy["roles"].append({"role_id": "editor", "label": "Editor", "description": "Maintain notes."})
+    note_writes = {"role_id": "editor", "collection": "notes", "actions": ["create_note", "update_note", "delete_note"]}
+    policy["grants"].append(note_writes)
+    bundle["access_policy"] = policy
+
+    async def approve(_tool_id, payload, **kwargs):
+        assert any("friends.requests" in row and "send_friend_request" in row for row in payload["checkpoints"])
+        assert any("support.requests" in row and "update_support_status" in row for row in payload["checkpoints"])
+        return {"action": "approve", "approved": True, "review_id": payload["review_id"]}
+
+    monkeypatch.setattr(save_design_doc, "use_ui_tool", AsyncMock(side_effect=approve))
+    result = inventory._save(context, bundle)
+    assert result["outcome"] == "saved", result
+    summary = persistence[2].await_args.kwargs["summary_payload"]
+    artifact = {
+        "app_id": "reports-app", "build_family": "design_docs", "build_key": "design_docs",
+        "source_workflow": "DesignDocs", "lifecycle_status": "current",
+        "commit_metadata": {"author_user_id": "owner", "metadata": {"summary_payload": summary}},
+    }
+    context.set("design_docs_artifact", artifact)
+    assert resolve_design_access_policy(context) == policy
+    assert resolve_authored_module_access_policy(context) == {**policy, "grants": [policy["grants"][0], note_writes]}
+
+    current = context.snapshot()
+    current.pop("data_contract", None)
+    recorded = current["design_docs_artifact"]["commit_metadata"]["metadata"]["summary_payload"]
+    receipt = deepcopy(recorded["access_policy_review"])
+    assert receipt["status"] == "approved" and receipt["review_id"]
+    assert receipt["pack_identities"] == [row.model_dump() for row in inputs["pack_authorization"].identities]
+    agent = SimpleNamespace(name="ConfigMiddlewareAgent", context_variables=current, _system_message="")
+    inject_design_access_policy(agent, [])
+    assert json.loads(agent._system_message.splitlines()[-1]) == [
+        {"id": "reader", "permissions": ["notes.get_notes", "notes.list_notes"]},
+        {"id": "member", "permissions": ["friends.manage"]},
+        {"id": "moderator", "permissions": ["support.manage"]},
+        {"id": "editor", "permissions": ["notes.create_note", "notes.delete_note", "notes.update_note"]},
+    ]
+    assert recorded["access_policy_review"] == receipt and recorded["access_policy"] == policy
+    approved_prompt = agent._system_message
+    current["data_contract"] = {"surfaces": []}
+    with pytest.raises(ValueError, match="does not match data_contract"):
+        inject_design_access_policy(agent, [])
+    assert agent._system_message == approved_prompt
+
+    summary["access_policy"]["grants"][2]["collection"] = "friends.requests"
+    context.set("design_docs_artifact", artifact)
+    with pytest.raises(ValueError, match="review"):
+        resolve_design_access_policy(context)
 
 
 def test_selected_pack_permissions_require_whole_reviewed_group(social):

@@ -6,13 +6,14 @@ import hashlib
 import json
 from typing import Any, cast
 
-from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_role_grants import (
     DesignAccessPolicy,
+    GrantCollectionIndex,
     PackAuthorization,
     ReviewedPackIdentity,
+    compiled_role_grants,
     validate_access_policy,
     verified_pack_authorization,
 )
@@ -155,6 +156,15 @@ def resolve_design_access_policy(context: Any) -> dict[str, Any] | None:
     return _resolve_reviewed_design(context)[0]
 
 
+def resolve_design_role_projection(context: Any) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    """Compile the displayed role permissions from the same review as their grant anchors."""
+    policy, summary, authorization = _resolve_reviewed_design(context)
+    if policy is None or summary is None:
+        return policy, []
+    roles = compiled_role_grants(policy, data_contract=summary.get("data_contract"), pack_authorization=authorization)
+    return policy, roles
+
+
 def resolve_reviewed_pack_selection(context: Any) -> list[dict[str, Any]]:
     """Resolve choices through the same bound artifact and review as its grants.
 
@@ -173,14 +183,16 @@ def resolve_authored_module_access_policy(context: Any) -> dict[str, Any] | None
     if policy is None or summary is None:
         return policy
     pack_modules = set(authorization.actions) if authorization is not None else set()
-    if not pack_modules:
+    if not pack_modules or not policy["grants"]:
         return policy
-    owners = {
-        collection["name"]: owner
-        for owner, kind, collection in iter_data_contract_collections(summary.get("data_contract"))
-        if kind == "module"
+    collections = GrantCollectionIndex(summary["data_contract"], authorization)
+    return {
+        **policy,
+        "grants": [
+            grant for grant in policy["grants"]
+            if collections.resolve(grant["collection"])[0] not in pack_modules
+        ],
     }
-    return {**policy, "grants": [grant for grant in policy["grants"] if owners.get(grant["collection"]) not in pack_modules]}
 
 
 def resolve_design_page_roles(context: Any) -> dict[str, list[str] | None] | None:
