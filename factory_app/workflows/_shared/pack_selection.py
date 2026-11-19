@@ -243,9 +243,12 @@ class PhysicalPackContext:
     @property
     def data(self) -> dict[str, Any]:
         """Preserve dictionary template inputs without exposing mutable state."""
-        if not isinstance(self._context, dict):
+        if isinstance(self._context, PhysicalPackContext):
+            values = self._context.data
+        elif isinstance(self._context, dict):
+            values = cast(dict[str, Any], detach(self._context))
+        else:
             raise AttributeError("The underlying context is not a dictionary")
-        values = cast(dict[str, Any], detach(self._context))
         values["capability_packs"] = detach(self._rows)
         if self._plan is not None:
             values["app_build_plan"] = deepcopy(self._plan)
