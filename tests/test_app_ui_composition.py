@@ -26,6 +26,7 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
 )
 from mozaiksai.core.workflow.generator_support.page_plan_utils import validate_planned_custom_routes
 from mozaiksai.core.workflow.generator_support.ui_registry_composition import compose_ui_registry
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_appgenerator_revision_baseline import baseline as revision_baseline  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,7 +105,7 @@ def test_typed_route_bundle_survives_exclusive_pack_filter():
 
 
 def test_selected_pack_releases_only_exclusive_implementations_before_page_admission():
-    context = {"capability_packs": [{"id": "messaging", "pack_source_path": str(ROOT / "factory_app/build_context/messaging")}]}
+    context = reviewed_pack_fixture({}, ["messaging"])
     exclusive = pack_owned_output_paths(context)
     assert not exclusive & SHARED_PACK_OUTPUT_PATHS
     assert {"modules/messages/module.yaml", "ui/components/MessagingProfileTab.jsx"} <= exclusive
@@ -315,8 +316,10 @@ def test_current_accumulated_snapshot_cannot_hide_competing_active_owners(other_
 @pytest.mark.parametrize("other_owner", ["task", "pack"])
 async def test_actual_genesis_accumulated_copy_cannot_hide_competing_ui_owners(other_owner):
     from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
-    from tests.factory_context import factory_context
-    from tests.test_messaging_pack_persistence_composition import _assembled_files, _context
+    from tests.test_messaging_pack_persistence_composition import (
+        _assembled_files,
+        _reviewed_messaging_context,
+    )
 
     class Context(dict):
         def set(self, key, value):
@@ -324,8 +327,8 @@ async def test_actual_genesis_accumulated_copy_cannot_hide_competing_ui_owners(o
 
     files = component() if other_owner == "task" else {**_assembled_files(), **component("MessagingProfileTab", path="ui/pages/custom/Hijacked.jsx")}
     output = {"code_files": contribution("task:pages", files)["files"]}
-    context = Context(factory_context({
-        **_context(), "app_id": "genesis_collision", "code_files": output["code_files"],
+    context = Context(_reviewed_messaging_context({
+        "app_id": "genesis_collision", "code_files": output["code_files"],
         "data_contract": {"version": "1", "surfaces": [], "shared_collections": []},
         "app_task_batch_items": [{"task_id": "pages"}, *([{"task_id": "other"}] if other_owner == "task" else [])],
         "app_task_batch_results": {"pages": output, **({"other": output} if other_owner == "task" else {})},
@@ -343,7 +346,10 @@ async def test_actual_revision_assembly_updates_app_route_and_retains_verified_p
     from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
     from mozaiksai.core.workflow.context.adapter import create_context_container
     from tests.test_appgenerator_revision_baseline import _replace_archive
-    from tests.test_messaging_pack_persistence_composition import _assembled_files, _context
+    from tests.test_messaging_pack_persistence_composition import (
+        _assembled_files,
+        _reviewed_messaging_context,
+    )
 
     saved = request.getfixturevalue("revision_baseline")
     app = component(path="ui/pages/custom/board.jsx")
@@ -357,14 +363,15 @@ async def test_actual_revision_assembly_updates_app_route_and_retains_verified_p
     board["order"] = board["navigation"]["order"] = 90
     manifest["pages"].reverse()
     revised["ui/route_manifest.json"] = json.dumps(manifest)
-    selected = _context()
-    plan = {**selected["app_build_plan"], "pages": [{"name": "board", "route": "/board", "ui_surface": "custom_react_page"}],
-            "build_tasks": [{"task_id": "pages", "task_type": "page_bundle", "owned_paths": list(revised)}]}
-    context = create_context_container(initial={
-        **saved.context, **selected, "app_build_plan": plan,
+    plan = {
+        "pages": [{"name": "board", "route": "/board", "ui_surface": "custom_react_page"}],
+        "build_tasks": [{"task_id": "pages", "task_type": "page_bundle", "owned_paths": list(revised)}],
+    }
+    context = create_context_container(initial=_reviewed_messaging_context({
+        **saved.context, "app_build_plan": plan,
         "data_contract": {"version": "1", "surfaces": [], "shared_collections": []},
         "app_task_batch_results": {"pages": {"code_files": contribution("task:pages", revised)["files"]}},
-    })
+    }))
     result = await assemble_app_tasks(context_variables=context)
     assert result["success"], result
     files = {file["filename"]: file["content"] for file in result["code_files"]}
