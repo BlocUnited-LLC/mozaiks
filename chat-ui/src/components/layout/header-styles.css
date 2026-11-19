@@ -551,6 +551,7 @@
   .shell-header-with-mobile-nav {
     --shell-header-gap: 0.5rem;
     --shell-header-cluster-gap: 0.5rem;
+    --shell-header-control-gap: 0.5rem;
     --shell-header-nav-padding-left: 0;
   }
 
