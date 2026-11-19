@@ -221,6 +221,19 @@ exclusions. Task workers derive template-owned paths from their authoritative
 parent context; task-local design changes remain subject to the existing bounded
 rejection and repair path before output compilation.
 
+The repository pack-proof fixture declares its test roles, permissions and
+action-to-collection grants before materialization. Collection-backed packs use
+the same reviewed Factory input contract as builds. Cloud and Pay facades have
+no collection-backed target for those custom test-role grants: their Factory
+case proves that a candidate auth role cannot become an unreviewed grant.
+Separate authored test apps pass canonical authored-app static validation and
+retain the same verified source identities, implementation and provenance bytes
+for the existing trusted runtime/provider probes. Receipts distinguish Factory
+authorization from runtime authorization, origin and bundle hashes. These
+authored probes establish facade wiring and existing role enforcement; they do
+not establish Factory-generated facade grants, containment, or hosted-provider
+acceptance.
+
 ## Archived corpus expectation migration
 
 The 91 recorded bodies, original context, hashes and labelled defaults are
