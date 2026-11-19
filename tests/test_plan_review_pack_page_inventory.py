@@ -19,6 +19,9 @@ from factory_app.workflows.AppGenerator.tools.app_plan_review import (
     review_app_build_plan,
     validate_plan_coverage,
 )
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    verified_pack_selection,
+)
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
@@ -132,8 +135,11 @@ def test_the_reviewed_local_pack_page_stays_in_the_plan_without_model_work(revie
         pack for pack in cached["capability_packs"] if pack["capability_pack_id"] == approved_pack["pack_id"]
     ]
     assert cached_pack["capability_source"] == "config_file"
-    assert Path(cached_pack["pack_source_path"]).is_dir()
+    assert "pack_source_path" not in cached_pack
     assert (cached_pack["version"], cached_pack["digest"]) == (approved_pack["version"], approved_pack["digest"])
+    resolved = verified_pack_selection(cached_pack, context_variables=context)
+    assert resolved is not None and Path(resolved["source_path"]).is_dir()
+    assert {key: resolved[key] for key in ("pack_id", "version", "digest")} == approved_pack
 
     items = detach(context.get("app_task_batch_items"))
     page_owned = sorted(
