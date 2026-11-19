@@ -9,6 +9,9 @@ import yaml
 
 from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
+    _resolve_scan_packs,
+    _resolved_pack_context,
+    _resolved_pack_rows,
     _scan_planned_data_fields,
 )
 from mozaiksai.core.runtime.persistence.indexes import (
@@ -38,12 +41,14 @@ def _contract():
 
 
 def _managed_context():
-    # A managed pack is selected from a verified source: the shipped MozaiksPay pack, whose
-    # contract declares the billing_portal facade.
-    return {"capability_packs": [{
+    # These are standalone physical compiler inputs, not a Factory launch or
+    # DesignDocs review. Resolve the explicit source before reading ownership.
+    rows = [{
         "id": "mozaikspay", "capability_source": "managed_capability",
         "pack_source_path": str(Path(__file__).resolve().parents[1] / "factory_app/build_context/mozaikspay"),
-    }]}
+    }]
+    entries = _resolve_scan_packs(rows, None)
+    return _resolved_pack_context(None, _resolved_pack_rows(entries))
 
 
 def test_null_index_name_compiles_before_runtime_and_preserves_approved_input():

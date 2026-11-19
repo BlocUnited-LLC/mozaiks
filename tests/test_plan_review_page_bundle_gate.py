@@ -25,6 +25,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
+import yaml
 
 from factory_app.workflows.AppGenerator.tools import app_plan_review
 from factory_app.workflows.AppGenerator.tools.app_plan_review import (
@@ -35,6 +36,7 @@ from factory_app.workflows.AppGenerator.tools.app_plan_review import (
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     verify_pack_integrity,
 )
+from factory_app.workflows.DesignDocs.tools.save_design_doc import _materialize_facade_pages
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
 from tests.reviewed_pack_fixture import reviewed_pack_fixture
@@ -72,6 +74,20 @@ def _context(chat: str) -> ContextVariablesBridge:
         source = ROOT / pack["pack_source_path"]
         metadata = verify_pack_integrity(source, pack["id"])
         pack.update(pack_source_path=str(source), version=metadata["version"], digest=metadata["digest"])
+    # The captured free MVP is unchanged. These current page/task scenarios
+    # explicitly exercise a subscription writer with its required later contract.
+    if variables["subscription_contract"]["contract_required"] is False:
+        variables["subscription_contract"] = {
+            "contract_required": True, "subscription_config_file": {
+                "schema_version": "mozaiks.subscriptions.v1", "label": "Fixture subscription",
+                "default_plan_id": "free", "plans": [{"plan_id": "free", "label": "Free", "capabilities": []}],
+                "assignment_store": {"data_alias": "billing.subscriptions", "user_id_field": "user_id"},
+            },
+        }
+    # The current saved review includes the selected pack's canonical pages.
+    contract = yaml.safe_load((ROOT / "factory_app/build_context/mozaikspay/contract.yaml").read_text(encoding="utf-8"))
+    _materialize_facade_pages(variables["experience_spec"], variables["design_surface_map"],
+                             pack_id="mozaikspay", contract=contract)
     # Current replay inputs explicitly select/review the registered provider.
     return ContextVariablesBridge(reviewed_pack_fixture(variables, ["mozaikspay"]))
 
@@ -264,9 +280,8 @@ def test_with_no_approved_pages_no_page_bundle_task_is_suggested():
     result = review_app_build_plan(AppBuildPlan=_draft("5cd39d67", "1"), context_variables=context)
 
     message = result["error"]
-    assert "unapproved surface 'page_bundle'" in message
-    assert "build_tasks ['pt_page_bundle_app', 'pt_page_bundle_billing_portal'] use it" in message
-    assert "declares no pages, so page_bundle approves no task here: remove those page_bundle tasks" in message
+    assert "approved design does not match experience_spec" in message
+    assert context.get("app_build_plan") is None
     assert "Keep the page_bundle label" not in message
     assert "['app.json']" not in message
 
@@ -320,15 +335,23 @@ def test_the_obsolete_admin_config_is_rejected_in_either_spelling():
     assert "owns obsolete path 'app/config/admin.json'" in result["error"]
 
 
-def test_the_live_rejection_is_reproduced_without_pack_page_approval(monkeypatch):
-    """Guard for the fix itself: approving only experience_spec pages brings the live rejection back."""
-    monkeypatch.setattr(app_plan_review, "_pack_page_paths", lambda context: frozenset())
-
-    result, _context_ = _review("601d2f56", _draft("601d2f56", "1"))
+def test_captured_missing_pack_pages_cannot_replace_the_current_review():
+    context = _context("601d2f56")
+    context.set("experience_spec", deepcopy(_fixture("601d2f56")["context_variables"]["experience_spec"]))
+    result = review_app_build_plan(AppBuildPlan=_draft("601d2f56", "1"), context_variables=context)
 
     assert result["outcome"] == "needs_revision"
-    assert "unapproved surface 'page_bundle'" in result["error"]
-    assert "ui/pages/billing.yaml" in result["error"]
+    assert "approved design does not match experience_spec" in result["error"]
+    assert context.get("app_build_plan") is None
+
+
+def test_recorded_free_contract_still_cannot_activate_the_selected_writer():
+    context = _context("5cd39d67")
+    context.set("subscription_contract", deepcopy(_fixture("5cd39d67")["context_variables"]["subscription_contract"]))
+    result = review_app_build_plan(AppBuildPlan=_draft("5cd39d67", "1"), context_variables=context)
+    assert result["outcome"] == "needs_revision"
+    assert "contract_required=true" in result["error"]
+    assert context.get("app_build_plan") is None
 
 
 def test_the_planner_prompt_does_not_ask_for_pack_shipped_billing_pages():

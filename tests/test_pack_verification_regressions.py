@@ -901,11 +901,15 @@ def test_a_pack_that_declares_no_capability_source_is_never_managed_whatever_the
         assert any(REQUIRED_DISPATCH in error for error in errors), (claim, errors)
 
 
-def test_planning_decides_managed_from_the_verified_pack_not_the_row_label(tmp_path):
+def test_planning_decides_managed_from_the_verified_pack_not_the_row_label(tmp_path, monkeypatch):
     """Planning's managed contract inventory follows the verified pack's own declaration, as the scanner does: a
     managed claim on a pack that declares none contributes nothing, and an id-only shipped managed pack counts
     without the row naming its source."""
     from mozaiksai.core.workflow.generator_support import module_action_inventory as inventory
+    from tests.reviewed_pack_fixture import reviewed_pack_fixture
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
 
     source = tmp_path / "greetings"
     shutil.copytree(GREETINGS, source, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
@@ -916,7 +920,9 @@ def test_planning_decides_managed_from_the_verified_pack_not_the_row_label(tmp_p
     claimed = {"id": "greetings", "pack_source_path": str(source), "capability_source": "managed_capability",
                **_pinned("greetings", source)}
     assert inventory.managed_pack_contracts({"capability_packs": [claimed]}) == []
-    unlabelled = inventory.managed_pack_contracts({"capability_packs": [{"id": "mozaikspay"}]})
+    unlabelled = inventory.managed_pack_contracts(reviewed_pack_fixture(
+        {"capability_packs": [{"id": "mozaikspay"}]}, ["mozaikspay"],
+    ))
     assert "mozaikspay" in {contract["contract_id"] for contract in unlabelled}
 
 
@@ -1876,23 +1882,27 @@ def test_a_workspace_pack_without_an_identity_from_acceptance_cannot_be_recorded
 # ------------------------------------------------------------------ planning reads only verified packs
 
 
-def test_planning_reads_a_selected_pack_only_after_the_resolver_verified_it(caplog):
+def test_planning_reads_a_selected_pack_only_after_the_resolver_verified_it(tmp_path, monkeypatch):
     """Pack-owned outputs, facades and managed contracts come only from a verified selection, never a fallback."""
     from mozaiksai.core.workflow.generator_support import module_action_inventory as inventory
+    from tests.reviewed_pack_fixture import reviewed_pack_fixture
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
 
     shipped = resolver.verify_pack_integrity(MOZAIKSPAY, "mozaikspay")
     pinned = {**HOSTED_MOZAIKSPAY_ROW, "version": shipped["version"], "digest": shipped["digest"]}
-    [selected] = inventory._selected_packs({"capability_packs": [pinned]})
+    reviewed = reviewed_pack_fixture({"capability_packs": [pinned]}, ["mozaikspay"])
+    [selected] = inventory._selected_packs(reviewed)
     assert selected.identity == {
         **{key: shipped[key] for key in ("pack_id", "version", "digest", "source")},
-        "resolution": "factory_build_context", "authority": "factory_build_context",
+        "resolution": "explicit", "authority": "factory_build_context",
     }
-    assert "ui/pages/pricing.yaml" in inventory.pack_owned_output_paths({"capability_packs": [pinned]})
-    assert "billing_portal" in inventory.managed_facade_actions({"capability_packs": [pinned]})
+    assert "ui/pages/pricing.yaml" in inventory.pack_owned_output_paths(reviewed)
+    assert "billing_portal" in inventory.managed_facade_actions(reviewed)
 
     # A selection the resolver refuses (here a digest pin the source does not verify to) yields nothing to plan
     # with: not its unverified source, not the projected operator contracts, not its inline facades.
-    caplog.set_level("WARNING", logger=inventory.__name__)
     projected = [{"contract_id": "mozaikspay", "required_outputs": [{"path": "ui/pages/pricing.yaml", "owner": "templates"}]}]
     facades = [{"module_id": "billing_portal", "pages": [{"primary_actions": ["list_plans"]}]}]
     refused = {**pinned, "digest": "sha256:" + "0" * 64, "facades": facades}
@@ -1900,19 +1910,36 @@ def test_planning_reads_a_selected_pack_only_after_the_resolver_verified_it(capl
     assert inventory._selected_packs(context) == []
     assert inventory.pack_owned_output_paths(context) == frozenset()
     assert inventory.pack_facade_directories(context) == []
-    assert any("SELECTED_PACK_UNRESOLVED pack=mozaikspay" in record.getMessage() for record in caplog.records)
-    # What a managed pack owns (ownership, managed data, facade actions) is enforced from its contract, so a
-    # refused managed selection is never silently omitted there: it raises with the resolver's diagnostic.
+    # Raw inventory never authorizes a source. Explicit physical inputs still
+    # reject the bad pin at the canonical resolver before any contract is read.
+    with pytest.raises(resolver.PackIntegrityError, match="selected digest"):
+        resolver.verified_selected_pack_sources([refused])
     for read in (inventory.managed_pack_contracts, inventory.managed_facade_actions):
-        with pytest.raises(ValueError, match="Selected managed pack 'mozaikspay' cannot be verified.*selected digest"):
-            read(context)
+        assert read(context) == ([] if read is inventory.managed_pack_contracts else {})
+
+    from copy import deepcopy
+
+    from mozaiksai.core.workflow.generator_support.design_access_policy import access_policy_sha256
+
+    damaged = deepcopy(reviewed)
+    summary = damaged["design_docs_artifact"]["commit_metadata"]["metadata"]["summary_payload"]
+    receipt = summary["access_policy_review"]
+    receipt["pack_identities"][0]["digest"] = refused["digest"]
+    receipt["policy_sha256"] = access_policy_sha256(
+        summary["access_policy"], summary.get("experience_spec"), pack_identities=receipt["pack_identities"],
+    )
+    for read in (inventory._selected_packs, inventory.pack_owned_output_paths,
+                 inventory.managed_pack_contracts, inventory.managed_facade_actions):
+        with pytest.raises((ValueError, resolver.ManagedCapabilityTemplateError), match="Reviewed pack.*changed"):
+            read(damaged)
 
     # A managed row that resolves nowhere grants no facade from its own inline declaration.
     inline = {"id": "acme_pay", "capability_source": "managed_capability", "facades": facades}
-    with pytest.raises(ValueError, match="Selected managed pack 'acme_pay' cannot be verified"):
-        inventory.managed_pack_contracts({"capability_packs": [inline]})
+    assert inventory.managed_pack_contracts({"capability_packs": [inline]}) == []
+    with pytest.raises(ValueError, match="Unknown or unavailable"):
+        reviewed_pack_fixture({}, ["acme_pay"])
     # The id-only managed row's contracts are the shipped catalog's verified contract assets.
-    contracts = inventory.managed_pack_contracts({"capability_packs": [dict(HOSTED_MOZAIKSPAY_ROW)]})
+    contracts = inventory.managed_pack_contracts(reviewed)
     assert "mozaikspay" in {contract["contract_id"] for contract in contracts}
 
 
@@ -1939,7 +1966,8 @@ def test_a_row_naming_its_pack_only_under_a_non_canonical_key_is_refused_as_malf
     assert not result.passed and result.resolved_capability_packs == []
     caplog.set_level("WARNING", logger=inventory.__name__)
     assert inventory.pack_owned_output_paths({"capability_packs": [dict(row)]}) == frozenset()
-    assert any(message in record.getMessage() for record in caplog.records)
+    # Planning has no selected source here; malformed public physical inputs
+    # were rejected above, while unreviewed inventory contributes no paths.
 
 
 def test_a_canonical_id_beside_a_non_canonical_key_is_an_ordinary_selection():
