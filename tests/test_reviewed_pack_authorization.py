@@ -411,6 +411,34 @@ def test_empty_review_does_not_authorize_pack_actions(social, persistence, monke
         resolve_design_access_policy(context)
 
 
+@pytest.mark.parametrize("change", ["selection", "source"])
+def test_changed_pack_during_owner_review_does_not_persist_approval(tmp_path, persistence, monkeypatch, change):
+    root = tmp_path / "social"
+    shutil.copytree(ROOT / "factory_app/build_context/social", root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(tmp_path))
+    metadata = verify_pack_integrity(root, "social")
+    context = inventory._context(monetized=False)
+    context.set("capability_packs", [{"id": "social", "pack_source_path": str(root),
+                                    "capability_source": "generated_module", "version": metadata["version"],
+                                    "digest": metadata["digest"]}])
+    context.set("pack_selection", pin_pack_choices(context, ["social"]))
+
+    async def approve(_tool_id, payload, **kwargs):
+        if change == "selection":
+            context.set("pack_selection", [])
+        else:
+            manifest = root / "templates/modules/friends/module.yaml"
+            manifest.write_text(manifest.read_text(encoding="utf-8") + "\n# changed while owner reviewed\n", encoding="utf-8")
+        return {"action": "approve", "approved": True, "review_id": payload["review_id"]}
+
+    monkeypatch.setattr(save_design_doc, "use_ui_tool", AsyncMock(side_effect=approve))
+    result = inventory._save(context, inventory._bundle(pricing=False))
+    assert result["outcome"] == "blocked", result
+    assert result["reason"] == "access_policy_review_failed", result
+    persistence[1].assert_not_called()
+    persistence[2].assert_not_awaited()
+
+
 def test_changed_pack_after_owner_review_refuses_consumption(tmp_path, persistence, monkeypatch):
     root = tmp_path / "social"
     shutil.copytree(ROOT / "factory_app/build_context/social", root, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))

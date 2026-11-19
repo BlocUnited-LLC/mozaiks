@@ -1270,6 +1270,10 @@ async def save_design_docs_bundle(
             access_policy, experience_spec=experience_spec, binding=binding, context_variables=context_variables,
             pack_authorization=pack_authorization,
         )
+        if access_policy_review["status"] == "approve":
+            if detach(context_variables.get("pack_selection")) != selection:
+                raise ValueError("Pack selection changed during owner review; renew DesignDocs review")
+            verified_pack_authorization(context_variables, selection=selection)
     except Exception as err:
         return _refused(context_variables, "access_policy_review_failed", str(err), outcome="blocked")
     if access_policy_review["status"] == "request_changes":

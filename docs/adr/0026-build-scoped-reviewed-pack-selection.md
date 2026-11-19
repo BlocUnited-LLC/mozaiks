@@ -199,6 +199,11 @@ scope. A failed final gate clears the cached plan through the existing rejection
 path. Assembly, saved compilation replay and publication do not inherit the
 planner memo and retain their independent fresh verification boundaries.
 
+After the owner review card returns approval, saving DesignDocs rechecks that
+the candidate selection is unchanged and re-admits its captured source pins.
+A change while the card was open refuses persistence and requires renewed
+review; the earlier display-time check is not a post-approval source receipt.
+
 The synchronous template, workspace-path and file-merge assembly phases each
 own a separate read operation with the same successful-read and defensive-copy
 rules. A phase never inherits another phase's memo. All scopes end before the
