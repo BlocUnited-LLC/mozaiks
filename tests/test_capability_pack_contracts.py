@@ -128,7 +128,9 @@ def test_app_plan_agent_prompt_requires_capability_first_planning() -> None:
     assert "Do NOT plan a second raw-frontend lane inside AppGenerator." in content
     assert "domain-specific profile records" in content
     assert "host-owned `/api/me` account/profile contract" in content
-    assert "minimum complete set of `capability_packs`" in content
+    assert "Derive app-owned capabilities from approved surfaces" in content
+    assert "preserve the exact owner-reviewed reusable pack selection" in content
+    assert "return to DesignDocs to add, remove or repin one" in content
     assert "surface_id for capability_pack_id" in content
     assert "AppBuildPlanOutput JSON" in content
     assert '\n        "workflows": [' not in content
