@@ -50,7 +50,9 @@ const pickDefaultFile = (filesMap) => {
   return keys.sort((a, b) => a.localeCompare(b))[0];
 };
 
-export function useAppValidationWorkbench(payload, themeConfig, candidateResult = null, activeArtifactVersionId = null) {
+export function useAppValidationWorkbench(
+  payload, themeConfig, candidateResult = null, activeArtifactVersionId = null, reviewedValidation = null
+) {
   const workbench = useMemo(() => {
     if (!payload || typeof payload !== 'object') return {};
     return payload.workbench && typeof payload.workbench === 'object' ? payload.workbench : payload;
@@ -79,11 +81,11 @@ export function useAppValidationWorkbench(payload, themeConfig, candidateResult 
   // A refinement carries evidence for its own exact snapshot. Never fill gaps
   // from the parent bundle, even while the editor keeps that previous version.
   const validationWorkbench = useMemo(() => {
-    if (!candidateResult) return workbench;
-    const evidence = normalizeValidation(candidateResult.validation_result);
+    if (!candidateResult && !reviewedValidation) return workbench;
+    const evidence = normalizeValidation(reviewedValidation || candidateResult?.validation_result);
     const build = normalizeValidation(evidence.app_validation_result);
     const acceptance = normalizeIntegrationResult(evidence.app_bundle_acceptance_result);
-    const status = evidence.validation_status || (candidateResult.status === 'failed' ? 'failed' : 'pending');
+    const status = evidence.validation_status || (candidateResult?.status === 'failed' ? 'failed' : 'pending');
     const hasPassedChecks = acceptance?.passed === true && build.validation_status === 'passed';
     return {
       validation_result: { ...build, ...evidence },
@@ -93,7 +95,7 @@ export function useAppValidationWorkbench(payload, themeConfig, candidateResult 
       integration_test_result: acceptance,
       integration_tests_passed: acceptance?.passed ?? null,
     };
-  }, [candidateResult, workbench]);
+  }, [candidateResult, reviewedValidation, workbench]);
 
   const validationResult = useMemo(() => {
     return normalizeValidation(
