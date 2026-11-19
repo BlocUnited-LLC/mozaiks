@@ -29,6 +29,7 @@ export { default as PersistentChatWidget } from './components/chat/PersistentCha
 export { default as MozaiksApp } from './app/MozaiksApp';
 export { createAuthAdapter, loadShellAuth, safeReturnPath } from './auth/authAdapter.js';
 export { LoginPage, AuthCallbackPage } from './auth/AuthPages.jsx';
+export { createBrowserAuthorizationTransport, relayBrowserAuthorization } from './auth/browserAuthorizationTransport.js';
 
 // -----------------------------------------------------------------------------
 // HOOKS

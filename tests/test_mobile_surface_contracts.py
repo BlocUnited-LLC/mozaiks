@@ -120,8 +120,9 @@ def test_support_escalation_uses_profile_support_tab() -> None:
     assert "studioModuleAction('workspace_support'" in profile_panel_source
     assert "if (page?.error)" in profile_panel_source
     assert "supportError" in widget_source
-    assert "page_title:" not in widget_source
-    assert "page_url:" not in widget_source
+    assert "const requestPayload = supportModule === 'support'" in widget_source
+    assert "page_url: payload.page_url" in widget_source
+    assert "page_title: payload.page_title" in widget_source
     assert "subjectParams.set('username', username)" in profile_source
     assert "const subjectSuffix = subjectParams.toString() ? `?${subjectParams}` : '';" in profile_source
     assert "fetchWithAuth(`${backendUrl}/api/me/profile-pages${subjectSuffix}`, { signal }, auth)" in profile_source

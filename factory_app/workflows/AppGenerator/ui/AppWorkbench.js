@@ -503,6 +503,7 @@ const AppWorkbench = ({
           {(showSplit || showPreview) && (
             <div className={showSplit ? 'min-w-0 @min-[72rem]:col-span-4' : 'min-w-0 @min-[72rem]:col-span-12'}>
               <PreviewPane
+                files={filesMap}
                 previewUrl={livePreviewUrl}
                 sandboxStatus={sandboxStatus}
                 sandboxSyncing={sandboxSyncing}

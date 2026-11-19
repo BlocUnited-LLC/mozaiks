@@ -80,6 +80,23 @@ behavior inherited by hosted products, not hosted commercial policy.
 
 ### Navigation
 
+The Studio account dropdown offers `App Dashboard` to signed-in builders.
+`/apps` lists the caller's portfolio without requiring a global admin role.
+During a workflow conversation, the dropdown resolves
+`GET /api/studio/build/dashboard-link?chat_id=...`. The server reads the
+caller's owned chat binding and verifies its App Registry target before returning
+the enabled default app dashboard portal. URL app selectors cannot choose that
+target. A missing conversation or an owned first-build chat without a binding
+opens `/apps`. An inaccessible context returns `404`, and the menu returns to
+the portfolio when resolution fails.
+
+The shared navigation manifest is readable with a token bound to the loaded
+Studio host. Explicit app selections retain registry checks.
+
+App dashboard pages retain server-side registry ownership checks. Workspace
+operations retain their existing role requirements. Generated app administration
+continues through the app's declared Admin surface.
+
 Workspace-level routes:
 
 - `/apps` -> workspace app portfolio home

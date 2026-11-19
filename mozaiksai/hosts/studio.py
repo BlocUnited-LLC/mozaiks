@@ -856,9 +856,10 @@ async def get_studio_dashboard_config(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_studio_user),
 ):
-    # The manifest is a shared navigation contract when no app is selected.
-    # An explicit selection or app-bound token still needs the registry check.
-    if app_id or principal.app_id:
+    # The loaded Studio host's shared navigation manifest contains no app data.
+    # Explicit targets and customer-app token scopes retain registry checks.
+    host_app_id = getattr(app.state, "loaded_app_id", None)
+    if app_id or (principal.app_id and principal.app_id != host_app_id):
         resolved_app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
     else:
         resolved_app_id, _ = _resolve_studio_scope(principal)
@@ -871,6 +872,42 @@ async def get_studio_dashboard_config(
     if scope:
         payload["surface"] = manifest.surface_for_scope(scope).model_dump(mode="json")
     return payload
+
+
+@app.get("/api/studio/build/dashboard-link")
+async def get_build_dashboard_link(
+    chat_id: BuildIdentity | None = None,
+    principal: UserPrincipal = Depends(require_studio_user),
+):
+    """Resolve the owned build's dashboard from its server-persisted binding."""
+    fallback = {"path": "/apps"}
+    if chat_id is None:
+        return fallback
+    host_app_id, user_id = _resolve_studio_scope(principal)
+    registry = _get_app_registry_service()
+    saved = await registry.repo.get_owned_chat_binding(
+        app_id=host_app_id, owner_user_id=user_id, chat_id=chat_id,
+    )
+    if saved is None:
+        raise HTTPException(status_code=404, detail="Build context not found")
+    if not saved:
+        return fallback
+    try:
+        binding = RunBuildBinding.model_validate(saved)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Build context not found") from exc
+    record = (await registry.get_app_record(
+        build_registry_id=binding.build_registry_id, owner_user_id=user_id,
+    )).get("app")
+    if (not record or record.get("app_id") != binding.target_app_id
+            or record.get("chat_app_id") != host_app_id):
+        raise HTTPException(status_code=404, detail="Build context not found")
+    surface = load_dashboard_manifest(resolve_app_root()).surface_for_scope("app")
+    portal = next(portal for portal in surface.portals if portal.id == surface.default_portal and portal.enabled)
+    path = portal.route.replace(":appId", binding.target_app_id)
+    if not path.startswith("/") or path.startswith("//") or "\\" in path:
+        raise HTTPException(status_code=500, detail="App dashboard route is invalid")
+    return {"path": path}
 
 
 @app.get("/api/studio/overview")

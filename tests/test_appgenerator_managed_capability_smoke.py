@@ -429,7 +429,7 @@ class TestCreatorDashboardBuildPlan:
         msg = _CREATOR_DASHBOARD_WALLET_ADAPTER_TASK["initial_message"]
         assert "PAYMENT_PROVIDER_SECRET_KEY" in msg
 
-    def test_build_plan_validates_with_app_build_plan_tool(self) -> None:
+    def test_build_plan_validates_with_app_build_plan_tool(self, pack_sources) -> None:
         mod = _load_module(
             "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
             f"tests.app_build_plan_smoke.{id({})}",
@@ -437,7 +437,9 @@ class TestCreatorDashboardBuildPlan:
 
         class _Ctx:
             def __init__(self):
-                self.data: dict[str, Any] = {}
+                self.data: dict[str, Any] = {
+                    "available_managed_capabilities": [{**_CREATOR_DASHBOARD_MANAGED_CAPABILITY, **pack_sources[0]}],
+                }
 
             def get(self, key, default=None):
                 return self.data.get(key, default)
@@ -531,7 +533,7 @@ class TestCreatorDashboardBuildPlan:
             "client_secret",
         }
 
-    def test_build_plan_rejects_if_wallet_module_contract_added(self) -> None:
+    def test_build_plan_rejects_if_wallet_module_contract_added(self, pack_sources) -> None:
         mod = _load_module(
             "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
             f"tests.app_build_plan_smoke_guard.{id({})}",
@@ -539,7 +541,9 @@ class TestCreatorDashboardBuildPlan:
 
         class _Ctx:
             def __init__(self):
-                self.data: dict[str, Any] = {}
+                self.data: dict[str, Any] = {
+                    "available_managed_capabilities": [{**_CREATOR_DASHBOARD_MANAGED_CAPABILITY, **pack_sources[0]}],
+                }
 
             def get(self, key, default=None):
                 return self.data.get(key, default)

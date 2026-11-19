@@ -167,7 +167,7 @@ PLAN_INPUTS: dict[str, dict[str, Any]] = {
     },
 }
 
-APP_ADMIN_PAGES = {"commerce": ("commerce",), "mozaikspay": ("usage",)}
+APP_ADMIN_PAGES = {"commerce": ("commerce",), "mozaikspay": ("usage",), "support": ("support",)}
 
 
 # Explicit authorization for the test app, reviewed against the shipped pack

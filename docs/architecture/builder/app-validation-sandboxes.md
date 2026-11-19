@@ -284,6 +284,8 @@ docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .
 
 The image includes the installed OSS runtime, frontend dependencies, and Mongo.
 Generated `requirements.txt` installs against the image's dependency constraints.
+The requirements scanner maps `bson` imports to `pymongo`, which supplies the
+MongoDB driver's BSON implementation.
 The install runs in the sandbox user's site directory with pip's
 `--break-system-packages` option because the disposable image uses Debian's
 externally managed Python. It does not install into the operator's Python.

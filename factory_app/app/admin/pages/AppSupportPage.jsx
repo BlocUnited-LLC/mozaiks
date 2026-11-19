@@ -451,10 +451,10 @@ export default function AppSupportPage() {
           </div>
 
           {/* Two-pane inbox */}
-          <div className="flex gap-3" style={{ minHeight: '480px' }}>
+          <div className="flex flex-col md:flex-row gap-3" style={{ minHeight: '480px' }}>
 
             {/* Left: session list */}
-            <div className="flex w-64 shrink-0 flex-col gap-1.5 overflow-y-auto xl:w-72">
+            <div className="flex w-full md:w-64 max-h-64 md:max-h-none shrink-0 flex-col gap-1.5 overflow-y-auto xl:w-72">
               {runs.length > 0 ? runs.map((run) => (
                 <SessionListCard
                   key={run.chat_id}

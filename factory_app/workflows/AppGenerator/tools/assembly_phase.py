@@ -37,6 +37,7 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     materialize_data_contract,
 )
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_authored_module_access_policy,
     resolve_design_access_policy,
 )
 from mozaiksai.core.workflow.generator_support.module_account_data import (
@@ -46,6 +47,10 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import pa
 from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
     materialize_module_read_implementations,
+)
+from mozaiksai.core.workflow.generator_support.module_role_grants import (
+    validate_pack_permission_consumers,
+    verified_pack_authorization,
 )
 from mozaiksai.core.workflow.generator_support.module_write_actions import (
     assert_generated_action_permissions,
@@ -302,7 +307,7 @@ def _merge_code_files(
         design_surface_map=design_surface_map,
         subscription_contract=subscription_contract,
         declared_auth_scopes=admitted_scopes,
-        access_policy=resolve_design_access_policy(context_variables),
+        access_policy=resolve_authored_module_access_policy(context_variables),
         pack_owned_manifest_paths=pack_manifests,
     ))
     synthesis_files.update(materialize_module_policies(synthesis_files, data_contract))
@@ -329,12 +334,17 @@ def _merge_code_files(
     synthesis_files.update(materialize_module_write_implementations(
         synthesis_files, app_build_plan=app_build_plan, data_contract=data_contract, owned_paths=service_paths,
         subscription_contract=subscription_contract,
-        access_policy=resolve_design_access_policy(context_variables),
+        access_policy=resolve_authored_module_access_policy(context_variables),
         design_surface_map=design_surface_map,
     ))
     file_map.update(synthesis_files)
     if "app.json" in file_map:
         approved_policy = resolve_design_access_policy(context_variables)
+        pack_authorization = verified_pack_authorization(context_variables) if approved_policy and approved_policy["grants"] else None
+        if pack_authorization and approved_policy is not None:
+            validate_pack_permission_consumers(
+                file_map, approved_policy, data_contract=data_contract, pack_authorization=pack_authorization,
+            )
         # Model outputs cannot set scopes or provider behavior while approved
         # roles are compiled. Render exclusively from the admitted auth source.
         candidate_auth = file_map.pop("config/auth.yaml", None)
@@ -344,6 +354,7 @@ def _merge_code_files(
         file_map.update(materialize_auth_scaffold(
             file_map, data_contract=data_contract, design_surface_map=design_surface_map,
             access_policy=approved_policy, auth_mode=(app_build_plan or {}).get("auth_mode"),
+            pack_authorization=pack_authorization,
         ))
         if candidate_auth is not None:
             allowed_auth = [yaml.safe_load(file_map.get("config/auth.yaml", "null"))]

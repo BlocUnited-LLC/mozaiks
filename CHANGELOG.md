@@ -15,6 +15,24 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Profile support tickets and app support inboxes keep reply fields usable on narrow mobile screens.
+
+- Signed-in Studio builders can open App Dashboard from their account menu and resolve the current build through its owner-scoped saved app binding.
+
+- Authenticated draft previews retain the customer login for inspection before
+  explicit sign-in, including when an app session already exists. Artifact
+  controls switch between login and app views without changing authorization.
+- ChatUI artifacts expose expand and return controls through existing workspace
+  view state, preserving the conversation and mounted preview.
+
+- Factory compiles selected-pack action permissions only from owner-reviewed
+  role grants and the exact verified pack identities and action requirements.
+- Generated messaging uses the profile workspace for conversation creation and replies. App-owned support connects the widget, requester profile, and authorized Admin inbox through module manifests.
+- Generated app requirements resolve BSON imports to PyMongo, preserving the MongoDB driver's bundled BSON implementation.
+- AppGenerator resolves explicitly selected managed packs without requiring an
+  operator-selected pack projection, preserving verified facade planning and
+  template assembly for paid builds while free builds keep their own surfaces.
+
 - Retried friendship acceptance replays its stored event identity and returns the accepting user’s view. Default notification storage keeps one alert per scoped source event across retries.
 
 - Social friendships derive from atomic request states, fencing competing accept, decline, withdrawal, and removal actions. Profile tabs expose friend requests and messaging, with nullable pagination cursors and failed message sends preserving drafts.
@@ -25,6 +43,8 @@ This project follows a practical pre-1.0 changelog format:
   uses trusted profile identity while preserving existing grants during refinement.
 - Standalone app administration uses the shared core renderer, authenticated configuration reads, and module panels on the overview.
 - App profile menus offer the declared app home, floating assistants follow app AI configuration, and chat surfaces use the app brand.
+- Existing-app design guidance avoids an unsupported surface owner for
+  protected discovered sources.
 
 
 ### Added
@@ -112,6 +132,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Factory design agents receive verified selected-pack capabilities, actions and
+  ownership boundaries while retaining app-specific design intent. The shipped
+  catalog no longer selects unrequested packs. Social 0.1.18 and Messaging
+  0.1.17 support DesignDocs; older pinned identities require review and update.
 - Notification `source_event: reference` also stores `actor: null`, retaining
   the minimal origin reference without changing the original attributed event.
   Existing records are not rewritten; envelope-mode retention stays unchanged.

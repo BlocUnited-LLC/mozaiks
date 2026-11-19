@@ -10,7 +10,7 @@ import yaml
 
 from factory_app.workflows._shared.surface_ownership import validate_surface_ownership
 from factory_app.workflows.AppGenerator.tools.app_plan_review import validate_plan_origins
-from mozaiksai.core.session.build_context import load_trusted_build_context
+from mozaiksai.core.session.build_context import load_trusted_build_context, merge_build_context
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.authority import build_context_authority_policy
 
@@ -182,6 +182,113 @@ def test_trusted_selection_resolves_only_the_selected_registered_pack(
             }]},
             context_variables=ContextVariablesBridge(context),
         )
+
+
+@pytest.mark.parametrize("workflow_name", ["DesignDocs", "AppGenerator"])
+@pytest.mark.parametrize("selected", [["social"], ["messaging"], ["social", "messaging"]])
+def test_selected_social_and_messaging_are_available_only_when_selected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workflow_name: str, selected: list[str],
+) -> None:
+    root = tmp_path / "build_context"
+    _write_context(root, "SelectedCapabilities", {
+        "context_id": "selected_capabilities",
+        "applies_to_workflows": [workflow_name],
+        "assets": [],
+        "values": {"operator_capabilities": selected},
+        "projections": {"context_variables": {
+            "operator_capabilities": {"from": "operator_capabilities"},
+        }},
+    })
+    monkeypatch.setenv("MOZAIKS_FACTORY_APP_PATH", str(ROOT / "factory_app"))
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(root))
+
+    context = load_trusted_build_context(_policy(workflow_name), build_context_root=root)
+
+    assert sorted(pack["id"] for pack in context["capability_packs"]) == sorted(selected)
+    assert all(pack["capability_source"] == "generated_module" for pack in context["capability_packs"])
+
+
+@pytest.mark.parametrize("selected", [[], ["social"], ["messaging"], ["social", "messaging"], ["content"]])
+@pytest.mark.parametrize("workflow_name", ["DesignDocs", "AppGenerator"])
+def test_shipped_catalog_root_only_admits_operator_selected_packs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selected: list[str], workflow_name: str,
+) -> None:
+    factory = tmp_path / "factory_app"
+    root = factory / "build_context"
+    for name in ("social", "messaging", "content"):
+        shutil.copytree(ROOT / "factory_app/build_context" / name, root / name)
+    _write_context(root, "SelectedCapabilities", {
+        "context_id": "selected_capabilities",
+        "applies_to_workflows": [workflow_name],
+        "assets": [],
+        "values": {"operator_capabilities": selected},
+        "projections": {"context_variables": {
+            "operator_capabilities": {"from": "operator_capabilities"},
+        }},
+    })
+    monkeypatch.setenv("MOZAIKS_FACTORY_APP_PATH", str(factory))
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(root))
+    monkeypatch.setattr(
+        "mozaiksai.core.data.persistence.persistence_manager._context_authority_policy_for_workflow",
+        _policy,
+    )
+
+    context = load_trusted_build_context(_policy(workflow_name), build_context_root=root)
+    launched = merge_build_context(workflow_id=workflow_name, build_context_root=root)
+
+    assert context["operator_capabilities"] == selected
+    assert sorted(pack["id"] for pack in context.get("capability_packs", [])) == sorted(selected)
+    assert launched.get("capability_packs", []) == context.get("capability_packs", [])
+    assert launched.get("operator_contracts", []) == context.get("operator_contracts", [])
+    assert any(
+        Path(contract["source_path"]).parent.name == "content"
+        for contract in context.get("operator_contracts", [])
+    ) == ("content" in selected)
+
+
+def test_shipped_root_without_operator_selection_does_not_select_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = ROOT / "factory_app/build_context"
+    monkeypatch.setenv("MOZAIKS_FACTORY_APP_PATH", str(ROOT / "factory_app"))
+    context = load_trusted_build_context(_policy("DesignDocs"), build_context_root=root)
+    assert not context.get("operator_capabilities")
+    assert not context.get("capability_packs")
+    assert not context.get("operator_contracts")
+    assert (root / "social/context.yaml").is_file()
+    assert (root / "messaging/context.yaml").is_file()
+
+
+@pytest.mark.parametrize("pack_id,old_version,new_version", [
+    ("social", "0.1.17", "0.1.18"), ("messaging", "0.1.16", "0.1.17"),
+])
+def test_pack_registration_upgrade_rejects_previous_pins(
+    tmp_path: Path, pack_id: str, old_version: str, new_version: str,
+) -> None:
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        PackIntegrityError,
+        verified_pack_selection,
+        verify_pack_integrity,
+    )
+
+    current = ROOT / "factory_app/build_context" / pack_id
+    old = tmp_path / pack_id
+    shutil.copytree(current, old)
+    manifest = old / "context.yaml"
+    previous = manifest.read_text(encoding="utf-8").replace("  - DesignDocs\n", "").replace(
+        f'version: "{new_version}"', f'version: "{old_version}"',
+    )
+    manifest.write_text(previous, encoding="utf-8", newline="\n")
+    before = verify_pack_integrity(old, pack_id)
+    after = verify_pack_integrity(current, pack_id)
+    assert before["version"] == old_version and after["version"] == new_version
+    assert before["digest"] != after["digest"]
+    selection = {
+        "id": pack_id, "pack_source_path": str(current), "capability_source": "generated_module",
+        "version": old_version, "digest": before["digest"],
+    }
+    with pytest.raises(PackIntegrityError, match="selected version"):
+        verified_pack_selection(selection, context_variables={})
 
 
 def test_trusted_selection_does_not_register_unknown_provider_alias(tmp_path: Path) -> None:

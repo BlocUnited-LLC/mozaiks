@@ -51,8 +51,15 @@ def _load_module(relative_path: str, module_name: str):
 
 
 class _Context:
+    managed_sources = ()
+
     def __init__(self, **data) -> None:
         self.data = dict(data)
+        available = list(self.data.get("available_managed_capabilities") or [])
+        present = {item.get("id") for item in available}
+        self.data["available_managed_capabilities"] = available + [
+            source for source in self.managed_sources if source["id"] not in present
+        ]
 
     def get(self, key, default=None):
         return self.data.get(key, default)
@@ -62,6 +69,34 @@ class _Context:
 
     def __setitem__(self, key, value) -> None:
         self.data[key] = value
+
+
+@pytest.fixture(autouse=True)
+def managed_pack_sources(tmp_path, monkeypatch):
+    """Give authored managed-capability fixtures real sources and integrity pins."""
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        compute_pack_digest,
+    )
+
+    def source(pack_id, facades=None):
+        root = tmp_path / pack_id
+        root.mkdir(exist_ok=True)
+        context = {
+            "context_id": pack_id, "applies_to_workflows": ["AppGenerator"],
+            "assets": [{"path": "contract.yaml", "kind": "contract"}],
+            "pack": {"id": pack_id, "version": "1.0.0", "capability_source": "managed_capability"},
+            "facades": facades or [],
+        }
+        contract = {"contract_id": pack_id, "contract_type": "build_pack_instructions"}
+        (root / "context.yaml").write_text(yaml.safe_dump(context), encoding="utf-8")
+        (root / "contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
+        return {
+            "id": pack_id, "capability_source": "managed_capability", "pack_source_path": str(root),
+            "version": "1.0.0", "digest": compute_pack_digest(root, pack_id),
+        }
+
+    monkeypatch.setattr(_Context, "managed_sources", [source("wallet"), source("investor_marketplace")])
+    return source
 
 
 # ---------------------------------------------------------------------------
@@ -333,11 +368,11 @@ class TestAppBuildPlanManagedCapabilityNormalization:
         )
         assert ctx.data["app_build_plan"]["capability_packs"][0]["capability_pack_id"] == "crm"
 
-    def test_multi_managed_facades_depend_on_their_matching_adapters(self):
+    def test_multi_managed_facades_depend_on_their_matching_adapters(self, managed_pack_sources):
         """Multiple managed capabilities must wire each facade to its own adapter task."""
         ctx = ContextVariablesBridge({"capability_packs": [
             {
-                "id": provider, "capability_source": "managed_capability",
+                **managed_pack_sources(provider, [{"module_id": facade, "provider_module": provider}]),
                 "facades": [{"module_id": facade, "provider_module": provider}],
             }
             for provider, facade in (("wallet", "wallet_dashboard"), ("notifications", "notification_center"))

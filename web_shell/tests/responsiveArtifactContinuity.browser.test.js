@@ -150,10 +150,22 @@ test('ChatPage retains one live artifact and conversation across responsive layo
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   t.after(()=>new Promise(resolve=>{server.closeAllConnections();server.close(resolve);}));
   const browser = await chromium.launch({headless:true});
-  t.after(()=>browser.close());
-  const page = await browser.newPage({viewport:{width:1280,height:900}});
+  let page;
+  let traceActive = false;
+  t.after(async()=>{try {if (traceActive) await page.context().tracing.stop();} finally {await browser.close();}});
+  page = await browser.newPage({viewport:{width:1280,height:900}});
   const errors = [];
+  const consoleErrors = [];
+  const failedRequests = [];
+  let initialPreview;
+  const diagnosticDir = process.env.RESPONSIVE_ARTIFACT_DIAGNOSTICS_DIR;
+  if (diagnosticDir) {
+    await page.context().tracing.start({screenshots:true,snapshots:true});
+    traceActive = true;
+  }
   page.on('pageerror',error=>errors.push(error.message));
+  page.on('console',message=>{if (message.type()==='error') consoleErrors.push(message.text());});
+  page.on('requestfailed',request=>failedRequests.push({url:request.url(),failure:request.failure()?.errorText}));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   const lifecycle = () => page.evaluate(()=>window.lifecycle);
   const expectState = state => expect.poll(()=>page.evaluate(()=>window.testState)).toMatchObject(state);
@@ -168,34 +180,80 @@ test('ChatPage retains one live artifact and conversation across responsive layo
     await page.setViewportSize(viewport);
     await expectState({isMobileView:viewport.width<768});
   };
+  const captureFirstResizeFailure = async error => {
+    if (!diagnosticDir) return;
+    try {
+      await fs.mkdir(diagnosticDir,{recursive:true});
+      const state = await page.evaluate(()=>{
+        const iframe=document.querySelector('iframe[title="Live app preview"]');
+        const ancestors=[];
+        for (let element=iframe;element;element=element.parentElement) {
+          const style=getComputedStyle(element),rect=element.getBoundingClientRect();
+          ancestors.push({tag:element.tagName,className:element.className,inert:element.hasAttribute('inert'),
+            ariaHidden:element.getAttribute('aria-hidden'),display:style.display,visibility:style.visibility,
+            rect:{x:rect.x,y:rect.y,width:rect.width,height:rect.height}});
+        }
+        return {viewport:{width:innerWidth,height:innerHeight},testState:window.testState,
+          sameFrame:window.originalFrame===iframe,frameCount:document.querySelectorAll('iframe').length,ancestors};
+      }).catch(captureError=>({captureError:String(captureError)}));
+      const preview=page.frames().find(candidate=>candidate.url().endsWith('/preview'));
+      const frameHtml=preview ? await preview.locator('body').innerHTML({timeout:3000}).catch(captureError=>String(captureError)) : null;
+      const pageHtml=await page.content().catch(captureError=>String(captureError));
+      const details={error:String(error),...state,initialPreview,previewRequests,consoleErrors,failedRequests,
+        frameUrl:preview?.url() || null,frameHtml,pageHtml};
+      await fs.writeFile(path.join(diagnosticDir,'first-resize.json'),JSON.stringify(details,null,2));
+      await page.screenshot({path:path.join(diagnosticDir,'first-resize.png'),timeout:3000})
+        .catch(captureError=>console.error('Failed to capture first-resize screenshot:',captureError));
+      if (traceActive) {
+        traceActive=false;
+        await page.context().tracing.stop({path:path.join(diagnosticDir,'first-resize-trace.zip')});
+      }
+    } catch (diagnosticError) {
+      console.error('Failed to capture first-resize diagnostics:',diagnosticError);
+    }
+  };
   await expect(page.getByLabel('Message',{exact:true})).toBeVisible();
   await page.getByLabel('Message',{exact:true}).fill('Keep this unsent draft');
   await expect(page.locator('iframe')).toHaveCount(0);
   await page.getByRole('button',{name:'Open artifact',exact:true}).click();
   await expectState({layoutMode:'split',isSidePanelOpen:true});
   const frame = page.frameLocator('iframe[title="Live app preview"]');
-  await expect(frame.getByRole('button',{name:'Add item',exact:true})).toBeVisible();
-  await frame.getByRole('button',{name:'Add item',exact:true}).click();
-  await frame.getByLabel('Preview note').fill('Keep this app state');
-  await page.evaluate(()=>{window.originalFrame=document.querySelector('iframe');window.originalComposer=document.querySelector('textarea');});
+  try {
+    await expect(frame.getByRole('button',{name:'Add item',exact:true})).toBeVisible();
+    await frame.getByRole('button',{name:'Add item',exact:true}).click();
+    await frame.getByLabel('Preview note').fill('Keep this app state');
+    await expect(frame.getByRole('button',{name:'Item added',exact:true})).toBeVisible();
+    await expect(frame.getByLabel('Preview note')).toHaveValue('Keep this app state');
+    initialPreview={button:await frame.getByRole('button',{name:'Item added',exact:true}).innerText(),
+      note:await frame.getByLabel('Preview note').inputValue(),previewRequests};
+    await page.evaluate(()=>{window.originalFrame=document.querySelector('iframe');window.originalComposer=document.querySelector('textarea');});
+  } catch (error) {
+    await captureFirstResizeFailure(error);
+    throw error;
+  }
 
   await t.test('open desktop preview crosses 768px in both directions without remounting',async()=>{
-    for (const width of [767,390,768,1280]) {
-      await resize({width,height:900});
-      await expect(frame.getByRole('button',{name:'Item added',exact:true})).toBeVisible();
-      await expect(frame.getByLabel('Preview note')).toHaveValue('Keep this app state');
-      await expect(page.locator('textarea')).toHaveValue('Keep this unsent draft');
-      assert.equal(await page.evaluate(()=>window.originalFrame===document.querySelector('iframe')),true);
-      assert.equal(await page.evaluate(()=>window.originalComposer===document.querySelector('textarea')),true);
-      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= window.innerWidth),true);
-      if (width < 768) {
-        assert.equal(await page.locator('textarea').evaluate(element=>Boolean(element.closest('[inert]'))),true);
-        await page.locator('textarea').evaluate(element=>element.focus());
-        await expect(page.locator('textarea')).not.toBeFocused();
+    try {
+      for (const width of [767,390,768,1280]) {
+        await resize({width,height:900});
+        await expect(frame.getByRole('button',{name:'Item added',exact:true})).toBeVisible();
+        await expect(frame.getByLabel('Preview note')).toHaveValue('Keep this app state');
+        await expect(page.locator('textarea')).toHaveValue('Keep this unsent draft');
+        assert.equal(await page.evaluate(()=>window.originalFrame===document.querySelector('iframe')),true);
+        assert.equal(await page.evaluate(()=>window.originalComposer===document.querySelector('textarea')),true);
+        assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= window.innerWidth),true);
+        if (width < 768) {
+          assert.equal(await page.locator('textarea').evaluate(element=>Boolean(element.closest('[inert]'))),true);
+          await page.locator('textarea').evaluate(element=>element.focus());
+          await expect(page.locator('textarea')).not.toBeFocused();
+        }
       }
+      assert.deepEqual(await lifecycle(),{mounts:1,active:1,maximum:1,chatMounts:1});
+      assert.equal(previewRequests,1);
+    } catch (error) {
+      await captureFirstResizeFailure(error);
+      throw error;
     }
-    assert.deepEqual(await lifecycle(),{mounts:1,active:1,maximum:1,chatMounts:1});
-    assert.equal(previewRequests,1);
   });
 
   await t.test('full, minimized, view and closed mobile states preserve content and hide interaction',async()=>{

@@ -234,12 +234,11 @@ def test_messaging_page_uses_module_actions_not_websocket_or_legacy_events() -> 
         _pack_path("messaging")
         / "templates"
         / "ui"
-        / "pages"
-        / "custom"
-        / "Messages.jsx"
+        / "components"
+        / "MessagingProfileTab.jsx"
     ).read_text(encoding="utf-8")
 
-    assert 'moduleAction("messages", "list_threads"' in source
+    assert "moduleAction('messages', 'list_threads'" in source
     assert 'moduleAction("messages", "send_message"' in source
     assert "new WebSocket" not in source
     assert "app.messages" not in source
@@ -248,16 +247,14 @@ def test_messaging_page_uses_module_actions_not_websocket_or_legacy_events() -> 
 
 def test_messaging_inbox_entrypoint_is_profile_tab_not_global_shell_nav() -> None:
     profile = _read_yaml("factory_app/build_context/messaging/templates/modules/messages/contracts/profile.yaml")
-    route_manifest = _read_yaml("factory_app/build_context/messaging/templates/ui/route_manifest.json")
-
-    tab = profile["tabs"][0]
-    route = route_manifest["pages"][0]
+    assert not (_pack_path("messaging") / "templates/ui/route_manifest.json").exists()
+    tab = profile["pages"][0]
 
     assert tab["id"] == "messages"
     assert tab["action"] == "list_threads"
     assert tab["component"] == "MessagingProfileTab"
-    assert route["path"] == "/messages"
-    assert route["navigation"] == {"include": False}
+    assert tab["route"] == "messages"
+    assert tab["visibility"] == "owner_only"
     component = (_pack_path("messaging") / "templates" / "ui" / "components" / "MessagingProfileTab.jsx").read_text(encoding="utf-8")
     assert "get_thread" in component
     assert "send_message" in component
@@ -301,17 +298,16 @@ def test_support_template_module_loads_with_current_contracts(tmp_path) -> None:
     assert {"domain.support.request_created", "domain.support.status_changed"} <= notification_events
 
 
-def test_support_page_creates_real_message_threads() -> None:
+def test_support_profile_uses_ticket_authorized_conversations() -> None:
     source = (
         _pack_path("support")
         / "templates"
         / "ui"
-        / "pages"
-        / "custom"
-        / "Support.jsx"
+        / "components"
+        / "SupportProfileTab.jsx"
     ).read_text(encoding="utf-8")
 
-    assert "moduleAction('support', 'create_support_request'" in source
+    assert "moduleAction('support', 'list_support_requests'" in source
     assert "moduleAction('support', 'get_support_conversation'" in source
     assert "moduleAction('support', 'reply_support_request'" in source
     assert "moduleAction('messages'" not in source

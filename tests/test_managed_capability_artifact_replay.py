@@ -103,16 +103,12 @@ def _write_wallet_pack(root: Path) -> dict[str, Any]:
         ).lstrip(),
         encoding="utf-8",
     )
-    # An external pack is selected with the version and digest its bytes verify to.
-    metadata = verify_pack_integrity(pack_root, "wallet")
-    return {
+    descriptor = {
         "id": "wallet",
         "capability_source": "managed_capability",
         "surface_kind": "external_integration",
         "implementation_mode": "external_integration",
         "pack_source_path": str(pack_root),
-        "version": metadata["version"],
-        "digest": metadata["digest"],
         "capabilities": [
             {"capability_id": "wallet.view", "module": "wallet"},
             {"capability_id": "wallet.payout", "module": "wallet"},
@@ -133,6 +129,13 @@ def _write_wallet_pack(root: Path) -> dict[str, Any]:
             }
         ],
     }
+    context_path = pack_root / "context.yaml"
+    context = yaml.safe_load(context_path.read_text(encoding="utf-8"))
+    context.update(capabilities=descriptor["capabilities"], facades=descriptor["facades"])
+    context_path.write_text(yaml.safe_dump(context), encoding="utf-8")
+    metadata = verify_pack_integrity(pack_root, "wallet")
+    descriptor.update(version=metadata["version"], digest=metadata["digest"])
+    return descriptor
 
 
 def _base_plan(

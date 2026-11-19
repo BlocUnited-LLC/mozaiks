@@ -4008,7 +4008,7 @@ async def test_admission_refuses_when_the_apps_current_build_cannot_be_read(tmp_
     assert store.created == []
 
 
-TEMPLATE_PAGE = "ui/pages/custom/Messages.jsx"
+TEMPLATE_PAGE = "ui/components/MessagingProfileTab.jsx"
 TEMPLATE_BASE_HANDLER = "modules/messages/backend/base_handler.py"
 
 

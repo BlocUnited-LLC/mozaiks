@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Any
 
+import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
@@ -38,6 +42,100 @@ class DesignAccessPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
     roles: list[DesignRole]
     grants: list[DesignGrant]
+
+
+class ReviewedPackIdentity(BaseModel):
+    """Pack bytes whose action requirements were shown at design review."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    pack_id: _Text
+    version: _Text
+    digest: Annotated[str, Field(strict=True, pattern=r"^sha256:[0-9a-f]{64}$")]
+
+
+@dataclass(frozen=True)
+class PackAuthorization:
+    identities: tuple[ReviewedPackIdentity, ...]
+    data_contracts: tuple[dict[str, Any], ...]
+    actions: dict[str, dict[str, tuple[str, ...]]]
+    module_packs: dict[str, str]
+
+
+def verified_pack_authorization(context: Any) -> PackAuthorization:
+    """Read action prerequisites only from selected, verified static pack files."""
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        declared_output_owners,
+        static_pack_templates,
+        verified_selected_pack_sources,
+    )
+    from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
+
+    selected = detach(context.get("capability_packs")) if context is not None else []
+    if not selected:
+        return PackAuthorization((), (), {}, {})
+    identities: list[ReviewedPackIdentity] = []
+    contracts: list[dict[str, Any]] = []
+    actions: dict[str, dict[str, tuple[str, ...]]] = {}
+    module_packs: dict[str, str] = {}
+    for entry in verified_selected_pack_sources(selected, context_variables=context):
+        root = Path(entry["source_path"])
+        static, contextual = static_pack_templates(root, entry["pack_id"])
+        owners = declared_output_owners(root)
+        identities.append(ReviewedPackIdentity.model_validate({
+            key: entry[key] for key in ("pack_id", "version", "digest")
+        }))
+        if "data/contract.json" in contextual:
+            raise ValueError("Reviewed pack data contract must be a static verified template")
+        pack_contract = None
+        if "data/contract.json" in static:
+            if owners.get("data/contract.json") != "templates":
+                raise ValueError("Reviewed pack data contract must be template-owned")
+            data = json.loads(static["data/contract.json"])
+            if not isinstance(data, dict):
+                raise ValueError("Reviewed pack data contract must be an object")
+            pack_contract = data
+            contracts.append(data)
+        pack_modules: set[str] = set()
+        for path, source in static.items():
+            parts = path.split("/")
+            if len(parts) != 3 or parts[0] != "modules" or parts[2] != "module.yaml":
+                continue
+            if owners.get(path) != "templates":
+                continue
+            module = ModuleDefinition.model_validate(yaml.safe_load(source))
+            if module.module.id != parts[1] or module.module.id in actions:
+                raise ValueError(f"Conflicting verified pack module {parts[1]!r}")
+            actions[module.module.id] = {action.id: tuple(action.permissions) for action in module.actions}
+            module_packs[module.module.id] = entry["pack_id"]
+            pack_modules.add(module.module.id)
+        if pack_contract is not None:
+            for surface in pack_contract.get("surfaces") or []:
+                if surface.get("surface_kind") != "module" or surface.get("surface_id") not in pack_modules:
+                    raise ValueError("Reviewed pack data must belong to its verified module")
+        if any(path.startswith("modules/") and path.endswith("/module.yaml") for path in contextual):
+            raise ValueError("Reviewed pack module contracts must be static verified templates")
+    return PackAuthorization(tuple(sorted(identities, key=lambda row: row.pack_id)), tuple(contracts), actions, module_packs)
+
+
+def validate_reviewed_pack_data(contract: dict[str, Any], authorization: PackAuthorization) -> set[tuple[str, str]]:
+    """Require the exact verified contributions, including their owner boundaries."""
+    from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
+
+    if not authorization.data_contracts:
+        return set()
+    if compile_data_contract(contract, pack_data_contracts=list(authorization.data_contracts)) != contract:
+        raise ValueError("access_policy requires the verified pack data in the reviewed data_contract")
+    expected = {
+        (owner, collection["name"])
+        for contribution in authorization.data_contracts
+        for owner, kind, collection in iter_data_contract_collections(contribution)
+        if kind == "module"
+    }
+    pack_owners = {owner for owner, _name in expected}
+    for owner, kind, collection in iter_data_contract_collections(contract):
+        if kind == "module" and owner in pack_owners and (owner, collection["name"]) not in expected:
+            raise ValueError(f"Unverified collection {owner}.{collection['name']} cannot belong to a pack module")
+    return expected
 
 
 def _canonical_spelling(action: str, name: str, collection: dict[str, Any], canonical: set[str]) -> str:
@@ -81,7 +179,7 @@ def _custom_action_remedy(action: str, owner: str, collection: dict[str, Any]) -
 
 
 def validate_access_policy(
-    raw: Any, *, data_contract: Any, design_surface_map: Any,
+    raw: Any, *, data_contract: Any, design_surface_map: Any, pack_authorization: PackAuthorization | None = None,
 ) -> dict[str, Any]:
     """Close role, collection and action references before design approval.
 
@@ -102,6 +200,8 @@ def validate_access_policy(
     contract, surface_map = detach(data_contract), detach(design_surface_map)
     if not isinstance(contract, dict) or not isinstance(surface_map, dict):
         raise ValueError("access_policy grants require the approved data_contract and surface_map")
+    pack_authorization = pack_authorization or PackAuthorization((), (), {}, {})
+    pack_collections = validate_reviewed_pack_data(contract, pack_authorization)
     surfaces = {
         surface["surface_id"]: surface for surface in surface_map.get("surfaces", [])
         if surface.get("surface_kind") == "module" and surface.get("owner") == "app"
@@ -122,6 +222,8 @@ def validate_access_policy(
                            for operation in CANONICAL_WRITE_OPERATIONS)
         canonical_owners.update({(owner, action): name for action in actions})
     selected: dict[str, set[str]] = defaultdict(set)
+    role_actions: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    role_permissions: dict[str, set[str]] = defaultdict(set)
     seen: set[tuple[str, str, str]] = set()
     action_collections: dict[tuple[str, str], set[str]] = defaultdict(set)
     for grant in policy["grants"]:
@@ -136,9 +238,12 @@ def validate_access_policy(
             for operation in CANONICAL_WRITE_OPERATIONS
         } if collection_has_canonical_writes(collection) else set()
         reads = {canonical_read_action_id(name, operation) for operation in ("get", "list")}
-        allowed = canonical | reads | set(surfaces[owner].get("owned_mutations") or []) | set(
-            surfaces[owner].get("custom_reads") or []
-        )
+        pack_actions = pack_authorization.actions.get(owner)
+        if pack_actions is not None and (owner, name) not in pack_collections:
+            raise ValueError(f"pack grant collection {owner}.{name} is not owned by its verified pack")
+        allowed = set(pack_actions) if pack_actions is not None else canonical | reads | set(
+            surfaces[owner].get("owned_mutations") or []
+        ) | set(surfaces[owner].get("custom_reads") or [])
         for action in grant["actions"]:
             if action not in allowed:
                 choices = sorted(candidate for candidate in allowed
@@ -151,7 +256,7 @@ def validate_access_policy(
                     f"Approved actions: {choices}. Canonical reads use the exact collection name; "
                     "canonical writes use the snake_case entity name."
                 )
-            canonical_owner = canonical_owners.get((owner, action))
+            canonical_owner = canonical_owners.get((owner, action)) if pack_actions is None else None
             if canonical_owner is not None and canonical_owner != name:
                 raise ValueError(
                     f"access_policy action {owner}.{action} belongs to collection {canonical_owner!r}, "
@@ -163,6 +268,13 @@ def validate_access_policy(
             seen.add(key)
             action_collections[owner, action].add(name)
             selected[name].add(action)
+            if pack_actions is not None:
+                if not pack_actions[action]:
+                    raise ValueError(f"pack action {owner}.{action} has no dispatch permission to grant")
+                role_actions[role].add((owner, action))
+                role_permissions[role].update(pack_actions[action])
+            else:
+                role_permissions[role].add(f"{name}.{action}")
         # Other roles may supply the remaining canonical grants; check after all rows.
     errors = [
         f"access_policy action {owner}.{action} names multiple collections {sorted(names)}; "
@@ -172,7 +284,9 @@ def validate_access_policy(
     ]
     write_gaps = False
     for name, actions in sorted(selected.items()):
-        _, collection = collections[name]
+        owner, collection = collections[name]
+        if owner in pack_authorization.actions:
+            continue
         required = {
             canonical_write_action_id(collection["entity"], operation)
             for operation in CANONICAL_WRITE_OPERATIONS
@@ -201,18 +315,84 @@ def validate_access_policy(
         )
     if errors:
         raise ValueError("; ".join(errors))
+    consumers: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    for owner, pack_actions_by_name in pack_authorization.actions.items():
+        for action, permissions in pack_actions_by_name.items():
+            for permission in permissions:
+                consumers[permission].add((owner, action))
+    for role, role_scopes in role_permissions.items():
+        for permission in sorted(role_scopes & consumers.keys()):
+            missing_consumers = consumers[permission] - role_actions[role]
+            if missing_consumers:
+                raise ValueError(
+                    f"role {role!r} cannot receive shared pack permission {permission!r} without reviewing "
+                    f"every consuming action: {sorted(f'{owner}.{action}' for owner, action in missing_consumers)}"
+                )
     return policy
 
 
-def compiled_role_grants(policy: dict[str, Any]) -> list[dict[str, Any]]:
+def compiled_role_grants(
+    policy: dict[str, Any], *, data_contract: Any = None, pack_authorization: PackAuthorization | None = None,
+) -> list[dict[str, Any]]:
     """Render the auth contract's role grants; no caller receives this union."""
     permissions: dict[str, set[str]] = defaultdict(set)
+    owners = {
+        collection["name"]: owner
+        for owner, kind, collection in iter_data_contract_collections(detach(data_contract))
+        if kind == "module"
+    } if data_contract is not None else {}
     for grant in policy["grants"]:
-        permissions[grant["role_id"]].update(
-            f"{grant['collection']}.{action}" for action in grant["actions"]
-        )
+        owner = owners.get(grant["collection"])
+        pack_actions = pack_authorization.actions.get(owner) if pack_authorization and owner is not None else None
+        for action in grant["actions"]:
+            permissions[grant["role_id"]].update(
+                pack_actions[action] if pack_actions is not None else [f"{grant['collection']}.{action}"]
+            )
     return [{"id": role["role_id"], "permissions": sorted(permissions[role["role_id"]])}
             for role in policy["roles"]]
+
+
+def validate_pack_permission_consumers(
+    files: dict[str, str], policy: dict[str, Any], *, data_contract: Any, pack_authorization: PackAuthorization,
+) -> None:
+    """Refuse another module consuming a permission derived from reviewed pack actions."""
+    from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
+
+    owners = {
+        collection["name"]: owner
+        for owner, kind, collection in iter_data_contract_collections(detach(data_contract))
+        if kind == "module"
+    }
+    pack_permissions = {
+        permission for actions in pack_authorization.actions.values()
+        for permissions in actions.values() for permission in permissions
+    }
+    compiled = compiled_role_grants(policy, data_contract=data_contract, pack_authorization=pack_authorization)
+    granted = {permission for role in compiled for permission in role["permissions"]} & pack_permissions
+    authored_actions = {
+        (owners[grant["collection"]], action): f"{grant['collection']}.{action}"
+        for grant in policy["grants"]
+        for action in grant["actions"]
+        if owners.get(grant["collection"]) not in pack_authorization.actions
+    }
+    if not granted:
+        return
+    for path, source in files.items():
+        parts = path.split("/")
+        if len(parts) != 3 or parts[0] != "modules" or parts[2] != "module.yaml":
+            continue
+        module = ModuleDefinition.model_validate(yaml.safe_load(source))
+        if module.module.id != parts[1]:
+            raise ValueError(f"Module identity does not match {path}")
+        for action in module.actions:
+            if not granted.intersection(action.permissions):
+                continue
+            expected = pack_authorization.actions.get(module.module.id, {}).get(action.id)
+            if expected is None:
+                authored = authored_actions.get((module.module.id, action.id))
+                expected = (authored,) if authored else None
+            if expected is None or tuple(action.permissions) != expected:
+                raise ValueError(f"Unreviewed action {module.module.id}.{action.id} consumes a reviewed pack permission")
 
 
 def apply_module_role_permissions(manifest: dict[str, Any], permissions: dict[str, str]) -> None:

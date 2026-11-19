@@ -25,6 +25,7 @@ from mozaiksai.core.workflow.context.authority import (
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_authored_module_access_policy,
     resolve_design_access_policy,
 )
 
@@ -1238,7 +1239,7 @@ async def _run_one_task(
                     output, app_build_plan=base_context.get("app_build_plan"),
                     data_contract=task_context.get("data_contract"),
                     design_surface_map=task_context.get("design_surface_map"),
-                    access_policy=approved_access_policy,
+                    access_policy=resolve_authored_module_access_policy(base_context),
                     subscription_contract=subscription_contract, companion_files=companion_files,
                 ))
                 canonical_code_files = extract_code_file_entries_from_payload(

@@ -1,6 +1,7 @@
-import Support from "./pages/custom/Support.jsx";
+import SupportProfileTab, { SupportAdminPanel } from "./components/SupportProfileTab.jsx";
 
 export function register(registerComponent) {
   if (typeof registerComponent !== "function") return;
-  registerComponent("Support", Support);
+  registerComponent("SupportProfileTab", SupportProfileTab);
+  registerComponent("SupportAdminPanel", SupportAdminPanel);
 }

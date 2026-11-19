@@ -1,4 +1,5 @@
 /** Shared OIDC code flow. The host's validated auth contract owns configuration. */
+import { createBrowserAuthorizationTransport } from './browserAuthorizationTransport.js';
 const TRANSACTION_TTL_MS = 15 * 60 * 1000;
 
 export function safeReturnPath(value, fallback = '/') {
@@ -122,10 +123,11 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {}, aut
   if (typeof clientId !== 'string' || !clientId.trim()) throw new Error('OIDC client ID is missing');
   const authority = frontend.authority ? publicUrl(frontend.authority, 'OIDC authority').href.replace(/\/$/, '') : '';
   const discoveryUrl = publicUrl(frontend.discovery_url || (authority && `${authority}/.well-known/openid-configuration`), 'OIDC discovery URL').href;
-  const redirectUri = authorizationTransport
+  const nativeTransport = authorizationTransport && authorizationTransport.kind !== 'browser';
+  const redirectUri = nativeTransport
     ? nativeRedirectUri(frontend.redirect_uri, routes.callback)
     : publicUrl(frontend.redirect_uri || new URL(routes.callback, window.location.origin).href, 'OIDC redirect URI').href;
-  if (!authorizationTransport && redirectUri !== new URL(routes.callback, window.location.origin).href) {
+  if (!nativeTransport && redirectUri !== new URL(routes.callback, window.location.origin).href) {
     throw new Error('OIDC redirect URI must match this application callback route');
   }
   const scope = frontend.scope;
@@ -321,6 +323,7 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {}, aut
       const revision = sessionRevision;
       let state;
       try {
+        authorizationTransport?.prepare?.();
         const document = await metadata();
         const verifier = randomValue();
         const challenge = base64Url(new Uint8Array(await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
@@ -344,6 +347,7 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {}, aut
           if (state) delete pending[state];
           sessionStorage.setItem(transactionKey, JSON.stringify(pending));
           authorizationPending = false;
+          authorizationTransport.cancel?.();
         }
       }
     },
@@ -354,9 +358,13 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {}, aut
       sessionStorage.removeItem(sessionKey);
       sessionStorage.removeItem(transactionKey);
       notify();
+      if (authorizationTransport && !authorizationPending) authorizationTransport.prepare?.();
       let document;
       try { document = await metadata(); } catch { /* Local logout still succeeds. */ }
-      if (!document?.end_session_endpoint) { window.location.assign(routes.logout); return; }
+      if (!document?.end_session_endpoint) {
+        authorizationTransport?.cancel?.();
+        window.location.assign(routes.logout); return;
+      }
       const url = new URL(document.end_session_endpoint);
       url.searchParams.set('client_id', clientId);
       url.searchParams.set('post_logout_redirect_uri', authorizationTransport ? redirectUri : new URL(routes.logout, window.location.origin).href);
@@ -378,6 +386,7 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {}, aut
         window.location.assign(routes.logout);
       } finally {
         authorizationPending = false;
+        authorizationTransport.cancel?.();
       }
     },
     handleCallback,
@@ -390,7 +399,9 @@ export async function loadShellAuth({ apiBaseUrl = '', createAppAuthAdapter, env
   if (!response.ok) throw new Error(`Application sign-in configuration failed: HTTP ${response.status}`);
   const shellConfig = await response.json();
   const runtime = validateAuthBootstrap(shellConfig.auth);
-  const options = { authConfig: shellConfig.auth, appId: shellConfig.appId, env, apiBaseUrl };
+  const options = { authConfig: shellConfig.auth, appId: shellConfig.appId, env, apiBaseUrl,
+    ...(window.self !== window.top ? { authorizationTransport: createBrowserAuthorizationTransport() } : {}),
+  };
   const authAdapter = await (runtime.enabled && shellConfig.auth.required && typeof createAppAuthAdapter === 'function'
     ? createAppAuthAdapter(options) : createAuthAdapter(options));
   for (const name of ['getCurrentUser', 'getAccessToken', 'onAuthStateChange', 'login', 'logout']) {

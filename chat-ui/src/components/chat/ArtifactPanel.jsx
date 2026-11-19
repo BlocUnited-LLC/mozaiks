@@ -16,6 +16,7 @@ const ArtifactPanel = ({
   workflowName = null,
   viewMode = false,
   onExitView = null,
+  onExpand = null,
   onArtifactAction = null,
   actionStatusMap = null,
   chatTheme = null,
@@ -78,6 +79,14 @@ const ArtifactPanel = ({
 
       {/* Panel Content */}
       <div className={contentClasses} style={{ overflow: 'clip', width: '100%' }}>
+        {hasMessages && (viewMode ? onExitView : onExpand) && (
+          <div className="flex justify-end border-b border-white/10 px-3 py-2">
+            <button type="button" onClick={viewMode ? onExitView : onExpand}
+              className="rounded-lg border border-white/20 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/10">
+              {viewMode ? 'Return to chat' : 'Expand artifact'}
+            </button>
+          </div>
+        )}
         {/* Artifact Content Area - match chat scroll treatment */}
         <div className="flex-1 min-h-0 relative overflow-hidden" role="region" aria-label="Artifact output stream">
           <div className="absolute inset-0 pointer-events-none bg-[rgba(0,0,0,0.45)] z-0" />
