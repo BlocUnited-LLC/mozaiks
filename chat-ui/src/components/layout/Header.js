@@ -152,6 +152,7 @@ const Header = ({
   chatTheme = null,
   route = null,
   shellMode = null,
+  hasMobileBottomBar = false,
   onAction = () => {},
   onNotificationClick = null,
 }) => {
@@ -425,6 +426,7 @@ const Header = ({
   const dropdownPanelStyle = {
     borderRadius: "var(--shell-header-panel-radius, 1rem)",
   };
+  const useMobileHeaderNav = !hasMobileBottomBar && visibleHeaderPages.length > 0;
 
   const renderPrimaryActionIcon = (className = "h-5 w-5") => (
     primaryAction?.icon ? <ActionIcon icon={primaryAction.icon} className={className} /> : <DefaultPrimaryActionIcon className={className} />
@@ -436,16 +438,16 @@ const Header = ({
         {logoSrc && (
           <img
             src={logoSrc}
-            className="h-7 w-7 object-contain"
+            className="h-7 w-7 shrink-0 object-contain"
             alt={logoConfig.alt || brandName || "Logo"}
             onError={(event) => applyBrandImageFallback(event, logoFallback)}
           />
         )}
-        <span className="min-w-0">
+        <span className={`${useMobileHeaderNav ? "hidden md:block" : ""} min-w-0 max-w-[10.5rem] sm:max-w-[12rem]`}>
           {wordmarkSrc ? (
             <img
               src={wordmarkSrc}
-              className="h-6 max-w-[10.5rem] object-contain opacity-90 sm:h-7 sm:max-w-[12rem]"
+              className="h-6 max-w-full object-contain opacity-90 sm:h-7"
               alt={brandName || "Brand"}
             />
           ) : (
@@ -463,7 +465,7 @@ const Header = ({
           <button
             type="button"
             onClick={() => handleNavigationItem({ path: logoConfig.href })}
-            className="appearance-none border-0 bg-transparent p-0"
+            className="min-w-0 appearance-none border-0 bg-transparent p-0"
           >
             {content}
           </button>
@@ -485,13 +487,17 @@ const Header = ({
   };
 
   return (
-    <header className={`fixed top-0 left-0 right-0 z-50 bg-background text-foreground border-b border-border transition-shadow ${isScrolled ? "shadow-sm" : ""}`}>
+    <header className={`fixed top-0 left-0 right-0 z-50 bg-background text-foreground border-b border-border transition-shadow ${useMobileHeaderNav ? "shell-header-with-mobile-nav" : ""} ${isScrolled ? "shadow-sm" : ""}`}>
       <div className="relative flex w-full items-center justify-between" style={headerFrameStyle}>
         <div className="flex min-w-0 items-center" style={headerClusterStyle}>
           <LogoSection />
 
           {visibleHeaderPages.length > 0 && (
-            <nav className="hidden xl:flex items-center" style={headerNavStyle}>
+            <nav
+              aria-label="App navigation"
+              className={`${hasMobileBottomBar ? "hidden md:flex" : "flex"} min-w-0 items-center overflow-x-auto`}
+              style={headerNavStyle}
+            >
               {visibleHeaderPages.map((item) => {
                 const isActive = location.pathname === item.path;
                 return (
@@ -499,7 +505,8 @@ const Header = ({
                     key={item.id || item.path || item.label}
                     type="button"
                     onClick={() => handleNavigationItem(item)}
-                    className={`rounded-md border px-3 py-1.5 text-sm font-medium transition heading-font ${isActive
+                    aria-current={isActive ? "page" : undefined}
+                    className={`shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-sm font-medium transition heading-font ${isActive
                       ? "border-primary/40 bg-primary/10 text-foreground"
                       : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"}`}
                     style={navButtonStyle}
@@ -512,7 +519,7 @@ const Header = ({
           )}
         </div>
 
-        <div className="flex items-center" style={headerRightStyle}>
+        <div className="flex shrink-0 items-center" style={headerRightStyle}>
           {primaryAction && (
             <>
               <button
@@ -608,6 +615,7 @@ const Header = ({
                 onClick={() => setIsProfileOpen((open) => !open)}
                 className="flex items-center hover:bg-white/10 transition-colors"
                 title={profileLabel}
+                aria-expanded={isProfileOpen}
                 style={profileButtonStyle}
               >
                 <div className="relative">
