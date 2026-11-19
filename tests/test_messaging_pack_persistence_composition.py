@@ -294,14 +294,15 @@ def test_persistence_repair_save_keeps_the_verified_pack_data_contributions(repa
         "execution_target": "AppGenerator", "description": "Data contract", "initial_message": "Data contract",
         "owned_paths": ["data/contract.json", migration], "depends_on": [],
     }
-    context = _context()
-    context["app_build_plan"] = {**context["app_build_plan"], "build_tasks": [task]}
-    templates = resolve_managed_capability_templates(context["capability_packs"], context_variables=context)
+    physical = _context()
+    plan = {**physical["app_build_plan"], "build_tasks": [task]}
+    templates = resolve_managed_capability_templates(physical["capability_packs"], context_variables=physical)
     assembled = {file["filename"]: file["content"] for file in _merge_code_files(
-        [{"code_files": templates}], app_build_plan=context["app_build_plan"], data_contract=approved,
-        context_variables={**context, "data_contract": approved},
+        [{"code_files": templates}], app_build_plan=plan, data_contract=approved,
+        context_variables={**physical, "data_contract": approved},
     )}
-    context.update({
+    context = _reviewed_messaging_context({
+        "app_build_plan": plan,
         "data_contract": approved, "generated_files": assembled,
         "app_task_batch_results": {"data_contract": {"code_files": []}},
     })
@@ -345,11 +346,14 @@ def test_the_save_compiles_the_contract_from_the_bundle_copy_never_the_process_m
     """
     from factory_app.workflows.AppGenerator.tools import code_file_utils
 
-    context = {
-        **_context(), "user_id": "user-1", "revision_source_artifact_version_id": "version-1",
-        "run_build_binding": {"target_app_id": "customer-app", "build_registry_id": "registry-1"},
+    context = _reviewed_messaging_context({
+        "app_id": "factory-host", "user_id": "user-1", "revision_source_artifact_version_id": "version-1",
+        "run_build_binding": {
+            "target_app_id": "customer-app", "build_registry_id": "registry-1",
+            "build_id": "revision-build", "phase": "refinement",
+        },
         "generated_files": {"app.json": json.dumps({"appId": "customer-app"})},
-    }
+    })
     code_file_utils.remember_revision_baseline(context, {"data/contract.json": json.dumps(CARRIED_APP_CONTRACT)})
     try:
         assert json.loads(code_file_utils._cached_revision_baseline(context)["data/contract.json"]) == CARRIED_APP_CONTRACT
@@ -358,6 +362,23 @@ def test_the_save_compiles_the_contract_from_the_bundle_copy_never_the_process_m
         code_file_utils._REVISION_UI_BASELINES.clear()
     # The packs' contribution on an empty base, with no guard error raised from the memo's 'projects' surface.
     assert [surface["surface_id"] for surface in compiled["surfaces"]] == ["messages"]
+
+
+def test_workflow_save_does_not_compile_unreviewed_pack_data():
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import _assembled_data_contract
+
+    offered = _context()["capability_packs"]
+    approved = {"version": "1", "surfaces": [], "shared_collections": []}
+    context = reviewed_pack_fixture({
+        "app_build_plan": {"capability_packs": []},
+        "capability_packs": offered,
+        "data_contract": approved,
+    }, [])
+
+    compiled = _assembled_data_contract(context, None)
+
+    assert compiled["surfaces"] == []
+    assert context["capability_packs"] == offered
 
 
 @pytest.mark.asyncio

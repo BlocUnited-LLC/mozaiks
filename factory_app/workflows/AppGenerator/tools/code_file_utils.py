@@ -382,6 +382,8 @@ def _assembled_data_contract(context_variables: Any, subscription_contract: Any)
     replaced it with a composition it checked against that source; assembly
     checks the source's copy again (carried_contracts) whenever it runs.
     """
+    from factory_app.workflows._shared.pack_selection import PhysicalPackContext
+
     from .resolve_managed_capability_templates import (
         ManagedCapabilityTemplateError,
         verified_pack_data_contracts,
@@ -390,8 +392,9 @@ def _assembled_data_contract(context_variables: Any, subscription_contract: Any)
 
     contract = detach(context_variables.get("data_contract"))
     try:
+        pack_context = PhysicalPackContext(context_variables)
         pack_data_contracts = verified_pack_data_contracts(
-            verified_pack_template_inventory(context_variables=context_variables),
+            verified_pack_template_inventory(context_variables=pack_context),
         )
     except ManagedCapabilityTemplateError as exc:
         raise ValueError(f"The selected capability packs' data contributions cannot be verified: {exc}") from exc
@@ -401,7 +404,7 @@ def _assembled_data_contract(context_variables: Any, subscription_contract: Any)
     if not isinstance(contract, dict):
         return contract
     compiled = compile_data_contract(
-        contract, subscription_contract=subscription_contract, context_variables=context_variables,
+        contract, subscription_contract=subscription_contract, context_variables=pack_context,
         pack_data_contracts=pack_data_contracts,
     )
     if pack_only_base:
