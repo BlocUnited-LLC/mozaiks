@@ -37,6 +37,7 @@ from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templat
 )
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_continuous_deterministic_materialization import _load_models
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,7 +54,10 @@ LIVE_DRAFTS = [("5cd39d67", "1"), ("5cd39d67", "2"), ("5cd39d67", "3"), ("601d2f
 
 
 @pytest.fixture(autouse=True)
-def _load_factory_contracts():
+def _load_factory_contracts(tmp_path, monkeypatch):
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
     _load_models()
 
 
@@ -68,7 +72,8 @@ def _context(chat: str) -> ContextVariablesBridge:
         source = ROOT / pack["pack_source_path"]
         metadata = verify_pack_integrity(source, pack["id"])
         pack.update(pack_source_path=str(source), version=metadata["version"], digest=metadata["digest"])
-    return ContextVariablesBridge(variables)
+    # Current replay inputs explicitly select/review the registered provider.
+    return ContextVariablesBridge(reviewed_pack_fixture(variables, ["mozaikspay"]))
 
 
 def _draft(chat: str, attempt: str) -> dict:

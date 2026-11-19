@@ -3,11 +3,21 @@
 import json
 import shutil
 from pathlib import Path
+from types import MappingProxyType
 
 from factory_app.workflows.AppGenerator.tools import generated_bundle_scanner as scanner
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     verify_pack_integrity,
 )
+
+
+def test_physical_dictionary_projection_detaches_frozen_nested_values():
+    base = {"custom": MappingProxyType({"labels": ("original",)}), "capability_packs": []}
+    view = scanner._resolved_pack_context(base, [])
+    data = view.data
+    data["custom"]["labels"].append("mutated")
+    assert view.data["custom"] == {"labels": ["original"]}
+    assert base["custom"]["labels"] == ("original",)
 
 
 def test_planned_data_scan_preserves_custom_template_input_and_defensive_rows(tmp_path):

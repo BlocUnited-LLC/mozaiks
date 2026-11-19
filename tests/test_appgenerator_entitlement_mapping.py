@@ -594,7 +594,11 @@ async def test_canonical_read_gate_rejected_without_mutating_any_writer(action_i
     assert {key: context.snapshot()[key] for key in before} == before
 
 
-def test_managed_facade_authored_gate_is_rejected_instead_of_silently_removed():
+def test_managed_facade_authored_gate_is_rejected_instead_of_silently_removed(tmp_path, monkeypatch):
+    from tests.reviewed_pack_fixture import reviewed_pack_fixture
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
     context = _context()
     surfaces = context.snapshot()["design_surface_map"]
     surfaces["surfaces"].append({
@@ -602,6 +606,9 @@ def test_managed_facade_authored_gate_is_rejected_instead_of_silently_removed():
         "source_capability_packs": ["mozaikspay"], "custom_reads": ["list_plans"],
     })
     context.set("design_surface_map", surfaces)
+    reviewed = reviewed_pack_fixture(context.snapshot(), ["mozaikspay"])
+    context.set("design_docs_artifact", reviewed["design_docs_artifact"])
+    context.set("workflow_name", "AppGenerator")
     files = [{"filename": "modules/billing_portal/module.yaml", "content": yaml.safe_dump({
         "module": {"id": "billing_portal"}, "actions": [
             {"id": "list_plans", "entitlement_gate": "dashboard.view"},
