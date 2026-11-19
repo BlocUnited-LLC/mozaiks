@@ -545,6 +545,8 @@ async def test_public_facade_rejects_candidate_supplied_authority_and_selection(
 
 @pytest.mark.asyncio
 async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_tampered_output(tmp_path, monkeypatch):
+    from httpx import ASGITransport, AsyncClient
+
     from factory_app.workflows._shared.pack_selection import (
         record_reviewed_pack_rows,
         selected_pack_rows,
@@ -554,7 +556,10 @@ async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_
         verified_selected_pack_sources,
     )
     from mozaiksai.control_plane.implementations.coding_worker import parent_pack_output_owners
+    from mozaiksai.core.artifacts.models import BuildRecordStatus, BuildRecordValidationStatus
+    from mozaiksai.core.validation import generated_app
     from mozaiksai.core.workflow.context.frozen import detach
+    from mozaiksai.hosts import studio
     from tests import test_capability_pack_proof as proof
 
     owner = "fixture-owner"
@@ -655,7 +660,31 @@ async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_
 
     moved_contract = moved_registry / "outcome_feedback/contract.yaml"
     moved_contract.write_bytes(moved_contract.read_bytes() + b"\n# changed after review\n")
-    with pytest.raises(ManagedCapabilityTemplateError, match="changed; renew design review"):
+    draft = bundle.model_copy(deep=True, update={
+        "id": "draft",
+        "parent_build_record_id": bundle.id,
+        "lifecycle_status": BuildRecordStatus.DRAFT,
+        "validation_status": BuildRecordValidationStatus.FAILED,
+    })
+    draft.commit_metadata.metadata.update(
+        bundle_mode="staged_refinement_bundle", compilation_inputs=approval.for_child(sha),
+    )
+    store.records[draft.id] = draft
+    monkeypatch.setattr(studio, "get_artifact_store", lambda: store)
+    monkeypatch.setattr(studio, "_resolve_studio_artifact_scope", AsyncMock(return_value=(app_id, owner)))
+    monkeypatch.setattr(studio, "_require_current_build_in_lineage", AsyncMock())
+    monkeypatch.setitem(studio.app.dependency_overrides, studio.require_studio_user, lambda: object())
+    validator = AsyncMock()
+    monkeypatch.setattr(generated_app, "validate_generated_app_candidate", validator)
+    async with AsyncClient(transport=ASGITransport(app=studio.app, raise_app_exceptions=False),
+                           base_url="http://test") as client:
+        response = await client.post(f"/api/studio/build/artifacts/{draft.id}/revalidate",
+                                     params={"build_registry_id": binding["build_registry_id"]})
+    assert response.status_code == 409, response.text
+    assert response.json() == {"detail": "Draft archive identity or compilation inputs could not be verified"}
+    validator.assert_not_awaited()
+    assert draft.validation_status == BuildRecordValidationStatus.FAILED
+    with pytest.raises(ValueError, match="pack sources could not be verified"):
         await replay()
     assert parent_pack_output_owners(packs) is None
 

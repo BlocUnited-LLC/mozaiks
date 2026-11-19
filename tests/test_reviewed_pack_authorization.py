@@ -157,7 +157,7 @@ async def test_pack_review_survives_capture_registration_and_bound_replay(
         await replay()
     child.commit_metadata.metadata["capability_packs"] = deepcopy(rows)
     child.commit_metadata.metadata["capability_packs"][0]["digest"] = "sha256:" + "0" * 64
-    with pytest.raises(PackIntegrityError, match="digest does not match"):
+    with pytest.raises(ValueError, match="pack sources could not be verified"):
         await replay()
     other_id = "messaging" if pack_id == "social" else "social"
     other_pack = ROOT / "factory_app/build_context" / other_id

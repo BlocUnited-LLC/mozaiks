@@ -247,8 +247,13 @@ async def resolve_app_compilation_inputs(
 
     The host supplies authenticated ownership and registry scope. Returning
     None leaves old/unbound bundles on strict static-template validation.
+    Unverifiable reviewed sources are invalid compilation inputs.
     """
     from factory_app.workflows._shared.artifact_bundle import APP_BUNDLE_MAX_TOTAL_BYTES
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        ManagedCapabilityTemplateError,
+    )
+    from mozaiksai.core.session.build_context import BuildContextError
 
     store = artifact_store or get_artifact_store()
     record: BuildRecord | None = await store.get_build_record(app_id=app_id, build_record_id=build_record_id)
@@ -291,10 +296,13 @@ async def resolve_app_compilation_inputs(
         if saved.parent_record_id is None:
             if record.source_workflow != "AppGenerator" or saved.inputs.binding != binding:
                 raise ValueError("Approved compilation origin is not the bound Factory save")
-            context = await _context_from_inputs(
-                saved.inputs, store=store, owner_user_id=owner_user_id,
-                capability_packs=deepcopy(selected.commit_metadata.metadata.get("capability_packs") or []),
-            )
+            try:
+                context = await _context_from_inputs(
+                    saved.inputs, store=store, owner_user_id=owner_user_id,
+                    capability_packs=deepcopy(selected.commit_metadata.metadata.get("capability_packs") or []),
+                )
+            except (ManagedCapabilityTemplateError, BuildContextError) as exc:
+                raise ValueError("Approved compilation pack sources could not be verified. Renew DesignDocs review.") from exc
             await read_verified_artifact_bundle(selected, max_bytes=APP_BUNDLE_MAX_TOTAL_BYTES)
             return ApprovedAppCompilation(key=_RESOLVER_KEY, context=context, binding=first, record=selected)
         if saved.parent_record_id != record.parent_build_record_id:
