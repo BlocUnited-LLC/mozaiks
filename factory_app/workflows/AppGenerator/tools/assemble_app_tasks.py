@@ -7,7 +7,10 @@ from typing import Annotated, Any
 import yaml
 from pydantic import Field
 
-from factory_app.workflows._shared.pack_selection import PhysicalPackContext
+from factory_app.workflows._shared.pack_selection import (
+    PhysicalPackContext,
+    reviewed_pack_read_operation,
+)
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     discard_pack_owned_outputs,
@@ -324,6 +327,7 @@ async def _verified_revision_source(app_build_plan: Any, context_variables: Any)
     return {path: content for path, content in saved.items() if isinstance(content, str)}
 
 
+@reviewed_pack_read_operation
 def _workspace_paths(app_build_plan: Any, context_variables: Any) -> frozenset[str]:
     capability_packs = _selected_capability_packs(app_build_plan, context_variables)
     if not capability_packs:
@@ -331,6 +335,7 @@ def _workspace_paths(app_build_plan: Any, context_variables: Any) -> frozenset[s
     return resolve_declared_pack_output_paths(capability_packs, context_variables=context_variables, owner="workspace")
 
 
+@reviewed_pack_read_operation
 def _apply_managed_capability_templates(
     code_files: list[dict[str, str]],
     *,
@@ -604,7 +609,7 @@ async def _assemble_app_tasks(
         verified_source=verified_source, overlay_files=overlay_files,
     )
     # App-owned pack code is never deleted by a tombstone either.
-    workspace_paths = _workspace_paths(app_build_plan, context_variables) if template_files else frozenset()
+    workspace_paths = _workspace_paths(app_build_plan, context_variables=context_variables) if template_files else frozenset()
     ignored_tombstones = sorted(workspace_paths & set(_context_deleted_files(context_variables)))
     if ignored_tombstones:
         logger.warning(

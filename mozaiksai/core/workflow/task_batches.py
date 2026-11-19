@@ -1231,6 +1231,7 @@ async def _run_one_task(
                     for key in ("data_contract", "design_surface_map"):
                         if detach(task_context.get(key)) != detach(base_context.get(key)):
                             raise ValueError(f"Task context cannot replace {key} beneath approved role grants")
+                authored_access_policy = resolve_authored_module_access_policy(base_context)
                 subscription_contract = resolve_subscription_contract(task_context)
                 companion_files = dict(base_context.get("generated_files") or {})
                 for dependency in (task_context.get("dependency_task_outputs") or {}).values():
@@ -1239,7 +1240,7 @@ async def _run_one_task(
                     output, app_build_plan=base_context.get("app_build_plan"),
                     data_contract=task_context.get("data_contract"),
                     design_surface_map=task_context.get("design_surface_map"),
-                    access_policy=resolve_authored_module_access_policy(base_context),
+                    access_policy=authored_access_policy,
                     subscription_contract=subscription_contract, companion_files=companion_files,
                 ))
                 canonical_code_files = extract_code_file_entries_from_payload(
@@ -1301,7 +1302,7 @@ async def _run_one_task(
                     read_sources, app_build_plan=task_context.get("app_build_plan"),
                     data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
                     subscription_contract=subscription_contract,
-                    access_policy=approved_access_policy,
+                    access_policy=authored_access_policy,
                     design_surface_map=task_context.get("design_surface_map"),
                 ))
                 canonical_file_map = compile_module_entitlement_gates(

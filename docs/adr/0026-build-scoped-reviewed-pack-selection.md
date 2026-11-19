@@ -199,6 +199,13 @@ scope. A failed final gate clears the cached plan through the existing rejection
 path. Assembly, saved compilation replay and publication do not inherit the
 planner memo and retain their independent fresh verification boundaries.
 
+The synchronous template, workspace-path and file-merge assembly phases each
+own a separate read operation with the same successful-read and defensive-copy
+rules. A phase never inherits another phase's memo. All scopes end before the
+async caller can yield; acceptance, saved input capture and publication still
+reverify current sources. This avoids reparsing identical admitted inputs for
+each consumer inside one phase without treating an earlier phase as authority.
+
 The physical-source projection retains the complete verified plan, including
 its approved customization inputs, after checking its source selection. Catalog
 descriptors do not replace those compiler inputs. Public replay validators return

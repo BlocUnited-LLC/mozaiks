@@ -160,3 +160,33 @@ def test_physical_projection_preserves_verified_plan_inputs_without_mutation(man
     context.set("app_build_plan", {**plan, "capability_packs": []})
     with pytest.raises(ValueError, match="selected pack identities differ"):
         selection.PhysicalPackContext(context)
+
+
+@pytest.mark.parametrize("phase", ["templates", "workspace"])
+def test_synchronous_assembly_phase_owns_fresh_reads_and_rechecks_revocation(managed_registry, monkeypatch, phase):
+    from factory_app.workflows.AppGenerator.tools import assemble_app_tasks as assembly
+
+    plan, context = _plan_and_context()
+    context.set("build_timestamp", "2026-01-01T00:00:00Z")
+    catalog = Mock(wraps=selection.available_pack_rows)
+    monkeypatch.setattr(selection, "available_pack_rows", catalog)
+
+    def invoke():
+        if phase == "workspace":
+            return assembly._workspace_paths(plan, context_variables=context)
+        return assembly._apply_managed_capability_templates(
+            [], app_build_plan=plan, context_variables=context, ui_contributions=[],
+        )
+
+    first = invoke()
+    assert first
+    assert catalog.call_count == 1
+    assert selection._PACK_READS.get() is None
+    assert invoke() == first
+    assert catalog.call_count == 2
+    assert selection._PACK_READS.get() is None
+    _revoke(managed_registry)
+    with pytest.raises(ValueError, match="no longer available"):
+        invoke()
+    assert catalog.call_count == 3
+    assert selection._PACK_READS.get() is None

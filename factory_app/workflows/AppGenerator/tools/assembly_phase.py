@@ -18,6 +18,7 @@ from typing import Any
 
 import yaml
 
+from factory_app.workflows._shared.pack_selection import reviewed_pack_read_operation
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     admitted_module_file_map,
     extract_code_file_entries_from_payload,
@@ -206,6 +207,7 @@ def _carried_contract_conflict(content: str, composed: dict[str, Any]) -> str | 
     return None
 
 
+@reviewed_pack_read_operation
 def _merge_code_files(
     feature_outputs: list[dict[str, Any]],
     *,
