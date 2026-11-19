@@ -427,10 +427,10 @@ def validate_pack_permission_consumers(
     granted: set[str] = set()
     authored_actions = {}
     actions = _grant_actions(policy, data_contract=data_contract, pack_authorization=pack_authorization)
-    for _, owner, action, scopes in actions:
+    for _, owner, action_id, scopes in actions:
         granted.update(pack_permissions.intersection(scopes))
         if owner not in pack_authorization.actions:
-            authored_actions[owner, action] = scopes
+            authored_actions[owner, action_id] = scopes
     if not granted:
         return
     for path, source in files.items():
