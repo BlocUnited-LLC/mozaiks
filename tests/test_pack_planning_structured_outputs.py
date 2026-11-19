@@ -16,12 +16,18 @@ import pytest
 import yaml
 
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    verified_pack_selection,
+)
 from mozaiksai.core.session.build_context import load_trusted_build_context
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge, _workflow_tool_invocation
 from mozaiksai.core.workflow.context.authority import build_context_authority_policy
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.context.schema import load_context_variables_config
 from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_reviewed_pack_selection,
+)
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_owned_output_paths,
 )
@@ -164,8 +170,12 @@ def test_exact_app_plan_json_releases_pack_backend_and_preserves_app_work(regist
     assert not owned.intersection(path for task in tasks.values() for path in task["owned_paths"])
     [selected] = stored["capability_packs"]
     [admitted] = detach(context.get("capability_packs"))
-    for key in ("pack_source_path", "version"):
-        assert selected[key] == admitted[key]
+    [reviewed] = resolve_reviewed_pack_selection(context)
+    assert "pack_source_path" not in selected
+    assert (selected["version"], selected["digest"]) == (reviewed["version"], reviewed["digest"])
+    resolved = verified_pack_selection(selected, context_variables=context)
+    assert resolved is not None and resolved["source_path"] == admitted["pack_source_path"]
+    assert resolved["pack_id"] == reviewed["pack_id"]
     assert candidate == original
 
 
