@@ -52,7 +52,7 @@
       "order": 5,
       "meta": {
         "surfaces": ["studio"],
-        "requiresRole": "admin",
+        "requiresAuth": true,
         "title": "Performance",
         "appShell": true,
         "ai_context": "The user is on the Performance page, the portfolio command center. It shows revenue and user metrics across all their apps, a portfolio trend, deterministic attention insights, and a comparable applications table. Clicking an app drills into that app's analytics.",
