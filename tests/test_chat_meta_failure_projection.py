@@ -31,7 +31,11 @@ def metadata_route(monkeypatch):
         state.reads.append((query, projection))
         if any(state.document.get(key) != value for key, value in query.items()):
             return None
-        return {key: value for key, value in state.document.items() if key in projection}
+        projected = {key: value for key, value in state.document.items() if key in projection}
+        binding = state.document.get("run_build_binding") or {}
+        if "run_build_binding.refinement_model" in projection and "refinement_model" in binding:
+            projected["run_build_binding"] = {"refinement_model": binding["refinement_model"]}
+        return projected
 
     monkeypatch.setattr(chat.runtime_app, "_chat_coll", AsyncMock(return_value=SimpleNamespace(find_one=find_one)))
     state.history = AsyncMock(return_value=[])
@@ -111,3 +115,17 @@ def test_production_host_mounts_the_tested_chat_metadata_handler():
         or getattr(route, "endpoint", None) is chat.chat_meta
         for route in platform.app.routes
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["gemini", "openai", "unknown", None])
+async def test_chat_meta_only_exposes_known_bound_model(metadata_route, model):
+    state = metadata_route
+    state.document["run_build_binding"] = {"refinement_model": model, "build_id": "internal"}
+    result = await _get(state)
+    assert "run_build_binding" not in result
+    assert "run_build_binding" not in state.reads[0][1]
+    if model in {"gemini", "openai"}:
+        assert result["refinement_model"] == model
+    else:
+        assert "refinement_model" not in result

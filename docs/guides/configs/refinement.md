@@ -62,9 +62,11 @@ before enabling them. Studio displays provider availability without returning
 key values.
 
 Factory prefers Gemini 3.8 Flash. A workspace with only an allowed OpenAI key
-can start builds with GPT-5 Nano. Choose a model when starting an app build or
-submitting a change from App Review. Studio saves the choice with the build
-or refinement so routed workflows and approval continue with that model.
+can start builds with GPT-5 Nano. Choose a model when starting an app build.
+The chat composer shows the model attached to an active build. In App Review,
+use the dropdown inside the composer, below the message text and beside Send,
+to choose the model for a new refinement. Studio saves the choice with the run
+so routed workflows and approval continue with that model.
 
 For file-based configuration, `model_override: gemini` or
 `model_override: openai` in `app/config/refinement_policy.yaml` supplies

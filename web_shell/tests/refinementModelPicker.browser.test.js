@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 
 import { chromium, expect } from '@playwright/test';
 import { build } from 'esbuild';
+import postcss from 'postcss';
+import tailwindcss from '@tailwindcss/postcss';
 
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ui = path.join(path.dirname(shell), 'chat-ui/src');
@@ -27,13 +29,21 @@ test('the AppReview composer lets the user select a model and preserves it acros
       function Fixture() {
         const [currentWorkflowName, setCurrentWorkflowName] = useState('AppReview');
         const pendingHarnessDecision = null;
+        const [currentChatId, changeChat] = useState('fixture-chat');
+        const [conversationMode, changeMode] = useState('workflow');
         const loading = false;
         ${picker}
         window.changeWorkflow = setCurrentWorkflowName;
+        window.showBuildModel = () => {
+          setCurrentWorkflowName('ValueEngine');
+          setBoundChatModel({chatId:'fixture-chat',model:'gemini'});
+        };
+        window.changeChat = changeChat;
+        window.changeMode = changeMode;
         window.selectedModel = () => refinementModelRef.current;
         return <ChatInterface messages={[]} onSendMessage={() => {}} loading={false}
           workflowName={currentWorkflowName} connectionStatus="connected"
-          conversationMode="workflow" plainContainer={true} refinementModelPicker={refinementModelPicker} />;
+          conversationMode={conversationMode} plainContainer={true} refinementModelPicker={refinementModelPicker} />;
       }
       createRoot(document.getElementById('root')).render(<Fixture />);
     ` },
@@ -54,7 +64,17 @@ test('the AppReview composer lets the user select a model and preserves it acros
       builder.onLoad({ filter: /.*/, namespace: 'fixture-stub' }, args => ({ contents: stubs[args.path], loader: 'js' }));
     } }],
   });
+  const css = await postcss([tailwindcss()]).process(
+    (await fs.readFile(path.join(shell, 'styles.css'), 'utf8'))
+      + `\n@source "${ui.replaceAll('\\', '/')}";`,
+    {from:path.join(shell, 'styles.css')},
+  );
   const server = http.createServer((request, response) => {
+    if (request.url === '/styles.css') {
+      response.setHeader('Content-Type', 'text/css');
+      response.end(css.css);
+      return;
+    }
     if (request.url === '/api/studio/refinement/models') {
       response.setHeader('Content-Type', 'application/json');
       response.end(JSON.stringify({ default: 'default', models: [
@@ -63,7 +83,7 @@ test('the AppReview composer lets the user select a model and preserves it acros
       return;
     }
     response.setHeader('Content-Type', request.url === '/fixture.js' ? 'text/javascript' : 'text/html');
-    response.end(request.url === '/fixture.js' ? bundle.outputFiles[0].text : '<div id="root"></div><script src="/fixture.js"></script>');
+    response.end(request.url === '/fixture.js' ? bundle.outputFiles[0].text : '<!doctype html><link rel="stylesheet" href="/styles.css"><div id="root"></div><script src="/fixture.js"></script>');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
@@ -83,6 +103,20 @@ test('the AppReview composer lets the user select a model and preserves it acros
     await expect(select).toHaveCount(0);
     await page.evaluate(() => window.changeWorkflow('AppReview'));
     await expect(select).toHaveValue('chosen');
+    const box = await page.locator('textarea').boundingBox();
+    const picker = await select.boundingBox();
+    assert.ok(box && picker && picker.y >= box.y + box.height - 1, 'Model picker is below the text field');
+    await expect(page.getByRole('button', {name: 'Send message'})).toBeVisible();
+    await page.evaluate(() => window.showBuildModel());
+    const runModel = page.getByLabel('Run model: Gemini 3.8 Flash');
+    await expect(runModel).toBeVisible();
+    await expect(select).toHaveCount(0);
+    await page.evaluate(() => window.changeMode('ask'));
+    await expect(runModel).toHaveCount(0);
+    await page.evaluate(() => window.changeMode('workflow'));
+    await expect(runModel).toBeVisible();
+    await page.evaluate(() => window.changeChat('other-chat'));
+    await expect(runModel).toHaveCount(0);
     assert.deepEqual(errors, []);
   }
 });

@@ -359,9 +359,10 @@ const ChatPage = () => {
   const [currentWorkflowName, setCurrentWorkflowName] = useState(defaultWorkflow);
   const [refinementModels, setRefinementModels] = useState([]);
   const [refinementModel, setRefinementModel] = useState('');
+  const [boundChatModel, setBoundChatModel] = useState(null);
   const refinementModelRef = useRef('');
   const submittedRefinementModelRef = useRef(null);
-  const showRefinementModelPicker = currentWorkflowName === 'AppReview';
+  const showRefinementModelPicker = conversationMode === 'workflow' && currentWorkflowName === 'AppReview';
   useEffect(() => {
     if (!showRefinementModelPicker) return undefined;
     const controller = new AbortController();
@@ -381,10 +382,15 @@ const ChatPage = () => {
     return () => controller.abort();
   }, [showRefinementModelPicker]);
 
+  const activeRunModel = conversationMode === 'workflow' && boundChatModel?.chatId === currentChatId
+    ? boundChatModel?.model
+    : null;
+  const activeRunModelLabel = activeRunModel === 'gemini' ? 'Gemini 3.8 Flash'
+    : activeRunModel === 'openai' ? 'GPT-5 Nano' : null;
   const refinementModelPicker = showRefinementModelPicker && refinementModels.length > 0 ? (
     <select
       aria-label="AI model"
-      className="min-w-0 max-w-32 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+      className="h-8 max-w-full cursor-pointer rounded-full border border-transparent bg-card px-2.5 text-xs font-medium text-foreground hover:border-border focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-default disabled:text-muted-foreground"
       value={refinementModel}
       disabled={loading || Boolean(pendingHarnessDecision)}
       onChange={event => {
@@ -394,6 +400,14 @@ const ChatPage = () => {
     >
       {refinementModels.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
     </select>
+  ) : activeRunModelLabel ? (
+    <span
+      className="rounded-full px-2.5 py-1 text-xs font-medium text-muted-foreground"
+      aria-label={`Run model: ${activeRunModelLabel}`}
+      title="Model selected for this run"
+    >
+      {activeRunModelLabel}
+    </span>
   ) : null;
   const currentWorkflowNameRef = useRef(defaultWorkflow);
 
@@ -2282,6 +2296,8 @@ const ChatPage = () => {
       if (!meta) {
         return false;
       }
+      const model = meta.refinement_model;
+      setBoundChatModel(model === 'gemini' || model === 'openai' ? { chatId: targetChatId, model } : null);
       observeSessionMeta(meta);
       if (isFailedWorkflowSession(meta.status)) setLoading(false);
 
