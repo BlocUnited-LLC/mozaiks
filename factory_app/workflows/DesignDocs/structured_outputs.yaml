@@ -440,11 +440,18 @@ models:
         description: Exact role_id declared in access_policy.roles.
       collection:
         type: str
-        description: Exact app-owned module collection name in data_contract used as the action's permission anchor. Each module action must use the same single collection across all roles, even when its implementation changes several collections. Platform and hosted collections cannot receive app grants.
+        description: >-
+          App-owned collection anchoring the module action across all roles.
+          Use its bare name when unique. Qualify a shared name as module.collection
+          only when every owner is a selected verified pack module, such as
+          support.requests or friends.requests. Platform and hosted collections
+          cannot receive app grants.
       actions:
         type: list[str]
         description: >-
-          Non-empty exact canonical list_<collection>/get_<collection> or
+          Non-empty list of action ids. For verified pack collections, use
+          actions declared by the owning module. For authored collections, use
+          canonical list_<collection>/get_<collection> or
           create_<entity>/update_<entity>/delete_<entity> action ids, or surface_map
           owned_mutations/custom_reads for this collection. Reads retain the exact
           collection name; writes convert the declared entity to snake_case.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
@@ -153,6 +154,47 @@ def validate_reviewed_pack_data(contract: dict[str, Any], authorization: PackAut
     return expected
 
 
+class GrantCollectionIndex:
+    """Resolve review-time grant anchors without flattening their module ownership."""
+
+    def __init__(self, data_contract: Any, pack_authorization: PackAuthorization | None = None):
+        contract = detach(data_contract)
+        if not isinstance(contract, dict):
+            raise ValueError("access_policy grants require the approved data_contract")
+        self.collections = {
+            (owner, collection["name"]): collection
+            for owner, kind, collection in iter_data_contract_collections(contract)
+            if kind == "module"
+        }
+        self._owners_by_name: dict[str, list[str]] = defaultdict(list)
+        for owner, name in self.collections:
+            self._owners_by_name[name].append(owner)
+        self._pack_modules = pack_authorization.actions if pack_authorization else {}
+        self._pack_collections = validate_reviewed_pack_data(contract, pack_authorization) if pack_authorization else set()
+
+    def resolve(self, reference: str) -> tuple[str, str]:
+        qualifier, separator, suffix = reference.partition(".")
+        name = suffix if separator else reference
+        owners = self._owners_by_name.get(name, [])
+        if not owners or (separator and qualifier not in owners):
+            raise ValueError(f"access_policy grant names unknown app-owned collection {reference!r}")
+        if len(owners) > 1:
+            candidates = sorted(f"{owner}.{name}" for owner in owners)
+            if any((owner, name) not in self._pack_collections or owner not in self._pack_modules for owner in owners):
+                raise ValueError(
+                    f"access_policy collection {name!r} is ambiguous across {candidates}; qualified grants "
+                    "require every collection with this name to belong to a verified pack module"
+                )
+            if not separator:
+                raise ValueError(f"access_policy collection {name!r} is ambiguous; use one of {candidates}")
+        elif separator:
+            raise ValueError(f"access_policy collection {reference!r} is unique; use its bare name {name!r}")
+        owner = qualifier if separator else owners[0]
+        if owner in self._pack_modules and (owner, name) not in self._pack_collections:
+            raise ValueError(f"pack grant collection {owner}.{name} is not owned by its verified pack")
+        return owner, name
+
+
 def _canonical_spelling(action: str, name: str, collection: dict[str, Any], canonical: set[str]) -> str:
     """Name the canonical id an unknown action misspelled, without accepting the alias.
 
@@ -216,46 +258,39 @@ def validate_access_policy(
     if not isinstance(contract, dict) or not isinstance(surface_map, dict):
         raise ValueError("access_policy grants require the approved data_contract and surface_map")
     pack_authorization = pack_authorization or PackAuthorization((), (), {}, {})
-    pack_collections = validate_reviewed_pack_data(contract, pack_authorization)
+    index = GrantCollectionIndex(contract, pack_authorization)
     surfaces = {
         surface["surface_id"]: surface for surface in surface_map.get("surfaces", [])
         if surface.get("surface_kind") == "module" and surface.get("owner") == "app"
     }
-    collections: dict[str, tuple[str, dict[str, Any]]] = {}
-    for owner, kind, collection in iter_data_contract_collections(contract):
-        if kind != "module" or owner not in surfaces:
-            continue
-        name = collection["name"]
-        if name in collections:
-            raise ValueError(f"access_policy collection {name!r} is ambiguous")
-        collections[name] = (owner, collection)
     canonical_owners: dict[tuple[str, str], str] = {}
-    for name, (owner, collection) in collections.items():
+    for (owner, name), collection in index.collections.items():
+        if owner not in surfaces:
+            continue
         actions = {canonical_read_action_id(name, operation) for operation in ("get", "list")}
         if collection_has_canonical_writes(collection):
             actions.update(canonical_write_action_id(collection["entity"], operation)
                            for operation in CANONICAL_WRITE_OPERATIONS)
         canonical_owners.update({(owner, action): name for action in actions})
-    selected: dict[str, set[str]] = defaultdict(set)
+    selected: dict[tuple[str, str], set[str]] = defaultdict(set)
     role_actions: dict[str, set[tuple[str, str]]] = defaultdict(set)
     role_permissions: dict[str, set[str]] = defaultdict(set)
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[str, str, str, str]] = set()
     action_collections: dict[tuple[str, str], set[str]] = defaultdict(set)
     for grant in policy["grants"]:
-        role, name = grant["role_id"], grant["collection"]
+        role, reference = grant["role_id"], grant["collection"]
         if role not in role_ids:
             raise ValueError(f"access_policy grant names unknown role {role!r}")
-        if name not in collections:
-            raise ValueError(f"access_policy grant names unknown app-owned collection {name!r}")
-        owner, collection = collections[name]
+        owner, name = index.resolve(reference)
+        if owner not in surfaces:
+            raise ValueError(f"access_policy grant names unknown app-owned collection {reference!r}")
+        collection = index.collections[owner, name]
         canonical = {
             canonical_write_action_id(collection["entity"], operation)
             for operation in CANONICAL_WRITE_OPERATIONS
         } if collection_has_canonical_writes(collection) else set()
         reads = {canonical_read_action_id(name, operation) for operation in ("get", "list")}
         pack_actions = pack_authorization.actions.get(owner)
-        if pack_actions is not None and (owner, name) not in pack_collections:
-            raise ValueError(f"pack grant collection {owner}.{name} is not owned by its verified pack")
         allowed = set(pack_actions) if pack_actions is not None else canonical | reads | set(
             surfaces[owner].get("owned_mutations") or []
         ) | set(surfaces[owner].get("custom_reads") or [])
@@ -267,7 +302,7 @@ def validate_access_policy(
                           or _canonical_spelling(action, name, collection, canonical | reads)
                           or _custom_action_remedy(action, owner, collection))
                 raise ValueError(
-                    f"access_policy action {action!r} is not an approved action of {name!r}. {remedy}"
+                    f"access_policy action {action!r} is not an approved action of {reference!r}. {remedy}"
                     f"Approved actions: {choices}. Canonical reads use the exact collection name; "
                     "canonical writes use the snake_case entity name."
                 )
@@ -277,12 +312,12 @@ def validate_access_policy(
                     f"access_policy action {owner}.{action} belongs to collection {canonical_owner!r}, "
                     f"not {name!r}; custom action declarations cannot change canonical ownership"
                 )
-            key = (role, name, action)
+            key = (role, owner, name, action)
             if key in seen:
                 raise ValueError(f"access_policy repeats grant {key!r}")
             seen.add(key)
             action_collections[owner, action].add(name)
-            selected[name].add(action)
+            selected[owner, name].add(action)
             if pack_actions is not None:
                 if not pack_actions[action]:
                     raise ValueError(f"pack action {owner}.{action} has no dispatch permission to grant")
@@ -298,8 +333,8 @@ def validate_access_policy(
         for (owner, action), names in sorted(action_collections.items()) if len(names) > 1
     ]
     write_gaps = False
-    for name, actions in sorted(selected.items()):
-        owner, collection = collections[name]
+    for (owner, name), actions in sorted(selected.items()):
+        collection = index.collections[owner, name]
         if owner in pack_authorization.actions:
             continue
         required = {
@@ -346,23 +381,35 @@ def validate_access_policy(
     return policy
 
 
+def _grant_actions(
+    policy: dict[str, Any], *, data_contract: Any, pack_authorization: PackAuthorization | None,
+) -> Iterator[tuple[str, str | None, str, tuple[str, ...]]]:
+    if not policy["grants"]:
+        return
+    index = GrantCollectionIndex(data_contract, pack_authorization) if data_contract is not None else None
+    for grant in policy["grants"]:
+        reference = grant["collection"]
+        if index is None:
+            # Standalone authored policies render bare permissions without looking up a module.
+            if "." in reference or (pack_authorization and (pack_authorization.identities or pack_authorization.actions)):
+                raise ValueError("Qualified and verified pack grants require the approved data_contract")
+            owner, name = None, reference
+        else:
+            owner, name = index.resolve(reference)
+        pack_actions = pack_authorization.actions.get(owner) if pack_authorization and owner is not None else None
+        for action in grant["actions"]:
+            scopes = pack_actions[action] if pack_actions is not None else (f"{name}.{action}",)
+            yield grant["role_id"], owner, action, scopes
+
+
 def compiled_role_grants(
     policy: dict[str, Any], *, data_contract: Any = None, pack_authorization: PackAuthorization | None = None,
 ) -> list[dict[str, Any]]:
     """Render the auth contract's role grants; no caller receives this union."""
     permissions: dict[str, set[str]] = defaultdict(set)
-    owners = {
-        collection["name"]: owner
-        for owner, kind, collection in iter_data_contract_collections(detach(data_contract))
-        if kind == "module"
-    } if data_contract is not None else {}
-    for grant in policy["grants"]:
-        owner = owners.get(grant["collection"])
-        pack_actions = pack_authorization.actions.get(owner) if pack_authorization and owner is not None else None
-        for action in grant["actions"]:
-            permissions[grant["role_id"]].update(
-                pack_actions[action] if pack_actions is not None else [f"{grant['collection']}.{action}"]
-            )
+    actions = _grant_actions(policy, data_contract=data_contract, pack_authorization=pack_authorization)
+    for role, _, _, scopes in actions:
+        permissions[role].update(scopes)
     return [{"id": role["role_id"], "permissions": sorted(permissions[role["role_id"]])}
             for role in policy["roles"]]
 
@@ -373,23 +420,17 @@ def validate_pack_permission_consumers(
     """Refuse another module consuming a permission derived from reviewed pack actions."""
     from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
 
-    owners = {
-        collection["name"]: owner
-        for owner, kind, collection in iter_data_contract_collections(detach(data_contract))
-        if kind == "module"
-    }
     pack_permissions = {
         permission for actions in pack_authorization.actions.values()
         for permissions in actions.values() for permission in permissions
     }
-    compiled = compiled_role_grants(policy, data_contract=data_contract, pack_authorization=pack_authorization)
-    granted = {permission for role in compiled for permission in role["permissions"]} & pack_permissions
-    authored_actions = {
-        (owners[grant["collection"]], action): f"{grant['collection']}.{action}"
-        for grant in policy["grants"]
-        for action in grant["actions"]
-        if owners.get(grant["collection"]) not in pack_authorization.actions
-    }
+    granted: set[str] = set()
+    authored_actions = {}
+    actions = _grant_actions(policy, data_contract=data_contract, pack_authorization=pack_authorization)
+    for _, owner, action_id, scopes in actions:
+        granted.update(pack_permissions.intersection(scopes))
+        if owner not in pack_authorization.actions:
+            authored_actions[owner, action_id] = scopes
     if not granted:
         return
     for path, source in files.items():
@@ -404,8 +445,7 @@ def validate_pack_permission_consumers(
                 continue
             expected = pack_authorization.actions.get(module.module.id, {}).get(action.id)
             if expected is None:
-                authored = authored_actions.get((module.module.id, action.id))
-                expected = (authored,) if authored else None
+                expected = authored_actions.get((module.module.id, action.id))
             if expected is None or tuple(action.permissions) != expected:
                 raise ValueError(f"Unreviewed action {module.module.id}.{action.id} consumes a reviewed pack permission")
 
@@ -432,12 +472,11 @@ def approved_module_role_permissions(
     policy = validate_access_policy(raw, data_contract=data_contract, design_surface_map=design_surface_map)
     if not policy["grants"]:
         return {}
-    owners = {collection["name"]: owner
-              for owner, kind, collection in iter_data_contract_collections(detach(data_contract))
-              if kind == "module"}
+    index = GrantCollectionIndex(data_contract)
     result: dict[str, dict[str, str]] = {}
     for grant in policy["grants"]:
-        target = result.setdefault(owners[grant["collection"]], {})
+        owner, name = index.resolve(grant["collection"])
+        target = result.setdefault(owner, {})
         for action in grant["actions"]:
-            target[action] = f"{grant['collection']}.{action}"
+            target[action] = f"{name}.{action}"
     return result
