@@ -73,6 +73,35 @@ def test_owner_without_global_admin_uses_server_bound_dashboard(dashboard):
     assert calls == [("factory", "builder", "chat_owned")]
 
 
+def test_host_can_project_its_registration_id_only_after_ownership_checks(dashboard, monkeypatch):
+    client, current, _ = dashboard
+    seen = []
+
+    async def resolve_app_id(*, host_app_id, owner_user_id, binding):
+        seen.append((host_app_id, owner_user_id, binding.model_dump()))
+        return "host-registration"
+
+    monkeypatch.setattr(client.app.state, "resolve_studio_dashboard_app_id", resolve_app_id, raising=False)
+    assert client.get("/api/studio/build/dashboard-link?chat_id=chat_owned&app_id=foreign").json() == {
+        "path": "/apps/host-registration/overview"
+    }
+    assert client.get("/api/studio/build/dashboard-link?chat_id=chat_foreign").status_code == 404
+    current["record_app"] = "mismatched"
+    assert client.get("/api/studio/build/dashboard-link?chat_id=chat_owned").status_code == 404
+    assert seen == [("factory", "builder", BINDING)]
+
+
+@pytest.mark.parametrize("mapped_id", [None, "", "../private", "https://outside.example"])
+def test_unmapped_host_dashboard_cannot_redirect_to_another_resource(dashboard, monkeypatch, mapped_id):
+    client, _, _ = dashboard
+
+    async def resolve_app_id(**_):
+        return mapped_id
+
+    monkeypatch.setattr(client.app.state, "resolve_studio_dashboard_app_id", resolve_app_id, raising=False)
+    assert client.get("/api/studio/build/dashboard-link?chat_id=chat_owned").status_code == 404
+
+
 def test_missing_context_and_first_build_use_portfolio(dashboard):
     client, current, _ = dashboard
     assert client.get("/api/studio/build/dashboard-link").json() == {"path": "/apps"}

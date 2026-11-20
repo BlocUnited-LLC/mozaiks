@@ -880,6 +880,7 @@ async def get_studio_dashboard_config(
 
 @app.get("/api/studio/build/dashboard-link")
 async def get_build_dashboard_link(
+    request: Request,
     chat_id: BuildIdentity | None = None,
     principal: UserPrincipal = Depends(require_studio_user),
 ):
@@ -908,7 +909,15 @@ async def get_build_dashboard_link(
         raise HTTPException(status_code=404, detail="Build context not found")
     surface = load_dashboard_manifest(resolve_app_root()).surface_for_scope("app")
     portal = next(portal for portal in surface.portals if portal.id == surface.default_portal and portal.enabled)
-    path = portal.route.replace(":appId", binding.target_app_id)
+    dashboard_app_id = binding.target_app_id
+    resolve_app_id = getattr(request.app.state, "resolve_studio_dashboard_app_id", None)
+    if resolve_app_id is not None:
+        mapped_id = await resolve_app_id(host_app_id=host_app_id, owner_user_id=user_id, binding=binding)
+        try:
+            dashboard_app_id = TypeAdapter(BuildIdentity).validate_python(mapped_id)
+        except ValidationError as exc:
+            raise HTTPException(status_code=404, detail="Build context not found") from exc
+    path = portal.route.replace(":appId", dashboard_app_id)
     if not path.startswith("/") or path.startswith("//") or "\\" in path:
         raise HTTPException(status_code=500, detail="App dashboard route is invalid")
     return {"path": path}
