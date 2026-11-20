@@ -27,6 +27,7 @@ from mozaiksai.core.session.build_context_schema import validate_pack_context
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     SHARED_PACK_OUTPUT_PATHS,
+    TEMPLATE_BACKEND_FILES,
 )
 from mozaiksai.resources import resolve_factory_app_root
 
@@ -1567,14 +1568,13 @@ def verified_template_module_ids(files: dict[str, str], inventory: list[dict[str
     before execution. Neither grants ownership to backend implementation files.
     """
     result = set()
-    required = {"module.yaml", "backend/service.py", "backend/repo.py", "backend/policy.py", "backend/schemas.py"}
     for pack in inventory:
         owners = pack["owner_map"]
         rendered = {entry["filename"]: entry["content"] for entry in pack["files"]}
         modules = {path.split("/")[1] for path in rendered if path.startswith("modules/")}
         for module_id in modules:
             prefix = f"modules/{module_id}/"
-            if not all(owners.get(prefix + path) == "templates" and prefix + path in rendered for path in required):
+            if not all(owners.get(prefix + path) == "templates" and prefix + path in rendered for path in TEMPLATE_BACKEND_FILES):
                 continue
             if pack.get("authority") not in PACK_AUTHORITIES:
                 raise PackIntegrityError(

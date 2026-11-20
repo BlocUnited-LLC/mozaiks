@@ -68,6 +68,9 @@ from mozaiksai.core.validation.workspace import (
 from mozaiksai.core.workflow.context.adapter import create_context_container
 from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
 from mozaiksai.core.workflow.generator_support.module_role_grants import verified_pack_authorization
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    module_action_index_from_context,
+)
 from mozaiksai.core.workflow.outcome_feedback import WorkflowFeedbackEvidence
 from mozaiksai.version import __version__ as FRAMEWORK_VERSION
 from tests.appgenerator_subscription_fixture import subscription_contract
@@ -450,6 +453,19 @@ async def _assemble(pack_id: str) -> tuple[dict[str, str], Any, list[dict[str, s
     expected = [] if pack_id in AUTHORED_ROLE_PACKS else _expected_roles(pack_id)
     assert yaml.safe_load(files["config/auth.yaml"])["authorization"]["roles"] == expected
     return files, context, identities
+
+
+@pytest.mark.asyncio
+async def test_page_repair_reads_compiler_added_actions_from_the_admitted_partial_pack():
+    files, context, _ = await _assemble("outcome_feedback")
+    path = "modules/outcome_feedback/module.yaml"
+    manifest = yaml.safe_load(files[path])
+    actions = {action["id"]: action for action in manifest["actions"]}
+    assert {"list_my_feedback", "get_records", "list_records"} <= actions.keys()
+    context.set("generated_files", files)
+    proposed = {**manifest, "actions": [{"id": "get_records", "description": "replacement"}, {"id": "invented"}]}
+    index = module_action_index_from_context(context, authored_files={path: yaml.safe_dump(proposed)})
+    assert index["outcome_feedback"] == actions
 
 
 def _assemble_authored_role_fixture(pack_id):

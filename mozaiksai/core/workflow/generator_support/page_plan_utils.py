@@ -30,8 +30,8 @@ from .module_action_inventory import (
     all_module_actions,
     approved_manifest_action_ids,
     module_action_index,
+    pack_module_templates,
     pack_owned_output_paths,
-    pack_template_module_contracts,
 )
 from .page_action_bindings import (
     generated_workflow_names,
@@ -569,28 +569,29 @@ def _page_reference_files(context: Any) -> dict[str, str]:
 
 def module_action_index_from_context(context: Any, *, authored_files: dict[str, str] | None = None) -> ModuleActionIndex:
     """Resolve app modules from task inputs and pack modules from the manifests assembly supplies."""
-    sources = {**_page_reference_files(context), **(authored_files or {})}
-    modules = module_action_index(sources)
-    templates = pack_template_module_contracts(context)
+    admitted = _page_reference_files(context)
+    sources = {**admitted, **(authored_files or {})}
+    templates = pack_module_templates(context)
     owned = pack_owned_output_paths(context) if templates.keys() & sources.keys() else set()
-    modules.update(module_action_index({
-        path: source for path, source in templates.items() if path not in sources or path in owned
-    }))
-    return _approved_page_actions(context, modules)
-
-
-def workflow_names_from_context(context: Any) -> set[str]:
-    return generated_workflow_names(_page_reference_files(context), context)
-
-
-def _approved_page_actions(context: Any, modules: ModuleActionIndex) -> ModuleActionIndex:
+    for path, template in templates.items():
+        if path not in sources or path in owned:
+            # Partial backends gain canonical actions at assembly. Use an
+            # admitted manifest when available; a page worker cannot replace it.
+            sources[path] = (
+                admitted.get(path, template.source) if template.action_source == "compiler" else template.source
+            )
+    modules = module_action_index(sources)
     if context is None or not context.get("design_surface_map"):
         return modules
-    approved = approved_page_action_ids(context)
+    approved = approved_manifest_action_ids(context, all_module_actions(context), http_only=True, templates=templates)
     return {
         module: {action_id: contract for action_id, contract in actions.items() if action_id in approved.get(module, [])}
         for module, actions in modules.items()
     }
+
+
+def workflow_names_from_context(context: Any) -> set[str]:
+    return generated_workflow_names(_page_reference_files(context), context)
 
 
 def _materialize_table_response_keys(document: Any, contracts: dict[str, dict[str, Any]]) -> int:
