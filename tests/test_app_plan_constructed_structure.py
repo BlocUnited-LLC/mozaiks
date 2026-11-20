@@ -254,8 +254,11 @@ def test_complete_correct_plan_preserves_structure_and_restates_page_outputs():
     assert result["outcome"] == "ready", result
     assert complete == original
     cached = detach(context.get("app_build_plan"))
-    # Permit only the authoritative instruction addition; every other task
-    # field and the complete structural inventories still compare exactly.
+    # This design has no reviewed writes. Plan review records that decision on
+    # each declarative page and restates the page worker's final output paths.
+    for page in expected["pages"]:
+        if page["ui_surface"] == "declarative_page":
+            page["required_write_actions"] = []
     expected_page = next(task for task in expected["build_tasks"] if task["task_type"] == "page_bundle")
     output_contract = (
         'Page output contract from final owned_paths: ["brand/theme_config.json", "app.json", '
