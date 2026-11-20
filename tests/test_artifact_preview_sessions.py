@@ -194,10 +194,10 @@ async def test_managed_keycloak_registers_canonical_callback_before_launch(manag
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["public", "legacy", "e2b"])
+@pytest.mark.parametrize("mode", ["public", "manual_oidc", "e2b"])
 async def test_unmanaged_previews_skip_keycloak_registration(managed_keycloak_preview, monkeypatch, mode):
     preview = managed_keycloak_preview
-    if mode == "legacy":
+    if mode == "manual_oidc":
         preview.resolver.return_value = None
         monkeypatch.delenv("MOZAIKS_KEYCLOAK_PREVIEW_REGISTRAR_CLIENT_ID")
         monkeypatch.delenv("MOZAIKS_KEYCLOAK_PREVIEW_REGISTRAR_CLIENT_SECRET")
@@ -212,11 +212,11 @@ async def test_unmanaged_previews_skip_keycloak_registration(managed_keycloak_pr
     preview.adapter.read_file.assert_not_awaited()
     preview.registrar.register.assert_not_awaited()
     preview.registrar.remove.assert_not_awaited()
-    if mode != "legacy":
+    if mode != "manual_oidc":
         preview.resolver.assert_not_called()
     launched = next(kwargs for kind, kwargs in preview.adapter.calls if kind == "run_command" and kwargs.get("background"))
     assert launched["envs"] == {"__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS": "127.0.0.1"}
-    if mode in {"legacy", "e2b"}:
+    if mode in {"manual_oidc", "e2b"}:
         assert state.keycloak_cleanup_grace is False
         created = next(kwargs for kind, kwargs in preview.adapter.calls if kind == "create_session")
         assert created["timeout_seconds"] == preview.manager._ttl_minutes * 60
