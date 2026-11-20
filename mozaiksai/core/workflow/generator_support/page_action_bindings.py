@@ -15,6 +15,8 @@ from mozaiksai.core.workflow.context.frozen import detach
 from .page_data_bindings import iter_data_bound_sections
 
 PAGE_ACTION_FIELDS = ("action", "submit_action", "cancel_action", "plan_action", "add_on_action")
+# JavaScript arrays, including the renderer's selected_rows, use 32-bit length.
+_MAX_ARRAY_LENGTH = 2**32 - 1
 
 
 def generated_workflow_names(files: dict[str, str], context: Any = None) -> set[str]:
@@ -141,7 +143,7 @@ def _action_payload(action: dict[str, Any]) -> dict[str, Any]:
 
 
 def _payload_selection(payload: dict[str, Any]) -> int:
-    """A row token needs a selected item; an indexed row after the first needs multi-selection."""
+    """Minimum selected row count required by the action's indexed payload references."""
     needed = 0
     for value in payload.values():
         if not isinstance(value, str):
@@ -151,14 +153,17 @@ def _payload_selection(payload: dict[str, Any]) -> int:
             if parts and parts[0] in {"row", "selected_row"}:
                 needed = max(needed, 1)
             if len(parts) > 1 and parts[0] == "selected_rows" and parts[1].isdecimal():
-                needed = max(needed, 1 if parts[1] == "0" else 2)
+                index = parts[1]
+                if len(index) > 10 or not index.isascii() or (len(index) > 1 and index.startswith("0")):
+                    return _MAX_ARRAY_LENGTH + 1
+                needed = max(needed, int(index) + 1)
     return needed
 
 
 def _control_selection(
     section: dict[str, Any], field: str, action: dict[str, Any], *, has_data: bool, inherited: int,
 ) -> int | None:
-    """Maximum possible row context (0, 1, or multiple); None means the control cannot fire."""
+    """Maximum selectable row count. None means the control cannot fire."""
     primitive, config = section.get("primitive"), section["config"]
     if primitive == "Form" and config.get("disabled") and field == "submit_action":
         return None
@@ -172,7 +177,11 @@ def _control_selection(
         selection = config.get("selection")
         available = 0
         if field == "actions" and has_data and selection not in (None, "none"):
-            available = 2 if selection == "multi" else 1
+            available = _MAX_ARRAY_LENGTH if selection == "multi" else 1
+            # Server pagination clears selection when moving to a different page.
+            if config.get("pagination_mode") == "server":
+                page_size = config.get("page_size")
+                available = min(available, page_size) if type(page_size) is int and page_size > 0 else 0
         if field == "actions" and action.get("requires_selection") and not available:
             return None
         return available

@@ -111,6 +111,13 @@ def test_table_selection_needs_a_source_and_a_multi_row_token_needs_multi_select
         _validate(page, _plan(page, "archive_entry"))
     table["selection"] = "multi"
     _validate(page, _plan(page, "archive_entry"))
+    # A server table discards its selection on page changes. A second row
+    # can only supply the action's ID when both rows fit on one page.
+    table.update(pagination_mode="server", pagination=True, data_key="entries", total_key="total", page_size=1)
+    with pytest.raises(ValueError, match="missing reachable write controls for content/archive_entry"):
+        _validate(page, _plan(page, "archive_entry"))
+    table["page_size"] = 2
+    _validate(page, _plan(page, "archive_entry"))
 
 
 def test_modal_reached_again_from_a_table_can_receive_a_record_after_a_header_open():
