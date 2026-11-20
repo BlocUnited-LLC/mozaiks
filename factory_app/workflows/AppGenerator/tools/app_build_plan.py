@@ -1360,7 +1360,7 @@ def _apply_reviewed_page_writes(pages: list[dict[str, Any]], context: Any) -> No
     inventory = approved_page_action_ids(context) if by_route else {}
     for page in pages:
         page.pop("required_write_actions", None)  # The plan cannot author this projection.
-        route = page.get("route")
+        route = page.get("route", "")
         required = by_route.get(route, [])
         if page.get("ui_surface") != "declarative_page":
             if required:

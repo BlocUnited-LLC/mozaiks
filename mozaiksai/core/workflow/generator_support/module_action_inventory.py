@@ -226,6 +226,21 @@ def unapproved_module_actions_error(
 ModuleActionIndex = dict[str, dict[str, dict[str, Any]]]
 
 
+def scoped_module_implementation_sources(files: Mapping[str, str], owned_paths: Iterable[str]) -> dict[str, str]:
+    """Only manifests with an owned handler/service/repo may trigger implementation generation."""
+    manifests = {
+        f"modules/{match[1]}/module.yaml" for path in owned_paths
+        if (match := re.fullmatch(r"modules/([^/]+)/backend/(?:handler|service|repo)\.py", path))
+    }
+    if not manifests:
+        return {}
+    # Keep companion inputs such as events and service hooks even when another task owns them.
+    return {
+        path: source for path, source in files.items()
+        if path in manifests or not re.fullmatch(r"modules/[^/]+/module\.yaml", path)
+    }
+
+
 def module_action_index(file_map: dict[str, str], *, http_only: bool = True) -> ModuleActionIndex:
     """Index declared module actions, including their exact schemas; page callers see HTTP actions."""
     index: ModuleActionIndex = {}

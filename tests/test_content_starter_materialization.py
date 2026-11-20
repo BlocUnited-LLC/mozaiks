@@ -170,6 +170,53 @@ def _scan(files, context):
                                  planned_data_contract=APPROVED_DATA, context_variables=context)
 
 
+@pytest.mark.asyncio
+async def test_page_retry_and_scoped_save_use_assembled_content_only_as_a_binding_source():
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import save_generated_code
+    from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+    from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
+    from mozaiksai.core.workflow.task_batches import execute_task_batches_for_trigger
+    from tests.test_appschema_scoped_manifest import _batch_config, _output, _task
+
+    context = _context("editorial")
+    baseline = await _assemble(context)
+    path = "ui/pages/entries.yaml"
+    task = _task("entries")
+    plan = {**detach(context.get("app_build_plan")), "build_tasks": [task]}
+    values = {**context.snapshot(), "generated_files": baseline, "app_build_plan": plan,
+              "app_task_batch_items": [task], "app_task_batch_results": {}, "code_files": []}
+    page = _entries_page()
+    page["title"] = "Content collection"
+    table = page["sections"][0]["config"]
+    del table["api_endpoint"]
+    table["data_source"] = {"module_id": "content", "action_id": "list_entries"}
+
+    class Worker:
+        async def ask(self, message, **kwargs):
+            return SimpleNamespace(body=json.dumps(_output(page)))
+
+    await execute_task_batches_for_trigger(
+        workflow_name="AppGenerator", trigger_agent="AppPlanAgent", batches_config=_batch_config(),
+        agents={"WorkerAgent": Worker()}, context_variables=values, fresh_agents_per_task=False,
+    )
+    assert values["app_task_batch_status"] == "completed", values["app_task_batch_results"]
+    files = values["app_task_batch_results"]["entries"]["code_files"]
+    assert [entry["filename"] for entry in files] == [path]
+
+    # Bundle repair uses a separate save path. Both stages receive the stock backend among their inputs.
+    bridge = ContextVariablesBridge({**values, "current_build_task": task, "bundle_repair_result": {"active": {
+        "task_id": "entries", "target_agent": "WorkerAgent", "allowed_paths": [path],
+        "request_id": "scoped-page", "status": "selected",
+    }}})
+    candidate = {"code_files": [{"filename": path, "content": yaml.safe_dump(page)}]}
+    saved = save_generated_code(StructuredOutputOverlay(bridge, candidate))
+    assert saved["saved_files"] == [path], saved
+    assert bridge.get("bundle_repair_result")["active"]["status"] == "responded"
+    saved_page = yaml.safe_load(bridge.get("code_files")[0]["content"])
+    assert saved_page["sections"][0]["config"]["api_endpoint"] == "/api/modules/content/list_entries"
+    assert detach(bridge.get("generated_files")) == baseline
+
+
 class _ReadCollection:
     """Mongo wire double; the real persistence adapter adds the app filter."""
 

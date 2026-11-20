@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from typing import Any
 
@@ -98,22 +99,26 @@ def design_page_write_actions(page: dict[str, Any]) -> list[dict[str, str]]:
     return [{"module_id": module, "action_id": action} for module, action in sorted(pairs)]
 
 
-def _sections(sections: Any, modal_ancestors: tuple[str, ...] = ()) -> Iterator[tuple[dict[str, Any], tuple[str, ...]]]:
+def _sections(
+    sections: Any, modal_ancestors: tuple[str, ...] = (), inherited_data: bool = False,
+) -> Iterator[tuple[dict[str, Any], tuple[str, ...], bool]]:
     for section in sections if isinstance(sections, list) else []:
         if not isinstance(section, dict) or not isinstance(section.get("config"), dict):
             continue
         ancestors = modal_ancestors
         if section.get("primitive") == "Modal":
             ancestors += (str(section.get("id") or ""),)
-        yield section, ancestors
-        yield from _sections(section["config"].get("children"), ancestors)
+        config = section["config"]
+        has_data = bool(config.get("api_endpoint")) or inherited_data
+        yield section, ancestors, has_data
+        yield from _sections(config.get("children"), ancestors, has_data)
 
 
 def page_workflow_binding_errors(document: Any, workflow_names: set[str]) -> list[str]:
     failures: list[str] = []
     if not isinstance(document, dict):
         return failures
-    for section, _ in _sections(document.get("sections")):
+    for section, _, _ in _sections(document.get("sections")):
         for _, action in _actions(section["config"]):
             if action.get("action_type") != "workflow":
                 continue
@@ -126,6 +131,52 @@ def page_workflow_binding_errors(document: Any, workflow_names: set[str]) -> lis
                     f"Valid workflows: {valid}. Use an existing workflow or a typed module action."
                 )
     return failures
+
+
+def _action_payload(action: dict[str, Any]) -> dict[str, Any]:
+    payload = action.get("payload")
+    if isinstance(payload, list):
+        return {item["key"]: item.get("value") for item in payload if isinstance(item, dict) and "key" in item}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _payload_selection(payload: dict[str, Any]) -> int:
+    """A row token needs a selected item; an indexed row after the first needs multi-selection."""
+    needed = 0
+    for value in payload.values():
+        if not isinstance(value, str):
+            continue
+        for token in re.findall(r"\{([^}]+)\}", value):
+            parts = [part for part in token.strip().split(".") if part]
+            if parts and parts[0] in {"row", "selected_row"}:
+                needed = max(needed, 1)
+            if len(parts) > 1 and parts[0] == "selected_rows" and parts[1].isdecimal():
+                needed = max(needed, 1 if parts[1] == "0" else 2)
+    return needed
+
+
+def _control_selection(
+    section: dict[str, Any], field: str, action: dict[str, Any], *, has_data: bool, inherited: int,
+) -> int | None:
+    """Maximum possible row context (0, 1, or multiple); None means the control cannot fire."""
+    primitive, config = section.get("primitive"), section["config"]
+    if primitive == "Form" and config.get("disabled") and field == "submit_action":
+        return None
+    if primitive == "PricingCatalog":
+        rows = config.get("plans" if field == "plan_action" else "add_ons")
+        # A catalog button passes its own item. Static arrays override fetched arrays.
+        has_items = bool(rows) if isinstance(rows, list) else has_data
+        return 1 if has_items else None
+    if primitive in {"DataTable", "ResourceTable"}:
+        # The table passes its local selection even inside a modal. Empty-state actions pass [].
+        selection = config.get("selection")
+        available = 0
+        if field == "actions" and has_data and selection not in (None, "none"):
+            available = 2 if selection == "multi" else 1
+        if field == "actions" and action.get("requires_selection") and not available:
+            return None
+        return available
+    return inherited
 
 
 def reachable_page_action_keys(pages: list[Any], *, include_reads: bool = True) -> set[str]:
@@ -142,42 +193,32 @@ def reachable_page_action_keys(pages: list[Any], *, include_reads: bool = True) 
         if not isinstance(page, dict):
             continue
         sections = list(_sections(page.get("sections")))
-        opened: set[str] = set()
-        visited: set[int] = set()
+        opened: dict[str, int] = {}
+        visited: dict[int, int] = {}
         while True:
             changed = False
-            for index, (section, ancestors) in enumerate(sections):
-                if index in visited or any(modal not in opened for modal in ancestors):
+            for index, (section, ancestors, has_data) in enumerate(sections):
+                if any(modal not in opened for modal in ancestors):
                     continue
-                visited.add(index)
+                inherited = opened[ancestors[-1]] if ancestors else 0
+                if visited.get(index, -1) >= inherited:
+                    continue
+                visited[index] = inherited
                 changed = True
                 config = section["config"]
                 if include_reads:
                     add(config.get("api_endpoint"))
                 for action_field, action in _actions(config):
-                    if section.get("primitive") == "Form" and config.get("disabled") and action_field == "submit_action":
+                    selection = _control_selection(section, action_field, action, has_data=has_data, inherited=inherited)
+                    if selection is None:
                         continue
-                    if section.get("primitive") == "PricingCatalog":
-                        rows = config.get("plans" if action_field == "plan_action" else "add_ons")
-                        # Explicit static arrays override fetched arrays in the renderer.
-                        if (isinstance(rows, list) and not rows) or (rows is None and not config.get("api_endpoint")):
-                            continue
-                    if (
-                        section.get("primitive") in {"DataTable", "ResourceTable"}
-                        and action_field == "actions"
-                        and action.get("requires_selection")
-                        and config.get("selection") in (None, "none")
-                    ):
-                        continue
-                    if action.get("action_type") in {"submit", "delete"}:
+                    payload = _action_payload(action)
+                    if action.get("action_type") in {"submit", "delete"} and selection >= _payload_selection(payload):
                         add(action.get("href"))
                     elif action.get("action_type") == "event" and action.get("event_type") == "ui.modal.open":
-                        payload = action.get("payload")
-                        if isinstance(payload, list):
-                            payload = {item.get("key"): item.get("value") for item in payload if isinstance(item, dict)}
-                        modal = payload.get("modal_id") if isinstance(payload, dict) else None
+                        modal = payload.get("modal_id")
                         if isinstance(modal, str):
-                            opened.add(modal)
+                            opened[modal] = max(opened.get(modal, -1), selection)
             if not changed:
                 break
     return keys
@@ -236,7 +277,7 @@ def page_refresh_binding_errors(document: Any) -> list[str]:
                 candidates[name] = candidates.get(name, 0) + 1
     targets = sorted(name for name, count in candidates.items() if count == 1)
     errors: list[str] = []
-    for section, _ in _sections(document.get("sections")):
+    for section, _, _ in _sections(document.get("sections")):
         for field, action in _actions(section["config"]):
             if action.get("action_type") != "event" or action.get("event_type") != "ui.datatable.refresh":
                 continue

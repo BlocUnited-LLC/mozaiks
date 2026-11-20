@@ -44,6 +44,7 @@ from .generator_support.module_action_inventory import (
     all_module_actions,
     approved_workflow_surface_ids,
     pack_owned_output_paths,
+    scoped_module_implementation_sources,
     ungated_module_actions,
 )
 from .generator_support.module_authored_code import invalid_python_diagnostics
@@ -1305,15 +1306,15 @@ async def _run_one_task(
                     validate_scoped_service_repositories(
                         read_sources, revision_paths.intersection(canonical_file_map),
                     )
-                else:
-                    canonical_file_map.update(materialize_module_read_implementations(
-                        read_sources, app_build_plan=task_context.get("app_build_plan"),
+                elif sources := scoped_module_implementation_sources(read_sources, task.get("owned_paths") or []):
+                    reads = materialize_module_read_implementations(
+                        sources, app_build_plan=task_context.get("app_build_plan"),
                         data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
                         subscription_contract=subscription_contract,
-                    ))
-                    read_sources.update(canonical_file_map)
+                    )
+                    canonical_file_map.update(reads)
                     canonical_file_map.update(materialize_module_write_implementations(
-                        read_sources, app_build_plan=task_context.get("app_build_plan"),
+                        {**sources, **reads}, app_build_plan=task_context.get("app_build_plan"),
                         data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
                         subscription_contract=subscription_contract,
                         access_policy=authored_access_policy,

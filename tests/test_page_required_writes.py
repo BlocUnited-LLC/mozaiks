@@ -60,6 +60,100 @@ def test_required_controls_accept_submit_in_an_openable_modal_and_delete_on_a_se
     _validate(page, _plan(page, "create_entry", "archive_entry"))
 
 
+@pytest.mark.parametrize("reference", ["{selected_row.entry_id}", "archived-{ row.entry_id }", "{selected_rows.0.entry_id}"])
+def test_header_cannot_supply_a_record_even_if_it_requests_selection(reference):
+    page = _editor()
+    action = {**_write("archive_entry"), "requires_selection": True, "payload": {"entry_id": reference}}
+    page["sections"] = [{"id": "header", "primitive": "PageHeader", "config": {"title": "Entries", "actions": [action]}}]
+    with pytest.raises(ValueError, match="missing reachable write controls for content/archive_entry"):
+        _validate(page, _plan(page, "archive_entry"))
+    # The renderer can submit an empty selection as a list without needing an individual record.
+    action["payload"] = {"selection": "{selected_rows}", "count": "{selected_rows.length}"}
+    _validate(page, _plan(page, "archive_entry"))
+
+
+@pytest.mark.parametrize("source", ["header", "button", "unbound_table", "table_empty", "selectable_table"])
+def test_a_modal_receives_only_rows_its_opener_can_supply(source):
+    page = _editor()
+    table, modal = page["sections"]
+    opener = table["config"]["actions"][1]
+    form = modal["config"]["children"][0]["config"]
+    form["submit_action"] = {**_write("archive_entry"), "payload": [
+        {"key": "entry_id", "value": "{selected_row.entry_id}"}, {"key": "title", "value": "{form.title}"},
+    ]}
+    if source == "header":
+        page["sections"][0] = {"id": "header", "primitive": "PageHeader", "config": {"title": "Edit", "actions": [opener]}}
+    elif source == "button":
+        page["sections"][0] = {"id": "open", "primitive": "Button", "config": {"label": "Edit", "action": opener}}
+    elif source == "table_empty":
+        table["config"]["actions"] = []
+        table["config"]["empty"] = {"title": "No entries", "action": opener}
+    else:
+        table["config"]["actions"] = [opener]  # A selectable toolbar may pass a row with or without requires_selection.
+        if source == "unbound_table":
+            table["config"].pop("api_endpoint")
+    if source == "selectable_table":
+        _validate(page, _plan(page, "archive_entry"))
+    else:
+        with pytest.raises(ValueError, match="missing reachable write controls for content/archive_entry"):
+            _validate(page, _plan(page, "archive_entry"))
+
+
+def test_table_selection_needs_a_source_and_a_multi_row_token_needs_multi_selection():
+    page = _editor()
+    table = page["sections"][0]["config"]
+    endpoint = table.pop("api_endpoint")
+    with pytest.raises(ValueError, match="missing reachable write controls for content/archive_entry"):
+        _validate(page, _plan(page, "archive_entry"))
+    table["api_endpoint"] = endpoint
+    table["actions"][0]["payload"] = {"second": "{selected_rows.1.entry_id}"}
+    with pytest.raises(ValueError, match="missing reachable write controls for content/archive_entry"):
+        _validate(page, _plan(page, "archive_entry"))
+    table["selection"] = "multi"
+    _validate(page, _plan(page, "archive_entry"))
+
+
+def test_modal_reached_again_from_a_table_can_receive_a_record_after_a_header_open():
+    page = _editor()
+    table, modal = page["sections"]
+    opener = table["config"]["actions"][1]
+    table["config"]["actions"] = [opener]
+    modal["config"]["children"][0]["config"]["submit_action"] = {
+        **_write("archive_entry"), "payload": {"entry_id": "{selected_row.entry_id}", "title": "{form.title}"},
+    }
+    header = {"id": "header", "primitive": "PageHeader", "config": {"title": "Entries", "actions": [deepcopy(opener)]}}
+    page["sections"] = [header, modal, table]
+    _validate(page, _plan(page, "archive_entry"))
+
+
+def test_nested_table_does_not_borrow_its_openers_rows_and_can_supply_its_own():
+    page = _editor()
+    table, modal = page["sections"]
+    inner = deepcopy(table)
+    inner["id"] = "related"
+    del inner["config"]["api_endpoint"]
+    table["config"]["actions"].pop(0)
+    inner["config"]["actions"] = [{
+        **_write("archive_entry"), "requires_selection": True, "payload": {"entry_id": "{row.entry_id}"},
+    }]
+    modal["config"]["children"] = [inner]
+    with pytest.raises(ValueError, match="missing reachable write controls for content/archive_entry"):
+        _validate(page, _plan(page, "archive_entry"))
+    inner["config"]["api_endpoint"] = "/api/modules/content/list_entries"
+    _validate(page, _plan(page, "archive_entry"))
+
+
+def test_catalog_item_callbacks_supply_the_clicked_item():
+    page = _editor()
+    config = {"plans": [{"plan_id": "plus", "label": "Plus"}],
+              "plan_action": {**_write("choose_plan"), "payload": {"id": "{selected_row.plan_id}"}}}
+    page["sections"] = [{"id": "plans", "primitive": "PricingCatalog", "config": config}]
+    _validate(page, _plan(page, "choose_plan"))
+    config["plans"] = []
+    with pytest.raises(ValueError, match="missing reachable write controls for content/choose_plan"):
+        _validate(page, _plan(page, "choose_plan"))
+
+
 @pytest.mark.parametrize("case", ["malformed_yaml", "invalid_schema", "moved_route"])
 def test_changed_snapshot_must_still_match_the_reviewed_page_identity_and_schema(case):
     page = _editor()
