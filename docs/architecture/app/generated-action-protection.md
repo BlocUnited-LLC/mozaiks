@@ -69,9 +69,18 @@ Candidate tasks cannot edit auth or use
 their own role declarations as authorization.
 
 Selected packs keep their verified module implementations and exact data
-contributions. For a pack-owned collection, the same reviewed policy names the
-pack's actual module actions, rather than invented canonical CRUD actions. A
-role receives a pack permission only when that role's reviewed grants cover
+contributions. A pack grant names actions declared by the module that owns its
+collection. In `access_policy.grants[].collection`, use the bare name when the
+collection has one owner. If every owner of a shared name is a selected
+verified pack module, qualify it as `module.collection`. The Support and Social
+packs both supply `requests`. Use `support.requests` for a support request
+action and `friends.requests` for a friend request action. A grant targeting a
+shared name with an app-authored owner fails validation because authored
+permission IDs derive from the bare collection name. Give new app-authored
+data a distinct name in that case. All roles granting the same module action
+use the same anchor, including actions that work with several collections.
+
+A role receives a pack permission only when that role's reviewed grants cover
 every verified module action that consumes it, including when an authored
 action would derive the same permission id. Assembly refuses unreviewed modules
 that consume such a permission. The review receipt binds the selected pack ids,

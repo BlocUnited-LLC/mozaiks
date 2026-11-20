@@ -97,11 +97,15 @@ agents:
       changes. Bind each module action to exactly one collection across ALL roles;
       an action that accesses multiple collections still has one grant anchor.
       Multiple roles may grant that same action only under that same collection.
-      For a selected verified pack, use its real module action ids and the exact
-      pack-owned collection as the grant anchor; do not invent canonical CRUD
-      actions for the pack. A role receiving a pack permission must explicitly
-      list every action that shares that permission, including actions in other
-      selected modules. The owner reviews the actual actions and pack identities.
+      For a selected verified pack, use its module's declared action ids. In
+      grants[].collection, use the bare collection name when it has one owner.
+      For a shared name, use module.collection only when every owner is a
+      selected verified pack module, such as support.requests or friends.requests.
+      Give new app-authored data a distinct name if its grant would collide.
+      Use one collection owned by the action's module as its grant anchor.
+      A role receiving a pack permission must explicitly list every action
+      that shares that permission, including actions in other selected modules.
+      The owner reviews the actual actions and pack identities.
       Leave selected pack data to deterministic composition; do not replace its
       collections or field definitions with model-authored copies.
       Include every role that needs a protected action, including ordinary
