@@ -36,7 +36,7 @@ test('the AppReview composer lets the user select a model and preserves it acros
         window.changeWorkflow = setCurrentWorkflowName;
         window.showBuildModel = () => {
           setCurrentWorkflowName('ValueEngine');
-          setBoundChatModel({chatId:'fixture-chat',model:'gemini'});
+          setBoundChatModels(new Map([['fixture-chat','gemini'], ['second-chat','openai']]));
         };
         window.changeChat = changeChat;
         window.changeMode = changeMode;
@@ -103,6 +103,10 @@ test('the AppReview composer lets the user select a model and preserves it acros
     await expect(select).toHaveCount(0);
     await page.evaluate(() => window.changeWorkflow('AppReview'));
     await expect(select).toHaveValue('chosen');
+    await select.focus();
+    await page.keyboard.press('d');
+    await expect(select).toBeFocused();
+    await expect(page.locator('textarea')).toHaveValue('');
     const box = await page.locator('textarea').boundingBox();
     const picker = await select.boundingBox();
     assert.ok(box && picker && picker.y >= box.y + box.height - 1, 'Model picker is below the text field');
@@ -114,6 +118,10 @@ test('the AppReview composer lets the user select a model and preserves it acros
     await page.evaluate(() => window.changeMode('ask'));
     await expect(runModel).toHaveCount(0);
     await page.evaluate(() => window.changeMode('workflow'));
+    await expect(runModel).toBeVisible();
+    await page.evaluate(() => window.changeChat('second-chat'));
+    await expect(page.getByLabel('Run model: GPT-5 Nano')).toBeVisible();
+    await page.evaluate(() => window.changeChat('fixture-chat'));
     await expect(runModel).toBeVisible();
     await page.evaluate(() => window.changeChat('other-chat'));
     await expect(runModel).toHaveCount(0);

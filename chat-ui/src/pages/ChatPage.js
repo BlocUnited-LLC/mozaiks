@@ -359,7 +359,7 @@ const ChatPage = () => {
   const [currentWorkflowName, setCurrentWorkflowName] = useState(defaultWorkflow);
   const [refinementModels, setRefinementModels] = useState([]);
   const [refinementModel, setRefinementModel] = useState('');
-  const [boundChatModel, setBoundChatModel] = useState(null);
+  const [boundChatModels, setBoundChatModels] = useState(() => new Map());
   const refinementModelRef = useRef('');
   const submittedRefinementModelRef = useRef(null);
   const showRefinementModelPicker = conversationMode === 'workflow' && currentWorkflowName === 'AppReview';
@@ -382,8 +382,8 @@ const ChatPage = () => {
     return () => controller.abort();
   }, [showRefinementModelPicker]);
 
-  const activeRunModel = conversationMode === 'workflow' && boundChatModel?.chatId === currentChatId
-    ? boundChatModel?.model
+  const activeRunModel = conversationMode === 'workflow'
+    ? boundChatModels.get(currentChatId)
     : null;
   const activeRunModelLabel = activeRunModel === 'gemini' ? 'Gemini 3.8 Flash'
     : activeRunModel === 'openai' ? 'GPT-5 Nano' : null;
@@ -2297,7 +2297,14 @@ const ChatPage = () => {
         return false;
       }
       const model = meta.refinement_model;
-      setBoundChatModel(model === 'gemini' || model === 'openai' ? { chatId: targetChatId, model } : null);
+      const knownModel = model === 'gemini' || model === 'openai' ? model : undefined;
+      setBoundChatModels(previous => {
+        if (previous.get(targetChatId) === knownModel) return previous;
+        const next = new Map(previous);
+        if (knownModel) next.set(targetChatId, knownModel);
+        else next.delete(targetChatId);
+        return next;
+      });
       observeSessionMeta(meta);
       if (isFailedWorkflowSession(meta.status)) setLoading(false);
 

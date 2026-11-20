@@ -267,6 +267,7 @@ const ModernChatInterface = ({
         active &&
         (active.tagName === 'INPUT' ||
          active.tagName === 'TEXTAREA' ||
+         active.tagName === 'SELECT' ||
          active.isContentEditable ||
          active === textareaRef.current)
       ) return;
