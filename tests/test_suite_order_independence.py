@@ -194,7 +194,7 @@ def test_workflow_catalog_survives_tool_loader_then_persistence_policy_restore()
         )
 
 
-def test_assembly_pack_reads_share_their_scope_after_workflow_reload() -> None:
+def test_workflow_reload_preserves_assembly_pack_read_scope() -> None:
     result = _run_pytest([
         "--reruns=0",
         "tests/test_designdocs_selection_handoff.py"
