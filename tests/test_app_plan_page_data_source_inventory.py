@@ -15,19 +15,36 @@ import json
 import logging
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import yaml
 
+from factory_app.workflows._shared.pack_selection import pin_pack_choices
+from factory_app.workflows._shared.subscription_contract_context import selected_feature_gates
 from factory_app.workflows.AppGenerator.tools.app_plan_review import review_app_build_plan
+from factory_app.workflows.AppGenerator.tools.hook_file_contract_context import (
+    _build_file_contracts_body,
+)
+from factory_app.workflows.AppGenerator.tools.module_entitlement_gates import (
+    apply_entitlement_gates,
+)
 from factory_app.workflows.AppGenerator.tools.plan_page_data_sources import (
     drop_unapproved_page_data_sources,
 )
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    PackIntegrityError,
     verify_pack_integrity,
 )
+from factory_app.workflows.DesignDocs.tools.save_design_doc import _compose_reviewed_pack_data
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
-from tests.reviewed_pack_fixture import reviewed_pack_fixture
+from mozaiksai.core.workflow.generator_support.design_access_policy import access_policy_sha256
+from mozaiksai.core.workflow.generator_support.module_role_grants import verified_pack_authorization
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    module_action_index_from_context,
+)
+from tests.reviewed_pack_fixture import registered_pack_fixture, reviewed_pack_fixture
 from tests.test_continuous_deterministic_materialization import _load_models
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -199,6 +216,98 @@ def test_without_an_approved_design_the_inventory_is_open():
 
     assert drop_unapproved_page_data_sources(plan, _context(variables)) == []
     assert plan == fixture["AppBuildPlan"]
+
+
+def _stock_design(pack_id):
+    # DesignDocs adds the stock module and its collection entities to this UI-only design.
+    surface_map = {"surfaces": [{"surface_id": "editor", "surface_kind": "ui_only", "owner": "app"}]}
+    selection = pin_pack_choices({}, [pack_id])
+    authorization = verified_pack_authorization({}, selection=selection)
+    data = _compose_reviewed_pack_data({"version": "1", "surfaces": [], "shared_collections": []}, surface_map, authorization)
+    return {"design_surface_map": surface_map, "data_contract": data}
+
+
+@pytest.mark.parametrize("pack_id,module_id,expected,refused", [
+    ("content", "content", ["list_entries", "get_entry", "create_entry", "update_entry", "archive_entry"],
+     ["get_entries", "create_content_entry", "delete_entry"]),
+    ("social", "activity_feed", ["get_feed", "get_profile_activity"], ["record_activity", "on_friendship_created"]),
+])
+def test_app_page_uses_reviewed_pack_module_http_actions(pack_id, module_id, expected, refused):
+    values = _stock_design(pack_id)
+    context = ContextVariablesBridge(reviewed_pack_fixture(values, [pack_id]))
+    sources = [{"module_id": module_id, "action_id": action} for action in expected + refused]
+    hints = [{"data_source": dict(source)} for source in sources]
+    plan = {"pages": [{"route": "/editor", "name": "Editor", "sections_hint": hints}], "build_tasks": []}
+
+    drop_unapproved_page_data_sources(plan, context)
+    assert [hint["data_source"] for hint in hints] == sources[:len(expected)] + [None] * len(refused)
+    assert set(module_action_index_from_context(context)[module_id]) == set(expected)
+    prompt = _build_file_contracts_body(SimpleNamespace(name="AppPlanAgent", context_variables=context), {})
+    assert all(action in prompt for action in expected)
+    assert all(action not in prompt for action in refused)
+
+    # An available pack and a worker-supplied manifest cannot stand in for reviewed pack selection.
+    offering = ROOT / f"factory_app/build_context/{pack_id}/templates/modules/{module_id}/module.yaml"
+    values["generated_files"] = {f"modules/{module_id}/module.yaml": offering.read_text(encoding="utf-8")}
+    unselected = ContextVariablesBridge(reviewed_pack_fixture(values, []))
+    index = module_action_index_from_context(unselected)[module_id]
+    assert set(expected).intersection(index) == ({"list_entries"} if module_id == "content" else set())
+
+
+@pytest.mark.parametrize("pack_id,module_id", [("content", "content"), ("social", "activity_feed")])
+def test_free_assembly_accepts_exact_stock_manifest_without_expanding_gate_authority(pack_id, module_id):
+    context = ContextVariablesBridge(reviewed_pack_fixture(_stock_design(pack_id), [pack_id]))
+    path = f"modules/{module_id}/module.yaml"
+    text = (ROOT / f"factory_app/build_context/{pack_id}/templates" / path).read_text(encoding="utf-8")
+    files = [{"filename": path, "content": text}]
+    assert apply_entitlement_gates(files, context_variables=context) == files
+    manifest = yaml.safe_load(text)
+    original_action = manifest["actions"][-1]["id"]
+    with pytest.raises(ValueError, match="outside the approved inventory"):
+        selected_feature_gates({"pro": [f"module.{module_id}.{original_action}"]}, context)
+    manifest["actions"][-1]["id"] = "invented_action"
+    with pytest.raises(ValueError, match="unapproved module actions .*invented_action"):
+        apply_entitlement_gates([{"filename": path, "content": yaml.safe_dump(manifest)}], context_variables=context)
+
+
+def test_stale_stock_module_cannot_supply_page_actions():
+    values = reviewed_pack_fixture(_stock_design("content"), ["content"])
+    summary = values["design_docs_artifact"]["commit_metadata"]["metadata"]["summary_payload"]
+    review = summary["access_policy_review"]
+    review["pack_identities"][0]["digest"] = "sha256:" + "0" * 64
+    review["policy_sha256"] = access_policy_sha256(
+        summary["access_policy"], summary["experience_spec"], pack_identities=review["pack_identities"],
+    )
+    with pytest.raises(PackIntegrityError, match="Reviewed pack 'content' changed"):
+        module_action_index_from_context(ContextVariablesBridge(values))
+
+
+def test_revision_reads_a_workspace_owned_manifest_after_genesis(tmp_path, monkeypatch):
+    path = "modules/notes/module.yaml"
+    pack = registered_pack_fixture(tmp_path, monkeypatch, "notes_seed", "generated_module")
+    root = Path(pack["pack_source_path"])
+    config = yaml.safe_load((root / "context.yaml").read_text(encoding="utf-8"))
+    config["assets"].append({"kind": "templates", "path": "templates"})
+    (root / "context.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    contract = yaml.safe_load((root / "contract.yaml").read_text(encoding="utf-8"))
+    contract["required_outputs"] = [{"path": path, "owner": "workspace"}]
+    (root / "contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
+
+    def manifest(action):
+        return yaml.safe_dump({"module": {"id": "notes"}, "actions": [{"id": action}]})
+
+    template = root / "templates" / path
+    template.parent.mkdir(parents=True)
+    template.write_text(manifest("seed"), encoding="utf-8")
+    values = reviewed_pack_fixture({
+        "generated_files": {path: manifest("admitted")},
+        "design_surface_map": {"surfaces": [{"surface_id": "notes", "surface_kind": "module", "owner": "app",
+                                             "owned_mutations": ["seed", "admitted", "authored"]}]},
+    }, ["notes_seed"])
+    assert set(module_action_index_from_context(values)["notes"]) == {"seed"}
+    values["build_mode"] = "revision"
+    assert set(module_action_index_from_context(values)["notes"]) == {"admitted"}
+    assert set(module_action_index_from_context(values, authored_files={path: manifest("authored")})["notes"]) == {"authored"}
 
 
 @pytest.mark.parametrize("surface,path", [

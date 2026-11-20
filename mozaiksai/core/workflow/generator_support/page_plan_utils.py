@@ -25,7 +25,14 @@ from .code_files import (
     planned_page_path,
     safe_relpath,
 )
-from .module_action_inventory import all_module_actions, pack_template_module_contracts
+from .module_action_inventory import (
+    ModuleActionIndex,
+    all_module_actions,
+    approved_manifest_action_ids,
+    module_action_index,
+    pack_owned_output_paths,
+    pack_template_module_contracts,
+)
 from .page_action_bindings import (
     generated_workflow_names,
     page_refresh_binding_errors,
@@ -539,41 +546,13 @@ def declare_the_intended_modal(document: Any) -> str | None:
     return modal_id
 
 
-ModuleActionIndex = dict[str, dict[str, dict[str, Any]]]
-
-
-def module_action_index(file_map: dict[str, str]) -> ModuleActionIndex:
-    """Index declared HTTP action contracts, including their exact output fields."""
-    index: ModuleActionIndex = {}
-    for path, content in (file_map or {}).items():
-        if not str(path).replace("\\", "/").endswith("/module.yaml"):
-            continue
-        try:
-            document = yaml.safe_load(content)
-        except yaml.YAMLError:
-            continue
-        if not isinstance(document, dict):
-            continue
-        module = document.get("module")
-        module_id = str((module or {}).get("id") or "").strip() if isinstance(module, dict) else ""
-        if not module_id:
-            continue
-        actions = document.get("actions")
-        index[module_id] = {
-            str(action.get("id")).strip(): action
-            for action in (actions if isinstance(actions, list) else [])
-            if isinstance(action, dict) and str(action.get("id") or "").strip()
-            and action.get("api_surface") not in {"internal", "admin_internal"}
-        }
-    return index
+def approved_page_action_ids(context: Any) -> dict[str, list[str]]:
+    """Use verified module contracts for approved pack surfaces and design actions for other modules."""
+    return approved_manifest_action_ids(context, all_module_actions(context), http_only=True)
 
 
 def _page_reference_files(context: Any) -> dict[str, str]:
-    """Read admitted files, declared dependencies and pack template module contracts.
-
-    No task authors a module a selected pack's templates provide, so its
-    contract is read from the template assembly will apply.
-    """
+    """Read admitted files and declared dependencies for page references."""
     if context is None:
         return {}
     files = detach(context.get("generated_files")) or {}
@@ -585,13 +564,19 @@ def _page_reference_files(context: Any) -> dict[str, str]:
         files.update(extract_code_file_map_from_payload(output))
     for path in extract_deleted_file_paths_from_payload({"deleted_files": detach(context.get("deleted_files"))}):
         files.pop(path, None)
-    files.update(pack_template_module_contracts(context))
     return files
 
 
-def module_action_index_from_context(context: Any) -> ModuleActionIndex:
-    """Read the closed inventory from admitted files and declared dependencies."""
-    return _approved_page_actions(context, module_action_index(_page_reference_files(context)))
+def module_action_index_from_context(context: Any, *, authored_files: dict[str, str] | None = None) -> ModuleActionIndex:
+    """Resolve app modules from task inputs and pack modules from the manifests assembly supplies."""
+    sources = {**_page_reference_files(context), **(authored_files or {})}
+    modules = module_action_index(sources)
+    templates = pack_template_module_contracts(context)
+    owned = pack_owned_output_paths(context) if templates.keys() & sources.keys() else set()
+    modules.update(module_action_index({
+        path: source for path, source in templates.items() if path not in sources or path in owned
+    }))
+    return _approved_page_actions(context, modules)
 
 
 def workflow_names_from_context(context: Any) -> set[str]:
@@ -601,7 +586,7 @@ def workflow_names_from_context(context: Any) -> set[str]:
 def _approved_page_actions(context: Any, modules: ModuleActionIndex) -> ModuleActionIndex:
     if context is None or not context.get("design_surface_map"):
         return modules
-    approved = all_module_actions(context)
+    approved = approved_page_action_ids(context)
     return {
         module: {action_id: contract for action_id, contract in actions.items() if action_id in approved.get(module, [])}
         for module, actions in modules.items()
@@ -751,9 +736,7 @@ def compile_authored_page_files(
     )
     admitted = detach(context.get("generated_files")) or {}
     admitted.update(extract_code_file_map_from_payload({"code_files": detach(context.get("code_files"))}))
-    modules = module_action_index_from_context(context)
-    modules.update(module_action_index(files))
-    modules = _approved_page_actions(context, modules)
+    modules = module_action_index_from_context(context, authored_files=files)
     for path in extract_deleted_file_paths_from_payload(payload):
         match = re.fullmatch(r"modules/([^/]+)/module\.yaml", path)
         if match:

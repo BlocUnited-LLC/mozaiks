@@ -32,6 +32,7 @@ from mozaiksai.core.workflow.generator_support.module_revision import scoped_ser
 from mozaiksai.core.workflow.generator_support.module_write_actions import (
     module_write_implementation_ownership,
 )
+from mozaiksai.core.workflow.generator_support.page_plan_utils import approved_page_action_ids
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +157,7 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
         context = getattr(agent, "context_variables", None)
         task = _context_get(context, "current_build_task", {}) or {}
         module_id = str(task.get("capability_pack_id") or "")
-        inventory = all_module_actions(context)
+        inventory = approved_page_action_ids(context) if agent_name == "AppPlanAgent" else all_module_actions(context)
         surfaces = (_context_get(context, "design_surface_map", {}) or {}).get("surfaces") or []
         for surface in surfaces:
             surface_id = surface.get("surface_id")
@@ -175,7 +176,8 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
         if inventory:
             lines.append(
                 "Use only the listed action ids; do not infer alternate names from an entity or page, or keep obsolete spellings after a repair. "
-                "For app_wide collections with protected writes, declare every canonical read with its intended "
+                "Use the shipped request and response schemas for pack-owned modules. "
+                "For app-authored app_wide collections with protected writes, declare every canonical read with its intended "
                 "permissions, api_surface, handler_method and input/output schemas; code does not infer read access. "
                 "Code constructs owner-scoped reads and ordinary unprotected app-wide reads. "
                 "Constructed get_<collection> takes id and returns item; list_<collection> takes page/page_size/search and returns items/total. "

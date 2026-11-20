@@ -223,6 +223,35 @@ def unapproved_module_actions_error(
     )
 
 
+ModuleActionIndex = dict[str, dict[str, dict[str, Any]]]
+
+
+def module_action_index(file_map: dict[str, str], *, http_only: bool = True) -> ModuleActionIndex:
+    """Index declared module actions, including their exact schemas; page callers see HTTP actions."""
+    index: ModuleActionIndex = {}
+    for path, content in (file_map or {}).items():
+        if not str(path).replace("\\", "/").endswith("/module.yaml"):
+            continue
+        try:
+            document = yaml.safe_load(content)
+        except yaml.YAMLError:
+            continue
+        if not isinstance(document, dict):
+            continue
+        module = document.get("module")
+        module_id = str((module or {}).get("id") or "").strip() if isinstance(module, dict) else ""
+        if not module_id:
+            continue
+        actions = document.get("actions")
+        index[module_id] = {
+            str(action.get("id")).strip(): action
+            for action in (actions if isinstance(actions, list) else [])
+            if isinstance(action, dict) and str(action.get("id") or "").strip()
+            and (not http_only or action.get("api_surface") not in {"internal", "admin_internal"})
+        }
+    return index
+
+
 def approved_workflow_surface_ids(context_variables: Any) -> list[str]:
     """Return selectable app workflow surfaces when the concept has agentic capabilities."""
     if context_variables is None:
@@ -477,7 +506,7 @@ def pack_facade_directories(context_variables: Any) -> list[PackFacadeDirectory]
     ]
 
 
-def pack_template_module_contracts(context_variables: Any) -> dict[str, str]:
+def pack_template_module_contracts(context_variables: Any, *, owned_generated_only: bool = False) -> dict[str, str]:
     """``module.yaml`` contracts the selected packs' templates provide, by bundle path.
 
     No task authors a pack-owned module, so pages that bind its actions compile
@@ -487,8 +516,14 @@ def pack_template_module_contracts(context_variables: Any) -> dict[str, str]:
     for pack in _selected_packs(context_variables):
         if pack.root is None or pack.config is None:
             continue
+        if owned_generated_only and pack.config["pack"].get("capability_source") != "generated_module":
+            continue
         for contract in pack.contracts:
             for entry in contract.get("required_outputs") or []:
+                if owned_generated_only and (
+                    not isinstance(entry, Mapping) or (entry.get("owner") or "templates") != "templates"
+                ):
+                    continue
                 path = _bundle_relative_path(entry.get("path") if isinstance(entry, Mapping) else entry)
                 if not path or not re.fullmatch(r"modules/[^/]+/module\.yaml", path):
                     continue
@@ -496,6 +531,19 @@ def pack_template_module_contracts(context_variables: Any) -> dict[str, str]:
                 if template is not None and template.suffix != ".j2":
                     files[path] = template.read_text(encoding="utf-8")
     return files
+
+
+def approved_manifest_action_ids(
+    context: Any, design_actions: dict[str, list[str]], *, http_only: bool = False,
+) -> dict[str, list[str]]:
+    """Replace inferred identities for approved stock modules with their verified static manifest IDs."""
+    if not design_actions:
+        return {}
+    stock = module_action_index(pack_template_module_contracts(context, owned_generated_only=True), http_only=http_only)
+    return {
+        module_id: sorted(stock[module_id]) if module_id in stock else actions
+        for module_id, actions in design_actions.items()
+    }
 
 
 def ungated_module_actions(context_variables: Any) -> dict[str, list[str]]:
