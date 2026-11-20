@@ -26,6 +26,7 @@ on:
       - 'web_shell/**'
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, labeled, unlabeled]
     paths:
       - '.github/workflows/mobile-reference.yml'
       - 'examples/mobile-reference/**'
@@ -57,6 +58,7 @@ concurrency:
 
 jobs:
   android-project:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -131,6 +133,7 @@ jobs:
           path: ${{ runner.temp }}/mobile-project-hub-output/workspace/mobile/android/app/build/outputs/bundle/release/app-release.aab
 
   native-acceptance:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
