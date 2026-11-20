@@ -228,12 +228,12 @@ def test_missing_writes_name_the_route_and_reachable_controls_for_repair(case, m
     assert "data_source" in str(error.value)
 
 
-def test_required_writes_are_per_page_and_legacy_pages_have_no_implied_writes():
+def test_required_writes_are_per_page_and_action_hints_do_not_imply_writes():
     page = _editor()
     other = {**deepcopy(page), "name": "secondary", "route": "/secondary"}
     page["sections"][0]["config"]["actions"].pop(0)
-    legacy = {"route": "/editor", "primary_actions": ["archive_entry"], "primary_entities": ["ContentEntry"]}
-    _validate(page, legacy)
+    page_with_hints = {"route": "/editor", "primary_actions": ["archive_entry"], "primary_entities": ["ContentEntry"]}
+    _validate(page, page_with_hints)
     assert planned_page_writes([{**_plan(other, "archive_entry"), "ui_surface": "custom_react_page"}]) == {}
     pages = [_plan(page, "archive_entry"), _plan(other)]
     task = _task("both")
