@@ -201,6 +201,8 @@ not context state, model input, persisted evidence or a process-wide cache.
 Readers receive defensive copies; errors are not cached, and `finally` removes
 the memo on success, rejection and exceptions. Nested operations own separate
 memos. No scope spans an await or background task.
+The operation scope lives in generator support so retained tools and reloaded
+Factory pack helpers share it during a synchronous invocation.
 
 Receipt digest, author, app/build lineage and supplied design checks remain
 live on each read. Plan rendering/caching starts with a fresh read scope, and
