@@ -715,3 +715,71 @@ def test_safe_upgrade_apply_preserves_other_pack_provenance(tmp_path: Path) -> N
     updated = json.loads(provenance_path.read_text(encoding="utf-8"))
     assert {pack["pack_id"] for pack in updated["packs"]} == {"greetings", "other_pack"}
     assert next(pack for pack in updated["packs"] if pack["pack_id"] == "greetings")["version"] == "0.2.0"
+
+
+def test_safe_upgrade_apply_reads_past_binary_app_files(tmp_path: Path) -> None:
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        apply_component_upgrade,
+    )
+
+    build_context_root = tmp_path / "build_context"
+    app_root = tmp_path / "app"
+    _install(GREETINGS, build_context_root)
+    _write_app_root_from_pack(app_root, GREETINGS, "greetings")
+    logo = app_root / "brand" / "assets" / "logo.png"
+    logo.parent.mkdir(parents=True)
+    logo.write_bytes(b"\x89PNG\r\n\x1a\n\x00\xff\xfe")
+
+    plan = apply_component_upgrade(
+        build_context_root=build_context_root,
+        candidate_pack_source_path=_greetings_v2(tmp_path),
+        workspace_app_root=app_root,
+    )
+
+    assert plan.status == "ready"
+    assert logo.read_bytes() == b"\x89PNG\r\n\x1a\n\x00\xff\xfe"
+
+
+def test_safe_upgrade_apply_renders_a_pack_that_requires_another(tmp_path: Path) -> None:
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        apply_component_upgrade,
+    )
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        resolve_managed_capability_templates,
+        verify_pack_integrity,
+    )
+    from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+        compose_ui_registry,
+    )
+
+    build_context_root = tmp_path / "build_context"
+    app_root = tmp_path / "app"
+    _install(GREETINGS, build_context_root)
+    _install(FAREWELL, build_context_root)
+    selected = []
+    for pack, pack_id in ((GREETINGS, "greetings"), (FAREWELL, "farewell")):
+        metadata = verify_pack_integrity(pack, pack_id)
+        selected.append({"id": pack_id, "pack_id": pack_id, "pack_source_path": str(pack),
+                         "version": metadata["version"], "digest": metadata["digest"]})
+    contributions: list[dict] = []
+    files = {item["filename"]: item["content"] for item in resolve_managed_capability_templates(selected, ui_contributions=contributions)}
+    files.update(compose_ui_registry(contributions, files))
+    for filename, content in files.items():
+        target = app_root / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    farewell_v2 = tmp_path / "farewell_v2"
+    copytree(FAREWELL, farewell_v2)
+    context = farewell_v2 / "context.yaml"
+    context.write_text(context.read_text(encoding="utf-8").replace('version: "0.1.0"', 'version: "0.2.0"'), encoding="utf-8")
+
+    plan = apply_component_upgrade(
+        build_context_root=build_context_root,
+        candidate_pack_source_path=farewell_v2,
+        workspace_app_root=app_root,
+    )
+
+    assert plan.status == "ready"
+    provenance = json.loads((app_root / ".mozaiks" / "pack_provenance.json").read_text(encoding="utf-8"))
+    versions = {pack["pack_id"]: pack["version"] for pack in provenance["packs"]}
+    assert versions == {"greetings": "0.1.0", "farewell": "0.2.0"}

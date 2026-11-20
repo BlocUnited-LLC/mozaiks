@@ -55,6 +55,9 @@ repository's own Studio bundle under `factory_app/app` instead.
 | `python -m mozaiks info --available` | List every preset and its features |
 | `python -m mozaiks add <feature>` | Enable one feature in `app/app.json` |
 | `python -m mozaiks add --preset <preset>` | Switch `app/app.json` to a preset |
+| `python -m mozaiks pack install <pack-dir>` | Install a capability pack into an existing app |
+| `python -m mozaiks pack upgrade <pack-dir>` | Upgrade an installed pack, keeping the app's customizations |
+| `python -m mozaiks pack verify` | Check that pack-owned files and entries are unedited |
 | `python -m mozaiks gen {workflow,app} --prompt "..."` | Generate from a one-shot prompt |
 | `python -m mozaiks migrations status` | Report generated-app migration health |
 | `python -m mozaiks context index --app-id <id>` | Index a local workspace for App Intelligence |
@@ -464,6 +467,52 @@ Restart the active host to apply changes, such as `python -m mozaiks serve . --h
 
 The next steps depend on what you enabled. Restart the running host to pick up
 the change.
+
+### `pack`
+
+Install a versioned capability pack into an existing app, upgrade it, and check
+that the files it owns are unedited.
+
+```text
+python -m mozaiks pack install <pack-dir> [--adopt] [--dry-run] [--json]
+python -m mozaiks pack install --git <repo> --rev <full-commit> --path <pack-folder>
+python -m mozaiks pack upgrade <pack-dir> [--dry-run] [--json]
+python -m mozaiks pack verify [--json]
+python -m mozaiks pack status [--json]
+```
+
+| Argument | Effect |
+| --- | --- |
+| `pack-dir` | A local pack directory. |
+| `--git`, `--rev`, `--path` | Install from an exact commit of a local git repository instead. The revision must be a full commit id. |
+| `--adopt` | Take ownership of app files and entries that already hold exactly the pack's content. |
+| `--dry-run` | Print the plan; write nothing. |
+| `--workspace PATH` | Workspace holding `app/`, `workflows/` and `build_context/` (default `.`). |
+| `--json` | Print machine-readable output. |
+
+Exit codes: `0` applied, unchanged or verified clean; `1` blocked or drift
+found, nothing written; `2` invalid input or an operating-system failure, with
+any incomplete rollback reported in both text and JSON output. Plans list
+permissions, host requirements and dependency changes before application.
+A blocked plan lists each conflict,
+for example a locally edited pack file (`locally_modified_owned_file`) or an
+app file the pack would overwrite (`workspace_owned_file`).
+
+```bash
+python -m mozaiks pack install ../libraries/stock_ledger --dry-run
+```
+
+```text
+install library.stock_ledger 1.0.0: ready
+  write     app/modules/stock_ledger/module.yaml
+  seed      app/config/stock_ledger.yaml
+  write     workflows/StockReview/orchestrator.yaml
+  add       ui/route_manifest.json pages:stock-ledger
+  warning   secret_not_declared: STOCK_SUPPLIER_API_KEY is not declared in security/secrets.yaml; ...
+```
+
+See [Build Context Packs](architecture/workflows/build-context-packs.md#installing-into-an-existing-app)
+for ownership, shared-file composition and upgrade rules.
 
 ## Generation Command
 

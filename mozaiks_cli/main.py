@@ -21,6 +21,7 @@ Commands:
     mozaiks gen <mode>        Convenience shortcut: generate from a prompt
     mozaiks migrations status Read-only generated-app migration health
     mozaiks package android  Package an existing app workspace for Android
+    mozaiks pack <action>    Install, upgrade or verify capability packs in an app
     mozaiks context index    Index local workspace App Intelligence
     mozaiks sync-agent-guidance  Sync app-local coding-agent guidance safely
     mozaiks info              Show current config and available presets
@@ -37,6 +38,7 @@ from mozaiks_cli.commands import (
     init_command,
     migrations_command,
     onboard_command,
+    pack_command,
     package_command,
     quickstart_command,
     serve_command,
@@ -533,6 +535,8 @@ def create_parser():
         help="Export source and tooling without installing dependencies or compiling",
     )
 
+    pack_command.add_parser(subparsers)
+
     # mozaiks info
     info_parser = subparsers.add_parser(
         "info",
@@ -594,6 +598,10 @@ def main():
                 sys.exit(result)
         elif args.command == "package":
             result = package_command.run(args)
+            if result:
+                sys.exit(result)
+        elif args.command == "pack":
+            result = pack_command.run(args)
             if result:
                 sys.exit(result)
         elif args.command == "context":

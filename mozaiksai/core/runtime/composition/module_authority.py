@@ -150,6 +150,24 @@ def event_reaction_authority(
     return authority, provenance
 
 
+def is_trusted_dispatch_context(ctx: Any) -> bool:
+    """Whether the executor dispatched this action under trusted-bypass authority.
+
+    Module policy code that skips its own permission check for server-owned
+    callers asks this instead of importing an app's policy module. Only a
+    framework authority object constructed with ``trusted_bypass`` counts, and
+    construction already limits that mode to :data:`TRUSTED_BYPASS_KINDS`; a
+    missing authority, a look-alike object or an enforcing authority never does.
+    """
+
+    authority = getattr(ctx, "dispatch_authority", None)
+    return (
+        isinstance(authority, ModuleDispatchAuthority)
+        and authority.permission_mode == "trusted_bypass"
+        and authority.kind in TRUSTED_BYPASS_KINDS
+    )
+
+
 @dataclass(frozen=True)
 class ModuleDispatchProvenance:
     """Source metadata for a module action dispatch."""

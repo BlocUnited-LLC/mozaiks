@@ -1,0 +1,4 @@
+agents:
+  - name: StockReviewAgent
+    system_message: Review the supplied stock levels and propose restocking. Do not place orders.
+    structured_outputs_required: false

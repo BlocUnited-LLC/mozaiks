@@ -17,6 +17,7 @@ from .module_authority import (
     ModuleExecutionPolicyInput,
     ModulePermissionCheck,
     event_reaction_authority,
+    is_trusted_dispatch_context,
     workflow_user_authority,
 )
 from .module_context import ModuleContext
@@ -67,6 +68,7 @@ __all__ = [
     "ModuleDispatchAuthority",
     "TRUSTED_BYPASS_KINDS",
     "event_reaction_authority",
+    "is_trusted_dispatch_context",
     "workflow_user_authority",
     "ModuleDispatchProvenance",
     "ModuleEntitlementCheck",

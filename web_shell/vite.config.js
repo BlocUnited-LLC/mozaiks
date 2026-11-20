@@ -6,6 +6,7 @@ import { createRequire } from 'module';
 import fs from 'fs';
 import { createHash } from 'node:crypto';
 import { workflowUiPlugin } from './workflowUi.js';
+import { moduleUiPlugin } from './moduleUi.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require   = createRequire(import.meta.url);
@@ -270,6 +271,7 @@ export default defineConfig(({ mode }) => {
     factoryWorkflowsRoot,
     path.resolve(platformAppDir, 'ui'),
     path.resolve(platformAppDir, 'admin'),
+    path.resolve(platformAppDir, 'modules'),
     platformWorkflowRoot,
   ];
   const viteFsAllow = Array.from(new Set([
@@ -341,6 +343,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     workflowUiPlugin({ primaryRoot: platformWorkflowRoot, factoryRoot: factoryWorkflowsRoot }),
+    moduleUiPlugin({ appDir: platformAppDir }),
     // Pre-process .js files that contain JSX anywhere in the build graph.
     // Covers chat-ui/src, shared factory workflow UIs, active app workflow/module
     // UIs, and product/workspace overlays that still ship JSX in .js files.
