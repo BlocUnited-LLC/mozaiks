@@ -7,7 +7,6 @@ from types import MappingProxyType
 
 import yaml
 
-from factory_app.workflows._shared.pack_selection import PhysicalPackContext, available_pack_rows
 from factory_app.workflows.AppGenerator.tools import generated_bundle_scanner as scanner
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     verify_pack_integrity,
@@ -63,6 +62,13 @@ def test_planned_data_scan_preserves_custom_template_input_and_defensive_rows(tm
 
 
 def test_bound_bundle_scan_preserves_approved_plan_template_inputs(tmp_path, monkeypatch):
+    # Workflow loading can replace pack_selection after test collection. Use
+    # the same context class the scanner imports for this invocation.
+    from factory_app.workflows._shared.pack_selection import (
+        PhysicalPackContext,
+        available_pack_rows,
+    )
+
     pack_id = "planned_notes"
     registered = registered_pack_fixture(tmp_path, monkeypatch, pack_id, "config_file")
     root = Path(registered["pack_source_path"])
