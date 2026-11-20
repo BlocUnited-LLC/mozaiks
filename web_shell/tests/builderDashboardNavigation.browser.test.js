@@ -58,7 +58,7 @@ const globalPages = [
   { id: "marketplace", label: "Discover", path: "/marketplace", icon: "store" },
   { id: "operations", label: "Operations", path: "/operations", requiresRole: "admin" },
 ];
-window.shellNavigation = { landing_spot: "/notes", pages: [{ path: "/notes", label: "Personal Notes", meta: { requiresAuth: true } }], headerPages: globalPages, header: { actions: [{ id: "create", label: "Create App", path: "/create" }] }, mobile: { bottomBar: { items: globalPages } }, profile: { menu: [{ id: "app-dashboard", label: "App Dashboard", path: "/apps" }, { id: "admin", label: "Admin", path: "/admin", requiresRole: "admin" }] }, notifications: { show: true }, auth: { runtime: { enabled: true } } };
+window.shellNavigation = { landing_spot: new URLSearchParams(window.location.search).get("home") || "/apps", pages: [{ path: "/apps", label: "My Apps" }, { path: "/notes", label: "Personal Notes", meta: { requiresAuth: true } }], headerPages: globalPages, header: { actions: [{ id: "create", label: "Create App", path: "/create" }] }, mobile: { bottomBar: { items: globalPages } }, profile: { menu: [{ id: "app-dashboard", label: "Studio", path: "/apps" }, { id: "admin", label: "Admin", path: "/admin", requiresRole: "admin" }] }, notifications: { show: true }, auth: { runtime: { enabled: true } } };
 function App() {
   const location = useLocation();
   const [actor, setActor] = React.useState({ id: "reader", name: "Reader", roles: ["user"] });
@@ -112,7 +112,9 @@ createRoot(document.getElementById("root")).render(<BrowserRouter><App /></Brows
         await expect(page).toHaveURL(origin + "/marketplace");
         await page.goto(origin + route);
         await page.getByTitle("Reader", { exact: true }).click();
-        await page.getByRole("button", { name: "App Dashboard", exact: true }).click();
+        await expect(page.getByRole("button", { name: /^(My Apps|Apps|App Dashboard)$/ })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Account", exact: true })).toBeVisible();
+        await page.getByRole("button", { name: "Studio", exact: true }).click();
         await expect(page).toHaveURL(origin + "/apps");
       }
     });
@@ -136,7 +138,7 @@ createRoot(document.getElementById("root")).render(<BrowserRouter><App /></Brows
         }, scenario);
         await page.getByTitle("Reader", { exact: true }).click();
         assert.equal(await page.getByText("Admin", { exact: true }).count(), 0);
-        await page.getByText("App Dashboard", { exact: true }).click();
+        await page.getByText("Studio", { exact: true }).click();
         await expect(page.getByRole("heading", { name: scenario.target, exact: true })).toBeVisible();
         const calls = await page.evaluate(() => window.dashboardRequests);
         assert.equal(calls.length, scenario.calls);
@@ -145,7 +147,7 @@ createRoot(document.getElementById("root")).render(<BrowserRouter><App /></Brows
       await page.goto(origin + "/chat?workflow=AppGenerator&chat_id=chat_owned");
       await page.evaluate(() => { window.dashboardDelay = true; });
       await page.getByTitle("Reader", { exact: true }).click();
-      await page.getByText("App Dashboard", { exact: true }).click();
+      await page.getByText("Studio", { exact: true }).click();
       await page.waitForFunction(() => typeof window.resolveDashboard === "function");
       await page.evaluate(() => {
         window.history.pushState({}, "", "/me?tab=support-tickets");
@@ -157,15 +159,19 @@ createRoot(document.getElementById("root")).render(<BrowserRouter><App /></Brows
       await page.goto(origin + "/chat?workflow=AppGenerator&chat_id=chat_owned");
       await page.evaluate(() => { window.dashboardDelay = true; });
       await page.getByTitle("Reader", { exact: true }).click();
-      await page.getByText("App Dashboard", { exact: true }).click();
+      await page.getByText("Studio", { exact: true }).click();
       await page.waitForFunction(() => typeof window.resolveDashboard === "function");
       await page.evaluate(() => window.switchUser({ id: "new-reader", name: "New Reader", roles: ["user"] }));
       await expect(page.getByTitle("New Reader", { exact: true })).toBeVisible();
       await page.evaluate(() => window.resolveDashboard());
       await expect(page).toHaveURL(origin + "/chat?workflow=AppGenerator&chat_id=chat_owned");
+      await page.goto(origin + "/me?home=/notes");
+      await page.getByTitle("Reader", { exact: true }).click();
+      await page.getByRole("button", { name: "Personal Notes", exact: true }).click();
+      await expect(page).toHaveURL(origin + "/notes");
       await page.goto(origin + "/me?anonymous=1");
       await page.getByTitle("Guest", { exact: true }).click();
-      assert.equal(await page.getByText("App Dashboard", { exact: true }).count(), 0);
+      await expect(page.getByRole("button", { name: /^(Studio|My Apps|Apps|App Dashboard)$/ })).toHaveCount(0);
       await page.close();
     });
   }

@@ -80,8 +80,10 @@ behavior inherited by hosted products, not hosted commercial policy.
 
 ### Navigation
 
-The Studio account dropdown offers `App Dashboard` to signed-in builders.
-`/apps` lists the caller's portfolio without requiring a global admin role.
+The account dropdown offers signed-in builders one management entry, `Studio`.
+Its home is `My Apps` (`/apps`), the caller's portfolio. The workspace navigation
+also offers `Performance` (`/performance`) across the caller's apps. Both use
+the builder's existing owner scope.
 During a workflow conversation, the dropdown resolves
 `GET /api/studio/build/dashboard-link?chat_id=...`. The server reads the
 caller's owned chat binding and verifies its App Registry target before returning
@@ -136,7 +138,7 @@ product billing routes.
 
 | Route | Surface | Notes |
 | --- | --- | --- |
-| `/apps` | Workspace Apps | Primary workspace home and app portfolio |
+| `/apps` | My Apps | Primary Studio workspace home and app portfolio |
 | `/usage` | Workspace Usage | Cross-app workflow input/output tokens, totals, and averages |
 | `/integrations` | Workspace Integrations | Workspace provider setup, catalog coverage, and safe credential-presence status |
 | `/create` | Workflow entrypoint | Workflow-owned fresh create path; not part of the persistent Studio nav and never an implicit resume surface |

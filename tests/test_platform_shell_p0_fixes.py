@@ -281,7 +281,7 @@ def test_build_shell_config_studio_injects_builder_dashboard(monkeypatch, tmp_pa
     assert "admin-portal" not in ids
     entry = next(item for item in menu if item.get("id") == "app-dashboard")
     assert entry["path"] == "/apps"
-    assert entry["label"] == "App Dashboard"
+    assert entry["label"] == "Studio"
     assert "requiresRole" not in entry
 
 
