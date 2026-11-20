@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from datetime import timedelta
-from unittest.mock import AsyncMock
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -103,6 +106,292 @@ async def _read(manager, state):
 
 def _metadata(state):
     return state.manifest, sorted(state.paths), state.has_requirements
+
+
+@pytest.fixture
+def managed_keycloak_preview(monkeypatch):
+    adapter = FakeSandboxAdapter(preview_url="http://127.0.0.1:45678")
+    manager = _manager(adapter)
+    auth_yaml = (Path(__file__).parents[1] / "factory_app/app/config/auth.yaml").read_text(encoding="utf-8")
+    auth_yaml = auth_yaml.replace("callback: /auth/callback", "callback: /session/oidc/return")
+    adapter.read_file = AsyncMock(return_value=auth_yaml)
+    public_env = {
+        "AUTH_ENABLED": "true", "AUTH_PROVIDER": "jwt",
+        "AUTH_ISSUER": "http://localhost:8080/realms/studio",
+        "AUTH_AUDIENCE": "preview-api", "AUTH_ACCESS_TOKEN_TYPE_CLAIM": "typ",
+        "AUTH_ACCESS_TOKEN_TYPE_VALUE": "Bearer",
+        "VITE_OIDC_AUTHORITY": "http://localhost:8080/realms/studio",
+        "VITE_OIDC_CLIENT_ID": "preview-browser",
+    }
+    registrar = SimpleNamespace(issuer=public_env["AUTH_ISSUER"])
+
+    async def register(**kwargs):
+        record = await manager._store.get(kwargs["sandbox_id"])
+        assert record["keycloak_issuer"] == registrar.issuer
+        assert record["operation"]["kind"] == "start"
+        adapter.calls.append(("register", kwargs))
+        return dict(public_env)
+
+    async def remove(**kwargs):
+        record = await manager._store.get(kwargs["sandbox_id"])
+        assert record["keycloak_issuer"] == registrar.issuer
+        assert record["operation"]["kind"] in {"start", "stop", "status"}
+        adapter.calls.append(("remove", kwargs))
+
+    registrar.register = AsyncMock(side_effect=register)
+    registrar.remove = AsyncMock(side_effect=remove)
+    resolver = Mock(return_value=registrar)
+    monkeypatch.setattr(preview_sessions, "resolve_keycloak_preview_registrar", resolver)
+    monkeypatch.setenv("MOZAIKS_KEYCLOAK_PREVIEW_REGISTRAR_CLIENT_ID", "preview-registrar")
+    monkeypatch.setenv("MOZAIKS_KEYCLOAK_PREVIEW_REGISTRAR_CLIENT_SECRET", "host-only-registrar-secret")
+    monkeypatch.setenv("KEYCLOAK_CLIENT_SECRET", "host-only-studio-secret")
+    return SimpleNamespace(
+        manager=manager, adapter=adapter, registrar=registrar,
+        resolver=resolver, auth_yaml=auth_yaml, public_env=public_env,
+    )
+
+
+async def _sync_managed_auth(preview, state, *, auth_required=True):
+    manifest = {"appId": "preview-app", "appName": "Preview"}
+    if auth_required is not None:
+        manifest["authRequired"] = auth_required
+    await _sync_manifest(preview.manager, state, **{
+        "app.json": json.dumps(manifest), "config/auth.yaml": preview.auth_yaml,
+    })
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("auth_required", [True, None], ids=["explicit-auth", "default-auth"])
+async def test_managed_keycloak_registers_canonical_callback_before_launch(managed_keycloak_preview, auth_required):
+    preview = managed_keycloak_preview
+    state = await _create(preview.manager)
+    await _sync_managed_auth(preview, state, auth_required=auth_required)
+
+    running = await preview.manager.start(state.sandbox_id)
+
+    assert running.status == "running"
+    preview.adapter.read_file.assert_awaited_once_with(
+        session_id=state.session_id, path="/workspace/app/config/auth.yaml",
+    )
+    preview.registrar.register.assert_awaited_once_with(
+        sandbox_id=state.sandbox_id, target_app_id="preview-app",
+        preview_url="http://127.0.0.1:45678", callback_path="/session/oidc/return",
+    )
+    calls = preview.adapter.calls
+    launched = next(kwargs for kind, kwargs in calls if kind == "run_command" and kwargs.get("background"))
+    assert launched["envs"] == {**preview.public_env, "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS": "127.0.0.1"}
+    assert [kind for kind, _ in calls].index("get_preview_url") < [kind for kind, _ in calls].index("register")
+    assert calls.index(("register", preview.registrar.register.call_args.kwargs)) < calls.index(("run_command", launched))
+    saved = await preview.manager._store.get(state.sandbox_id)
+    assert saved["keycloak_issuer"] == preview.registrar.issuer
+    assert "host-only-" not in repr(calls) + repr(saved) + repr(preview.manager._broadcast.call_args_list)
+
+    await preview.manager.stop(state.sandbox_id)
+
+    preview.registrar.remove.assert_awaited_once_with(sandbox_id=state.sandbox_id)
+    assert [kind for kind, _ in calls][-2:] == ["remove", "terminate_session"]
+    assert await preview.manager._store.get(state.sandbox_id) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["public", "legacy", "e2b"])
+async def test_unmanaged_previews_skip_keycloak_registration(managed_keycloak_preview, monkeypatch, mode):
+    preview = managed_keycloak_preview
+    if mode == "legacy":
+        preview.resolver.return_value = None
+        monkeypatch.delenv("MOZAIKS_KEYCLOAK_PREVIEW_REGISTRAR_CLIENT_ID")
+        monkeypatch.delenv("MOZAIKS_KEYCLOAK_PREVIEW_REGISTRAR_CLIENT_SECRET")
+    elif mode == "e2b":
+        preview.manager = _manager(preview.adapter, provider="e2b")
+    state = await _create(preview.manager)
+    await _sync_managed_auth(preview, state, auth_required=mode != "public")
+
+    assert (await preview.manager.start(state.sandbox_id)).status == "running"
+    await preview.manager.stop(state.sandbox_id)
+
+    preview.adapter.read_file.assert_not_awaited()
+    preview.registrar.register.assert_not_awaited()
+    preview.registrar.remove.assert_not_awaited()
+    if mode != "legacy":
+        preview.resolver.assert_not_called()
+    launched = next(kwargs for kind, kwargs in preview.adapter.calls if kind == "run_command" and kwargs.get("background"))
+    assert launched["envs"] == {"__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS": "127.0.0.1"}
+    if mode in {"legacy", "e2b"}:
+        assert state.keycloak_cleanup_grace is False
+        created = next(kwargs for kind, kwargs in preview.adapter.calls if kind == "create_session")
+        assert created["timeout_seconds"] == preview.manager._ttl_minutes * 60
+        assert not launched["command"].startswith("timeout ")
+
+
+@pytest.mark.asyncio
+async def test_managed_keycloak_grace_holds_port_without_extending_runtime(managed_keycloak_preview, monkeypatch):
+    preview = managed_keycloak_preview
+    allocation_time = preview_sessions._utcnow()
+    monkeypatch.setattr(preview_sessions, "_utcnow", lambda: allocation_time)
+    state = await _create(preview.manager)
+    ttl = preview.manager._ttl_minutes * 60
+    created = next(kwargs for kind, kwargs in preview.adapter.calls if kind == "create_session")
+    assert created["timeout_seconds"] == ttl + 120
+    assert 0 < (state.expires_at - state.created_at).total_seconds() <= ttl
+    assert state.keycloak_cleanup_grace is True
+    assert (await preview.manager._store.get(state.sandbox_id))["keycloak_cleanup_grace"] is True
+    await _sync_managed_auth(preview, state)
+    start_time = state.expires_at - timedelta(seconds=ttl - 30)
+    monkeypatch.setattr(preview_sessions, "_utcnow", lambda: start_time)
+
+    running = await preview.manager.start(state.sandbox_id)
+
+    launched = next(kwargs for kind, kwargs in preview.adapter.calls if kind == "run_command" and kwargs.get("background"))
+    assert launched["command"].startswith(
+        f"timeout --kill-after=10s {ttl - 30}s python -m mozaiksai.core.sandbox.preview_runtime start "
+    )
+    assert running.expires_at == state.expires_at
+
+    # Neither the grace marker nor a claimed provider teardown may bypass the
+    # durable registration receipt when the cleanup lease tries to release it.
+    async with preview.manager._operation(state.sandbox_id, "stop") as (_, token):
+        with pytest.raises(PreviewRecoveryRequired, match="Keycloak preview client cleanup"):
+            await preview.manager._store.release(state.sandbox_id, operation_token=token, provider_absent=True)
+    assert (await preview.manager._store.get(state.sandbox_id))["keycloak_issuer"] == preview.registrar.issuer
+    await preview.manager.stop(state.sandbox_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("revocation_outage", [False, True])
+async def test_managed_keycloak_expiry_revokes_before_port_cleanup(managed_keycloak_preview, monkeypatch, revocation_outage):
+    preview = managed_keycloak_preview
+    state = await _create(preview.manager)
+    await _sync_managed_auth(preview, state)
+    await preview.manager.start(state.sandbox_id)
+    monkeypatch.setattr(preview_sessions, "_utcnow", lambda: state.expires_at + timedelta(seconds=1))
+    remove = preview.registrar.remove.side_effect
+    if revocation_outage:
+        preview.registrar.remove.side_effect = preview_sessions.KeycloakPreviewRegistrationError("Keycloak cleanup unavailable")
+
+    await preview.manager.cleanup()
+
+    if revocation_outage:
+        saved = await preview.manager._store.get(state.sandbox_id)
+        assert saved["keycloak_issuer"] == preview.registrar.issuer
+        assert saved["keycloak_cleanup_grace"] is True
+        assert saved["session_id"] == state.session_id
+        assert not any(kind == "terminate_session" for kind, _ in preview.adapter.calls)
+        preview.registrar.remove.side_effect = remove
+        await preview.manager.cleanup()
+    assert await preview.manager._store.get(state.sandbox_id) is None
+    assert [kind for kind, _ in preview.adapter.calls][-2:] == ["remove", "terminate_session"]
+
+
+@pytest.mark.asyncio
+async def test_managed_keycloak_requires_new_allocation_after_registration_enabled(managed_keycloak_preview, monkeypatch):
+    preview = managed_keycloak_preview
+    monkeypatch.delenv("MOZAIKS_KEYCLOAK_PREVIEW_REGISTRAR_CLIENT_ID")
+    monkeypatch.delenv("MOZAIKS_KEYCLOAK_PREVIEW_REGISTRAR_CLIENT_SECRET")
+    state = await _create(preview.manager)
+    assert state.keycloak_cleanup_grace is False
+    await _sync_managed_auth(preview, state)
+    monkeypatch.setenv("MOZAIKS_KEYCLOAK_PREVIEW_REGISTRAR_CLIENT_ID", "preview-registrar")
+    monkeypatch.setenv("MOZAIKS_KEYCLOAK_PREVIEW_REGISTRAR_CLIENT_SECRET", "host-only-registrar-secret")
+
+    result = await preview.manager.start(state.sandbox_id)
+
+    assert result.status == "error" and result.session_id is None
+    assert result.last_error == "Start a new preview after configuring Keycloak registration"
+    preview.registrar.register.assert_not_awaited()
+    preview.adapter.read_file.assert_not_awaited()
+    assert not any(kwargs.get("background") for kind, kwargs in preview.adapter.calls if kind == "run_command")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["registration", "launch", "health"])
+async def test_managed_keycloak_start_failure_revokes_before_releasing_port(managed_keycloak_preview, failure):
+    preview = managed_keycloak_preview
+    state = await _create(preview.manager)
+    await _sync_managed_auth(preview, state)
+    if failure == "registration":
+        preview.registrar.register.side_effect = ConnectionError("private-provider-response")
+    elif failure == "launch":
+        preview.adapter.background_result = SandboxRunResult(success=False, exit_code=1, stderr="private-provider-response")
+    else:
+        preview.adapter.command_results[" check "] = SandboxRunResult(success=False, exit_code=1, stderr="private-provider-response")
+
+    result = await preview.manager.start(state.sandbox_id)
+
+    assert result.status == "error"
+    assert result.session_id is None and result.keycloak_issuer is None
+    assert result.preview_url is None
+    assert "private-provider-response" not in result.last_error
+    preview.registrar.remove.assert_awaited_once_with(sandbox_id=state.sandbox_id)
+    assert [kind for kind, _ in preview.adapter.calls][-2:] == ["remove", "terminate_session"]
+    saved = await preview.manager._store.get(state.sandbox_id)
+    assert saved["keycloak_issuer"] is None and saved["session_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_managed_keycloak_cancelled_registration_revokes_under_start_lease(managed_keycloak_preview):
+    preview = managed_keycloak_preview
+    state = await _create(preview.manager)
+    await _sync_managed_auth(preview, state)
+    entered = asyncio.Event()
+
+    async def pending_registration(**_kwargs):
+        entered.set()
+        await asyncio.Future()
+
+    preview.registrar.register.side_effect = pending_registration
+    task = asyncio.create_task(preview.manager.start(state.sandbox_id))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    preview.registrar.remove.assert_awaited_once_with(sandbox_id=state.sandbox_id)
+    saved = await preview.manager._store.get(state.sandbox_id)
+    assert saved["status"] == "error" and "cancelled" in saved["last_error"]
+    assert saved["session_id"] is None and saved["keycloak_issuer"] is None
+    assert saved["operation"] is None
+    assert not any(kwargs.get("background") for kind, kwargs in preview.adapter.calls if kind == "run_command")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["stop", "launch"])
+async def test_managed_keycloak_revocation_debt_holds_port_until_recovery(managed_keycloak_preview, failure):
+    preview = managed_keycloak_preview
+    preview.manager._max_sessions = 1
+    state = await _create(preview.manager)
+    await _sync_managed_auth(preview, state)
+    revoke = preview.registrar.remove.side_effect
+    if failure == "launch":
+        preview.adapter.background_result = SandboxRunResult(success=False, exit_code=1)
+        preview.registrar.remove.side_effect = preview_sessions.KeycloakPreviewRegistrationError("Keycloak cleanup unavailable")
+        assert (await preview.manager.start(state.sandbox_id)).status == "error"
+    else:
+        await preview.manager.start(state.sandbox_id)
+        preview.registrar.remove.side_effect = preview_sessions.KeycloakPreviewRegistrationError("Keycloak cleanup unavailable")
+        with pytest.raises(preview_sessions.KeycloakPreviewRegistrationError, match="cleanup unavailable"):
+            await preview.manager.stop(state.sandbox_id)
+
+    # A fresh worker must recover the persisted debt; a failed revocation may
+    # not free the loopback port for a different preview callback.
+    restarted = _manager(preview.adapter, store=_store(preview.manager._store._db))
+    restarted._max_sessions = 1
+    debt = await restarted._store.get(state.sandbox_id)
+    assert debt["keycloak_issuer"] == preview.registrar.issuer
+    assert debt["session_id"] == state.session_id and debt["status"] == "error"
+    assert debt["operation"] is None
+    assert not any(kind == "terminate_session" for kind, _ in preview.adapter.calls)
+    with pytest.raises(PreviewCapacityError):
+        await _create(restarted, "different-artifact", user_id="other-owner")
+    assert not any(kind == "terminate_session" for kind, _ in preview.adapter.calls)
+
+    preview.registrar.remove.side_effect = revoke
+    await restarted.cleanup()
+
+    assert await restarted._store.get(state.sandbox_id) is None
+    assert [kwargs["session_id"] for kind, kwargs in preview.adapter.calls if kind == "terminate_session"] == [state.session_id]
+    assert (await _create(restarted, "different-artifact", user_id="other-owner")).session_id
 
 
 def test_id_validators():
@@ -829,9 +1118,11 @@ RECOVER_URL = "/api/sandbox?build_registry_id=appreg-a"
 
 
 @pytest.mark.asyncio
-async def test_generic_router_hides_sealed_sessions_even_from_same_owner(api_client, keycloak_preview_environment):
+async def test_generic_router_hides_sealed_sessions_even_from_same_owner(api_client, keycloak_preview_environment, monkeypatch):
     client, adapter, _ = api_client
     manager = preview_sessions._manager
+    registrar = Mock(side_effect=AssertionError("Sealed candidates cannot use the preview registrar"))
+    monkeypatch.setattr(preview_sessions, "resolve_keycloak_preview_registrar", registrar)
     adapter.stage_sealed_files = AsyncMock()
     archive = build_deterministic_archive([
         ArchiveEntry(path="app/app.json", content=MANIFEST.encode()),
@@ -850,6 +1141,7 @@ async def test_generic_router_hides_sealed_sessions_even_from_same_owner(api_cli
     assert client.post(f"/api/sandbox/{state.sandbox_id}/start").status_code == 404
     assert client.post(f"/api/sandbox/{state.sandbox_id}/stop").status_code == 404
     await manager.stop(state.sandbox_id)
+    registrar.assert_not_called()
 
 
 def test_router_recovers_actual_identity_and_safe_dto_without_provider_calls(api_client):

@@ -25,7 +25,7 @@ _IDENTITY_FIELDS = ("app_id", "user_id", "artifact_id", "target_app_id", "build_
 _SEALED_IDENTITY_FIELDS = ("sealed_archive_sha256", "sealed_image_id")
 _STATE_FIELDS = {
     "session_id", "status", "preview_url", "last_error", "last_access_at",
-    "manifest", "paths", "has_requirements", "health_checked_at",
+    "manifest", "paths", "has_requirements", "health_checked_at", "keycloak_issuer", "keycloak_cleanup_grace",
 }
 _MAX_RESERVATIONS = 4096
 _T = TypeVar("_T")
@@ -207,6 +207,11 @@ class MongoPreviewStore:
             raise ValueError("Preview paths must be a list of strings")
         if "has_requirements" in payload and not isinstance(payload["has_requirements"], bool):
             raise ValueError("Preview requirements marker must be boolean")
+        issuer = payload.get("keycloak_issuer")
+        if issuer is not None and (not isinstance(issuer, str) or not issuer):
+            raise ValueError("Preview Keycloak issuer must be nonempty text")
+        if "keycloak_cleanup_grace" in payload and not isinstance(payload["keycloak_cleanup_grace"], bool):
+            raise ValueError("Preview Keycloak cleanup grace marker must be boolean")
         if len(BSON.encode(payload)) > 1024 * 1024:
             raise ValueError("Preview metadata exceeds its storage limit")
         return deepcopy(payload)
@@ -369,6 +374,8 @@ class MongoPreviewStore:
                 raise PreviewLeaseLostError("Preview cleanup requires its current operation lease")
             if operation["kind"] not in {"stop", "recovery"}:
                 raise PreviewLeaseLostError("Only a cleanup operation can release a preview")
+            if session["state"].get("keycloak_issuer"):
+                raise PreviewRecoveryRequired("Keycloak preview client cleanup is not yet confirmed")
             closed = await self._sessions_collection().update_one(
                 {"_id": sandbox_id, "operation.token": operation_token, "operation.expires_at": {"$gt": self._now()}},
                 {"$set": {"closing": True}, "$inc": {"revision": 1}},

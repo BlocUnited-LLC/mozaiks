@@ -332,10 +332,45 @@ Use `MOZAIKS_PREVIEW_ENV_<NAME>` to configure the interactive preview
 environment. Factory API keys, credentials, and database URLs stay in Studio.
 The manager also supplies the canonical image's three nonsecret
 frontend/Factory resource paths, because E2B template-build ENV is not retained
-as session environment. Public apps may declare `authRequired: false`; authenticated apps
-cannot silently disable authentication. Configure their existing OIDC provider
-and register each target app client with the published preview callback origin.
-For local JWT validation, a typical explicit configuration is:
+as session environment. Public apps may declare `authRequired: false`.
+Authenticated apps require a configured OIDC provider.
+
+### Studio-managed Keycloak clients
+
+For local Docker previews, Studio can create a public OIDC client for each
+authenticated preview. Configure Studio with the native Keycloak adapter and
+create a dedicated confidential service-account client in the same realm.
+Grant the account the realm's `realm-management` client role `manage-clients`
+for registration and cleanup. Disable browser and password flows on this
+service account.
+
+Set `MOZAIKS_KEYCLOAK_PREVIEW_REGISTRAR_CLIENT_ID` and
+`MOZAIKS_KEYCLOAK_PREVIEW_REGISTRAR_CLIENT_SECRET` in the Studio host environment.
+Keep both values in Studio's configuration outside `MOZAIKS_PREVIEW_ENV_*`.
+If the public Keycloak URL is unreachable from Docker, set
+`MOZAIKS_PREVIEW_ENV_AUTH_JWKS_URL` to the same realm's container-reachable
+signing keys endpoint.
+
+Studio registers the exact Docker loopback origin and callback path declared
+in the app's auth contract. Each preview client requires PKCE and receives its
+own API audience and target app identity. The browser can reuse the Studio
+realm session. Studio revokes the client when the preview stops, expires, or
+fails to start. Keep the registrar configuration available until managed
+previews are cleaned up. Studio retains the cleanup record if revocation fails.
+Use the realm's standard `basic`, `profile`, and `email` client scopes with
+their standard mappers. These scopes must keep the Studio API audience out of
+preview tokens.
+
+With registration enabled, local Docker allocations give Studio two extra
+minutes to revoke the callback while Docker still owns the port. The app
+runtime keeps the original preview expiry. A Docker stop outside Studio or an
+outage longer than this grace period can leave a callback registered after the
+port is released. Studio retries revocation when it can reach Keycloak again.
+
+### Manually configured OIDC clients
+
+For other preview configurations, register the app's browser client with the
+published preview callback origin. One local JWT configuration is shown below.
 
 ```dotenv
 MOZAIKS_PREVIEW_ENV_AUTH_PROVIDER=jwt
@@ -482,6 +517,8 @@ artifact storage, provider limits, and expected traffic before broad rollout.
 | `SANDBOX_TEMPLATE` | provider default | artifact preview-session e2b template |
 | `MOZAIKS_PREVIEW_PROVIDER` | auto | `docker` (default) or explicit `e2b`; a key alone never selects E2B |
 | `SANDBOX_WORKDIR` | `/home/user/app` | e2b workspace root; Docker uses `/workspace` |
+| `MOZAIKS_KEYCLOAK_PREVIEW_REGISTRAR_CLIENT_ID` | unset | Studio-only client ID for managed Keycloak registration in Docker previews |
+| `MOZAIKS_KEYCLOAK_PREVIEW_REGISTRAR_CLIENT_SECRET` | unset | Studio-only registrar secret, configured with the client ID |
 | `MOZAIKS_PREVIEW_ENV_<NAME>` | unset | explicit interactive preview environment, with signed token-type defaults for the shared Studio Keycloak realm as described above |
 | `APP_VALIDATION_BUILD_OUTPUT_MAX_CHARS` | `20000` | persisted build-output trim |
 
