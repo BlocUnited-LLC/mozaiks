@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
-from contextvars import ContextVar
 from copy import deepcopy
 from functools import wraps
 from pathlib import Path
@@ -26,11 +25,13 @@ from mozaiksai.core.session.build_context import (
     resolve_build_context_root,
 )
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.generator_support.module_role_grants import ReviewedPackIdentity
+from mozaiksai.core.workflow.generator_support.module_role_grants import (
+    _PACK_READS,
+    ReviewedPackIdentity,
+)
 from mozaiksai.resources import resolve_factory_app_root
 
 _T = TypeVar("_T")
-_PACK_READS: ContextVar[tuple[Any, dict[tuple, Any]] | None] = ContextVar("_pack_reads", default=None)
 
 
 def _memoized_pack_read(context: Any, key: tuple, reader: Callable[[], _T]) -> _T:

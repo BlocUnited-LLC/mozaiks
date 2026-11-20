@@ -1,5 +1,6 @@
 """Read reuse cannot turn a prior admitted source into later authority."""
 from copy import deepcopy
+from importlib import import_module
 from pathlib import Path
 from shutil import copytree
 from unittest.mock import Mock
@@ -66,17 +67,23 @@ def test_review_receipt_and_final_sources_remain_live_inside_operation(managed_r
 
 @pytest.mark.parametrize("change", ["registry", "digest"])
 def test_source_change_before_ready_clears_the_cached_plan(managed_registry, monkeypatch, change):
-    from factory_app.workflows.AppGenerator.tools import app_plan_review as review
-
     _load_models()
+    review = import_module("factory_app.workflows.AppGenerator.tools.app_plan_review")
     source = managed_registry.parent.parent / "mozaikspay"
     if change == "digest":
         copytree(Path(__file__).resolve().parents[1] / "factory_app/build_context/mozaikspay", source)
     plan, context = _plan_and_context()
+    if change == "digest":
+        current_selection = import_module("factory_app.workflows._shared.pack_selection")
+        selected = current_selection.available_pack_rows(context, pack_ids={"mozaikspay"})
+        assert Path(selected["mozaikspay"]["pack_source_path"]).resolve() == source.resolve()
     publisher = review.app_build_plan
+    published = False
 
     def publish_then_revoke(**kwargs):
+        nonlocal published
         result = publisher(**kwargs)
+        published = True
         if change == "registry":
             _revoke(managed_registry)
         else:
@@ -86,8 +93,17 @@ def test_source_change_before_ready_clears_the_cached_plan(managed_registry, mon
 
     monkeypatch.setattr(review, "app_build_plan", publish_then_revoke)
     result = review.review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert published, result
     assert result["outcome"] == "needs_revision", result
-    assert ("no longer available" if change == "registry" else "selected digest does not match") in result["error"]
+    if change == "registry":
+        assert "no longer available" in result["error"]
+    else:
+        # Both the reviewed identity gate and the physical source verifier
+        # reject this changed digest; whichever runs first supplies the error.
+        assert any(message in result["error"] for message in (
+            "Reviewed pack 'mozaikspay' changed; renew design review",
+            "Pack 'mozaikspay' selected digest does not match freshly verified source",
+        )), result
     assert context.get("app_build_plan") is None
     assert context.get("app_plan_ready") is False
 
@@ -164,12 +180,15 @@ def test_physical_projection_preserves_verified_plan_inputs_without_mutation(man
 
 @pytest.mark.parametrize("phase", ["templates", "workspace"])
 def test_synchronous_assembly_phase_owns_fresh_reads_and_rechecks_revocation(managed_registry, monkeypatch, phase):
-    from factory_app.workflows.AppGenerator.tools import assemble_app_tasks as assembly
+    assembly = import_module("factory_app.workflows.AppGenerator.tools.assemble_app_tasks")
+    # Workflow tool loading can replace these modules after test collection.
+    # Observe the active reader and operation scope that assembly will use.
+    current_selection = import_module("factory_app.workflows._shared.pack_selection")
 
     plan, context = _plan_and_context()
     context.set("build_timestamp", "2026-01-01T00:00:00Z")
-    catalog = Mock(wraps=selection.available_pack_rows)
-    monkeypatch.setattr(selection, "available_pack_rows", catalog)
+    catalog = Mock(wraps=current_selection.available_pack_rows)
+    monkeypatch.setattr(current_selection, "available_pack_rows", catalog)
 
     def invoke():
         if phase == "workspace":
@@ -181,12 +200,12 @@ def test_synchronous_assembly_phase_owns_fresh_reads_and_rechecks_revocation(man
     first = invoke()
     assert first
     assert catalog.call_count == 1
-    assert selection._PACK_READS.get() is None
+    assert current_selection._PACK_READS.get() is None
     assert invoke() == first
     assert catalog.call_count == 2
-    assert selection._PACK_READS.get() is None
+    assert current_selection._PACK_READS.get() is None
     _revoke(managed_registry)
     with pytest.raises(ValueError, match="no longer available"):
         invoke()
     assert catalog.call_count == 3
-    assert selection._PACK_READS.get() is None
+    assert current_selection._PACK_READS.get() is None

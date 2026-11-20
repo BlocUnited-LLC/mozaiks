@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from collections.abc import Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
@@ -23,6 +24,9 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
 
 _Identifier = Annotated[str, Field(strict=True, pattern=r"^[a-z][a-z0-9_]*$")]
 _Text = Annotated[str, Field(strict=True, min_length=1)]
+
+# Retained workflow tools and reloaded Factory helpers share one operation scope.
+_PACK_READS: ContextVar[tuple[Any, dict[tuple, Any]] | None] = ContextVar("_pack_reads", default=None)
 
 
 class DesignRole(BaseModel):

@@ -194,6 +194,20 @@ def test_workflow_catalog_survives_tool_loader_then_persistence_policy_restore()
         )
 
 
+def test_workflow_reload_preserves_assembly_pack_read_scope() -> None:
+    result = _run_pytest([
+        "--reruns=0",
+        "tests/test_designdocs_selection_handoff.py"
+        "::test_factory_agent_requests_strict_selection_and_its_output_dispatches",
+        "tests/test_reviewed_pack_read_operation.py"
+        "::test_synchronous_assembly_phase_owns_fresh_reads_and_rechecks_revocation",
+    ])
+    assert result.returncode == 0, (
+        "Retained assembly tools lost their read scope after DesignDocs reloaded shared helpers.\n"
+        f"{result.stdout}\n{result.stderr}"
+    )
+
+
 def test_platform_host_import_survives_an_earlier_runtime_only_app_start() -> None:
     """Serving the runtime app must not break a later first platform import.
 
