@@ -400,6 +400,85 @@ async def test_only_explicit_preview_environment_is_forwarded(monkeypatch):
     assert "MONGO_URI" not in env
 
 
+@pytest.fixture
+def keycloak_preview_environment(monkeypatch):
+    issuer = "https://identity.example/realms/studio"
+    preview = {
+        "AUTH_PROVIDER": "jwt", "AUTH_ISSUER": issuer,
+        "AUTH_JWKS_URL": issuer + "/protocol/openid-connect/certs",
+        "AUTH_AUDIENCE": "preview-api", "VITE_OIDC_AUTHORITY": issuer,
+        "VITE_OIDC_CLIENT_ID": "preview-browser",
+    }
+    host = {
+        "AUTH_ENABLED": "true", "AUTH_PROVIDER": "keycloak",
+        "KEYCLOAK_URL": "https://identity.example", "KEYCLOAK_REALM": "studio",
+        "KEYCLOAK_CLIENT_ID": "studio-api", "KEYCLOAK_CLIENT_SECRET": "private-studio-client",
+        "OPENAI_API_KEY": "private-studio-provider", "MONGO_URI": "private-studio-database",
+        "INTERNAL_API_KEY": "private-studio-internal",
+        **{"MOZAIKS_PREVIEW_ENV_" + name: value for name, value in preview.items()},
+    }
+    monkeypatch.setattr(preview_sessions.os, "environ", host)
+    return host, preview
+
+
+@pytest.mark.asyncio
+async def test_interactive_preview_adds_same_issuer_keycloak_access_marker_without_studio_secrets(keycloak_preview_environment):
+    host, configured = keycloak_preview_environment
+    adapter = FakeSandboxAdapter()
+    await _create(_manager(adapter))
+    env = adapter.calls[0][1]["envs"]
+    assert env["AUTH_ACCESS_TOKEN_TYPE_CLAIM"] == "typ"
+    assert env["AUTH_ACCESS_TOKEN_TYPE_VALUE"] == "Bearer"
+    assert {name: env[name] for name in configured} == configured
+    assert env["AUTH_AUDIENCE"] != host["KEYCLOAK_CLIENT_ID"]
+    assert env["AUTH_AUDIENCE"] != env["VITE_OIDC_CLIENT_ID"]
+    assert not {"KEYCLOAK_CLIENT_SECRET", "OPENAI_API_KEY", "MONGO_URI", "INTERNAL_API_KEY"} & env.keys()
+    assert not any(value.startswith("private-studio-") for value in env.values())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", [
+    {"MOZAIKS_PREVIEW_ENV_AUTH_ISSUER": "https://other.example/realms/studio"},
+    {"MOZAIKS_PREVIEW_ENV_VITE_OIDC_AUTHORITY": "https://other.example/realms/studio"},
+    {"AUTH_PROVIDER": "jwt", "AUTH_ISSUER": "https://identity.example/realms/studio",
+     "AUTH_JWKS_URL": "https://identity.example/certs", "AUTH_AUDIENCE": "studio-api"},
+    {"KEYCLOAK_CLIENT_ID": ""},
+    {"MOZAIKS_PREVIEW_ENV_AUTH_PROVIDER": "keycloak"},
+    {"MOZAIKS_PREVIEW_ENV_AUTH_AUDIENCE": "studio-api"},
+    {"MOZAIKS_PREVIEW_ENV_AUTH_AUDIENCE": "preview-browser"},
+    {"MOZAIKS_PREVIEW_ENV_AUTH_AUDIENCE": ""},
+    {"MOZAIKS_PREVIEW_ENV_VITE_OIDC_CLIENT_ID": ""},
+], ids=[
+    "other_backend_issuer", "other_browser_issuer", "studio_not_keycloak", "studio_missing_audience",
+    "preview_not_jwt", "studio_audience_reused", "browser_audience_reused", "missing_audience", "missing_browser_client",
+])
+async def test_preview_does_not_infer_keycloak_marker_without_matching_identity_boundary(keycloak_preview_environment, changed):
+    host, _ = keycloak_preview_environment
+    host.update(changed)
+    adapter = FakeSandboxAdapter()
+    await _create(_manager(adapter))
+    env = adapter.calls[0][1]["envs"]
+    assert "AUTH_ACCESS_TOKEN_TYPE_CLAIM" not in env
+    assert "AUTH_ACCESS_TOKEN_TYPE_VALUE" not in env
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("configured", [
+    {"AUTH_ACCESS_TOKEN_TYPE_CLAIM": "token_use", "AUTH_ACCESS_TOKEN_TYPE_VALUE": "access"},
+    {"AUTH_ACCESS_TOKEN_TYPE_CLAIM": "token_use"},
+    {"AUTH_ACCESS_TOKEN_TYPE_VALUE": "access"},
+    {"AUTH_ACCESS_TOKEN_TYPE_CLAIM": ""},
+    {"AUTH_ACCESS_TOKEN_TYPE_VALUE": ""},
+], ids=["explicit_pair", "claim_only", "value_only", "empty_claim", "empty_value"])
+async def test_preview_preserves_explicit_access_marker_configuration(keycloak_preview_environment, configured):
+    host, _ = keycloak_preview_environment
+    host.update({"MOZAIKS_PREVIEW_ENV_" + name: value for name, value in configured.items()})
+    adapter = FakeSandboxAdapter()
+    await _create(_manager(adapter))
+    env = adapter.calls[0][1]["envs"]
+    assert {name: env[name] for name in ("AUTH_ACCESS_TOKEN_TYPE_CLAIM", "AUTH_ACCESS_TOKEN_TYPE_VALUE") if name in env} == configured
+
+
 @pytest.mark.asyncio
 async def test_sync_rejects_invalid_paths_before_any_write():
     adapter = FakeSandboxAdapter()
@@ -750,7 +829,7 @@ RECOVER_URL = "/api/sandbox?build_registry_id=appreg-a"
 
 
 @pytest.mark.asyncio
-async def test_generic_router_hides_sealed_sessions_even_from_same_owner(api_client):
+async def test_generic_router_hides_sealed_sessions_even_from_same_owner(api_client, keycloak_preview_environment):
     client, adapter, _ = api_client
     manager = preview_sessions._manager
     adapter.stage_sealed_files = AsyncMock()
@@ -763,6 +842,8 @@ async def test_generic_router_hides_sealed_sessions_even_from_same_owner(api_cli
         build_registry_id="appreg-a", archive_bytes=archive,
         archive_sha256=archive_digest(archive), image_id="sha256:" + "a" * 64,
     )
+    created = next(kwargs for name, kwargs in adapter.calls if name == "create_session")
+    assert created["envs"] == {}
     assert client.get(RECOVER_URL).json() == {"sessions": []}
     assert client.get(f"/api/sandbox/{state.sandbox_id}/status").status_code == 404
     assert client.post(f"/api/sandbox/{state.sandbox_id}/sync", json={"files": [], "deleted": []}).status_code == 404

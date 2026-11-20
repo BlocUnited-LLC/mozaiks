@@ -20,6 +20,13 @@ from typing import Any, Protocol, cast, runtime_checkable
 from urllib.parse import urlsplit
 
 from logs.logging_config import get_core_logger
+from mozaiksai.core.auth.adapters.base import AuthError
+from mozaiksai.core.auth.adapters.keycloak import (
+    ACCESS_TOKEN_TYPE_CLAIM,
+    ACCESS_TOKEN_TYPE_VALUE,
+    keycloak_issuer,
+)
+from mozaiksai.core.auth.adapters.registry import resolve_auth_config
 from mozaiksai.core.ports.sandbox import SandboxPort
 from mozaiksai.core.runtime.app.paths import app_bundle_workspace_path
 from mozaiksai.core.sandbox.preview_store import (
@@ -126,11 +133,47 @@ def sandbox_resource_environment() -> dict[str, str]:
 
 def preview_resource_environment() -> dict[str, str]:
     # Interactive previews explicitly opt in to forwarded environment values.
-    return {
+    env = {
         **sandbox_resource_environment(),
         **{name[len(_ENV_PREFIX):]: value for name, value in os.environ.items() if name.startswith(_ENV_PREFIX)},
         "VITE_MOZAIKS_PREVIEW": "true",
     }
+    claim_setting = "AUTH_ACCESS_TOKEN_TYPE_CLAIM"
+    value_setting = "AUTH_ACCESS_TOKEN_TYPE_VALUE"
+    if claim_setting in env or value_setting in env:
+        return env
+
+    issuer = env.get("AUTH_ISSUER", "").strip()
+    audience = env.get("AUTH_AUDIENCE", "").strip()
+    client = env.get("VITE_OIDC_CLIENT_ID", "").strip()
+    if not issuer or issuer != env.get("VITE_OIDC_AUTHORITY", "").rstrip("/"):
+        return env
+    if not audience or not client or audience == client:
+        return env
+
+    try:
+        studio_auth = resolve_auth_config()
+        preview_auth = resolve_auth_config(environ=env)
+    except AuthError:
+        # Let each host report its own misconfiguration through its normal validation.
+        return env
+    if studio_auth.provider != "keycloak" or preview_auth.provider != "jwt":
+        return env
+    server = studio_auth.settings.get("KEYCLOAK_URL", "")
+    realm = studio_auth.settings.get("KEYCLOAK_REALM", "")
+    studio_audience = studio_auth.settings.get("KEYCLOAK_CLIENT_ID", "").strip()
+    # Keycloak signs the access-token marker in the payload. Bind this default
+    # to the Studio realm while keeping the preview's own API audience.
+    if (
+        server
+        and realm
+        and studio_audience
+        and issuer == keycloak_issuer(server, realm)
+        and audience != studio_audience
+    ):
+        env[claim_setting] = ACCESS_TOKEN_TYPE_CLAIM
+        env[value_setting] = ACCESS_TOKEN_TYPE_VALUE
+    return env
 
 
 def _safe_relpath(raw: str) -> str | None:
