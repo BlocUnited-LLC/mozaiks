@@ -250,11 +250,11 @@ function WorkspaceMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio', shellLa
 export function WorkspaceLayout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
-  const { pages, appName } = useNavigation()
+  const { pages, appName, surface } = useNavigation()
   const { user } = useChatUI()
   const userRoles = useMemo(() => getUserRoles(user), [user])
   const appId = resolveAppId(location.pathname)
-  const shellLabel = resolveShellLabel(appName, appId)
+  const shellLabel = surface === 'studio' && !appId ? 'Studio' : resolveShellLabel(appName, appId)
   const shellSubtext = resolveShellSubtext(appId)
   const navGroups = useMemo(() => buildNavGroupsFromPages(pages, appId, userRoles), [pages, appId, userRoles])
   const activeNav = useMemo(() => getActiveNavItem(navGroups, location), [navGroups, location])

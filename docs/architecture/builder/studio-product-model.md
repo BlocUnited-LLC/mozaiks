@@ -80,8 +80,10 @@ behavior inherited by hosted products, not hosted commercial policy.
 
 ### Navigation
 
-The Studio account dropdown offers `App Dashboard` to signed-in builders.
-`/apps` lists the caller's portfolio without requiring a global admin role.
+The account dropdown offers signed-in builders one management entry, `Studio`.
+Its home is `My Apps` (`/apps`), the caller's portfolio. The workspace navigation
+also offers `Performance` (`/performance`) across the caller's apps. Both use
+the builder's existing owner scope.
 During a workflow conversation, the dropdown resolves
 `GET /api/studio/build/dashboard-link?chat_id=...`. The server reads the
 caller's owned chat binding and verifies its App Registry target before returning
@@ -89,6 +91,14 @@ the enabled default app dashboard portal. URL app selectors cannot choose that
 target. A missing conversation or an owned first-build chat without a binding
 opens `/apps`. An inaccessible context returns `404`, and the menu returns to
 the portfolio when resolution fails.
+
+The stock dashboard uses the verified binding's target app ID. A host whose
+dashboard uses its own registration IDs can supply the async FastAPI app-state
+callback `resolve_studio_dashboard_app_id(*, host_app_id, owner_user_id, binding)`.
+Studio calls it after verifying the owned chat and Factory registry record.
+The host looks up the matching registration under that owner, host and Factory
+binding, and returns its route ID or `None`. A missing or invalid ID yields
+`404`. The destination dashboard still checks the caller's access.
 
 The shared navigation manifest is readable with a token bound to the loaded
 Studio host. Explicit app selections retain registry checks.
@@ -136,7 +146,7 @@ product billing routes.
 
 | Route | Surface | Notes |
 | --- | --- | --- |
-| `/apps` | Workspace Apps | Primary workspace home and app portfolio |
+| `/apps` | My Apps | Primary Studio workspace home and app portfolio |
 | `/usage` | Workspace Usage | Cross-app workflow input/output tokens, totals, and averages |
 | `/integrations` | Workspace Integrations | Workspace provider setup, catalog coverage, and safe credential-presence status |
 | `/create` | Workflow entrypoint | Workflow-owned fresh create path; not part of the persistent Studio nav and never an implicit resume surface |

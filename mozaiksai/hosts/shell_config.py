@@ -154,7 +154,7 @@ _ADMIN_PORTAL_MENU_ITEM = {
 
 _APP_DASHBOARD_MENU_ITEM = {
     "id": "app-dashboard",
-    "label": "App Dashboard",
+    "label": "Studio",
     "action": "navigate",
     "path": "/apps",
 }

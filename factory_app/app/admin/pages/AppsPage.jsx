@@ -305,7 +305,7 @@ export function AppsDirectory({
     <WorkspaceLayout>
       <div className="space-y-6">
         <WorkspaceStudioHero
-          title="Apps"
+          title="My Apps"
           subtitle={pagination ? 'Manage your apps. Search and filters include all your apps.' : 'Manage your apps, continue builds, and open app Studio.'}
           summaryItems={pagination ? summaryItems.slice(0, 1) : summaryItems}
           summaryClassName="hidden md:block"

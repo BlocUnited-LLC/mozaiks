@@ -85,6 +85,7 @@ async function fixture(t) {
 test('AppsDirectory accepts server pages, controlled search/filters, retry and bounded navigation on mobile', async t => {
   const page = await fixture(t);
   await page.getByText('First app', { exact: true }).filter({ visible: true }).waitFor();
+  await page.getByRole('heading', { name: 'My Apps', exact: true }).waitFor();
   await page.getByText('On this page', { exact: true }).waitFor();
   assert.equal(await page.getByText('Total', { exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: 'Previous', exact: true }).isDisabled(), true);

@@ -31,13 +31,13 @@
     {
       "path": "/apps",
       "component": "AppsPage",
-      "label": "Apps",
+      "label": "My Apps",
       "order": 4,
       "meta": {
         "surfaces": ["studio"],
-        "title": "Apps",
+        "title": "My Apps",
         "appShell": true,
-        "ai_context": "The user is on the Apps page, showing all apps in this workspace. Each app can be clicked to open App Studio for configuration, usage, and health details.",
+        "ai_context": "The user is on My Apps in Studio, showing the apps they manage. Each app can be clicked to open App Studio for configuration, usage, and health details.",
         "navigation": {
           "group": "workspace-studio",
           "scope": "local",
@@ -52,7 +52,7 @@
       "order": 5,
       "meta": {
         "surfaces": ["studio"],
-        "requiresRole": "admin",
+        "requiresAuth": true,
         "title": "Performance",
         "appShell": true,
         "ai_context": "The user is on the Performance page, the portfolio command center. It shows revenue and user metrics across all their apps, a portfolio trend, deterministic attention insights, and a comparable applications table. Clicking an app drills into that app's analytics.",
