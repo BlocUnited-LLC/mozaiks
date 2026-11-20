@@ -28,7 +28,11 @@ from mozaiksai.core.workflow.generator_support.module_revision import (
     scoped_service_revision_paths,
     validate_scoped_service_repositories,
 )
-from mozaiksai.core.workflow.generator_support.page_action_bindings import generated_workflow_names
+from mozaiksai.core.workflow.generator_support.page_action_bindings import (
+    generated_workflow_names,
+    planned_page_writes,
+    validate_required_page_writes,
+)
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_stem_from_path,
     _page_stems,
@@ -134,6 +138,7 @@ def _apply_planned_page_contracts(
     if not pages or not tasks:
         return [{"filename": str(f["filename"]), "content": str(f["content"])} for f in code_files]
 
+    required_writes = planned_page_writes(pages, context_variables)
     planned_by_stem: dict[str, dict[str, Any]] = {}
     for page in pages:
         for stem in _page_stems(page):
@@ -203,6 +208,9 @@ def _apply_planned_page_contracts(
                 validate_planned_page(file_map[path], planned_by_stem[stem], path)
             except ValueError as exc:
                 raise ValueError(f"{path}: {exc}") from exc
+            validate_required_page_writes(
+                file_map[path], planned_by_stem[stem]["route"], required_writes, path, identity_validated=True,
+            )
     template_errors: list[str] = []
     for path, owned in sorted(pack_outputs.items()):
         template_stem = _page_stem_from_path(path)

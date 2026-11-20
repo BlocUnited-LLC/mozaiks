@@ -17,6 +17,7 @@ from mozaiksai.core.workflow.generator_support.module_role_grants import (
     validate_access_policy,
     verified_pack_authorization,
 )
+from mozaiksai.core.workflow.generator_support.page_action_bindings import design_page_write_actions
 
 
 def validate_design_page_roles(experience_spec: Any, policy: dict[str, Any]) -> dict[str, list[str] | None]:
@@ -200,6 +201,21 @@ def resolve_design_page_roles(context: Any) -> dict[str, list[str] | None] | Non
     if policy is None or summary is None or summary.get("experience_spec") is None:
         return None
     return validate_design_page_roles(summary.get("experience_spec"), policy)
+
+
+def resolve_reviewed_page_writes(context: Any) -> dict[str, list[dict[str, str]]]:
+    """Explicit submit/delete identities from the bound design, independent of roles and layout."""
+    _, summary, _ = _resolve_reviewed_design(context)
+    experience = (summary or {}).get("experience_spec") or {}
+    required: dict[str, list[dict[str, str]]] = {}
+    for page in experience.get("pages") or []:
+        if page.get("ui_surface") != "declarative_page":
+            continue
+        route = page["route"]
+        writes = design_page_write_actions(page)
+        if writes:
+            required[route] = writes
+    return required
 
 
 def _page_role_meta(page: dict[str, Any], *, declarative: bool) -> dict[str, Any]:

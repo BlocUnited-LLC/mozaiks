@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 from factory_app.workflows.AppGenerator.tools.code_file_utils import save_generated_code
+from factory_app.workflows.AppGenerator.tools.repair_policy import owned_diagnostics
 from factory_app.workflows.AppGenerator.tools.task_integrity import (
     artifact_snapshot_digest,
     planned_artifact_diagnostics,
@@ -97,6 +98,37 @@ def test_missing_required_paths_block_while_canonical_optional_paths_remain_opti
     assert [(item["code"], item["path"]) for item in diagnostics] == [
         ("PLANNED_ARTIFACT_MISSING", "ui/pages/records.yaml"),
     ]
+
+
+def test_export_rechecks_the_actual_page_even_when_the_accepted_task_has_its_archive_control():
+    context = _context()
+    path = "ui/pages/records.yaml"
+    plan_page = {
+        "name": "records", "route": "/records", "ui_surface": "declarative_page",
+        "required_write_actions": [{"module_id": "records", "action_id": "archive_record"}],
+    }
+    context["app_build_plan"]["pages"] = [plan_page]
+    button = {"label": "Archive", "action": {
+        "label": "Archive", "action_type": "submit", "href": "/api/modules/records/archive_record",
+    }}
+    page = {"schema_version": "mozaiks.app_page.v1", "name": "records", "route": "/records",
+            "title": "Editor", "page_type": "record_list", "layout": "full-width",
+            "sections": [{"id": "archive", "primitive": "Button", "config": button}]}
+    accepted = yaml.safe_dump(page)
+    context["generated_files"][path] = accepted
+    result = context["app_task_batch_results"]["pages"]["code_files"]
+    next(file for file in result if file["filename"] == path)["content"] = accepted
+    assert planned_artifact_diagnostics(context, context["generated_files"]) == []
+
+    del button["action"]
+    export = {**context["generated_files"], path: yaml.safe_dump(page)}
+    diagnostics = planned_artifact_diagnostics(context, export)
+    [failure] = owned_diagnostics(context, diagnostics)
+    assert (failure["code"], failure["path"], failure["task_id"]) == (
+        "PLANNED_PAGE_WRITE_UNSATISFIED", path, "pages",
+    )
+    assert "records/archive_record" in failure["error"]
+    assert not failure.get("block_reason")
 
 
 def test_removing_plan_task_does_not_turn_missing_output_into_completion():

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from typing import Any
 
 import yaml
 
+from mozaiksai.core.runtime.app.page_schema import _CHILD_CONFIG_MODELS, _TOP_LEVEL_CONFIG_MODELS
 from mozaiksai.core.workflow.context.frozen import detach
 
 from .page_data_bindings import iter_data_bound_sections
@@ -53,6 +55,49 @@ def _actions(config: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
             yield f"empty.{field}", action
 
 
+def _design_controls(primitive: str, config: Any, *, child: bool = False) -> Iterator[dict[str, Any]]:
+    """Read only action slots supported by this primitive, even in a partial design hint."""
+    models = _CHILD_CONFIG_MODELS if child else _TOP_LEVEL_CONFIG_MODELS
+    model = models.get(primitive)
+    if model is None or not isinstance(config, dict):
+        return
+    slots = {key: value for key, value in config.items() if key in model.model_fields}
+    if not isinstance(slots.get("actions"), list):
+        slots.pop("actions", None)
+    if isinstance(slots.get("empty"), dict):
+        slots["empty"] = {"action": slots["empty"].get("action")}
+    for _, action in _actions(slots):
+        yield action
+    children = slots.get("children")
+    if isinstance(children, list):
+        for section in children:
+            if isinstance(section, dict) and isinstance(section.get("primitive"), str):
+                yield from _design_controls(section["primitive"], section.get("config"), child=True)
+
+
+def design_page_write_actions(page: dict[str, Any]) -> list[dict[str, str]]:
+    """Project canonical write controls from partial DesignDocs section configs."""
+    route = page["route"]
+    pairs: set[tuple[str, str]] = set()
+    for section in page.get("sections") or []:
+        hint = section.get("config_hint")
+        if not isinstance(hint, str):
+            continue
+        try:
+            config = json.loads(hint)
+        except ValueError:
+            continue  # A prose hint supplies no canonical action reference.
+        for action in _design_controls(section.get("primitive", ""), config):
+            if action.get("action_type") not in ("submit", "delete") or action.get("data_source") is None:
+                continue
+            source = action["data_source"]
+            if (not isinstance(source, dict) or set(source) != {"module_id", "action_id"}
+                    or any(not isinstance(value, str) or not value.strip() for value in source.values())):
+                raise ValueError(f"Reviewed write on {route!r} requires data_source with exactly module_id and action_id")
+            pairs.add((source["module_id"], source["action_id"]))
+    return [{"module_id": module, "action_id": action} for module, action in sorted(pairs)]
+
+
 def _sections(sections: Any, modal_ancestors: tuple[str, ...] = ()) -> Iterator[tuple[dict[str, Any], tuple[str, ...]]]:
     for section in sections if isinstance(sections, list) else []:
         if not isinstance(section, dict) or not isinstance(section.get("config"), dict):
@@ -83,8 +128,8 @@ def page_workflow_binding_errors(document: Any, workflow_names: set[str]) -> lis
     return failures
 
 
-def reachable_page_action_keys(pages: list[Any]) -> set[str]:
-    """Count visible reads/actions and modals opened by reachable page actions."""
+def reachable_page_action_keys(pages: list[Any], *, include_reads: bool = True) -> set[str]:
+    """Collect reachable submit/delete controls and optionally section read bindings."""
     keys: set[str] = set()
 
     def add(endpoint: Any) -> None:
@@ -107,7 +152,8 @@ def reachable_page_action_keys(pages: list[Any]) -> set[str]:
                 visited.add(index)
                 changed = True
                 config = section["config"]
-                add(config.get("api_endpoint"))
+                if include_reads:
+                    add(config.get("api_endpoint"))
                 for action_field, action in _actions(config):
                     if section.get("primitive") == "Form" and config.get("disabled") and action_field == "submit_action":
                         continue
@@ -135,6 +181,46 @@ def reachable_page_action_keys(pages: list[Any]) -> set[str]:
             if not changed:
                 break
     return keys
+
+
+def planned_page_writes(pages: list[dict[str, Any]], context: Any = None) -> dict[str, set[str]]:
+    """Read the code-owned plan projection; older plans can use their bound DesignDocs review."""
+    declarative = [page for page in pages if page.get("ui_surface") != "custom_react_page" and page.get("route")]
+    reviewed = {}
+    if any("required_write_actions" not in page for page in declarative) and context is not None and (
+        context.get("design_docs_build_artifact") or context.get("design_docs_artifact")
+    ):
+        from .design_access_policy import resolve_reviewed_page_writes
+
+        reviewed = resolve_reviewed_page_writes(context)
+    by_route: dict[str, set[str]] = {}
+    for page in declarative:
+        route = page["route"]
+        actions = page.get("required_write_actions", reviewed.get(route))
+        if actions:
+            by_route[route] = {f"{action['module_id']}/{action['action_id']}" for action in actions}
+    return by_route
+
+
+def validate_required_page_writes(
+    content: str, route: str, expected_by_route: dict[str, set[str]], path: str, *, identity_validated: bool = False,
+) -> None:
+    """Compare a materialized page with the reviewed writes for its approved route."""
+    expected = expected_by_route.get(route)
+    if not expected:
+        return
+    if not identity_validated:
+        # Exact export snapshots can contain overlays applied after worker admission.
+        from .page_plan_utils import validate_planned_page
+
+        validate_planned_page(content, {"route": route}, path)
+    missing = expected - reachable_page_action_keys([yaml.safe_load(content)], include_reads=False)
+    if missing:
+        raise ValueError(
+            f"{path}: route {route!r} is missing reachable write controls for {', '.join(sorted(missing))}. "
+            "Add a reachable submit or delete control on this page with the matching "
+            "data_source {module_id, action_id} for each missing action."
+        )
 
 
 def page_refresh_binding_errors(document: Any) -> list[str]:

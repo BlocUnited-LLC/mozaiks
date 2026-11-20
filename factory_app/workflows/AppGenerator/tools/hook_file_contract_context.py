@@ -19,11 +19,13 @@ from mozaiksai.core.workflow.generator_support.code_files import (
 )
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
     resolve_authored_module_access_policy,
+    resolve_reviewed_page_writes,
 )
 from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     all_module_actions,
     canonical_read_actions_for_surface,
+    pack_owned_output_paths,
 )
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
     module_read_implementation_ownership,
@@ -196,6 +198,16 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
                 f"- `{page['name']}` (`{page['route']}`) -> `{planned_page_path(page)}`"
                 for page in pages
             )
+            write_routes = resolve_reviewed_page_writes(context)
+            if write_routes:
+                pack_paths = pack_owned_output_paths(context)
+                own_routes = [page["route"] for page in pages if page["route"] in write_routes
+                              and planned_page_path(page) not in pack_paths]
+                if own_routes:
+                    lines.append(
+                        "When scheduling " + ", ".join(own_routes) + ", give each route its own page_bundle "
+                        "task so its reviewed write controls can retry independently."
+                    )
             if any(page.get("ui_surface") == "custom_react_page" for page in pages):
                 lines.append(
                     "Preserve each approved ui_surface. One page_bundle task must own all "

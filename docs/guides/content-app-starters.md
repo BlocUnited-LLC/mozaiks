@@ -50,6 +50,16 @@ contracts are copied into app runtime paths.
 5. Assemble, validate references and ownership, then execute the relevant user
    journeys. Promote only through the normal validation/review path.
 
+For an editable portfolio, the reviewed design can bind `content.archive_entry`
+to a submit control on `/editor`. AppGenerator carries the action ID into that
+page's task. The agent can put Archive in a table action or behind a button
+that opens a modal. The generated editor must offer a reachable control that
+invokes the action. A table that only reads entries, or an Archive control on
+another route, leaves the editor task incomplete. Plan that editable page
+in its own page task so Factory can send the rejected output and missing
+action back to its owner and reuse the accepted portfolio and data results.
+Final acceptance checks the same requirement against the exported page.
+
 The descriptor is available through trusted build-context discovery. A workspace
 using operator selection can select the canonical `content` ID from the installed
 Factory registry. This addition does not change global catalog recommendations,

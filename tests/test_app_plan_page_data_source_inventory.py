@@ -39,7 +39,10 @@ from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templat
 from factory_app.workflows.DesignDocs.tools.save_design_doc import _compose_reviewed_pack_data
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.generator_support.design_access_policy import access_policy_sha256
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    access_policy_sha256,
+    resolve_reviewed_page_writes,
+)
 from mozaiksai.core.workflow.generator_support.module_role_grants import verified_pack_authorization
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     module_action_index_from_context,
@@ -225,6 +228,119 @@ def _stock_design(pack_id):
     authorization = verified_pack_authorization({}, selection=selection)
     data = _compose_reviewed_pack_data({"version": "1", "surfaces": [], "shared_collections": []}, surface_map, authorization)
     return {"design_surface_map": surface_map, "data_contract": data}
+
+
+def _control(action, *, module="tasks", action_type="submit"):
+    return {"action_type": action_type, "data_source": {"module_id": module, "action_id": action}}
+
+
+def _section(primitive, config):
+    return {"primitive": primitive, "config_hint": json.dumps(config)}
+
+
+def test_review_keeps_route_writes_when_planner_omits_every_control():
+    fixture = _fixture()
+    plan = fixture["AppBuildPlan"]
+    variables = fixture["context_variables"]
+    page = variables["experience_spec"]["pages"][0]
+    page["sections"] = [
+        _section("Modal", {"children": [{"primitive": "Form", "config": {"submit_action": _control("create_task")}}]}),
+        _section("DataTable", {"actions": [_control("delete_task", action_type="delete"), _control("create_task")],
+                               "empty": {"action": _control("update_task")}}),
+    ]
+    # Leave the real model plan's two advisory display sections untouched.
+    context = _context(variables)
+    result = review_app_build_plan(AppBuildPlan=deepcopy(plan), context_variables=context)
+    assert result["outcome"] == "ready", result
+    cached = detach(context.get("app_build_plan"))
+    expected = [_control(name)["data_source"] for name in ("create_task", "delete_task", "update_task")]
+    assert [(row["route"], row["required_write_actions"]) for row in cached["pages"]
+            if row.get("required_write_actions")] == [("/dashboard", expected)]
+    hints = cached["pages"][0]["sections_hint"]
+    assert [row["section_id_hint"] for row in hints] == ["summary", "recent_activities"]
+    tasks = detach(context.get("app_task_batch_items"))
+    note = "Provide reachable write controls on /dashboard for tasks/create_task, tasks/delete_task, tasks/update_task."
+    assert [row["task_id"] for row in tasks if note in row["current_build_task"]["initial_message"]] == [
+        _page_task(cached)["task_id"],
+    ]
+    # Lower-level cache callers and resumed plans cannot replace the code-owned projection.
+    from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
+
+    cached["pages"][0]["required_write_actions"] = [_control("invented_action")["data_source"]]
+    app_build_plan(AppBuildPlan=cached, context_variables=context)
+    assert detach(context.get("app_build_plan"))["pages"][0]["required_write_actions"] == expected
+
+
+def test_reviewed_writes_ignore_display_hints_prose_custom_pages_and_unsupported_action_slots():
+    section = _section("DataTable", {
+        "data_source": _control("display")["data_source"], "actions": [_control("navigate", action_type="navigate")],
+        "payload": {"action": _control("from_payload")}, "empty": {"actions": [_control("wrong_empty_slot")]},
+    })
+    sections = [section, _section("Image", {"actions": [_control("wrong_primitive")]}),
+                _section("Modal", {"children": [{"primitive": "Grid", "config": {"children": [
+                    {"primitive": "Button", "config": {"action": _control("unsupported_grandchild")}},
+                ]}}]}), {"primitive": "Button", "config_hint": "Please add archive and delete controls"}]
+    experience = {"pages": [
+        {"route": "/feed", "ui_surface": "declarative_page", "sections": sections},
+        {"route": "/custom", "ui_surface": "custom_react_page",
+         "sections": [_section("Button", {"action": _control("custom")})]},
+    ]}
+    assert resolve_reviewed_page_writes(reviewed_pack_fixture({"experience_spec": experience}, [])) == {}
+    assert resolve_reviewed_page_writes({"experience_spec": experience}) == {}
+
+
+def test_review_requires_independent_worker_only_when_an_owned_page_has_approved_write_controls():
+    fixture = _fixture()
+    plan, variables = fixture["AppBuildPlan"], fixture["context_variables"]
+    plan["pages"].append({**deepcopy(plan["pages"][0]), "name": "Editor", "route": "/editor"})
+    editor = {**deepcopy(variables["experience_spec"]["pages"][0]), "name": "Editor", "route": "/editor"}
+    variables["experience_spec"]["pages"].append(editor)
+    owner = _page_task(plan)
+    owner["owned_paths"].append("ui/pages/editor.yaml")
+
+    # The same public read-only page aggregate is valid until a reviewed write is requested.
+    context = _context(variables)
+    assert review_app_build_plan(AppBuildPlan=deepcopy(plan), context_variables=context)["outcome"] == "ready"
+    assert all(page.get("required_write_actions") == [] for page in detach(context.get("app_build_plan"))["pages"]
+               if page.get("ui_surface") == "declarative_page")
+    editor["sections"] = [_section("Button", {"action": _control("update_task")})]
+    context = _context(variables)
+    prompt = _build_file_contracts_body(SimpleNamespace(name="AppPlanAgent", context_variables=context), {})
+    assert "When scheduling /editor, give each route its own page_bundle" in prompt
+    rejected = review_app_build_plan(AppBuildPlan=deepcopy(plan), context_variables=context)
+    assert rejected["outcome"] == "needs_revision"
+    assert "must isolate '/editor'" in rejected["error"] and "page_bundle task with explicit dependencies" in rejected["error"]
+    assert not context.get("app_task_batch_items")
+
+    owner["owned_paths"].remove("ui/pages/editor.yaml")
+    scoped = {**deepcopy(owner), "task_id": "editor-page", "owned_paths": ["ui/pages/editor.yaml"]}
+    plan["build_tasks"].append(scoped)
+    plan["generation_order"].append(scoped["task_id"])
+    accepted = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert accepted["outcome"] == "ready", accepted
+    queued = {task["task_id"]: task for task in detach(context.get("app_task_batch_items"))}
+    assert queued["editor-page"]["owned_paths"] == ["ui/pages/editor.yaml"]
+    assert "ui/pages/dashboard.yaml" in queued[owner["task_id"]]["owned_paths"]
+    assert "tasks/update_task" in queued["editor-page"]["initial_message"]
+
+
+@pytest.mark.parametrize("source, expected_error", [
+    ({"module_id": "tasks"}, "requires data_source with exactly module_id and action_id"),
+    ({"module_id": "tasks", "action_id": "invented"}, "unknown or non-page-callable action tasks/invented"),
+])
+def test_invalid_reviewed_write_refuses_plan_before_dispatch(source, expected_error):
+    fixture = _fixture()
+    variables = fixture["context_variables"]
+    variables["experience_spec"]["pages"][0]["sections"] = [
+        _section("Button", {"action": {"action_type": "submit", "data_source": source}}),
+    ]
+    context = _context(variables)
+    result = review_app_build_plan(AppBuildPlan=fixture["AppBuildPlan"], context_variables=context)
+    assert result["outcome"] == "needs_revision"
+    assert "'/dashboard'" in result["error"] and expected_error in result["error"]
+    assert not context.get("app_plan_ready")
+    assert context.get("app_build_plan") is None
+    assert not context.get("app_task_batch_items")
 
 
 @pytest.mark.parametrize("pack_id,module_id,expected,refused", [

@@ -357,8 +357,8 @@ models:
           JSON-encoded partial primitive config scaffold with required fields
           populated, or null when config is entirely context-dependent.
           Must be null or a valid JSON object string matching the primitive's
-          required fields. AppPlanAgent and AppSchemaAgent decode this at
-          generation time.
+          required fields. A declarative control's explicit submit/delete
+          data_source binds its module action to this route during plan review.
 
   UIPage:
     type: model
