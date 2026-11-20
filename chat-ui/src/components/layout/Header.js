@@ -212,19 +212,23 @@ const Header = ({
     () => headerActions.find((item) => item?.variant === "gradient") || headerActions[0] || null,
     [headerActions]
   );
-  const profileMenu = useMemo(
-    () => filterPersonalAccountItems(
-      mergeProfileMenu([
-        ...(isSignInAvailable(shellAuth) ? pages || [] : []).filter((page) => page.path === landingSpot && isShellItemVisible(page, userRoles))
-          .map((page) => ({ id: 'app-home', label: page.label || 'Home', action: 'navigate', path: page.path })),
-        ...getDefaultProfileMenu(currentUser),
-      ], profileConfig.menu)
-        .filter((item) => isShellItemVisible(item, userRoles)
-          && (item.id !== 'app-dashboard' || isAuthenticatedUser(currentUser))),
+  const profileMenu = useMemo(() => {
+    const configured = Array.isArray(profileConfig.menu) ? profileConfig.menu : [];
+    const defaults = getDefaultProfileMenu(currentUser);
+    const landingPage = isSignInAvailable(shellAuth) && pages?.find(
+      (page) => page.path === landingSpot && isShellItemVisible(page, userRoles)
+    );
+    if (landingPage) {
+      // Studio resolves the owned build context when the portfolio is the landing page.
+      const studio = configured.find((item) => item?.id === 'app-dashboard' && item.path === landingPage.path);
+      defaults.unshift(studio || { id: 'app-home', label: landingPage.label || 'Home', action: 'navigate', path: landingPage.path });
+    }
+    return filterPersonalAccountItems(
+      mergeProfileMenu(defaults, configured).filter((item) => isShellItemVisible(item, userRoles)
+        && (item.id !== 'app-dashboard' || isAuthenticatedUser(currentUser))),
       shellAuth,
-    ),
-    [currentUser, profileConfig.menu, userRoles, shellAuth, pages, landingSpot]
-  );
+    );
+  }, [currentUser, profileConfig.menu, userRoles, shellAuth, pages, landingSpot]);
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);

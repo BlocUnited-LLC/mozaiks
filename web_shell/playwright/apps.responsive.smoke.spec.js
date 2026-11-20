@@ -54,7 +54,7 @@ const dashboardPayload = {
     portals: [
       {
         id: 'portfolio',
-        label: 'Apps',
+        label: 'My Apps',
         route: '/apps',
         enabled: true,
       },
@@ -1571,7 +1571,7 @@ test('apps route stays responsive across desktop and mobile widths', async ({ pa
   await page.goto('/apps');
   const main = page.locator('main');
 
-  await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'My Apps', exact: true })).toBeVisible();
   await expect(page.locator('header').getByRole('button', { name: 'Create App' })).toBeVisible();
   await expect(main.getByRole('button', { name: 'Create App' })).toHaveCount(0);
   await expect(main.getByRole('button', { name: 'Import App' })).toHaveCount(0);
@@ -1624,7 +1624,7 @@ test('create app transition overlay can return to Apps', async ({ page, isMobile
   await closeBtn.click();
 
   await expect(page).toHaveURL(/\/apps$/);
-  await expect(page.locator('main').getByRole('heading', { name: 'Apps', exact: true })).toBeVisible();
+  await expect(page.locator('main').getByRole('heading', { name: 'My Apps', exact: true })).toBeVisible();
 });
 
 test('workspace usage route stays responsive across desktop and mobile widths', async ({ page }) => {
@@ -2622,7 +2622,7 @@ test('mobile workspace Studio navigation keeps route transitions stable', async 
     },
     {
       href: '/apps',
-      heading: 'Apps',
+      heading: 'My Apps',
       detail: async () => {
         await expect(page.locator('header').getByRole('button', { name: 'Create App' })).toBeVisible();
         await expect(main.getByRole('button', { name: 'Create App' })).toHaveCount(0);
@@ -2693,7 +2693,7 @@ test('onboarding tour does not appear for a dismissed user', async ({ page }) =>
   });
 
   await page.goto('/apps');
-  await expect(page.locator('main').getByRole('heading', { name: 'Apps' })).toBeVisible();
+  await expect(page.locator('main').getByRole('heading', { name: 'My Apps', exact: true })).toBeVisible();
 
   await page.waitForTimeout(1000);
   await expect(page.getByRole('dialog', { name: /Onboarding step/i })).toHaveCount(0);
@@ -2714,7 +2714,7 @@ test('onboarding tour does not appear for a completed user', async ({ page }) =>
   });
 
   await page.goto('/apps');
-  await expect(page.locator('main').getByRole('heading', { name: 'Apps' })).toBeVisible();
+  await expect(page.locator('main').getByRole('heading', { name: 'My Apps', exact: true })).toBeVisible();
 
   await page.waitForTimeout(1000);
   await expect(page.getByRole('dialog', { name: /Onboarding step/i })).toHaveCount(0);
