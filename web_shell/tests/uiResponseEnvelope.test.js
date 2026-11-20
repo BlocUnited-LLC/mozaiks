@@ -78,6 +78,39 @@ test('previous socket metadata cannot revert a synchronously adopted review succ
   assert.equal(seen.length,1);
 });
 
+test('chat metadata restores pending transitions from enveloped and flat websocket frames', () => {
+  const metadata = {
+    chat_id: 'theme-chat', workflow_name: 'ThemeCapture', chat_exists: true, cache_seed: 42,
+    session_state: {pending_transition_id: 'coding_journey_selector', pending_harness_decision: null},
+    last_artifact: {tool_name: 'ThemePreviewCard'},
+  };
+  for (const frame of [
+    {type:'chat_meta', data:metadata},
+    {type:'chat_meta', ...metadata},
+  ]) {
+    const seen = {};
+    const receive = vm.runInNewContext(`(${incomingCallback});`, {
+      dispatchSurfaceEvent: null, debugFlag: () => false, initSpinnerShownRef: {current:false},
+      observeSessionMeta: value => {seen.metadata = value;},
+      currentChatId:'theme-chat', currentWorkflowName:'ThemeCapture', activeWorkflowName:'ThemeCapture',
+      urlWorkflowName:'ThemeCapture', resolveKnownWorkflowName: value => value,
+      conversationModeRef:{current:'workflow'}, setActiveChatId:()=>{}, setCurrentWorkflowName:()=>{},
+      setActiveWorkflowName:()=>{}, rememberWorkflowChatSession:()=>{},
+      applySessionStatePendingHarnessDecision: value => {seen.decision = value;},
+      applySessionStatePendingTransition: value => {seen.transition = value;},
+      setCacheSeed: value => {seen.seed = value;}, setStoredChatCacheSeed:()=>{},
+      reviewContinuationRef:{current:null}, setChatExists: value => {seen.exists = value;},
+      cacheServerLastArtifact: value => {seen.artifact = value;},
+    });
+    receive(frame);
+    assert.equal(seen.transition?.pending_transition_id, 'coding_journey_selector');
+    assert.equal(seen.decision, metadata.session_state);
+    assert.equal(seen.seed, 42);
+    assert.equal(seen.exists, true);
+    assert.equal(seen.artifact, metadata.last_artifact);
+  }
+});
+
 test('ChatPage approvals preserve original request identity through real browser controls and trigger HTTP', async t => {
   const root = path.dirname(shell);
   const normalizerStart = chatPage.indexOf('  const buildPendingHarnessDecision =');

@@ -2454,16 +2454,17 @@ const ChatPage = () => {
     // Handle chat_meta events (which may not have chat. prefix)
     if (data.type === 'chat_meta' || data.type === 'chat.chat_meta') {
       // Initial metadata handshake from backend
-      const { chatId: metaChatId, workflowName: metaWorkflowName } = applyWorkflowSessionMeta(data);
-      applySessionStatePendingHarnessDecision(data.session_state);
-      applySessionStatePendingTransition(data.session_state);
-      if (data.cache_seed !== undefined && data.cache_seed !== null) {
-        setCacheSeed(data.cache_seed);
+      const metaData = data.data && typeof data.data === 'object' ? data.data : data;
+      const { chatId: metaChatId, workflowName: metaWorkflowName } = applyWorkflowSessionMeta(metaData);
+      applySessionStatePendingHarnessDecision(metaData.session_state);
+      applySessionStatePendingTransition(metaData.session_state);
+      if (metaData.cache_seed !== undefined && metaData.cache_seed !== null) {
+        setCacheSeed(metaData.cache_seed);
         if (metaChatId) {
-          setStoredChatCacheSeed(metaChatId, data.cache_seed);
+          setStoredChatCacheSeed(metaChatId, metaData.cache_seed);
         }
       }
-      if (data.chat_exists === false && reviewContinuationRef.current?.chat_id !== metaChatId) {
+      if (metaData.chat_exists === false && reviewContinuationRef.current?.chat_id !== metaChatId) {
         // Backend indicates this chat_id had no persisted session (fresh after client-side reuse)
         setChatExists(false);
         clearStoredArtifactState(metaChatId);
@@ -2472,14 +2473,14 @@ const ChatPage = () => {
         lastArtifactEventRef.current = null;
         artifactCacheValidRef.current = false;
         artifactRestoredOnceRef.current = true; // prevent later restore effect
-      } else if (data.chat_exists === true) {
+      } else if (metaData.chat_exists === true) {
         setChatExists(true);
-        if (!data.last_artifact || !data.last_artifact.tool_name) {
+        if (!metaData.last_artifact || !metaData.last_artifact.tool_name) {
           handleMissingBackendArtifact(metaChatId, metaWorkflowName);
         }
 
-        if (data.last_artifact && data.last_artifact.tool_name) {
-          cacheServerLastArtifact(data.last_artifact, {
+        if (metaData.last_artifact && metaData.last_artifact.tool_name) {
+          cacheServerLastArtifact(metaData.last_artifact, {
             chatId: metaChatId,
             workflowName: metaWorkflowName,
           });
