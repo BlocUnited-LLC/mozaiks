@@ -44,6 +44,7 @@ from .generator_support.module_action_inventory import (
     all_module_actions,
     approved_workflow_surface_ids,
     pack_owned_output_paths,
+    scoped_module_implementation_sources,
     ungated_module_actions,
 )
 from .generator_support.module_authored_code import invalid_python_diagnostics
@@ -63,6 +64,10 @@ from .generator_support.module_write_actions import (
     code_owned_schema_paths,
     materialize_module_write_implementations,
     materialize_task_module_schemas,
+)
+from .generator_support.page_action_bindings import (
+    planned_page_writes,
+    validate_required_page_writes,
 )
 from .generator_support.page_plan_utils import (
     _page_stem_from_path,
@@ -1301,15 +1306,15 @@ async def _run_one_task(
                     validate_scoped_service_repositories(
                         read_sources, revision_paths.intersection(canonical_file_map),
                     )
-                else:
-                    canonical_file_map.update(materialize_module_read_implementations(
-                        read_sources, app_build_plan=task_context.get("app_build_plan"),
+                elif sources := scoped_module_implementation_sources(read_sources, task.get("owned_paths") or []):
+                    reads = materialize_module_read_implementations(
+                        sources, app_build_plan=task_context.get("app_build_plan"),
                         data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
                         subscription_contract=subscription_contract,
-                    ))
-                    read_sources.update(canonical_file_map)
+                    )
+                    canonical_file_map.update(reads)
                     canonical_file_map.update(materialize_module_write_implementations(
-                        read_sources, app_build_plan=task_context.get("app_build_plan"),
+                        {**sources, **reads}, app_build_plan=task_context.get("app_build_plan"),
                         data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
                         subscription_contract=subscription_contract,
                         access_policy=authored_access_policy,
@@ -1351,7 +1356,7 @@ async def _run_one_task(
                     failed_pages = {failure.split(":", 1)[0] for failure in page_failures}
                     try:
                         output["code_files"] = _normalize_owned_page_files_from_plan(
-                            output.get("code_files"), task=task, base_context=task_context,
+                            output.get("code_files"), task=task, base_context=task_context, plan_context=base_context,
                             reject_api_endpoints=False, skip_paths=failed_pages,
                         )
                     except ValueError as exc:
@@ -1547,6 +1552,7 @@ def _normalize_owned_page_files_from_plan(
     *,
     task: dict[str, Any],
     base_context: dict[str, Any],
+    plan_context: dict[str, Any] | None = None,
     reject_api_endpoints: bool = True,
     skip_paths: set[str] | None = None,
 ) -> list[dict[str, str]]:
@@ -1562,8 +1568,10 @@ def _normalize_owned_page_files_from_plan(
                 continue
             file_map[safe] = str(content)
 
+    plan_context = base_context if plan_context is None else plan_context
+    pages = _planned_pages(plan_context)
     validate_planned_custom_routes(
-        file_map, pages=_planned_pages(base_context),
+        file_map, pages=pages,
         owned_paths=set(_normalize_owned_paths(task.get("owned_paths"))),
         baseline_files=base_context.get("generated_files") if base_context.get("build_mode") == "revision" else None,
     )
@@ -1578,8 +1586,9 @@ def _normalize_owned_page_files_from_plan(
             for filename, content in file_map.items()
         ]
 
+    required_writes = planned_page_writes(pages, plan_context)
     planned_by_stem: dict[str, dict[str, Any]] = {}
-    for page in _planned_pages(base_context):
+    for page in pages:
         for stem in _page_stems(page):
             planned_by_stem.setdefault(stem, page)
 
@@ -1610,6 +1619,7 @@ def _normalize_owned_page_files_from_plan(
                     workflow_names=workflows, data_contract=data_contract, design_surface_map=surface_map,
                 )
             validate_planned_page(file_map[path], planned, path)
+            validate_required_page_writes(file_map[path], planned["route"], required_writes, path, identity_validated=True)
         except ValueError as exc:
             message = str(exc)
             failures.append(message if message.startswith(f"{path}:") else f"{path}: {message}")

@@ -538,7 +538,8 @@ agents:
       - Every page must have `name`, `route`, `ui_surface`, `layout`, `intent`, and `sections[]`.
       - Every section must declare `id`, `primitive`, `intent`, and `config_hint`.
       - `config_hint` is a JSON-encoded string or null. When non-null, JSON-encode the partial primitive presentation and response-binding scaffold using the supplied primitive contract. Use null when the contract is unavailable rather than inventing fields. Example: `"{\"columns\": [\"id\", \"name\"]}"`.
-      - Do not emit `api_endpoint` or mutation endpoint URLs in config_hint. Describe the section's data needs in `intent`; downstream planning selects typed module/action references and code renders their URLs.
+      - Do not emit `api_endpoint` or mutation endpoint URLs in config_hint. Describe the section's data needs in `intent`; code renders the URLs.
+      - For a required write on a declarative page, use the primitive's submit or delete control with `data_source: {module_id, action_id}` when the supplied module contract identifies that action. Each such binding commits that route to offering the action. Describe unresolved writes in the design intent for planning.
       - Prefer `Modal` sections for secondary create/edit/drill-in interactions.
       - Do not describe the same editor twice as both inline form and modal unless the page truly needs side-by-side editing.
       - Do NOT invent capabilities not described in concept_overview.

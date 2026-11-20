@@ -19,11 +19,13 @@ from mozaiksai.core.workflow.generator_support.code_files import (
 )
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
     resolve_authored_module_access_policy,
+    resolve_reviewed_page_writes,
 )
 from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     all_module_actions,
     canonical_read_actions_for_surface,
+    pack_owned_output_paths,
 )
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
     module_read_implementation_ownership,
@@ -32,6 +34,7 @@ from mozaiksai.core.workflow.generator_support.module_revision import scoped_ser
 from mozaiksai.core.workflow.generator_support.module_write_actions import (
     module_write_implementation_ownership,
 )
+from mozaiksai.core.workflow.generator_support.page_plan_utils import approved_page_action_ids
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +159,7 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
         context = getattr(agent, "context_variables", None)
         task = _context_get(context, "current_build_task", {}) or {}
         module_id = str(task.get("capability_pack_id") or "")
-        inventory = all_module_actions(context)
+        inventory = approved_page_action_ids(context) if agent_name == "AppPlanAgent" else all_module_actions(context)
         surfaces = (_context_get(context, "design_surface_map", {}) or {}).get("surfaces") or []
         for surface in surfaces:
             surface_id = surface.get("surface_id")
@@ -175,7 +178,8 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
         if inventory:
             lines.append(
                 "Use only the listed action ids; do not infer alternate names from an entity or page, or keep obsolete spellings after a repair. "
-                "For app_wide collections with protected writes, declare every canonical read with its intended "
+                "Use the shipped request and response schemas for pack-owned modules. "
+                "For app-authored app_wide collections with protected writes, declare every canonical read with its intended "
                 "permissions, api_surface, handler_method and input/output schemas; code does not infer read access. "
                 "Code constructs owner-scoped reads and ordinary unprotected app-wide reads. "
                 "Constructed get_<collection> takes id and returns item; list_<collection> takes page/page_size/search and returns items/total. "
@@ -194,6 +198,16 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
                 f"- `{page['name']}` (`{page['route']}`) -> `{planned_page_path(page)}`"
                 for page in pages
             )
+            write_routes = resolve_reviewed_page_writes(context)
+            if write_routes:
+                pack_paths = pack_owned_output_paths(context)
+                own_routes = [page["route"] for page in pages if page["route"] in write_routes
+                              and planned_page_path(page) not in pack_paths]
+                if own_routes:
+                    lines.append(
+                        "When scheduling " + ", ".join(own_routes) + ", give each route its own page_bundle "
+                        "task so its reviewed write controls can retry independently."
+                    )
             if any(page.get("ui_surface") == "custom_react_page" for page in pages):
                 lines.append(
                     "Preserve each approved ui_surface. One page_bundle task must own all "

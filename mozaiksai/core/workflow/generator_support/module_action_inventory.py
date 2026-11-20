@@ -6,7 +6,7 @@ import logging
 import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 import yaml
 
@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 # they cannot exclusively own a worker's contribution at the same path.
 SHARED_UI_OUTPUT_PATHS = frozenset({"ui/index.js", "ui/route_manifest.json"})
 SHARED_PACK_OUTPUT_PATHS = SHARED_UI_OUTPUT_PATHS | {"data/contract.json"}
+TEMPLATE_BACKEND_FILES = (
+    "module.yaml", "backend/service.py", "backend/repo.py", "backend/policy.py", "backend/schemas.py",
+)
 
 
 def _bundle_relative_path(raw: Any) -> str | None:
@@ -221,6 +224,50 @@ def unapproved_module_actions_error(
         f"Valid approved action ids: {sorted(approved_actions[module_id])}. "
         "Remove unapproved declarations; do not retain alternate spellings alongside canonical ids."
     )
+
+
+ModuleActionIndex = dict[str, dict[str, dict[str, Any]]]
+
+
+def scoped_module_implementation_sources(files: Mapping[str, str], owned_paths: Iterable[str]) -> dict[str, str]:
+    """Only manifests with an owned handler/service/repo may trigger implementation generation."""
+    manifests = {
+        f"modules/{match[1]}/module.yaml" for path in owned_paths
+        if (match := re.fullmatch(r"modules/([^/]+)/backend/(?:handler|service|repo)\.py", path))
+    }
+    if not manifests:
+        return {}
+    # Keep companion inputs such as events and service hooks even when another task owns them.
+    return {
+        path: source for path, source in files.items()
+        if path in manifests or not re.fullmatch(r"modules/[^/]+/module\.yaml", path)
+    }
+
+
+def module_action_index(file_map: dict[str, str], *, http_only: bool = True) -> ModuleActionIndex:
+    """Index declared module actions, including their exact schemas; page callers see HTTP actions."""
+    index: ModuleActionIndex = {}
+    for path, content in (file_map or {}).items():
+        if not str(path).replace("\\", "/").endswith("/module.yaml"):
+            continue
+        try:
+            document = yaml.safe_load(content)
+        except yaml.YAMLError:
+            continue
+        if not isinstance(document, dict):
+            continue
+        module = document.get("module")
+        module_id = str((module or {}).get("id") or "").strip() if isinstance(module, dict) else ""
+        if not module_id:
+            continue
+        actions = document.get("actions")
+        index[module_id] = {
+            str(action.get("id")).strip(): action
+            for action in (actions if isinstance(actions, list) else [])
+            if isinstance(action, dict) and str(action.get("id") or "").strip()
+            and (not http_only or action.get("api_surface") not in {"internal", "admin_internal"})
+        }
+    return index
 
 
 def approved_workflow_surface_ids(context_variables: Any) -> list[str]:
@@ -477,25 +524,66 @@ def pack_facade_directories(context_variables: Any) -> list[PackFacadeDirectory]
     ]
 
 
-def pack_template_module_contracts(context_variables: Any) -> dict[str, str]:
-    """``module.yaml`` contracts the selected packs' templates provide, by bundle path.
+class PackModuleTemplate(NamedTuple):
+    source: str
+    # Applies to template-owned generated modules. Managed facades and
+    # workspace-owned seeds retain their existing action authority.
+    action_source: Literal["template", "compiler"] | None
 
-    No task authors a pack-owned module, so pages that bind its actions compile
-    against the template contract, the same one assembly applies.
-    """
-    files: dict[str, str] = {}
+
+def pack_module_templates(context_variables: Any) -> dict[str, PackModuleTemplate]:
+    """Read selected static module manifests and identify who completes their action contracts."""
+    files: dict[str, PackModuleTemplate] = {}
     for pack in _selected_packs(context_variables):
         if pack.root is None or pack.config is None:
             continue
+        root, config = pack.root, pack.config
+        owned = {
+            _bundle_relative_path(entry.get("path"))
+            for contract in pack.contracts for entry in contract.get("required_outputs") or []
+            if isinstance(entry, Mapping) and (entry.get("owner") or "templates") == "templates"
+        }
         for contract in pack.contracts:
             for entry in contract.get("required_outputs") or []:
                 path = _bundle_relative_path(entry.get("path") if isinstance(entry, Mapping) else entry)
                 if not path or not re.fullmatch(r"modules/[^/]+/module\.yaml", path):
                     continue
-                template = _pack_template_file(pack.root, pack.config, path)
-                if template is not None and template.suffix != ".j2":
-                    files[path] = template.read_text(encoding="utf-8")
+                template = _pack_template_file(root, config, path)
+                if template is None or template.suffix == ".j2":
+                    continue
+                action_source: Literal["template", "compiler"] | None = None
+                if path in owned and config["pack"].get("capability_source") == "generated_module":
+                    prefix = path.removesuffix("module.yaml")
+                    complete = all(
+                        prefix + name in owned and _pack_template_file(root, config, prefix + name) is not None
+                        for name in TEMPLATE_BACKEND_FILES
+                    )
+                    action_source = "template" if complete else "compiler"
+                files[path] = PackModuleTemplate(template.read_text(encoding="utf-8"), action_source)
     return files
+
+
+def pack_template_module_contracts(context_variables: Any) -> dict[str, str]:
+    """Return the selected static manifests used by the design prompts."""
+    return {path: template.source for path, template in pack_module_templates(context_variables).items()}
+
+
+def approved_manifest_action_ids(
+    context: Any, design_actions: dict[str, list[str]], *, http_only: bool = False,
+    templates: dict[str, PackModuleTemplate] | None = None,
+) -> dict[str, list[str]]:
+    """Complete backends supply exact IDs. Partial modules still compile actions from approved design and data."""
+    if not design_actions:
+        return {}
+    if templates is None:
+        templates = pack_module_templates(context)
+    stock = module_action_index({
+        path: template.source for path, template in templates.items() if template.action_source == "template"
+    }, http_only=http_only)
+    return {
+        module_id: sorted(stock[module_id]) if module_id in stock else actions
+        for module_id, actions in design_actions.items()
+    }
 
 
 def ungated_module_actions(context_variables: Any) -> dict[str, list[str]]:

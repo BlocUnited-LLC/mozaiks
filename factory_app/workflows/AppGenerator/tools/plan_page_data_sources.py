@@ -10,9 +10,9 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
 )
 from mozaiksai.core.workflow.generator_support.code_files import planned_page_path
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
-    all_module_actions,
     pack_owned_output_paths,
 )
+from mozaiksai.core.workflow.generator_support.page_plan_utils import approved_page_action_ids
 
 
 def drop_unapproved_page_data_sources(plan: dict[str, Any], context: Any) -> list[str]:
@@ -36,7 +36,7 @@ def drop_unapproved_page_data_sources(plan: dict[str, Any], context: Any) -> lis
     """
     if context is None or not context.get("design_surface_map"):
         return []
-    inventory = all_module_actions(context)
+    inventory = approved_page_action_ids(context)
     routes = _managed_facade_route_rules(plan.get("capability_packs") or [], context_variables=context)
     pack_paths = pack_owned_output_paths(context)
     repairs: list[str] = []

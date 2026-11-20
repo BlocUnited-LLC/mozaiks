@@ -2245,7 +2245,14 @@ def review_app_build_plan(
     context_variables.set("app_plan_attempts", attempts)
     try:
         models, _ = load_workflow_structured_outputs("AppGenerator")
-        plan = models["AppBuildPlan"].model_validate(detach(AppBuildPlan)).model_dump(mode="json")
+        payload = detach(AppBuildPlan)
+        pages = payload.get("pages") if isinstance(payload, dict) else None
+        if isinstance(pages, list):
+            for page in pages:
+                if isinstance(page, dict):
+                    # Cached plans carry this projection. Review binds it again from DesignDocs.
+                    page.pop("required_write_actions", None)
+        plan = models["AppBuildPlan"].model_validate(payload).model_dump(mode="json")
         for repair in _strip_workspace_app_root(plan):
             logger.info("[AppGenerator] plan repaired: %s", repair)
         _validate_ui_only_surface_claims(plan, context_variables)

@@ -15,19 +15,39 @@ import json
 import logging
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import yaml
 
+from factory_app.workflows._shared.pack_selection import pin_pack_choices
+from factory_app.workflows._shared.subscription_contract_context import selected_feature_gates
 from factory_app.workflows.AppGenerator.tools.app_plan_review import review_app_build_plan
+from factory_app.workflows.AppGenerator.tools.hook_file_contract_context import (
+    _build_file_contracts_body,
+)
+from factory_app.workflows.AppGenerator.tools.module_entitlement_gates import (
+    apply_entitlement_gates,
+)
 from factory_app.workflows.AppGenerator.tools.plan_page_data_sources import (
     drop_unapproved_page_data_sources,
 )
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    PackIntegrityError,
     verify_pack_integrity,
 )
+from factory_app.workflows.DesignDocs.tools.save_design_doc import _compose_reviewed_pack_data
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
-from tests.reviewed_pack_fixture import reviewed_pack_fixture
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    access_policy_sha256,
+    resolve_reviewed_page_writes,
+)
+from mozaiksai.core.workflow.generator_support.module_role_grants import verified_pack_authorization
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    module_action_index_from_context,
+)
+from tests.reviewed_pack_fixture import registered_pack_fixture, reviewed_pack_fixture
 from tests.test_continuous_deterministic_materialization import _load_models
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -199,6 +219,211 @@ def test_without_an_approved_design_the_inventory_is_open():
 
     assert drop_unapproved_page_data_sources(plan, _context(variables)) == []
     assert plan == fixture["AppBuildPlan"]
+
+
+def _stock_design(pack_id):
+    # DesignDocs adds the stock module and its collection entities to this UI-only design.
+    surface_map = {"surfaces": [{"surface_id": "editor", "surface_kind": "ui_only", "owner": "app"}]}
+    selection = pin_pack_choices({}, [pack_id])
+    authorization = verified_pack_authorization({}, selection=selection)
+    data = _compose_reviewed_pack_data({"version": "1", "surfaces": [], "shared_collections": []}, surface_map, authorization)
+    return {"design_surface_map": surface_map, "data_contract": data}
+
+
+def _control(action, *, module="tasks", action_type="submit"):
+    return {"action_type": action_type, "data_source": {"module_id": module, "action_id": action}}
+
+
+def _section(primitive, config):
+    return {"primitive": primitive, "config_hint": json.dumps(config)}
+
+
+def test_review_keeps_route_writes_when_planner_omits_every_control():
+    fixture = _fixture()
+    plan = fixture["AppBuildPlan"]
+    variables = fixture["context_variables"]
+    page = variables["experience_spec"]["pages"][0]
+    page["sections"] = [
+        _section("Modal", {"children": [{"primitive": "Form", "config": {"submit_action": _control("create_task")}}]}),
+        _section("DataTable", {"actions": [_control("delete_task", action_type="delete"), _control("create_task")],
+                               "empty": {"action": _control("update_task")}}),
+    ]
+    # Leave the real model plan's two advisory display sections untouched.
+    context = _context(variables)
+    result = review_app_build_plan(AppBuildPlan=deepcopy(plan), context_variables=context)
+    assert result["outcome"] == "ready", result
+    cached = detach(context.get("app_build_plan"))
+    expected = [_control(name)["data_source"] for name in ("create_task", "delete_task", "update_task")]
+    assert [(row["route"], row["required_write_actions"]) for row in cached["pages"]
+            if row.get("required_write_actions")] == [("/dashboard", expected)]
+    hints = cached["pages"][0]["sections_hint"]
+    assert [row["section_id_hint"] for row in hints] == ["summary", "recent_activities"]
+    tasks = detach(context.get("app_task_batch_items"))
+    note = "Provide reachable write controls on /dashboard for tasks/create_task, tasks/delete_task, tasks/update_task."
+    assert [row["task_id"] for row in tasks if note in row["current_build_task"]["initial_message"]] == [
+        _page_task(cached)["task_id"],
+    ]
+    # Lower-level cache callers and resumed plans cannot replace the code-owned projection.
+    from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
+
+    cached["pages"][0]["required_write_actions"] = [_control("invented_action")["data_source"]]
+    app_build_plan(AppBuildPlan=cached, context_variables=context)
+    assert detach(context.get("app_build_plan"))["pages"][0]["required_write_actions"] == expected
+
+
+def test_reviewed_writes_ignore_display_hints_prose_custom_pages_and_unsupported_action_slots():
+    section = _section("DataTable", {
+        "data_source": _control("display")["data_source"], "actions": [_control("navigate", action_type="navigate")],
+        "payload": {"action": _control("from_payload")}, "empty": {"actions": [_control("wrong_empty_slot")]},
+    })
+    sections = [section, _section("Image", {"actions": [_control("wrong_primitive")]}),
+                _section("Modal", {"children": [{"primitive": "Grid", "config": {"children": [
+                    {"primitive": "Button", "config": {"action": _control("unsupported_grandchild")}},
+                ]}}]}), {"primitive": "Button", "config_hint": "Please add archive and delete controls"}]
+    experience = {"pages": [
+        {"route": "/feed", "ui_surface": "declarative_page", "sections": sections},
+        {"route": "/custom", "ui_surface": "custom_react_page",
+         "sections": [_section("Button", {"action": _control("custom")})]},
+    ]}
+    assert resolve_reviewed_page_writes(reviewed_pack_fixture({"experience_spec": experience}, [])) == {}
+    assert resolve_reviewed_page_writes({"experience_spec": experience}) == {}
+
+
+def test_review_requires_independent_worker_only_when_an_owned_page_has_approved_write_controls():
+    fixture = _fixture()
+    plan, variables = fixture["AppBuildPlan"], fixture["context_variables"]
+    plan["pages"].append({**deepcopy(plan["pages"][0]), "name": "Editor", "route": "/editor"})
+    editor = {**deepcopy(variables["experience_spec"]["pages"][0]), "name": "Editor", "route": "/editor"}
+    variables["experience_spec"]["pages"].append(editor)
+    owner = _page_task(plan)
+    owner["owned_paths"].append("ui/pages/editor.yaml")
+
+    # The same public read-only page aggregate is valid until a reviewed write is requested.
+    context = _context(variables)
+    assert review_app_build_plan(AppBuildPlan=deepcopy(plan), context_variables=context)["outcome"] == "ready"
+    assert all(page.get("required_write_actions") == [] for page in detach(context.get("app_build_plan"))["pages"]
+               if page.get("ui_surface") == "declarative_page")
+    editor["sections"] = [_section("Button", {"action": _control("update_task")})]
+    context = _context(variables)
+    prompt = _build_file_contracts_body(SimpleNamespace(name="AppPlanAgent", context_variables=context), {})
+    assert "When scheduling /editor, give each route its own page_bundle" in prompt
+    rejected = review_app_build_plan(AppBuildPlan=deepcopy(plan), context_variables=context)
+    assert rejected["outcome"] == "needs_revision"
+    assert "must isolate '/editor'" in rejected["error"] and "page_bundle task with explicit dependencies" in rejected["error"]
+    assert not context.get("app_task_batch_items")
+
+    owner["owned_paths"].remove("ui/pages/editor.yaml")
+    scoped = {**deepcopy(owner), "task_id": "editor-page", "owned_paths": ["ui/pages/editor.yaml"]}
+    plan["build_tasks"].append(scoped)
+    plan["generation_order"].append(scoped["task_id"])
+    accepted = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert accepted["outcome"] == "ready", accepted
+    queued = {task["task_id"]: task for task in detach(context.get("app_task_batch_items"))}
+    assert queued["editor-page"]["owned_paths"] == ["ui/pages/editor.yaml"]
+    assert "ui/pages/dashboard.yaml" in queued[owner["task_id"]]["owned_paths"]
+    assert "tasks/update_task" in queued["editor-page"]["initial_message"]
+
+
+@pytest.mark.parametrize("source, expected_error", [
+    ({"module_id": "tasks"}, "requires data_source with exactly module_id and action_id"),
+    ({"module_id": "tasks", "action_id": "invented"}, "unknown or non-page-callable action tasks/invented"),
+])
+def test_invalid_reviewed_write_refuses_plan_before_dispatch(source, expected_error):
+    fixture = _fixture()
+    variables = fixture["context_variables"]
+    variables["experience_spec"]["pages"][0]["sections"] = [
+        _section("Button", {"action": {"action_type": "submit", "data_source": source}}),
+    ]
+    context = _context(variables)
+    result = review_app_build_plan(AppBuildPlan=fixture["AppBuildPlan"], context_variables=context)
+    assert result["outcome"] == "needs_revision"
+    assert "'/dashboard'" in result["error"] and expected_error in result["error"]
+    assert not context.get("app_plan_ready")
+    assert context.get("app_build_plan") is None
+    assert not context.get("app_task_batch_items")
+
+
+@pytest.mark.parametrize("pack_id,module_id,expected,refused", [
+    ("content", "content", ["list_entries", "get_entry", "create_entry", "update_entry", "archive_entry"],
+     ["get_entries", "create_content_entry", "delete_entry"]),
+    ("social", "activity_feed", ["get_feed", "get_profile_activity"], ["record_activity", "on_friendship_created"]),
+])
+def test_app_page_uses_reviewed_pack_module_http_actions(pack_id, module_id, expected, refused):
+    values = _stock_design(pack_id)
+    context = ContextVariablesBridge(reviewed_pack_fixture(values, [pack_id]))
+    sources = [{"module_id": module_id, "action_id": action} for action in expected + refused]
+    hints = [{"data_source": dict(source)} for source in sources]
+    plan = {"pages": [{"route": "/editor", "name": "Editor", "sections_hint": hints}], "build_tasks": []}
+
+    drop_unapproved_page_data_sources(plan, context)
+    assert [hint["data_source"] for hint in hints] == sources[:len(expected)] + [None] * len(refused)
+    assert set(module_action_index_from_context(context)[module_id]) == set(expected)
+    prompt = _build_file_contracts_body(SimpleNamespace(name="AppPlanAgent", context_variables=context), {})
+    assert all(action in prompt for action in expected)
+    assert all(action not in prompt for action in refused)
+
+    # An available pack and a worker-supplied manifest cannot stand in for reviewed pack selection.
+    offering = ROOT / f"factory_app/build_context/{pack_id}/templates/modules/{module_id}/module.yaml"
+    values["generated_files"] = {f"modules/{module_id}/module.yaml": offering.read_text(encoding="utf-8")}
+    unselected = ContextVariablesBridge(reviewed_pack_fixture(values, []))
+    index = module_action_index_from_context(unselected)[module_id]
+    assert set(expected).intersection(index) == ({"list_entries"} if module_id == "content" else set())
+
+
+@pytest.mark.parametrize("pack_id,module_id", [("content", "content"), ("social", "activity_feed")])
+def test_free_assembly_accepts_exact_stock_manifest_without_expanding_gate_authority(pack_id, module_id):
+    context = ContextVariablesBridge(reviewed_pack_fixture(_stock_design(pack_id), [pack_id]))
+    path = f"modules/{module_id}/module.yaml"
+    text = (ROOT / f"factory_app/build_context/{pack_id}/templates" / path).read_text(encoding="utf-8")
+    files = [{"filename": path, "content": text}]
+    assert apply_entitlement_gates(files, context_variables=context) == files
+    manifest = yaml.safe_load(text)
+    original_action = manifest["actions"][-1]["id"]
+    with pytest.raises(ValueError, match="outside the approved inventory"):
+        selected_feature_gates({"pro": [f"module.{module_id}.{original_action}"]}, context)
+    manifest["actions"][-1]["id"] = "invented_action"
+    with pytest.raises(ValueError, match="unapproved module actions .*invented_action"):
+        apply_entitlement_gates([{"filename": path, "content": yaml.safe_dump(manifest)}], context_variables=context)
+
+
+def test_stale_stock_module_cannot_supply_page_actions():
+    values = reviewed_pack_fixture(_stock_design("content"), ["content"])
+    summary = values["design_docs_artifact"]["commit_metadata"]["metadata"]["summary_payload"]
+    review = summary["access_policy_review"]
+    review["pack_identities"][0]["digest"] = "sha256:" + "0" * 64
+    review["policy_sha256"] = access_policy_sha256(
+        summary["access_policy"], summary["experience_spec"], pack_identities=review["pack_identities"],
+    )
+    with pytest.raises(PackIntegrityError, match="Reviewed pack 'content' changed"):
+        module_action_index_from_context(ContextVariablesBridge(values))
+
+
+def test_revision_reads_a_workspace_owned_manifest_after_genesis(tmp_path, monkeypatch):
+    path = "modules/notes/module.yaml"
+    pack = registered_pack_fixture(tmp_path, monkeypatch, "notes_seed", "generated_module")
+    root = Path(pack["pack_source_path"])
+    config = yaml.safe_load((root / "context.yaml").read_text(encoding="utf-8"))
+    config["assets"].append({"kind": "templates", "path": "templates"})
+    (root / "context.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    contract = yaml.safe_load((root / "contract.yaml").read_text(encoding="utf-8"))
+    contract["required_outputs"] = [{"path": path, "owner": "workspace"}]
+    (root / "contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
+
+    def manifest(action):
+        return yaml.safe_dump({"module": {"id": "notes"}, "actions": [{"id": action}]})
+
+    template = root / "templates" / path
+    template.parent.mkdir(parents=True)
+    template.write_text(manifest("seed"), encoding="utf-8")
+    values = reviewed_pack_fixture({
+        "generated_files": {path: manifest("admitted")},
+        "design_surface_map": {"surfaces": [{"surface_id": "notes", "surface_kind": "module", "owner": "app",
+                                             "owned_mutations": ["seed", "admitted", "authored"]}]},
+    }, ["notes_seed"])
+    assert set(module_action_index_from_context(values)["notes"]) == {"seed"}
+    values["build_mode"] = "revision"
+    assert set(module_action_index_from_context(values)["notes"]) == {"admitted"}
+    assert set(module_action_index_from_context(values, authored_files={path: manifest("authored")})["notes"]) == {"authored"}
 
 
 @pytest.mark.parametrize("surface,path", [

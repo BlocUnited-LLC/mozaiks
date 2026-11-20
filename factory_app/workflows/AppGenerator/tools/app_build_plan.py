@@ -24,6 +24,9 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     auth_required_from_strategy,
     planned_page_path,
 )
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_reviewed_page_writes,
+)
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_facade_directories,
     pack_owned_output_paths,
@@ -33,6 +36,7 @@ from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
 )
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_stem_from_path,
+    approved_page_action_ids,
 )
 
 try:
@@ -1350,6 +1354,28 @@ def _normalize_managed_capability_adapter_task_pack_ids(
     return normalized
 
 
+def _apply_reviewed_page_writes(pages: list[dict[str, Any]], context: Any) -> None:
+    """Bind canonical, page-callable identities to their reviewed route before dispatch."""
+    by_route = resolve_reviewed_page_writes(context)
+    inventory = approved_page_action_ids(context) if by_route else {}
+    for page in pages:
+        page.pop("required_write_actions", None)  # The plan cannot author this projection.
+        route = page.get("route", "")
+        required = by_route.get(route, [])
+        if page.get("ui_surface") != "declarative_page":
+            if required:
+                raise ValueError(f"Reviewed writes on {route!r} require its approved declarative_page")
+            continue
+        for source in required:
+            module, action = source["module_id"], source["action_id"]
+            if action not in inventory.get(module, []):
+                raise ValueError(
+                    f"Reviewed write on {route!r} references unknown or non-page-callable action {module}/{action}. "
+                    "Revise the approved DesignDocs action reference."
+                )
+        page["required_write_actions"] = required
+
+
 def _normalize_page_task_dependencies(
     build_tasks: list[dict[str, Any]], *, pages: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
@@ -1396,10 +1422,22 @@ def _normalize_page_task_dependencies(
                 item["depends_on"] = deps
             owned_paths = {normalize_app_path(str(path)) for path in item.get("owned_paths") or []}
             dependencies = _normalize_string_list(item.get("depends_on"))
-            for page in pages or []:
-                if planned_page_path(page) not in owned_paths:
-                    continue
-                for source in _iter_page_data_sources(page):
+            owned_pages = [page for page in pages or [] if planned_page_path(page) in owned_paths]
+            for page in owned_pages:
+                required = page.get("required_write_actions") or []
+                if required:
+                    if len(owned_pages) > 1:
+                        raise ValueError(
+                            f"Page task {item['task_id']!r} must isolate {page['route']!r} so its reviewed writes "
+                            "can retry independently. Give this page its own page_bundle task with explicit dependencies. "
+                            "Keep other page paths and shared manifest ownership with their appropriate tasks."
+                        )
+                    pairs = ", ".join(f"{source['module_id']}/{source['action_id']}" for source in required)
+                    note = f"Provide reachable write controls on {page['route']} for {pairs}."
+                    message = item.get("initial_message") or ""
+                    if note not in message:
+                        item["initial_message"] = f"{message}\n\n{note}".strip()
+                for source in [*_iter_page_data_sources(page), *required]:
                     contract_task = module_contract_by_pack.get(source["module_id"])
                     if contract_task and contract_task not in dependencies:
                         dependencies.append(contract_task)
@@ -2287,6 +2325,7 @@ def app_build_plan(
         capability_packs=capability_packs,
         context_variables=context_variables,
     )
+    _apply_reviewed_page_writes(pages, context_variables)
     managed_capability_ids = frozenset(
         _pack_id_from_descriptor(p)
         for p in capability_packs

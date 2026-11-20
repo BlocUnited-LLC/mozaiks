@@ -61,6 +61,7 @@ from mozaiksai.core.workflow.generator_support.module_account_data import (
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     SHARED_UI_OUTPUT_PATHS,
     pack_owned_output_paths,
+    scoped_module_implementation_sources,
 )
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
@@ -310,13 +311,14 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
         revision_paths = scoped_service_revision_paths(context_variables, detach(context_variables.get("generated_files")) or {})
         if revision_paths:
             validate_scoped_service_repositories({**admitted, **incoming}, revision_paths.intersection(incoming))
-        else:
-            incoming.update(materialize_module_read_implementations(
-                {**admitted, **incoming}, app_build_plan=detach(context_variables.get("app_build_plan")),
+        elif sources := scoped_module_implementation_sources({**admitted, **incoming}, owned_paths or []):
+            reads = materialize_module_read_implementations(
+                sources, app_build_plan=detach(context_variables.get("app_build_plan")),
                 data_contract=contract, owned_paths=owned_paths or [], subscription_contract=subscription_contract,
-            ))
+            )
+            incoming.update(reads)
             incoming.update(materialize_module_write_implementations(
-                {**admitted, **incoming}, app_build_plan=detach(context_variables.get("app_build_plan")),
+                {**sources, **reads}, app_build_plan=detach(context_variables.get("app_build_plan")),
                 data_contract=contract, owned_paths=owned_paths or [], subscription_contract=subscription_contract,
                 access_policy=resolve_authored_module_access_policy(context_variables),
                 design_surface_map=detach(context_variables.get("design_surface_map")),

@@ -35,7 +35,13 @@ contracts are copied into app runtime paths.
    `capability_pack_id: content` and `capability_source: generated_module`.
    Retain the verified version and digest with the build's selected source.
 3. Use the module's declared action and response schemas to plan app-owned
-   pages. The existing pack inventory excludes supplied backend files from model
+   pages. Once the Content pack is reviewed, the planner and page compiler read
+   the HTTP action IDs from its verified module manifest. An editor can bind
+   create, update (including publish), and archive controls to those actions.
+   Assembly checks the complete Content manifest against that same version of
+   the pack. The reviewed grants and runtime permission checks govern who can
+   use each action. Subscription gates require separately approved features.
+   The existing pack inventory excludes supplied backend files from model
    tasks. Do not ask an agent to rewrite the publishing service for each app.
 4. Carry the app's approved composition and brand through `ExperienceSpec`, page
    intent, theme capture and task acceptance criteria. Use declarative pages
@@ -43,6 +49,16 @@ contracts are copied into app runtime paths.
    for a concrete composition or interaction gap. Keep semantic theme tokens.
 5. Assemble, validate references and ownership, then execute the relevant user
    journeys. Promote only through the normal validation/review path.
+
+For an editable portfolio, the reviewed design can bind `content.archive_entry`
+to a submit control on `/editor`. AppGenerator carries the action ID into that
+page's task. The agent can put Archive on the selected row or in a confirmation
+modal opened with that row's entry ID. The editor must offer a reachable control that
+invokes the action. A table that only reads entries, or an Archive control on
+another route, leaves the editor task incomplete. Plan that editable page
+in its own page task so Factory can send the rejected output and missing
+action back to its owner and reuse the accepted portfolio and data results.
+Final acceptance checks the same requirement against the exported page.
 
 The descriptor is available through trusted build-context discovery. A workspace
 using operator selection can select the canonical `content` ID from the installed

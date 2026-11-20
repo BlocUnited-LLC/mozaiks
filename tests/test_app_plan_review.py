@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
 
@@ -164,6 +165,37 @@ def test_revision_page_output_contract_preserves_page_only_scope_and_is_idempote
     assert result["outcome"] == "ready", result
     accepted = next(item for item in detach(context.get("app_task_batch_items")) if item["task_id"] == task["task_id"])
     assert accepted == first
+
+
+@pytest.mark.parametrize("replacement", [[], [{"module_id": "reports", "action_id": "erase_all"}]])
+def test_rereview_binds_writes_from_design_and_rejects_other_unknown_page_fields(replacement):
+    context = _context()
+    experience = detach(context.get("experience_spec"))
+    source = {"module_id": "reports", "action_id": "create_report"}
+    surfaces = detach(context.get("design_surface_map"))
+    surfaces["surfaces"][0]["owned_mutations"] = [source["action_id"]]
+    context.set("design_surface_map", surfaces)
+    experience["pages"][0]["sections"] = [{
+        "primitive": "Form",
+        "config_hint": json.dumps({"submit_action": {"action_type": "submit", "data_source": source}}),
+    }]
+    context.set("experience_spec", experience)
+    context = _reviewed(context, [])
+    result = review_app_build_plan(AppBuildPlan=_plan(), context_variables=context)
+    assert result["outcome"] == "ready", result
+    cached = detach(context.get("app_build_plan"))
+    assert cached["pages"][0]["required_write_actions"] == [source]
+    cached["pages"][0]["required_write_actions"] = replacement
+
+    result = review_app_build_plan(AppBuildPlan=cached, context_variables=context)
+
+    assert result["outcome"] == "ready", result
+    assert detach(context.get("app_build_plan"))["pages"][0]["required_write_actions"] == [source]
+    assert cached["pages"][0]["required_write_actions"] == replacement
+    cached["pages"][0]["unreviewed_field"] = True
+    result = review_app_build_plan(AppBuildPlan=cached, context_variables=context)
+    assert "pages.0.unreviewed_field" in result["error"]
+    assert not context.get("app_plan_ready")
 
 
 @pytest.mark.parametrize(("approved", "proposed"), [

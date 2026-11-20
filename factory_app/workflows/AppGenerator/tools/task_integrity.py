@@ -12,6 +12,10 @@ from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context impor
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import planned_page_path, safe_relpath
+from mozaiksai.core.workflow.generator_support.page_action_bindings import (
+    planned_page_writes,
+    validate_required_page_writes,
+)
 from mozaiksai.core.workflow.task_batches import (
     optional_task_output_paths,
     task_evidence_digest,
@@ -199,13 +203,13 @@ def planned_artifact_diagnostics(context: Any, files: dict[str, str]) -> list[di
     diagnostics: list[dict[str, Any]] = []
 
     def add(code: str, path: str = "", task: dict[str, Any] | None = None,
-            reason: str = "", blocked_by: list[str] | None = None) -> None:
+            reason: str = "", blocked_by: list[str] | None = None, *, error: str | None = None) -> None:
         task = task or {}
         diagnostics.append({
             "code": code, "path": path, "task_id": str(task.get("task_id") or ""),
             "owner_agent": str(task.get("initial_agent") or ""),
             "blocked_by": blocked_by or [], "block_reason": reason,
-            "error": f"{path or task.get('task_id') or 'approved plan'}: {reason}",
+            "error": error or f"{path or task.get('task_id') or 'approved plan'}: {reason}",
         })
 
     try:
@@ -263,12 +267,21 @@ def planned_artifact_diagnostics(context: Any, files: dict[str, str]) -> list[di
         return diagnostics
     if "app.json" not in files and not any(item["path"] == "app.json" for item in diagnostics):
         add("PLANNED_ARTIFACT_MISSING", "app.json", owners.get("app.json"), "required app manifest is missing")
-    for page in plan.get("pages") or []:
-        if not isinstance(page, dict):
-            continue
+    pages = [page for page in plan.get("pages") or [] if isinstance(page, dict)]
+    try:
+        required_writes = planned_page_writes(pages, context)
+    except ValueError as exc:
+        add("PLAN_INVENTORY_INVALID", reason=str(exc))
+        return diagnostics
+    for page in pages:
         path = planned_page_path(page)
         if path not in files and not any(item["path"] == path for item in diagnostics):
             add("PLANNED_ARTIFACT_MISSING", path, owners.get(path), "required planned page is missing")
+        elif path in files and page.get("route") in required_writes:
+            try:
+                validate_required_page_writes(files[path], page["route"], required_writes, path)
+            except ValueError as exc:
+                add("PLANNED_PAGE_WRITE_UNSATISFIED", path, owners.get(path), error=str(exc))
     for module in plan.get("modules") or []:
         if not isinstance(module, dict) or not module.get("module_id"):
             continue
