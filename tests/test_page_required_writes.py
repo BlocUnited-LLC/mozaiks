@@ -119,6 +119,15 @@ def test_table_selection_needs_a_source_and_a_multi_row_token_needs_multi_select
     table["page_size"] = 2
     _validate(page, _plan(page, "archive_entry"))
 
+    table.update(pagination_mode="client", total_key=None, page_size=1)
+    with pytest.raises(ValueError, match="missing reachable write controls for content/archive_entry"):
+        _validate(page, _plan(page, "archive_entry"))
+    table["columns"][0]["sortable"] = True
+    _validate(page, _plan(page, "archive_entry"))
+    table["actions"][0]["payload"] = {"fourth": "{selected_rows.3.entry_id}"}
+    with pytest.raises(ValueError, match="missing reachable write controls for content/archive_entry"):
+        _validate(page, _plan(page, "archive_entry"))
+
 
 def test_modal_reached_again_from_a_table_can_receive_a_record_after_a_header_open():
     page = _editor()

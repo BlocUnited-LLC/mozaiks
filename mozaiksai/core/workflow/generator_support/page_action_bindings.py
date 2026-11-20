@@ -178,10 +178,18 @@ def _control_selection(
         available = 0
         if field == "actions" and has_data and selection not in (None, "none"):
             available = _MAX_ARRAY_LENGTH if selection == "multi" else 1
-            # Server pagination clears selection when moving to a different page.
-            if config.get("pagination_mode") == "server":
-                page_size = config.get("page_size")
-                available = min(available, page_size) if type(page_size) is int and page_size > 0 else 0
+            if config.get("pagination"):
+                # Changing page clears selection. In client mode each sortable
+                # column can expose two more orderings without clearing it.
+                page_size = config.get("page_size") or 20
+                orderings = 1
+                if config.get("pagination_mode") != "server":
+                    orderings += 2 * sum(
+                        1 for col in config.get("columns") or []
+                        if isinstance(col, str) or (isinstance(col, dict) and col.get("sortable"))
+                    )
+                if type(page_size) is int:
+                    available = min(available, page_size * orderings)
         if field == "actions" and action.get("requires_selection") and not available:
             return None
         return available
