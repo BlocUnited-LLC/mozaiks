@@ -59,6 +59,7 @@ from .generator_support.module_revision import (
     scoped_service_revision_paths,
     validate_scoped_service_repositories,
 )
+from .generator_support.module_smoke_fixtures import pack_smoke_fixture_task_output
 from .generator_support.module_write_actions import (
     close_module_actions,
     code_owned_schema_paths,
@@ -1186,7 +1187,7 @@ async def _run_one_task(
                 # Every owned path is rendered from the contract: there is nothing for the
                 # worker to author, so the task completes without an AG2 turn.
                 logger.info(
-                    "TASK_CODE_OWNED: task=%s agent=%s skipped; owned paths are rendered from data_contract",
+                    "TASK_CODE_OWNED: task=%s agent=%s skipped; owned paths are rendered from verified contracts",
                     task.get("task_id"), agent_name,
                 )
                 runner_result = AG2TaskBatchRunnerResult(
@@ -1485,7 +1486,9 @@ def _build_scoped_worker_prompt(prompt: str, task_context: dict[str, Any]) -> st
 
 
 def _code_owned_task_output(task: dict[str, Any], task_context: dict[str, Any]) -> dict[str, Any] | None:
-    """A data_models task whose every owned path is contract-rendered has nothing to author."""
+    """Complete a task directly when its entire assignment has a deterministic source."""
+    if task.get("task_type") == "module_contract":
+        return pack_smoke_fixture_task_output(task, task_context)
     if str(task.get("task_type") or "").strip() != "data_models":
         return None
     owned = _normalize_owned_paths(task.get("owned_paths"))

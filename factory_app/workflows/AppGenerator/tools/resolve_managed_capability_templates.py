@@ -695,6 +695,16 @@ def verify_pack_integrity(pack_source_path: Path, pack_id: str) -> dict[str, Any
         if not isinstance(contract_data, dict):
             raise PackIntegrityError(f"Contract asset must be a YAML mapping: {path}")
         _validate_pack_contract_schema(context_root, contract_data)
+        for output in contract_data.get("required_outputs") or []:
+            if isinstance(output, dict) and "smoke_fixtures" in output:
+                from mozaiksai.core.workflow.generator_support.module_smoke_fixtures import (
+                    parse_pack_smoke_recipe,
+                )
+
+                try:
+                    parse_pack_smoke_recipe(output)
+                except ValueError as exc:
+                    raise PackIntegrityError(f"invalid smoke_fixtures for {output.get('path')}: {exc}") from exc
     return {
         "pack_id": pack_id,
         "version": version,

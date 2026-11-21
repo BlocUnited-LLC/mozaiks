@@ -19,12 +19,19 @@ from mozaiksai.core.runtime.composition.schema_validation import validate_json_s
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
 from mozaiksai.core.semantics.closed_contracts import ObjectContract, ScalarContract
+from mozaiksai.core.workflow.path_ownership import normalize_owned_paths
 
 from .data_contract_fields import read_lookup_field, record_id_field
-from .module_action_inventory import canonical_read_action_id, canonical_write_action_id
+from .module_action_inventory import (
+    _selected_packs,
+    canonical_read_action_id,
+    canonical_write_action_id,
+    pack_module_templates,
+)
 
 SCHEMA_VERSION = "mozaiks.module_smoke_fixtures.v1"
 MAX_FIXTURE_BYTES = 131072
+_FIXTURE_PATH = re.compile(r"modules/[A-Za-z_][A-Za-z0-9_]*/contracts/fixtures\.yaml")
 _Name = Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
 _Role = Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_]*$")]
 _Roles = Annotated[list[_Role], Field(max_length=16)]
@@ -262,10 +269,11 @@ def fixture_record_identity(
     return input_field, stored_field
 
 
-def _record_targets(
-    data_contract: Any,
-) -> dict[tuple[str, str], tuple[dict[str, dict[str, Any]], Mapping[str, Any], Literal["get", "update", "delete"]]]:
-    result: dict[tuple[str, str], tuple[dict[str, dict[str, Any]], Mapping[str, Any], Literal["get", "update", "delete"]]] = {}
+_RecordTarget = tuple[dict[str, dict[str, Any]], Mapping[str, Any], Literal["get", "update", "delete"]]
+
+
+def _record_targets(data_contract: Any) -> dict[tuple[str, str], _RecordTarget]:
+    result: dict[tuple[str, str], _RecordTarget] = {}
     for module, kind, collection in iter_data_contract_collections(data_contract, require_complete_ownership=False):
         if kind != "module":
             continue
@@ -401,12 +409,102 @@ def validate_module_fixture_record_identities(
         raise ValueError("\n".join(failures))
 
 
+def _validate_fixture(
+    module: str, fixture: ModuleSmokeFixture, modules: Mapping[str, Mapping[str, Any]],
+    grants: Mapping[str, set[str]], scopes: set[str], record_target: _RecordTarget | None,
+) -> None:
+    target = _action(modules, module, fixture.action)
+    _validate_roles(fixture.roles, target, grants, scopes)
+    responses: dict[str, Mapping[str, Any]] = {}
+    setup_fields = record_target[0] if record_target and record_target[2] in {"update", "delete"} else {}
+    for step in fixture.setup:
+        action = _action(modules, step.module, step.action)
+        _validate_roles(step.roles, action, grants, scopes)
+        _validate_params(step.params, action.get("input_schema", {}), responses, setup_fields)
+        output = action.get("output_schema", {})
+        Draft7Validator.check_schema(output)
+        responses[step.id] = output
+    _validate_params(fixture.params, target.get("input_schema", {}), responses, record_target[0] if record_target else {})
+    if record_target:
+        fixture_record_identity(fixture, collection=record_target[1], operation=record_target[2])
+
+
+def parse_pack_smoke_recipe(output: Mapping[str, Any]) -> ModuleSmokeFixtures:
+    """A pack supplies canonical probe inputs; the app supplies all role identities."""
+    path = output.get("path")
+    if output.get("owner") != "generator" or not isinstance(path, str) or not _FIXTURE_PATH.fullmatch(path):
+        raise ValueError("smoke_fixtures requires a generator-owned module fixture path")
+    document = parse_module_smoke_fixtures(output["smoke_fixtures"])
+    if any(fixture.roles or any(step.roles for step in fixture.setup) for fixture in document.fixtures):
+        raise ValueError("pack smoke fixtures must leave role selection to the reviewed app")
+    return document
+
+
+def _bind_pack_smoke_fixtures(
+    output: Mapping[str, Any], *, module: str, manifest: Mapping[str, Any], grants: Mapping[str, set[str]], data_contract: Any,
+) -> dict[str, Any]:
+    """Bind test actors to reviewed roles and validate the same references as the observer."""
+    document = parse_pack_smoke_recipe(output)
+    modules = {module: manifest}
+    records = _record_targets(data_contract)
+
+    def bind(actor: SmokeFixtureSetup | ModuleSmokeFixture, owner: str) -> None:
+        required = set(_action(modules, owner, actor.action).get("permissions") or [])
+        if required:
+            eligible = [role for role, permissions in grants.items() if required <= permissions]
+            if not eligible:
+                raise ValueError(f"no reviewed app role grants the permissions for {owner}.{actor.action}")
+            actor.roles = [min(eligible, key=lambda role: (len(grants[role]), role))]
+
+    for fixture in document.fixtures:
+        bind(fixture, module)
+        for step in fixture.setup:
+            bind(step, step.module)
+        _validate_fixture(module, fixture, modules, grants, set(), records.get((module, fixture.action)))
+    return document.model_dump(mode="json", exclude_none=True)
+
+
+def pack_smoke_fixture_task_output(task: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Render a new, generator-owned fixture from the selected module owner's recipe."""
+    module = task.get("capability_pack_id")
+    if not isinstance(module, str) or not module:
+        return None
+    path = f"modules/{module}/contracts/fixtures.yaml"
+    if normalize_owned_paths(task.get("owned_paths")) != (path,) or path in (context.get("generated_files") or {}):
+        return None
+
+    recipes = [
+        (pack.pack_id, output)
+        for pack in _selected_packs(context) for contract in pack.contracts
+        for output in contract.get("required_outputs") or []
+        if isinstance(output, Mapping) and output.get("path") == path
+        and output.get("owner") == "generator" and "smoke_fixtures" in output
+    ]
+    if not recipes:
+        return None
+    from .design_access_policy import resolve_design_role_projection
+    from .module_role_grants import verified_pack_authorization
+
+    owner = verified_pack_authorization(context).module_packs.get(module)
+    if len(recipes) != 1 or recipes[0][0] != owner:
+        raise ValueError(f"{path} requires a single recipe from the verified module owner")
+    manifest = pack_module_templates(context).get(f"modules/{module}/module.yaml")
+    if manifest is None or manifest.action_source != "template":
+        raise ValueError(f"{path} requires a complete template-owned module action contract")
+    _, roles = resolve_design_role_projection(context)
+    fixture = _bind_pack_smoke_fixtures(
+        recipes[0][1], module=module, manifest=yaml.safe_load(manifest.source),
+        grants={role["id"]: set(role["permissions"]) for role in roles}, data_contract=context.get("data_contract"),
+    )
+    return {"module_contract": {"module_id": module, "fixtures_yaml": fixture}}
+
+
 def load_module_smoke_fixtures(files: Mapping[str, str | bytes]) -> dict[tuple[str, str], ModuleSmokeFixture]:
     """Close all fixture references against exact bundle contracts before any request."""
     paths = [path for path in files if path.endswith("/contracts/fixtures.yaml")]
     if not paths:
         return {}
-    if any(not re.fullmatch(r"modules/[A-Za-z_][A-Za-z0-9_]*/contracts/fixtures\.yaml", path) for path in paths):
+    if any(not _FIXTURE_PATH.fullmatch(path) for path in paths):
         raise ValueError("module smoke fixtures require a canonical module companion path")
     modules = {}
     for path, content in files.items():
@@ -433,23 +531,7 @@ def load_module_smoke_fixtures(files: Mapping[str, str | bytes]) -> dict[tuple[s
         document = parse_module_smoke_fixtures(yaml.safe_load(content))
         module = path.split("/")[1]
         for fixture in document.fixtures:
-            target = _action(modules, module, fixture.action)
-            _validate_roles(fixture.roles, target, grants, scopes)
-            responses: dict[str, Mapping[str, Any]] = {}
-            record_target = records.get((module, fixture.action))
-            setup_fields = (record_target[0] if record_target is not None
-                            and record_target[2] in {"update", "delete"} else {})
-            for step in fixture.setup:
-                action = _action(modules, step.module, step.action)
-                _validate_roles(step.roles, action, grants, scopes)
-                _validate_params(step.params, action.get("input_schema", {}), responses, setup_fields)
-                output = action.get("output_schema", {})
-                Draft7Validator.check_schema(output)
-                responses[step.id] = output
-            _validate_params(fixture.params, target.get("input_schema", {}), responses,
-                             record_target[0] if record_target else {})
-            if record_target is not None:
-                fixture_record_identity(fixture, collection=record_target[1], operation=record_target[2])
+            _validate_fixture(module, fixture, modules, grants, scopes, records.get((module, fixture.action)))
             result[module, fixture.action] = fixture
     if len(result) > 256 or sum(len(fixture.setup) for fixture in result.values()) > 512:
         raise ValueError("app smoke fixtures exceed the total execution bound")
