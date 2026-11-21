@@ -2029,6 +2029,13 @@ test('app integrations route stays responsive across desktop and mobile widths',
 
   await main.getByRole('button', { name: 'Add integration' }).click();
   await expect(page.getByLabel('Service ID')).toBeVisible();
+  const serviceId = page.getByLabel('Service ID');
+  for (const invalid of ['.', 'calendar..sync']) {
+    await serviceId.fill(invalid);
+    expect(await serviceId.evaluate(input => input.validity.patternMismatch)).toBe(true);
+  }
+  await serviceId.fill('calendar.sync');
+  expect(await serviceId.evaluate(input => input.validity.valid)).toBe(true);
   await expect(page.getByLabel('API key or secret')).toHaveValue('');
   await expectNoHorizontalOverflow(page);
   await captureIntegrationsQa(page, testInfo, 'add-integration-overlay', { shell_layout: 'rendered', overlay: 'open' });
@@ -2078,6 +2085,8 @@ test('app usage route stays responsive across desktop and mobile widths', async 
 
 test('workspace performance route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.goto('/performance');
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
   const main = page.locator('main');
 
   await expect(main.getByRole('heading', { name: 'Performance', exact: true })).toBeVisible();

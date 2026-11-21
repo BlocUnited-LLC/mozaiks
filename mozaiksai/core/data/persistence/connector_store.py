@@ -223,9 +223,11 @@ class ConnectorStore:
         required_fields: Sequence[dict[str, Any]] | None = None,
         create_if_missing: bool = False,
     ) -> dict[str, Any] | None:
+        normalized_service = normalize_connector_service(service)
+        if create_if_missing and not normalized_service:
+            raise ValueError("service is required")
         await self._ensure_indexes()
         coll = await self._collection()
-        normalized_service = normalize_connector_service(service)
         update_fields: dict[str, Any] = {"updated_at": datetime.now(UTC)}
         if user_id:
             update_fields["updated_by_user_id"] = str(user_id)

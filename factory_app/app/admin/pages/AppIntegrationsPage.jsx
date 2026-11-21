@@ -49,8 +49,9 @@ function AdapterEditor({ connector, editing, catalog, credentialStorageAvailable
         onSave(serviceId, { display_name: displayName, notes: notes.trim(), ...(credential && { secret_value: credential }) })
       }}>
         <label className="block text-sm">Service ID
-          <input className={fieldStyle} required maxLength={128} pattern="[A-Za-z0-9_.\-]+" value={service}
+          <input className={fieldStyle} required maxLength={128} pattern="(?!\.$)(?!.*\.\.)[A-Za-z0-9_.\-]+" value={service}
             disabled={editing || busy} list={formId + '-services'} onChange={event => setService(event.target.value)}
+            title="Use letters, numbers, underscores, hyphens or dots. A single dot or consecutive dots are invalid."
             placeholder="e.g. analytics_provider" />
         </label>
         <datalist id={formId + '-services'}>{catalog.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</datalist>
@@ -61,11 +62,13 @@ function AdapterEditor({ connector, editing, catalog, credentialStorageAvailable
           <textarea className={fieldStyle} value={notes} disabled={busy} onChange={event => setNotes(event.target.value)} />
         </label>
         {credentialStorageAvailable ? (
-          <label className="block text-sm">API key or secret
-            <input className={fieldStyle} type="password" autoComplete="new-password" value={credential}
+          <div className="text-sm">
+            <label htmlFor={formId + '-credential'}>API key or secret</label>
+            <input id={formId + '-credential'} aria-describedby={formId + '-credential-hint'}
+              className={fieldStyle} type="password" autoComplete="new-password" value={credential}
               disabled={busy} onChange={event => setCredential(event.target.value)} />
-            <span className="text-xs text-muted-foreground">{editing ? 'Leave blank to keep the saved credential.' : 'Optional for a connection record.'}</span>
-          </label>
+            <p id={formId + '-credential-hint'} className="text-xs text-muted-foreground">{editing ? 'Leave blank to keep the saved credential.' : 'Optional for a connection record.'}</p>
+          </div>
         ) : <p className="text-sm text-muted-foreground">Credential storage is unavailable. You can still save connection details.</p>}
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       </form>
@@ -132,12 +135,13 @@ function SelectedAppIntegrations({ appId }) {
             {connectors.map(connector => (
               <li key={connector.service} className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <div className="min-w-0">
-                  <h3 className="font-semibold">{connector.display_name || connector.service}</h3>
+                  <h3 className="break-words font-semibold">{connector.display_name || connector.service}</h3>
                   <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                     <span>{connector.service}</span>
                     <StatusPill tone={connector.ready ? 'success' : 'muted'}>{connector.ready ? 'Ready' : (connector.status || 'Needs setup').replaceAll('_', ' ')}</StatusPill>
+                    {connector.secret_available && <span>Credential saved</span>}
                   </div>
-                  {connector.notes && <p className="mt-1 whitespace-pre-wrap text-sm">{connector.notes}</p>}
+                  {connector.notes && <p className="mt-1 whitespace-pre-wrap break-words text-sm">{connector.notes}</p>}
                   {connector.health?.last_checked_at && <p className="text-xs text-muted-foreground">Last check · {connector.health.status}</p>}
                 </div>
                 <div className="flex gap-2">

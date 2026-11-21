@@ -2013,6 +2013,9 @@ async def create_or_update_integration_connector(
     dashboard_app_id: str | None = None,
 ):
     app_id, user_id = await _connector_scope(principal, app_id=app_id, dashboard_app_id=dashboard_app_id)
+    # An empty identifier or a single-dot path segment has no per-service edit route.
+    if body.service.strip() in {"", "."}:
+        raise HTTPException(status_code=400, detail="Invalid service format")
     if dashboard_app_id is not None:
         validate_path_id(body.service, "service")
     secret_result: dict[str, Any] | None = None

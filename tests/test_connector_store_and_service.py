@@ -190,6 +190,13 @@ class _FakeVaultBackend:
             "error": None if existed else "missing",
         }
 
+def test_connector_store_rejects_empty_service_before_metadata_upsert() -> None:
+    store = ConnectorStore(pm=_FakePersistenceManager())
+    with pytest.raises(ValueError, match="service is required"):
+        asyncio.run(store.patch(scope="app", scope_id="owned", service="  ", create_if_missing=True))
+    assert asyncio.run(store.list(scope="app", scope_id="owned")) == []
+
+
 def test_connector_store_supports_crud() -> None:
     pm = _FakePersistenceManager()
     store = ConnectorStore(pm=pm)

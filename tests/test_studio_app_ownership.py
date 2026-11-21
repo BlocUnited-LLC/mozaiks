@@ -415,3 +415,23 @@ def test_selected_dashboard_connectors_check_ownership_before_every_operation(st
         assert failed.status_code == 503, failed.text
         assert "sensitive-placeholder" not in failed.text and "disposable-placeholder" not in failed.text
     calls["patch_connector"].assert_not_awaited()
+
+
+@pytest.mark.parametrize("service", ["", "   ", "."])
+def test_connector_creation_requires_an_addressable_service(studio_client, monkeypatch, service):
+    studio, client, headers, _ = studio_client
+    monkeypatch.setattr(studio.app.state, "loaded_app_id", "alice-app", raising=False)
+    patch = AsyncMock()
+    save = AsyncMock()
+    monkeypatch.setattr(studio, "patch_connector", patch)
+    monkeypatch.setattr(studio, "save_connector", save)
+    for selector in ("app_id", "dashboard_app_id"):
+        response = client.post(
+            "/api/studio/integrations/connectors",
+            params={selector: "alice-app"},
+            headers=headers("alice", "alice-app"),
+            json={"service": service, "secret_value": "disposable-placeholder"},
+        )
+        assert response.status_code == 400
+    patch.assert_not_awaited()
+    save.assert_not_awaited()
