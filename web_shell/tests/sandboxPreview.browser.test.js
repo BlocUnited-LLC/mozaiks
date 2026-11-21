@@ -9,6 +9,14 @@ import { chromium, expect } from '@playwright/test';
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const hook = path.join(path.dirname(shell), 'factory_app/workflows/_shared/ui/app_preview/useSandbox.js');
 const pane = path.join(path.dirname(shell), 'factory_app/workflows/_shared/ui/app_preview/PreviewPane.js');
+const previewComponent = path.join(path.dirname(shell), 'chat-ui/src/components/preview/ArtifactPreviewPane.jsx');
+const previewExport = { name: 'preview-export', setup(builder) {
+  builder.onResolve({filter: /^@mozaiks\/chat-ui$/}, () => ({path: 'preview-export', namespace: 'preview'}));
+  builder.onLoad({filter: /.*/, namespace: 'preview'}, () => ({
+    contents: `export {default as ArtifactPreviewPane} from ${JSON.stringify(previewComponent)}`,
+    resolveDir: shell, loader: 'js',
+  }));
+}};
 
 async function previewFixtureBundle() {
   return build({
@@ -62,7 +70,7 @@ async function previewFixtureBundle() {
       root.render(<Fixture />);
     ` },
     bundle: true, write: false, jsx: 'automatic', loader: {'.js': 'jsx'}, nodePaths: [path.join(shell, 'node_modules')],
-    plugins: [{ name: 'preview-transport-fixture', setup(builder) {
+    plugins: [previewExport, { name: 'preview-transport-fixture', setup(builder) {
       builder.onResolve({filter: /websocketAuth\.js$/}, () => ({path: 'socket', namespace: 'fixture'}));
       builder.onResolve({filter: /studioApi\.js$/}, () => ({path: 'http', namespace: 'fixture'}));
       builder.onLoad({filter: /.*/, namespace: 'fixture'}, ({path: kind}) => ({contents: kind === 'socket'
@@ -988,6 +996,7 @@ test('authenticated artifact initially inspects login and switches views through
     ` },
     bundle: true, write: false, jsx: 'automatic', loader: {'.js': 'jsx'},
     nodePaths: [path.join(shell, 'node_modules')], define: {'process.env.NODE_ENV':'"test"'},
+    plugins: [previewExport],
   });
   const server = http.createServer((req, res) => {
     if (req.url === '/fixture.js') {

@@ -225,6 +225,32 @@ _EXACT_BUILD = "preview:f47ac10b-58cc-4372-a567-0e02b2c3d479"
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("public_traffic", [True, False])
+async def test_private_document_checks_provider_network_before_use(monkeypatch, public_traffic):
+    from unittest.mock import Mock
+
+    sandbox = _FakeSandbox()
+    metadata = {"purpose": "artifact_preview", "preview_mode": "document"}
+    sandbox.details.metadata = metadata
+    sandbox.details.allow_internet_access = False
+    sandbox.details.network = {"allow_public_traffic": public_traffic}
+    factory = Mock()
+    factory.create.return_value = sandbox
+    monkeypatch.setattr(_sandbox_mod, "Sandbox", factory)
+    adapter = E2BSandboxAdapter(default_template="studio")
+    if public_traffic:
+        with pytest.raises(RuntimeError, match="private document isolation"):
+            await adapter.create_session(metadata=metadata)
+        assert sandbox.killed
+    else:
+        session = await adapter.create_session(metadata=metadata)
+        assert "sandbox_domain" not in session.metadata
+        assert await adapter.get_preview_url(session_id=session.session_id, port=3000) is None
+    assert factory.create.call_args.kwargs["network"] == {"allow_public_traffic": False}
+    assert factory.create.call_args.kwargs["allow_internet_access"] is False
+
+
+@pytest.mark.asyncio
 async def test_sealed_e2b_session_requires_exact_build_and_no_environment(monkeypatch):
     from unittest.mock import Mock
 

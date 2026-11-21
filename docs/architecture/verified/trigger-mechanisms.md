@@ -65,6 +65,36 @@ function OrderHelpPage({ params }) {
 }
 ```
 
+### Embed the Studio chat and a private preview
+
+`WorkflowChat` accepts `presentation="studio"` to use the same transcript, composer,
+streaming messages and status bar as Factory. Supply `userId` from the authenticated
+viewer, an authorized `appId`, a stable `getAccessToken` function and the
+workflow's declared `initialContext`. Use `freshSession` for an isolated conversation.
+Changing the viewer, workflow, app or context closes the previous conversation.
+
+For a workflow with a preview, declare a one-way artifact UI tool. Its authenticated
+WebSocket delivers `chat.tool_call` with `data.display` set to `artifact` and a unique
+`data.tool_call_id`. The embed calls `onArtifact(frame, {chatId, afterUserInput})`
+once for that event in the mounted conversation. `afterUserInput` identifies the
+turn following a local submission. The application can use `onSessionChange` to
+clear the displayed draft when the conversation changes and `onReplyActivity` for
+notifications outside the chat.
+
+Validate the expected workflow, component, tool payload and resource identity in
+the consumer. Ask the owning module to prepare the draft and recheck the viewer
+before fetching either version. The module decides whether an operation may use a
+sandbox. Keep ordinary conversational replies and opening greetings free of render
+requests. Store and display a completed render only while its identity and expiry
+match the selected private draft.
+
+Render the authorized HTML from the private document compiler with
+`<ArtifactPreviewPane documentHtml={documentHtml} title="Draft preview" />`,
+imported from `@mozaiks/chat-ui`. This is the document mode of Factory's preview
+pane. Its nested sandbox displays the self-contained app UI in an opaque origin.
+The saved-build workbench uses the URL mode for its running app. Publishing or
+accepting a private draft remains an explicit action in the consuming application.
+
 ---
 
 ## 3. CRUD Event Trigger (Backend)

@@ -37,152 +37,64 @@ export function useChatWebSocket({
   );
 
   const wsRef = useRef(null);
-  const connectionInProgressRef = useRef(false);
+  const [attempt, setAttempt] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const onMessageRef = useRef(onMessage);
+  onMessageRef.current = onMessage;
 
-  // Update workflow name when URL changes
   useEffect(() => {
-    if (urlWorkflowName && urlWorkflowName !== currentWorkflowName) {
-      setCurrentWorkflowName(urlWorkflowName);
-    }
-  }, [urlWorkflowName, currentWorkflowName]);
+    setCurrentWorkflowName(resolveWorkflow(urlWorkflowName) || '');
+    setPaused(false);
+  }, [urlWorkflowName, appId, userId, chatId]);
 
-  // Notify parent of connection status changes
   useEffect(() => {
-    if (onConnectionChange) {
-      onConnectionChange(connectionStatus);
-    }
+    onConnectionChange?.(connectionStatus);
   }, [connectionStatus, onConnectionChange]);
 
-  // Create WebSocket connection
-  const connectWebSocket = useCallback(() => {
-    if (!chatId) {
-      console.error('❌ [WS] WebSocket requires existing chat ID');
-      return () => {};
-    }
-
+  useEffect(() => {
+    if (!api || !workflowConfigLoaded || !chatId || !currentWorkflowName || paused) return;
+    let closed = false;
+    let socket;
+    setConnectionInitialized(true);
     setConnectionStatus('connecting');
-    setTransportType('websocket');
-
-    const workflowName = resolveWorkflow(urlWorkflowName) || currentWorkflowName;
-    if (!workflowName) {
-      console.warn('⚠️ [WS] No workflow available to connect');
-      return () => {};
-    }
-
-    const connection = api.createWebSocketConnection(
-      appId,
-      userId,
-      {
-        onOpen: () => {
-          setConnectionStatus('connected');
-        },
-        onMessage: (data) => {
-          if (onMessage) {
-            onMessage(data);
-          }
-        },
-        onError: (error) => {
-          console.error('❌ [WS] WebSocket error:', error);
-          setConnectionStatus('error');
-        },
+    async function connect() {
+      let transport;
+      try {
+        transport = await api.getWorkflowTransport(currentWorkflowName);
+      } catch {
+        // Discovery is optional for a named workflow with a WebSocket endpoint.
+      }
+      if (closed) return;
+      setTransportType(transport?.transport || 'websocket');
+      socket = api.createWebSocketConnection(appId, userId, {
+        onOpen: () => { if (!closed) setConnectionStatus('connected'); },
+        onMessage: data => { if (!closed) onMessageRef.current?.(data); },
+        onError: () => { if (!closed) setConnectionStatus('error'); },
         onClose: () => {
-          setConnectionStatus('disconnected');
+          if (closed) return;
           wsRef.current = null;
           setWs(null);
+          setConnectionStatus('disconnected');
         },
-      },
-      workflowName,
-      chatId
-    );
-
-    setWs(connection);
-    wsRef.current = connection;
-
+      }, currentWorkflowName, chatId);
+      wsRef.current = socket;
+      setWs(socket);
+    }
+    connect().catch(() => { if (!closed) setConnectionStatus('error'); });
     return () => {
-      if (connection) {
-        connection.close();
-      }
+      closed = true;
+      socket?.close();
       wsRef.current = null;
+      setWs(null);
+      setConnectionInitialized(false);
+      setConnectionStatus('disconnected');
     };
-  }, [api, appId, userId, chatId, urlWorkflowName, currentWorkflowName, onMessage]);
+  }, [api, workflowConfigLoaded, appId, userId, chatId, currentWorkflowName, paused, attempt]);
 
-  // Main connection effect
-  useEffect(() => {
-    if (!api) return;
-    if (!workflowConfigLoaded) return;
-    if (!chatId) return;
-    if (connectionInitialized || connectionInProgressRef.current) return;
-
-    connectionInProgressRef.current = true;
-    setConnectionInitialized(true);
-
-    const connectWithTransport = async () => {
-      try {
-        const workflowName = resolveWorkflow(urlWorkflowName) || currentWorkflowName;
-        if (!workflowName) {
-          throw new Error('No workflow available');
-        }
-
-        // Query transport info from backend
-        const transportInfo = await api.getWorkflowTransport(workflowName);
-        if (transportInfo?.transport) {
-          setTransportType(transportInfo.transport);
-        } else {
-          setTransportType('websocket');
-        }
-
-        setCurrentWorkflowName(workflowName);
-        return connectWebSocket();
-      } catch (error) {
-        console.error('❌ [WS] Error querying workflow transport:', error);
-        const fallbackWf = resolveWorkflow();
-        if (!fallbackWf) {
-          console.warn('⚠️ [WS] No workflow available for fallback');
-          return () => {};
-        }
-        setTransportType('websocket');
-        setCurrentWorkflowName(fallbackWf);
-        return connectWebSocket();
-      }
-    };
-
-    let cleanup;
-    connectWithTransport()
-      .then((cleanupFn) => {
-        cleanup = cleanupFn;
-      })
-      .catch((error) => {
-        console.error('❌ [WS] Failed to connect:', error);
-        setConnectionInitialized(false);
-        connectionInProgressRef.current = false;
-      });
-
-    return () => {
-      if (cleanup) cleanup();
-      connectionInProgressRef.current = false;
-    };
-  }, [
-    api,
-    workflowConfigLoaded,
-    chatId,
-    connectionInitialized,
-    urlWorkflowName,
-    currentWorkflowName,
-    connectWebSocket,
-  ]);
-
-  // Retry connection
   const retryConnection = useCallback(() => {
-    setConnectionInitialized(false);
-    connectionInProgressRef.current = false;
-    setConnectionStatus('disconnected');
-
-    setTimeout(() => {
-      if (chatId && workflowConfigLoaded) {
-        setConnectionStatus('connecting');
-      }
-    }, 1000);
-  }, [chatId, workflowConfigLoaded]);
+    setPaused(false);
+    setAttempt(value => value + 1);
+  }, []);
 
   // Send message through WebSocket
   const sendMessage = useCallback(
@@ -199,14 +111,7 @@ export function useChatWebSocket({
 
   // Close connection
   const disconnect = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    setWs(null);
-    setConnectionInitialized(false);
-    connectionInProgressRef.current = false;
-    setConnectionStatus('disconnected');
+    setPaused(true);
   }, []);
 
   // Reset connection state (for navigation triggers)

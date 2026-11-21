@@ -244,6 +244,7 @@ class PreviewSessionState:
     health_checked_at: datetime | None = None
     keycloak_issuer: str | None = None
     keycloak_cleanup_grace: bool = False
+    preview_mode: str | None = None
 
     @classmethod
     def from_record(cls, record: dict[str, Any]) -> PreviewSessionState:
@@ -364,14 +365,17 @@ class ArtifactPreviewSessionManager:
 
     async def create_or_reuse(
         self, artifact_id: str, *, app_id: str, user_id: str, target_app_id: str, build_registry_id: str,
+        document_only: bool = False,
     ) -> PreviewSessionState:
         if not all(is_valid_artifact_id(value) for value in (artifact_id, app_id, target_app_id, build_registry_id)) or not user_id:
             raise ValueError("Invalid preview identity")
-        provider, adapter = self._selected_provider()
+        provider, adapter = ("e2b", self._adapter("e2b")) if document_only else self._selected_provider()
         identity = dict(
             artifact_id=artifact_id, app_id=app_id, user_id=user_id,
             target_app_id=target_app_id, build_registry_id=build_registry_id, provider=provider,
         )
+        if document_only:
+            identity["preview_mode"] = "document"
         return await self._create(identity, adapter)
 
     async def create_sealed_candidate(
@@ -455,13 +459,18 @@ class ArtifactPreviewSessionManager:
         token = allocation["allocation_token"]
         started = time.monotonic()
         try:
+            document_only = allocation.get("preview_mode") == "document"
+            envs = {}
+            if sealed_files is None:
+                envs = sandbox_resource_environment() if document_only else preview_resource_environment()
             async with asyncio.timeout(self._allocation_timeout_seconds):
                 info = await adapter.create_session(
                     template=allocation["sealed_image_id"] if sealed_files is not None else self._template,
                     timeout_seconds=provider_ttl,
-                    envs={} if sealed_files is not None else preview_resource_environment(),
+                    envs=envs,
                     metadata={
                         "purpose": "sealed_candidate_preview" if sealed_files is not None else "artifact_preview",
+                        **({"preview_mode": "document"} if document_only else {}),
                         "manager_sandbox_id": sandbox_id,
                         **{name: allocation[name] for name in ("artifact_id", "app_id", "user_id", "target_app_id", "build_registry_id")},
                     },
@@ -530,7 +539,7 @@ class ArtifactPreviewSessionManager:
 
     async def require_owner(self, sandbox_id: str, *, app_id: str, user_id: str) -> PreviewSessionState:
         record = await self._store.get(sandbox_id)
-        if record is None or (record["app_id"], record["user_id"]) != (app_id, user_id):
+        if record is None or record.get("preview_mode") == "document" or (record["app_id"], record["user_id"]) != (app_id, user_id):
             raise KeyError("Sandbox not found")
         return await self._ensure_alive(sandbox_id)
 
@@ -551,6 +560,8 @@ class ArtifactPreviewSessionManager:
         # The admission ledger is bounded. Do not truncate to today's owner quota:
         # older reservations, pending allocations and failed cleanup still count.
         for record in await self._store.list():
+            if record.get("preview_mode") == "document":
+                continue
             if (record["app_id"], record["user_id"]) != (app_id, user_id):
                 continue
             state = PreviewSessionState.from_record(record)
@@ -657,6 +668,8 @@ class ArtifactPreviewSessionManager:
 
     async def sync(self, sandbox_id: str, files: list[dict[str, str | bytes]], deleted: list[str]) -> None:
         state = await self._ensure_alive(sandbox_id)
+        if state.preview_mode == "document":
+            raise ValueError("Private document previews have no app host")
         if state.sealed_archive_sha256:
             raise ValueError("Sealed candidate source cannot be synchronized")
         async with self._operation(sandbox_id, "sync") as (state, token):
@@ -776,6 +789,8 @@ class ArtifactPreviewSessionManager:
 
     async def start(self, sandbox_id: str) -> PreviewSessionState:
         state = await self._ensure_alive(sandbox_id)
+        if state.preview_mode == "document":
+            raise ValueError("Private document previews have no app host")
         if state.sealed_archive_sha256:
             raise ValueError("Sealed candidate runtime cannot be restarted through artifact preview")
         async with self._operation(sandbox_id, "start") as (state, token):
