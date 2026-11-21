@@ -789,6 +789,7 @@ function analyticsSeries(start, end, days = 14) {
 function buildPortfolioAnalyticsPayload() {
   const apps = Object.entries(ANALYTICS_BASES).map(([appId, base]) => ({
     app_id: appId,
+    dashboard_app_id: appId === 'member-growth-studio' ? 'dashboard-member-growth' : null,
     name: appsPayload.apps.find((app) => app.app_id === appId)?.name || appId,
     lifecycle_state: 'active',
     metrics: analyticsMetricSet(base),
@@ -1149,19 +1150,21 @@ async function mockStudioApis(page) {
     });
   });
 
-  await page.route('**/api/modules/workspace_integrations/list_app_integration_needs**', async (route) => {
-    let appId = APP_ID;
-    try {
-      const body = route.request().postDataJSON();
-      if (body?.app_id) appId = body.app_id;
-    } catch {
-      // Keep default app id for malformed test requests.
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(buildAppIntegrationDeclarationsPayload(appId)),
-    });
+  await page.route('**/api/studio/integrations/connectors?**', async (route) => {
+    const appId = new URL(route.request().url()).searchParams.get('dashboard_app_id');
+    expect(appId).toBe(APP_ID);
+    await route.fulfill({ json: {
+      app_id: appId,
+      connectors: [
+        { service: 'mozaikspay', display_name: 'Payments connection', ready: true,
+          health: { status: 'pending_validation', health_check_supported: true } },
+        { service: 'custom_search', display_name: 'Search connection', ready: false,
+          health: { status: 'unknown', health_check_supported: false } },
+      ],
+      declarations: buildAppIntegrationDeclarationsPayload(appId).declarations,
+      catalog: [{ id: 'postmark', name: 'Postmark', category: 'email' }],
+      credential_storage_available: true,
+    } });
   });
 
   await page.route('**/api/modules/workspace_integrations/delete_app_integration_need**', async (route) => {
@@ -2002,42 +2005,55 @@ test('app integrations route stays responsive across desktop and mobile widths',
   });
 
   await page.goto(`/apps/${APP_ID}/integrations`);
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
   const main = page.locator('main');
 
-  await expect(main.getByRole('heading', { name: 'App Integrations', exact: true })).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Workspace integrations' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Required' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Optional' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'App-specific' })).toBeVisible();
-  await expect(main.getByText('Mozaiks Pay').first()).toBeVisible();
-  await expect(main.getByText('Postmark').first()).toBeVisible();
-  await expect(main.getByText('Internal Search API').first()).toBeVisible();
-  await expect(main.getByText('Ready').first()).toBeVisible();
-  await expect(main.getByText('Partial setup').first()).toBeVisible();
-  await expect(main.getByText('Configure in app environment').first()).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Remove from app' }).first()).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Integrations', exact: true })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'App connections' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Build requirements' })).toBeVisible();
+  for (const name of ['Mozaiks Pay', 'Postmark', 'Internal Search API', 'Payments connection']) {
+    await expect(main.getByRole('heading', { name, exact: true })).toBeVisible();
+  }
+  await expect(main.getByText('Ready', { exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Remove requirement' })).toBeVisible();
+  const connections = main.getByRole('listitem');
+  await expect(connections.filter({ hasText: 'Payments connection' }).getByRole('button', { name: 'Check status' })).toBeVisible();
+  await expect(connections.filter({ hasText: 'Search connection' }).getByRole('button', { name: 'Check status' })).toHaveCount(0);
   await expect(main.getByText(SECRET_SENTINEL)).toHaveCount(0);
-  await expect(main.getByRole('button', { name: 'Add Integration' })).toHaveCount(0);
-  await expect(main.getByRole('button', { name: 'Check now' })).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
   expect(providerUrlRequests).toHaveLength(0);
 
   await captureIntegrationsQa(page, testInfo, 'initial', {
     shell_layout: 'rendered',
     app_declarations_visible: true,
-    credential_crud_visible: false,
+    app_connection_editor_available: true,
     provider_url_requests: providerUrlRequests,
     secret_values_visible: false,
     console_messages: consoleMessages,
     response_findings: responseFindings,
   });
 
+  await main.getByRole('button', { name: 'Add integration' }).click();
+  await expect(page.getByLabel('Service ID')).toBeVisible();
+  const serviceId = page.getByLabel('Service ID');
+  for (const invalid of ['.', 'calendar..sync']) {
+    await serviceId.fill(invalid);
+    expect(await serviceId.evaluate(input => input.validity.patternMismatch)).toBe(true);
+  }
+  await serviceId.fill('calendar.sync');
+  expect(await serviceId.evaluate(input => input.validity.valid)).toBe(true);
+  await expect(page.getByLabel('API key or secret')).toHaveValue('');
+  await expectNoHorizontalOverflow(page);
+  await captureIntegrationsQa(page, testInfo, 'add-integration-overlay', { shell_layout: 'rendered', overlay: 'open' });
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByLabel('Service ID')).toHaveCount(0);
   await writeIntegrationsQaArtifact(`${testInfo.project.name.replace(/[^a-z0-9_-]+/gi, '-').toLowerCase()}-report.json`, {
     page: `/apps/${APP_ID}/integrations`,
-    states_verified: ['initial'],
+    states_verified: ['initial', 'add-integration-overlay'],
     provider_url_requests: providerUrlRequests,
     secret_values_visible: false,
-    credential_crud_visible: false,
+    app_connection_editor_available: true,
     console_messages: consoleMessages,
     response_findings: responseFindings,
   });
@@ -2051,13 +2067,6 @@ test('app integrations route stays responsive across desktop and mobile widths',
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
   }
 
-  await captureIntegrationsQa(page, testInfo, 'add-integration-overlay', {
-    shell_layout: 'rendered',
-    overlay: 'not rendered',
-    secret_values_visible: false,
-    console_messages: consoleMessages,
-    response_findings: responseFindings,
-  });
 });
 
 test('app usage route stays responsive across desktop and mobile widths', async ({ page }) => {
@@ -2083,6 +2092,8 @@ test('app usage route stays responsive across desktop and mobile widths', async 
 
 test('workspace performance route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.goto('/performance');
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
   const main = page.locator('main');
 
   await expect(main.getByRole('heading', { name: 'Performance', exact: true })).toBeVisible();
@@ -2098,20 +2109,22 @@ test('workspace performance route stays responsive across desktop and mobile wid
   await expect(main.getByRole('heading', { name: 'Applications' })).toBeVisible();
   // Deterministic insight text, not an opaque generated summary.
   await expect(main.getByText('Campaign Revision Workbench MRR declined 8.6%')).toBeVisible();
+  await expect(main.getByText('Dashboard unavailable').filter({ visible: true }).first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
   expect(viewport).not.toBeNull();
 
   if (viewport.width < 768) {
-    await expect(main.locator('article').filter({ hasText: 'Member Growth Studio' }).first()).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
+    await main.locator('article').filter({ hasText: 'Member Growth Studio' }).first().click();
   } else {
-    await expect(main.getByRole('row', { name: /Member Growth Studio/i }).first()).toBeVisible();
     await expect(main.getByRole('columnheader', { name: 'MRR' })).toBeVisible();
     await expect(main.getByRole('columnheader', { name: 'Conversion' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
+    await main.getByRole('row', { name: /Member Growth Studio/i }).click();
   }
+  await expect(page).toHaveURL(/\/apps\/dashboard-member-growth\/overview$/);
 });
 
 test('app revenue route stays responsive across desktop and mobile widths', async ({ page }) => {

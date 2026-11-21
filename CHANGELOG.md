@@ -15,6 +15,7 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Studio owners can open Revenue and manage connections for the app they select in My Apps, including in hosts with a separate dashboard app ID.
 - Factory distinguishes available pack offerings from the explicit, versioned
   pack selection in the owner-reviewed DesignDocs artifact. Planning, template
   composition and saved-bundle replay preserve that selection; changed sources

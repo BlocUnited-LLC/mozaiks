@@ -99,6 +99,7 @@ export default function MetricDetailPanel({
   open,
   appId,
   appName = null,
+  reference = 'dashboard',
   metricId,
   period,
   registry = null,
@@ -120,7 +121,7 @@ export default function MetricDetailPanel({
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetchMetricDetail(appId, activeMetricId, period)
+    fetchMetricDetail(appId, activeMetricId, period, reference)
       .then(({ payload, dataMode: mode }) => {
         if (!cancelled) {
           setFetchedDetail(payload)
@@ -136,7 +137,7 @@ export default function MetricDetailPanel({
     return () => {
       cancelled = true
     }
-  }, [open, overrideDetail, appId, activeMetricId, period])
+  }, [open, overrideDetail, appId, activeMetricId, period, reference])
 
   const detail = overrideDetail || fetchedDetail
 
