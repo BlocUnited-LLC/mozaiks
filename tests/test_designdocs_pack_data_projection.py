@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     verify_pack_integrity,
@@ -30,7 +31,10 @@ from mozaiksai.core.workflow.generator_support.module_role_grants import (
     validate_reviewed_pack_data,
     verified_pack_authorization,
 )
-from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
+from mozaiksai.core.workflow.outputs.structured import (
+    get_provider_response_model,
+    load_workflow_structured_outputs,
+)
 from tests import test_designdocs_capability_ownership as ownership
 from tests import test_designdocs_monetization_inventory as inventory
 from tests.test_designdocs_selected_pack_context import PACK, WORKFLOW, _prompt, _prompt_runner
@@ -106,6 +110,7 @@ def test_selected_content_projects_the_verified_collection_and_real_actions(cont
     for action in ("list_entries", "get_entry", "create_entry", "update_entry", "archive_entry"):
         assert f"content.{action}" in prompt
     assert "content.manage" in prompt
+    assert '"data_contract": "selected_pack_data"' in prompt
     assert "class ContentHandler" not in prompt
     assert "templates/data/contract.json" not in prompt
     assert content_context.snapshot() == before
@@ -217,9 +222,9 @@ def test_repair_prompt_preserves_verified_owner_after_duplicate_entries_rejectio
     assert _collections(prompt)[0]["module_id"] == "content"
 
 
-@pytest.mark.parametrize("pack_only", [False, True])
+@pytest.mark.parametrize("data_source", ["mixed", "empty_object", "selected_pack_data"])
 def test_strict_design_saves_pack_data_and_optional_app_collection_after_review(
-    content_context, persistence, monkeypatch, pack_only,
+    content_context, persistence, monkeypatch, data_source,
 ):
     authorization = _select(content_context)
     shown = []
@@ -232,8 +237,11 @@ def test_strict_design_saves_pack_data_and_optional_app_collection_after_review(
 
     monkeypatch.setattr(save_design_doc, "use_ui_tool", approve)
     bundle = _bundle()
-    if pack_only:
-        bundle["data_contract"].update(surfaces=[], shared_collections=[])
+    if data_source != "mixed":
+        if data_source == "selected_pack_data":
+            bundle["data_contract"] = data_source
+        else:
+            bundle["data_contract"].update(surfaces=[], shared_collections=[])
         page = bundle["experience_spec"]["pages"][0]
         page.update(name="Entries", route="/entries", intent="Read the app's published editorial entries.")
         bundle["surface_map"]["surfaces"] = [{
@@ -251,9 +259,11 @@ def test_strict_design_saves_pack_data_and_optional_app_collection_after_review(
     contract = detach(content_context.get("data_contract"))
     assert validate_reviewed_pack_data(contract, authorization) == {("content", "entries")}
     groups = {group["surface_id"]: group for group in contract["surfaces"]}
-    if pack_only:
-        assert bundle["data_contract"]["surfaces"] == bundle["data_contract"]["shared_collections"] == []
+    if data_source != "mixed":
         assert set(groups) == {"content"}
+        assert [row["name"] for row in groups["content"]["collections"]] == ["entries"]
+        assert contract["shared_collections"] == []
+        assert contract["policies"] == {"default_scope_field": "app_id", "allow_destructive_migrations": False}
     else:
         assert groups["reports"]["collections"][0]["name"] == "reports"
         assert groups["reports"]["collections"][0]["entity"] == "Report"
@@ -261,6 +271,32 @@ def test_strict_design_saves_pack_data_and_optional_app_collection_after_review(
     assert detach(content_context.get("access_policy")) == bundle["access_policy"]
     assert bundle == before
     persistence[2].assert_awaited_once()
+
+
+@pytest.mark.parametrize("selection", [[], ["mobile"]])
+def test_pack_data_reference_requires_a_verified_collection(content_context, persistence, monkeypatch, selection):
+    assert select_capability_packs(selection, context_variables=content_context)["status"] == "selected"
+    review = AsyncMock()
+    monkeypatch.setattr(save_design_doc, "use_ui_tool", review)
+    bundle = {**_bundle(), "data_contract": "selected_pack_data"}
+    result = inventory._save(content_context, bundle)
+    assert result["outcome"] == "revise", result
+    assert "requires a verified selected pack that contributes collections" in result["error"]
+    review.assert_not_awaited()
+    persistence[1].assert_not_called()
+
+
+def test_design_requires_explicit_pack_data_reference_or_app_contract():
+    models, _ = load_workflow_structured_outputs("DesignDocs")
+    model = models["DesignDocsBundle"]
+    wire = get_provider_response_model(model).model_json_schema()
+    assert "data_contract" in wire["required"]
+    assert "selected_pack_data" in json.dumps(wire["properties"]["data_contract"])
+    bundle = _bundle()
+    del bundle["data_contract"]
+    for patch in ({}, {"data_contract": None}, {"data_contract": "content"}):
+        with pytest.raises(ValidationError):
+            model.model_validate({**bundle, **patch})
 
 
 def test_selected_content_cannot_gain_an_invented_delete_action(content_context, persistence, monkeypatch):
