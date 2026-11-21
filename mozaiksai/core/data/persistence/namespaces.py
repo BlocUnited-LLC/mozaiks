@@ -48,6 +48,7 @@ class PlatformCollections:
     CONNECTORS = "Connectors"
     CONNECTOR_SECRETS = "ConnectorSecrets"
     APP_CONTEXT_INDEX_JOBS = "AppContextIndexJobs"
+    STUDIO_MODEL_POLICIES = "StudioModelPolicies"
 
 
 __all__ = [

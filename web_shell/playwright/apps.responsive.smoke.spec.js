@@ -1725,6 +1725,26 @@ test('workspace integrations route stays responsive across desktop and mobile wi
   }
 });
 
+test('workspace AI models route stays responsive across desktop and mobile widths', async ({ page }) => {
+  await page.route('**/api/studio/settings/ai-models', async route => {
+    await route.fulfill({
+      json: {
+        default: 'gemini',
+        allowed: ['gemini', 'openai'],
+        models: [
+          { id: 'gemini', label: 'Gemini 3.8 Flash', configured: true },
+          { id: 'openai', label: 'GPT-5 Nano', configured: false },
+        ],
+      },
+    });
+  });
+  await page.goto('/settings/ai-models');
+  await expect(page.getByRole('heading', { name: 'AI models', exact: true })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Default model' })).toHaveValue('gemini');
+  await expect(page.getByText('Provider key missing', { exact: true })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+});
+
 test('workspace support route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.goto('/support');
   const main = page.locator('main');

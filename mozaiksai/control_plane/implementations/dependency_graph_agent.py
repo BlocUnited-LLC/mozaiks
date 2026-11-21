@@ -9,7 +9,11 @@ from collections.abc import Sequence
 from typing import Any
 
 from factory_app.refinement_harness.tools._context_graph import load_context_graph_for_tool
-from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
+from mozaiksai.control_plane.config import (
+    ControlPlaneConfig,
+    RefinementModel,
+    load_control_plane_config,
+)
 from mozaiksai.control_plane.context_graph.assessment import (
     MAX_GRAPH_PROMPT_BYTES,
     DependencyGraphAssessment,
@@ -70,8 +74,9 @@ class DependencyGraphAgent:
         usage_context: AuxiliaryUsageContext | None = None,
         run_build_binding: RunBuildBinding | None = None,
         selected_paths: Sequence[str] = (),
+        refinement_model: RefinementModel | None = None,
     ) -> DependencyGraphContext | None:
-        config = ControlPlaneConfig.model_validate(self._config_loader())
+        config = ControlPlaneConfig.model_validate(self._config_loader()).for_refinement_model(refinement_model)
         if (
             not config.enabled or not config.dependency_graph.enabled
             or not context.build_record_id or context.build_family != "app_bundle"

@@ -5,7 +5,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
+from mozaiksai.control_plane.config import (
+    ControlPlaneConfig,
+    RefinementModel,
+    load_control_plane_config,
+)
 from mozaiksai.control_plane.contracts import ControlPlaneToolCall, ControlPlaneToolContext
 from mozaiksai.control_plane.executor import ControlPlaneToolExecutor
 from mozaiksai.control_plane.loader import load_selected_refinement_harness
@@ -53,6 +57,7 @@ class LLMChangeClassifier:
         build_key: str | None = None,
         raw_user_request: str,
         declared_change_class: str | None = None,
+        refinement_model: RefinementModel | None = None,
         build_record_id: str | None = None,
         source_surface: str | None = None,
         app_id: str | None = None,
@@ -68,6 +73,8 @@ class LLMChangeClassifier:
         if not control_plane.classifier_enabled():
             raise RuntimeError("Refinement classifier is disabled in app/config/refinement_policy.yaml")
 
+        if refinement_model is not None:
+            control_plane = control_plane.model_copy(update={"model_override": refinement_model})
         llm_config = control_plane.resolve_capability_llm_config("classifier")
 
         user_prompt = self._build_user_prompt(

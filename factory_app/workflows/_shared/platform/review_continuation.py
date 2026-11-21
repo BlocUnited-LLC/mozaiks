@@ -183,6 +183,17 @@ async def recover_saved_app_review(
     )
     if version is None or version.id != current.get("artifact_version_id"):
         raise ValueError("The saved review artifact is unavailable")
+    metadata = version.commit_metadata.metadata or {}
+    saved_model = metadata.get("refinement_model")
+    if saved_model is not None:
+        # A recovered inline run may have no active chat, so its registry run
+        # contains only the build identity. The owned candidate is the durable
+        # source of the model selected for that run.
+        if (version.app_id != binding.target_app_id or version.commit_metadata.author_user_id != user_id
+                or any(metadata.get(key) != value for key, value in binding.model_dump(exclude={"refinement_model"}).items())
+                or binding.refinement_model not in (None, saved_model)):
+            raise ValueError("The saved review model does not match the owned build")
+        binding = RunBuildBinding.model_validate({**binding.model_dump(), "refinement_model": saved_model})
     source_chat_id = None
     baseline_id = None
     misrouted_chat_id = None

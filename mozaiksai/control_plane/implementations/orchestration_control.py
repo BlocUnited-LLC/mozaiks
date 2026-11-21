@@ -394,6 +394,7 @@ class OrchestrationControlHarness:
             target_app_id=refinement_request.target_app_id,
             user_id=str(refinement_request.user_id or "").strip() or None,
             usage_context=refinement_request.usage_context,
+            refinement_model=refinement_request.refinement_model,
             build_family=refinement_request.build_family,
             build_key=refinement_request.normalized_build_key(),
             build_record_id=refinement_request.build_record_id,

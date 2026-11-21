@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from mozaiksai.core.session.build_binding import RefinementModel
+
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
@@ -76,6 +78,7 @@ class RefinementRequestPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     request_kind: str = "refinement"
+    refinement_model: RefinementModel | None = None
     declared_change_class: ChangeClassification | None = None
     build_family: str
     build_key: str | None = None

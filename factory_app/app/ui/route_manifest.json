@@ -118,6 +118,22 @@
       }
     },
     {
+      "path": "/settings/ai-models",
+      "component": "WorkspaceAIModelsPage",
+      "label": "AI models",
+      "order": 10,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "AI models",
+        "navigation": {
+          "group": "workspace-studio",
+          "scope": "local",
+          "icon": "settings"
+        }
+      }
+    },
+    {
       "path": "/support",
       "component": "UserSupportPage",
       "label": "Support",

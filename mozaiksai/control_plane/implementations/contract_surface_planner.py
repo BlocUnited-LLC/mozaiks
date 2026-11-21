@@ -383,7 +383,7 @@ class ContractSurfacePlanner:
                 confidence=0.0,
             )
 
-        llm_config = self._load_config().resolve_capability_llm_config("contract_surface")
+        llm_config = self._load_config().for_refinement_model(refinement_request.refinement_model).resolve_capability_llm_config("contract_surface")
         user_prompt = self._build_user_prompt(
             request=refinement_request,
             routing_decision=routing_decision,
