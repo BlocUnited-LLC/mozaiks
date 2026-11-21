@@ -394,7 +394,7 @@ class SurfaceRegenerationWorker:
             "Apply a targeted Mozaiks contract surface update.",
             "Return JSON only.",
             "payload_json:",
-            json.dumps(payload, indent=2, sort_keys=True, default=str),
+            json.dumps(payload, indent=2, sort_keys=True, default=str, ensure_ascii=False),
             "",
             "Return a JSON object with this exact shape:",
             json.dumps(

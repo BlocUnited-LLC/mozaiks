@@ -12,6 +12,7 @@ changes as a provider-neutral ``StagedPatchProposal``. These tests pin:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -142,6 +143,15 @@ def _request(**overrides: Any) -> CodingWorkerRequest:
     }
     payload.update(overrides)
     return CodingWorkerRequest(**payload)
+
+
+def test_coding_prompt_presents_unicode_and_preserves_source_escapes():
+    source = r"const label = 'café · 星'; const separator = '\u0000';"
+    request = _request(files={_SCOPED_PATH: source})
+    prompt = StructuredOutputCodingProvider._build_user_prompt(request=request, control_plane_context={})
+    assert "café · 星" in prompt
+    payload, _ = json.JSONDecoder().raw_decode(prompt.split("payload_json:\n", 1)[1])
+    assert payload["input_files"] == request.files
 
 
 def _provider(plan: CodingWorkerPlan) -> StructuredOutputCodingProvider:
