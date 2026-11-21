@@ -1312,7 +1312,7 @@ async def _connector_scope(
 def _selected_connector_record(record: dict[str, Any]) -> dict[str, Any]:
     fields = (
         "service", "display_name", "notes", "status", "secret_available", "ready",
-        "expires_at", "updated_at", "health_check_supported",
+        "expires_at", "updated_at",
     )
     result = {key: record[key] for key in fields if key in record}
     health = record.get("health") or {}

@@ -142,10 +142,10 @@ function SelectedAppIntegrations({ appId }) {
                     {connector.secret_available && <span>Credential saved</span>}
                   </div>
                   {connector.notes && <p className="mt-1 whitespace-pre-wrap break-words text-sm">{connector.notes}</p>}
-                  {connector.health?.last_checked_at && <p className="text-xs text-muted-foreground">Last check · {connector.health.status}</p>}
+                  {connector.health?.status && <p className="text-xs text-muted-foreground">Health · {connector.health.status.replaceAll('_', ' ')}</p>}
                 </div>
                 <div className="flex gap-2">
-                  {connector.health_check_supported && <ActionButton size="sm" variant="secondary" disabled={busy} onClick={() => update(() => requestConnectors(appId, { service: connector.service, check: true, method: 'POST' }))}>Check status</ActionButton>}
+                  {connector.health?.health_check_supported && <ActionButton size="sm" variant="secondary" disabled={busy} onClick={() => update(() => requestConnectors(appId, { service: connector.service, check: true, method: 'POST' }))}>Check status</ActionButton>}
                   <ActionButton size="sm" variant="secondary" disabled={busy} onClick={() => openEditor(connector, true)}>Edit</ActionButton>
                 </div>
               </li>

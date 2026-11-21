@@ -1155,7 +1155,12 @@ async function mockStudioApis(page) {
     expect(appId).toBe(APP_ID);
     await route.fulfill({ json: {
       app_id: appId,
-      connectors: [{ service: 'mozaikspay', display_name: 'Payments connection', ready: true }],
+      connectors: [
+        { service: 'mozaikspay', display_name: 'Payments connection', ready: true,
+          health: { status: 'pending_validation', health_check_supported: true } },
+        { service: 'custom_search', display_name: 'Search connection', ready: false,
+          health: { status: 'unknown', health_check_supported: false } },
+      ],
       declarations: buildAppIntegrationDeclarationsPayload(appId).declarations,
       catalog: [{ id: 'postmark', name: 'Postmark', category: 'email' }],
       credential_storage_available: true,
@@ -2012,7 +2017,9 @@ test('app integrations route stays responsive across desktop and mobile widths',
   }
   await expect(main.getByText('Ready', { exact: true })).toBeVisible();
   await expect(main.getByRole('button', { name: 'Remove requirement' })).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Check status' })).toHaveCount(0);
+  const connections = main.getByRole('listitem');
+  await expect(connections.filter({ hasText: 'Payments connection' }).getByRole('button', { name: 'Check status' })).toBeVisible();
+  await expect(connections.filter({ hasText: 'Search connection' }).getByRole('button', { name: 'Check status' })).toHaveCount(0);
   await expect(main.getByText(SECRET_SENTINEL)).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
   expect(providerUrlRequests).toHaveLength(0);
