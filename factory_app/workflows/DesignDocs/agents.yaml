@@ -69,7 +69,7 @@ agents:
       owner review before generation.
 
       Every role_id is unique snake_case. Every grant names a declared role and
-      the exact name of an app-owned module collection in data_contract. Actions
+      the exact name of an app-owned module collection in the composed data contract, including verified pack collections. Actions
       name that collection's canonical create/update/delete or list/get ids, or
       explicit surface_map owned_mutations or custom_reads. If either canonical
       read is role-granted, cover both list_<collection> and get_<collection>
@@ -106,8 +106,11 @@ agents:
       A role receiving a pack permission must explicitly list every action
       that shares that permission, including actions in other selected modules.
       The owner reviews the actual actions and pack identities.
-      Leave selected pack data to deterministic composition; do not replace its
-      collections or field definitions with model-authored copies.
+      When verified selected packs supply all collections and the app uses default
+      data policies, emit "data_contract": "selected_pack_data". Describe how
+      the app uses those collections and actions in the database document.
+      For additional app-owned data or custom policies, emit a data_contract
+      object with only the app's additions. Design save composes the stock definitions.
       Include every role that needs a protected action, including ordinary
       submitters; granting an action only to admin excludes other users.
       The reserved admin role uses verified identity claims or the app's existing
@@ -357,7 +360,7 @@ agents:
 
       6) Emit one typed `surface_map` object that exactly captures the realization boundaries used by both the Backend doc and the UI Schema doc.
 
-      7) Emit one typed `data_contract` object that captures the canonical collection, field, index, ownership, and migration intent for the app.
+      7) Emit `data_contract` as the selected_pack_data literal for stock-only data with default policies, or as an object describing the app's own data and policy decisions.
 
       8) Output ONE valid `DesignDocsBundle` JSON object only. The runtime auto-persists the docs, the typed `surface_map`, and the typed `data_contract`.
   - id: event_architecture
@@ -452,8 +455,8 @@ agents:
       - For durable module surfaces, be explicit about owned entities, mutations, permissions, event facts, and ownership checks so downstream layered backend generation does not have to infer them from vague prose.
       - Do not rely on prose-only conventions for event namespaces, primitive types, layout modes, capability ids, or admin sections.
       - Keep the ui_schema YAML simple enough to transcribe into typed structured outputs without heuristic interpretation.
-      - The data design must be transcribed into `data_contract`; do not leave durable collection ownership, indexes, or migration policy trapped only in prose.
-      - Decide every collection's `tenancy` here: `per_user`, `per_workspace`, or `app_wide`. `scope` remains the namespace owner (`app`, `platform`, or `hosted`), never row tenancy. Set `owner_field` to an exact declared field for scoped collections, or null for `app_wide`. Give every collection its own `entity`, named exactly as in its owning surface's `primary_entities`; two collections of one owner never share an entity. When a module surface owns a collection whose entity it does not list, the save adds that entity to its `primary_entities`, unless another surface declares it or another module's collections hold it too, the module lists it under another spelling, or it is a platform identity or selected-provider entity. These decisions persist unchanged into `data/contract.json`; downstream workflows must not re-decide them.
+      - Transcribe app-authored data decisions into `data_contract`. For pack-owned data, name the verified owner in the document and let the pack supply its fields and indexes.
+      - Decide every app-authored collection's `tenancy` here: `per_user`, `per_workspace`, or `app_wide`. `scope` remains the namespace owner (`app`, `platform`, or `hosted`), never row tenancy. Set `owner_field` to an exact declared field for scoped collections, or null for `app_wide`. Give every collection its own `entity`, named exactly as in its owning surface's `primary_entities`; two collections of one owner never share an entity. When a module surface owns a collection whose entity it does not list, the save adds that entity to its `primary_entities`, unless another surface declares it or another module's collections hold it too, the module lists it under another spelling, or it is a platform identity or selected-provider entity. These decisions persist unchanged into `data/contract.json`; downstream workflows must not re-decide them.
       - Canonical reads use list_<collection> and get_<collection>, preserving the exact collection name rather than singularizing the entity. Constructed get takes the required string input `id` and returns `item`; constructed list takes `page`, `page_size`, and `search` and returns `items` and `total`. For per-user and per-workspace collections, code constructs these reads with login and owner filtering, plus exact explicit reviewed read grants when present. Without those grants there is no role permission. Do not promise a service-only role check on a code-constructed read or rename its input/output fields. For app-wide collections whose writes require permissions or subscription gates, explicitly describe each read and its access policy; public access is never inferred from protected writes.
       - Canonical create/update/delete writes are constructed for every collection whose lifecycle.write_mode is module_action. Declare the generated record id as `<entity>_id` (for example `task_id` for entity `Task`); code assigns it and clients never supply it. `search_by` is the lookup key for canonical get and may be a user-entered natural key such as `title` or `email`; it is never overwritten with a generated id. Declare `created_at`/`updated_at` as date or datetime fields when the record should carry managed timestamps. For app-wide collections beside actions with permissions, subscription gates, or internal surfaces, canonical writes are not constructed open; prefer per_user or per_workspace tenancy, or describe each write and its access policy explicitly.
       - Every field `type` is one of string, boolean, integer, number, date, datetime, object, array. A `default` is null (no default) or decodes to that type ("true" only for boolean, "0" for integer/number, "[]"/"{}" for array/object, a bare or JSON string for string); the string "null" is never a default. Declare created_at/updated_at as date or datetime with a null default: canonical writes stamp them, so a default such as "now" is saved as null (a string-typed created_at is an ordinary field and is not stamped). A non-string default that means exactly one value ("True" on a boolean, "3.0" on an integer, a bare ISO date) is saved JSON-encoded. An empty default on a non-string field, or any other optional non-string field's default that does not decode to its type, is saved as null; a required field's default must decode to its type or be null. A string field keeps a bare default as written; quote one that is JSON for another type ("1", "true"). Object and array fields cannot be canonical create/update inputs; a required one without a default is saved with the empty default ("[]" or "{}") and filled by hooks or custom mutations. `enum` requires type string.
@@ -735,7 +738,7 @@ agents:
       - `surface_map` is the parser-enforced source of truth for surface ownership. The saved Backend doc and experience_spec must align with it.
       - Every experience_spec page, Dashboard included, appears in exactly one surface's `owned_pages`. The example's projects module owns Dashboard because Dashboard shows its `summarize_projects` read and its project list.
       - Every column, form field, and value key a page names is a declared field of the collection, or an output of the custom read, that serves it.
-      - `data_contract` is the parser-enforced source of truth for durable collections, field contracts, indexes, and migration posture.
+      - The example designs app-owned data. Use `"data_contract": "selected_pack_data"` when verified packs supply all collections with default policies. The saved, composed contract is authoritative for collections, fields, indexes, and migrations.
       - Output ONLY the raw JSON object. No markdown fences, no commentary.
   web_search: true
   max_consecutive_auto_reply: 12

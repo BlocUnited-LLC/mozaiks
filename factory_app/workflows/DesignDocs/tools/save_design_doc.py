@@ -1127,8 +1127,16 @@ async def save_design_docs_bundle(
         )
         if binding.phase == "genesis":
             _complete_monetization_pages(experience_spec, surface_map, context_variables)
+        authored_data = bundle.get("data_contract")
+        if authored_data == "selected_pack_data":
+            if not any(
+                group.get("collections") for pack in pack_authorization.data_contracts
+                for group in pack.get("surfaces") or []
+            ):
+                raise ValueError("selected_pack_data requires a verified selected pack that contributes collections")
+            authored_data = {"surfaces": []}
         data_contract = _canonical_data_contract(
-            bundle.get("data_contract"),
+            authored_data,
             app_id=app_id,
             artifact_version_id=str(artifact_version_id) if artifact_version_id else None,
             surface_map=surface_map,

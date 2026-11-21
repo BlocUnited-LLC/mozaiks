@@ -173,8 +173,8 @@ def _pack_collection_context(context: Any) -> list[str]:
         return []
     lines = [
         "Design save adds these collections. Bind app pages to their module actions, even when the UI uses a "
-        "different name for the records. If the pack supplies all app data, emit data_contract.surfaces=[] and "
-        "shared_collections=[]. Otherwise declare only additional app-owned records. Use the shown owner and "
+        'different name for the records. If packs supply all data with default policies, emit "data_contract": '
+        '"selected_pack_data". Otherwise declare only additional app-owned records and app policies. Use the shown owner and '
         "its permission-bearing actions when proposing grants for approved roles."
     ]
     for row in rows:

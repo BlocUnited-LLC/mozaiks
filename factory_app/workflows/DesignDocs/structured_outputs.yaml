@@ -282,6 +282,10 @@ models:
         type: bool
         description: False unless the product explicitly permits destructive migrations.
 
+  SelectedPackData:
+    type: literal
+    values: [selected_pack_data]
+
   DataContractBundle:
     type: model
     fields:
@@ -303,7 +307,7 @@ models:
       surfaces:
         type: list
         items: DataContractSurface
-        description: Database ownership grouped by realization surface.
+        description: Additional app-authored collections grouped by realization surface. Verified selected packs contribute their own collection definitions.
       shared_collections:
         type: optional_list
         items: DataContractCollection
@@ -502,8 +506,9 @@ models:
         type: DesignSurfaceMap
         description: Canonical typed surface realization contract mirrored into the saved backend and ui_schema docs.
       data_contract:
-        type: DataContractBundle
-        description: Canonical typed database ownership and migration contract persisted separately and staged as data/contract.json in generated app bundles.
+        type: union
+        variants: [SelectedPackData, DataContractBundle]
+        description: Use the literal selected_pack_data when verified selected packs supply all collections and the app uses default migration and scoping policies. Otherwise provide the app-authored collection and policy contract. Design save composes the complete contract for owner review and downstream generation.
       access_policy:
         type: union
         variants: [DesignAccessPolicy, 'null']
