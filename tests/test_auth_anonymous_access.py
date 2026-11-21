@@ -1669,12 +1669,19 @@ def test_studio_route_match_survives_a_wrapper_without_functools_wraps() -> None
 
 def test_every_studio_route_refuses_an_anonymous_visitor(monkeypatch) -> None:
     """Request-level refusal, for a Studio composed without its lifespan."""
+    from fastapi.dependencies.models import Dependant
     from fastapi.routing import APIRoute
 
     from mozaiksai.core.auth import optional_user, require_any_auth, require_user_scope
     from mozaiksai.hosts import studio
 
     principal_dependencies = {require_user, require_user_scope, require_any_auth, optional_user}
+
+    def requires_studio_user(dependency: Dependant) -> bool:
+        return dependency.call is studio.require_studio_user or any(
+            requires_studio_user(child) for child in dependency.dependencies
+        )
+
     defined: set[tuple[tuple[str, ...], str]] = set()
     guarded: set[tuple[tuple[str, ...], str]] = set()
     for route in studio.app.routes:
@@ -1682,7 +1689,7 @@ def test_every_studio_route_refuses_an_anonymous_visitor(monkeypatch) -> None:
             continue
         key = (tuple(sorted(route.methods)), route.path)
         calls = {dependency.call for dependency in route.dependant.dependencies}
-        if studio.require_studio_user in calls:
+        if requires_studio_user(route.dependant):
             guarded.add(key)
         if not _defined_in_studio(route.endpoint):
             continue
@@ -1700,6 +1707,9 @@ def test_every_studio_route_refuses_an_anonymous_visitor(monkeypatch) -> None:
         ("POST", "/api/studio/apps"),
         ("GET", "/api/studio/build/history"),
         ("POST", "/api/studio/build/restore"),
+        ("GET", "/api/studio/refinement/models"),
+        ("GET", "/api/studio/settings/ai-models"),
+        ("PUT", "/api/studio/settings/ai-models"),
     ):
         response = visitor.request(method, path, json={})
         assert (response.status_code, response.json()["detail"]) == (403, STUDIO_PUBLIC_MESSAGE)
@@ -1785,6 +1795,11 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
     execution_host_routes = {
         "POST /api/workflows/trigger": "_resolve_studio_scope",
     }
+    workspace_model_policy_routes = {
+        "GET /api/studio/refinement/models": (studio.require_studio_user, "studio_model_options"),
+        "GET /api/studio/settings/ai-models": (studio.require_studio_model_admin, "studio_model_options"),
+        "PUT /api/studio/settings/ai-models": (studio.require_studio_model_admin, "save_studio_model_policy"),
+    }
     routes_without_app_scope = {"GET /api/shell-config"}
 
     direct_route_list = [
@@ -1802,9 +1817,10 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
         | existing_registry_gates.keys()
         | owner_scoped_registry_operations.keys()
         | execution_host_routes.keys()
+        | workspace_model_policy_routes.keys()
         | routes_without_app_scope
     )
-    assert len(direct_route_list) == len(direct_routes) == 39
+    assert len(direct_route_list) == len(direct_routes) == 42
     assert direct_routes.keys() == classified
     assert len(owned_app_routes) == 12
     for key in owned_app_routes:
@@ -1826,6 +1842,10 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
     )
     for key, expected_call in execution_host_routes.items():
         assert expected_call in named_calls(direct_routes[key].endpoint, awaited_only=False), key
+    for key, (guard, expected_call) in workspace_model_policy_routes.items():
+        route = direct_routes[key]
+        assert guard in {dependency.call for dependency in route.dependant.dependencies}, key
+        assert expected_call in named_calls(route.endpoint, awaited_only=True), key
 
 
 def test_studio_preview_routes_refuse_an_anonymous_visitor(monkeypatch) -> None:
