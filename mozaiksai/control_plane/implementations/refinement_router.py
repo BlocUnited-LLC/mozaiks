@@ -5,7 +5,7 @@ import logging
 import re
 from dataclasses import dataclass
 from enum import Enum, StrEnum
-from typing import Any
+from typing import Any, cast
 
 from pydantic import (
     BaseModel,
@@ -287,7 +287,7 @@ class RefinementRequest(BaseModel):
 
     @model_serializer(mode="wrap")
     def _serialize_request(self, handler: Any) -> dict[str, Any]:
-        payload = handler(self)
+        payload = cast(dict[str, Any], handler(self))
         if self.refinement_model is None:
             payload.pop("refinement_model", None)
         return payload

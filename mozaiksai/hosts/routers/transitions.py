@@ -10,7 +10,7 @@ Routes:
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -113,7 +113,8 @@ async def get_transition_by_id(transition_id: str):
 async def resolve_transition_route(
     body: TransitionResolveRequest,
     principal: UserPrincipal = Depends(require_user_scope),
-    request: Request = None,
+    # FastAPI injects the concrete Request type. Direct calls may omit it.
+    request: Request = cast(Request, None),
 ):
     from logs.logging_config import get_workflow_logger
 
@@ -121,8 +122,8 @@ async def resolve_transition_route(
     authorize_http_workflow_source_paths(body.context_variables, principal=principal)
     try:
         app_id, user_id = resolve_scope_from_principal(principal, app_id=body.app_id, user_id=body.user_id)
-        selected_model = None
-        hosts = getattr(request.app.state, "mozaiks_repo_host_bootstrap_hosts", set()) if request else set()
+        selected_model: RefinementModel | None = None
+        hosts: set[str] = getattr(request.app.state, "mozaiks_repo_host_bootstrap_hosts", set()) if request else set()
         studio_create = "studio" in hosts and body.transition_id in {
             "app_type_selector", "brownfield_path_selector", "brownfield_repo_input",
         }
@@ -146,7 +147,7 @@ async def resolve_transition_route(
             context_variables=body.context_variables or {},
             build_registry_id=body.build_registry_id,
             source_chat_id=body.source_chat_id,
-            **({"refinement_model": selected_model} if selected_model is not None else {}),
+            refinement_model=selected_model,
         )
     except HTTPException:
         raise

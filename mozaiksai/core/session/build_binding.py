@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, StringConstraints, model_serializer
 
@@ -44,7 +44,7 @@ class RunBuildBinding(BaseModel):
 
     @model_serializer(mode="wrap")
     def _serialize_binding(self, handler: Any) -> dict[str, Any]:
-        payload = handler(self)
+        payload = cast(dict[str, Any], handler(self))
         if self.refinement_model is None:
             payload.pop("refinement_model", None)
         return payload

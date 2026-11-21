@@ -24,7 +24,7 @@ class StudioModelPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     default: RefinementModel = "gemini"
-    allowed: list[RefinementModel] = Field(default_factory=lambda: ["gemini", "openai"])
+    allowed: list[RefinementModel] = Field(default_factory=lambda: list(_MODEL_LABELS))
 
     @model_validator(mode="after")
     def _validate_default(self) -> StudioModelPolicy:
