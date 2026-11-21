@@ -21,6 +21,7 @@ export { default as WorkflowChat } from './components/chat/WorkflowChat';
 
 // ChatInterface: Presentational chat component
 export { default as ChatInterface } from './components/chat/ChatInterface';
+export { default as ArtifactPreviewPane } from './components/preview/ArtifactPreviewPane.jsx';
 
 // PersistentChatWidget: Context-aware widget (for full apps)
 export { default as PersistentChatWidget } from './components/chat/PersistentChatWidget';

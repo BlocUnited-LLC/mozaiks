@@ -460,7 +460,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
     let hasOpened = false;
     
     // F7/F8: Sequence tracking and resume capability (strict canonical key)
-    let lastSequence = parseInt(platform.storage.getItem(`ws_idx_${chatId}`) || '0');
+    let lastSequence = parseInt(platform.storage.getItem(`ws_idx_${chatId}`) || '-1');
     let resumePending = false;
     
     // Helper to send client.resume
@@ -479,7 +479,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
       hasOpened = true;
       
       // If we have a previous sequence, request resume first
-      if (lastSequence > 0) {
+      if (lastSequence > 0 || options?.resumeSession) {
         sendResume();
       }
       

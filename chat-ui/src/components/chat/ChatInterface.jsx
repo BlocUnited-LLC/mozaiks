@@ -194,8 +194,15 @@ const ModernChatInterface = ({
   pendingHarnessDecisionError = null,
   onPendingHarnessDecisionAction = null,
   failedWorkflowRetry = null,
+  composerDisabled = false,
+  composerLabel,
+  composerValue,
+  onComposerChange,
+  transcriptLabel,
 }) => {
-  const [message, setMessage] = useState('');
+  const [localMessage, setLocalMessage] = useState('');
+  const message = composerValue ?? localMessage;
+  const setMessage = onComposerChange || setLocalMessage;
   const [hasUserInteracted, setHasUserInteracted] = useState(false);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const chatEndRef = useRef(null);
@@ -204,6 +211,7 @@ const ModernChatInterface = ({
   const textareaRef = useRef(null);
   const [buttonText, setButtonText] = useState('SEND');
   const [isScrolledUp, setIsScrolledUp] = useState(false);
+  const followingRef = useRef(true);
   const navigate = useNavigate();
   const formattedWorkflowName = workflowName
     ? workflowName.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ')
@@ -239,7 +247,7 @@ const ModernChatInterface = ({
   // Composer focus helpers
   // ---------------------------------------------------------------------------
 
-  const isComposerDisabled = buttonText === 'NEXT' || hasPendingHarnessDecision || Boolean(failedWorkflowRetry);
+  const isComposerDisabled = composerDisabled || buttonText === 'NEXT' || hasPendingHarnessDecision || Boolean(failedWorkflowRetry);
 
   const focusComposer = useCallback(() => {
     if (!isComposerDisabled) {
@@ -283,20 +291,24 @@ const ModernChatInterface = ({
 
   const scrollToBottom = useCallback((behavior = 'smooth') => {
     const resolvedBehavior = typeof behavior === 'string' ? behavior : 'smooth';
-    chatEndRef.current?.scrollIntoView({
+    followingRef.current = true;
+    if (transcriptLabel && chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    } else chatEndRef.current?.scrollIntoView({
       behavior: resolvedBehavior,
       block: 'end',
       inline: 'nearest',
     });
     setIsScrolledUp(false);
-  }, []);
+  }, [transcriptLabel]);
 
   const handleScroll = () => {
     if (chatContainerRef.current) {
       const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
       const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
       const hasScrolledUp = scrollTop > 100;
-      setIsScrolledUp(!isAtBottom && hasScrolledUp);
+      followingRef.current = isAtBottom;
+      setIsScrolledUp(!isAtBottom && (Boolean(transcriptLabel) || hasScrolledUp));
     }
   };
 
@@ -355,6 +367,7 @@ const ModernChatInterface = ({
 
   const onSubmitClick = (event) => {
     event.preventDefault();
+    if (composerDisabled) return;
     if (buttonText === 'NEXT') {
       const envDefaultAppId =
         (typeof process !== 'undefined' && process.env && (process.env.REACT_APP_DEFAULT_APP_ID || process.env.REACT_APP_DEFAULT_app_id))
@@ -369,6 +382,7 @@ const ModernChatInterface = ({
     if (message.trim() === '') return;
 
     const newMessage = { "sender": "user", "content": message, "artifactContext": artifactContext || null };
+    followingRef.current = true;
     onSendMessage(newMessage);
     setMessage('');
     setTimeout(focusComposer, 60);
@@ -401,7 +415,7 @@ const ModernChatInterface = ({
   };
 
   const handleKeyDown = (event) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       onSubmitClick(event);
     }
@@ -415,6 +429,10 @@ const ModernChatInterface = ({
   }, [messages, loading]);
 
   useEffect(() => {
+    if (transcriptLabel) {
+      if (followingRef.current) scrollToBottom('auto');
+      return;
+    }
     scrollToBottom('smooth');
     const frame = window.requestAnimationFrame(() => scrollToBottom('auto'));
     const timer = window.setTimeout(() => scrollToBottom('auto'), 160);
@@ -422,7 +440,7 @@ const ModernChatInterface = ({
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timer);
     };
-  }, [messages, scrollToBottom]);
+  }, [messages, scrollToBottom, transcriptLabel]);
 
   useEffect(() => {
     const chatContainer = chatContainerRef.current;
@@ -773,6 +791,8 @@ const ModernChatInterface = ({
       <div className={`absolute inset-0 pointer-events-none ${isOnChatPage ? 'chat-feed-backdrop' : 'bg-[rgba(0,0,0,0.45)]'} ${isOnChatPage ? (conversationMode === 'ask' ? 'chat-backdrop-ask' : 'chat-backdrop-workflow') : ''} z-0`} />
         <div
           ref={chatContainerRef}
+          role={transcriptLabel ? 'region' : undefined}
+          aria-label={transcriptLabel}
           className={`absolute inset-0 overflow-y-auto my-scroll1 z-10 ${isOnChatPage ? '' : 'px-2 py-2 md:p-6'}`}
         >
           {isOnChatPage ? (
@@ -797,6 +817,7 @@ const ModernChatInterface = ({
       <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-20">
             <button
               onClick={scrollToBottom}
+              aria-label={transcriptLabel ? 'View latest reply' : undefined}
         className="jump-present"
             >
               Jump to Present
@@ -805,7 +826,7 @@ const ModernChatInterface = ({
         )}
       </div>
 
-      <ChatStatusBar chatStatus={chatStatus} connectionStatus={connectionStatus} />
+      <ChatStatusBar chatStatus={chatStatus} connectionStatus={connectionStatus} onRetry={onRetry} />
 
   {/* Fixed Transmission Input Area - Never moves */}
             <div className={`flex-shrink-0 p-3 sm:p-4 border-t border-[rgba(var(--color-primary-light-rgb),0.2)] bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.05)] to-[rgba(var(--color-secondary-rgb),0.05)] backdrop-blur-xl shadow-lg transition-all duration-500 transmission-input-tight rounded-b-[inherit]`}>
@@ -950,6 +971,7 @@ const ModernChatInterface = ({
               onKeyDown={handleKeyDown}
               onFocus={() => setHasUserInteracted(true)}
               placeholder={composerPlaceholder}
+              aria-label={composerLabel}
               disabled={isComposerDisabled}
               rows={1}
               className={refinementModelPicker
@@ -995,7 +1017,7 @@ const ModernChatInterface = ({
             <button
               type="submit"
               aria-label={buttonText === 'NEXT' ? 'Continue' : 'Send message'}
-              disabled={!message.trim() || hasPendingHarnessDecision}
+              disabled={!message.trim() || hasPendingHarnessDecision || composerDisabled}
               className={`
                 px-2 py-1.5 rounded-md transition-all duration-300 min-w-[36px] sm:min-w-[40px] w-auto h-8 sm:h-9 oxanium font-bold text-[13px] flex items-center justify-center letter-spacing-wide border-2 flex-shrink-0
                 ${(!message.trim())

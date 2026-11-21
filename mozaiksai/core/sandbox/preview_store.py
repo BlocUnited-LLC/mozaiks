@@ -121,10 +121,13 @@ class MongoPreviewStore:
         max_pending: int, queue_seconds: float, ttl_seconds: float,
     ) -> dict[str, Any]:
         fields = set(identity)
-        if fields not in (set(_IDENTITY_FIELDS), set(_IDENTITY_FIELDS) | set(_SEALED_IDENTITY_FIELDS)) or not all(
+        base_fields = set(_IDENTITY_FIELDS)
+        if fields not in (base_fields, base_fields | {"preview_mode"}, base_fields | set(_SEALED_IDENTITY_FIELDS)) or not all(
             isinstance(value, str) and value for value in identity.values()
         ):
             raise ValueError("Preview requires its complete immutable identity")
+        if "preview_mode" in fields and (identity["preview_mode"] != "document" or identity["provider"] != "e2b"):
+            raise ValueError("Invalid document preview identity")
         if fields & set(_SEALED_IDENTITY_FIELDS):
             if identity["provider"] != "docker" or any(
                 re.fullmatch(r"sha256:[0-9a-f]{64}", identity[name]) is None
@@ -145,7 +148,7 @@ class MongoPreviewStore:
             self._bind_limits(document, {"max_sessions": max_sessions, "max_owner_sessions": max_owner_sessions, "max_pending": max_pending})
             for current in document["entries"]:
                 if all(current[name] == identity[name] for name in ("app_id", "user_id", "artifact_id")):
-                    if any(current.get(name) != identity.get(name) for name in (*_IDENTITY_FIELDS, *_SEALED_IDENTITY_FIELDS)):
+                    if any(current.get(name) != identity.get(name) for name in (*_IDENTITY_FIELDS, *_SEALED_IDENTITY_FIELDS, "preview_mode")):
                         raise ValueError("Preview artifact identity changed")
                     return cast(dict[str, Any], current)
             if sum(item["phase"] == "queued" for item in document["entries"]) >= max_pending:

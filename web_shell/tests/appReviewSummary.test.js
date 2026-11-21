@@ -11,6 +11,7 @@ import { build } from 'esbuild';
 import { chromium, expect } from '@playwright/test';
 import postcss from 'postcss';
 import tailwindcss from '@tailwindcss/postcss';
+import { previewExport, reactAlias } from './artifactPreviewFixture.js';
 
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const compiled = await build({
@@ -210,8 +211,8 @@ test('review workspace previews owned snapshots and keeps revision evidence sepa
     `},
     bundle:true, write:false, jsx:'automatic', loader:{'.js':'jsx','.png':'dataurl'}, nodePaths:[path.join(shell,'node_modules')],
     alias:{'@mozaiks/chat-ui/core/ui/DownloadCenter.js':path.join(root,'chat-ui/src/core/ui/DownloadCenter.js'),
-      react:path.join(shell,'node_modules/react'),'react-dom':path.join(shell,'node_modules/react-dom')},
-    plugins:[{name:'review-transport', setup(builder) {
+      ...reactAlias},
+    plugins:[previewExport, {name:'review-transport', setup(builder) {
       builder.onResolve({filter:/@mozaiks\/chat-ui\/ui|studioApi\.js$|websocketAuth\.js$|adapters\/api\.js$/}, args => ({path:args.path,namespace:'fixture'}));
       builder.onLoad({filter:/.*/,namespace:'fixture'}, ({path: name}) => ({loader:'jsx',resolveDir:shell,contents:
         name.endsWith('studioApi.js') ? 'export const getStudioAccessToken = () => null; export const studioFetch = (...args) => fetch(...args);'

@@ -11,6 +11,7 @@ recursive-include factory_app/build_context *
 recursive-include factory_app/refinement_harness *
 recursive-include factory_app/workflows *
 recursive-include mozaiksai/core/usage/catalogs *.json
+include mozaiksai/core/sandbox/compile_document.cjs
 include ai-pricing/catalogs/usage-pricing.generated.json
 recursive-include web_shell *.js *.jsx *.cjs *.css *.html *.json *.md
 include web_shell/.env.example
