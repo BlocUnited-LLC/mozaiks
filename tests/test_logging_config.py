@@ -184,3 +184,195 @@ def test_json_formatter_handles_opaque_websocket_extra_without_raw_error_output(
     assert rendered["extra"]["websocket"] == "<Connection>"
     assert "synthetic-credential" not in rendered["msg"]
     assert "***REDACTED***" in rendered["msg"]
+
+
+# ---------------------------------------------------------------------------
+# Audit fallback: the rendered output must keep the sanitized evidence (#1003)
+# ---------------------------------------------------------------------------
+
+_DRIVER_SECRET = "SECRET-IN-DRIVER-ERROR"
+_DIGEST = "a" * 64
+
+
+class _FailingCollection:
+    async def insert_one(self, document):
+        raise RuntimeError(f"insert failed: payload={_DRIVER_SECRET}")
+
+
+class _FakeMongoClient:
+    """Subscriptable stand-in: client[database][collection] -> collection."""
+
+    def __init__(self, collection):
+        self._collection = collection
+
+    def __getitem__(self, _database):
+        return {"audit_log": self._collection}
+
+    def __class_getitem__(cls, _item):
+        return cls
+
+
+def _fallback_message(rendered: str) -> str:
+    """The human-readable message of the first rendered fallback line.
+
+    JSON output also carries the whole audit document (unchanged by design), so
+    checks about what the readable line includes look at ``msg`` only.
+    """
+
+    import json
+
+    first = rendered.strip().splitlines()[0]
+    if first.startswith("{"):
+        return json.loads(first)["msg"]
+    return first.split("  (audit_logger.py")[0]
+
+
+def _rejection_shaped_record(**overrides):
+    """An AuditRecord shaped like a structured-output rejection record."""
+
+    from mozaiksai.core.audit.audit_logger import AuditEventKind, AuditRecord
+
+    fields = {
+        "kind": AuditEventKind.MODULE_ACTION,
+        "actor_id": "user-7",
+        "app_id": "app-1",
+        "chat_id": "chat-9",
+        "tenant_id": "tenant-3",
+        "workspace_id": "ws-4",
+        "resource": "contacts",
+        "action": "create_contact",
+        "inputs_hash": _DIGEST,
+        "outcome": "fail",
+        "error": "schema_violation",
+        "extra": {
+            "source": "unit",
+            "trace_id": "trace-1",
+            "model_name": "ContactOut",
+            "failure_fields": ["payload.<redacted-field>:int_parsing", "name:string_type"],
+        },
+    }
+    fields.update(overrides)
+    return AuditRecord(**fields)
+
+
+def _render_audit_fallback(
+    monkeypatch, formatter, *, collection_available: bool, record=None
+) -> str:
+    """Run the real AuditLogger and return what a handler with ``formatter`` writes."""
+
+    import asyncio
+    import io
+
+    from mozaiksai.core import core_config
+    from mozaiksai.core.audit.audit_logger import AuditLogger
+
+    client = _FakeMongoClient(_FailingCollection()) if collection_available else None
+    monkeypatch.setattr(core_config, "get_mongo_client", lambda: client)
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(formatter)
+    audit_logger = logging_config.get_core_logger("audit")
+    previous_level = audit_logger.level
+    audit_logger.setLevel(logging.INFO)
+    audit_logger.addHandler(handler)
+    try:
+        asyncio.run(AuditLogger().log(record or _rejection_shaped_record()))
+    finally:
+        audit_logger.removeHandler(handler)
+        audit_logger.setLevel(previous_level)
+    return stream.getvalue()
+
+
+@pytest.mark.parametrize("collection_available", [False, True], ids=["no-collection", "insert-failure"])
+@pytest.mark.parametrize(
+    "make_formatter",
+    [lambda: PrettyConsoleFormatter(no_color=True), logging_config.ProductionJSONFormatter],
+    ids=["pretty", "json"],
+)
+def test_audit_fallback_keeps_sanitized_evidence_in_rendered_output(
+    monkeypatch, make_formatter, collection_available
+) -> None:
+    rendered = _render_audit_fallback(
+        monkeypatch, make_formatter(), collection_available=collection_available
+    )
+
+    for evidence in (
+        "module.action",  # audit kind
+        "user-7",  # initiating actor
+        "app-1",
+        "chat-9",
+        "tenant-3",
+        "ws-4",
+        "contacts",  # workflow
+        "create_contact",  # agent
+        _DIGEST,  # digest of the input
+        "schema_violation",  # failure category
+        "payload.<redacted-field>:int_parsing",  # safe schema path
+        "name:string_type",
+        "unit",  # source
+        "trace-1",
+        "ContactOut",
+    ):
+        assert evidence in rendered, f"{evidence!r} missing from the rendered fallback:\n{rendered}"
+
+
+@pytest.mark.parametrize(
+    "make_formatter",
+    [lambda: PrettyConsoleFormatter(no_color=True), logging_config.ProductionJSONFormatter],
+    ids=["pretty", "json"],
+)
+def test_audit_insert_failure_does_not_render_raw_driver_exception_text(
+    monkeypatch, make_formatter
+) -> None:
+    rendered = _render_audit_fallback(monkeypatch, make_formatter(), collection_available=True)
+
+    assert "AUDIT_WRITE_FAIL" in rendered
+    assert _DRIVER_SECRET not in rendered
+
+
+@pytest.mark.parametrize("collection_available", [False, True], ids=["no-collection", "insert-failure"])
+@pytest.mark.parametrize(
+    "make_formatter",
+    [lambda: PrettyConsoleFormatter(no_color=True), logging_config.ProductionJSONFormatter],
+    ids=["pretty", "json"],
+)
+def test_audit_fallback_leaves_out_values_that_are_not_safe_tokens(
+    monkeypatch, make_formatter, collection_available
+) -> None:
+    secret = "sk-live-secret-in-free-text"
+    record = _rejection_shaped_record(
+        chat_id="chat-9" + chr(10) + "FORGED-LINE",
+        error="free text with spaces " + secret,
+        extra={
+            "source": "unit",
+            "dispatch": {"params": secret},  # arbitrary content under a key the fallback never reads
+            "failure_fields": ["ok:int_type", "bad value with spaces " + secret],
+        },
+    )
+
+    rendered = _render_audit_fallback(
+        monkeypatch, make_formatter(), collection_available=collection_available, record=record
+    )
+
+    message = _fallback_message(rendered)
+    assert "ok:int_type" in message
+    assert "FORGED-LINE" not in message
+    assert "free text" not in message
+    assert secret not in message
+    # The readable line stays a single line; nothing forged can start a new one.
+    assert chr(10) not in message
+
+
+def test_audit_fallback_renders_nothing_extra_for_a_minimal_record(monkeypatch) -> None:
+    from mozaiksai.core.audit.audit_logger import AuditEventKind, AuditRecord
+
+    record = AuditRecord(kind=AuditEventKind.ADMIN_ACCESS, actor_id="admin-1", resource="/admin", action="GET")
+
+    rendered = _render_audit_fallback(
+        monkeypatch, PrettyConsoleFormatter(no_color=True), collection_available=False, record=record
+    )
+
+    assert "AUDIT kind=admin.access actor=admin-1 resource=/admin action=GET outcome=ok" in rendered
+    for absent in ("digest=", "error=", "paths=", "tenant=", "chat_id="):
+        assert absent not in rendered

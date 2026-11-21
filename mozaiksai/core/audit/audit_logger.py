@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -75,6 +76,52 @@ class AuditRecord:
         }
 
 
+# Fallback logs render only values that match this pattern. Free text (an
+# exception message, a model-supplied string) and anything with whitespace or
+# control characters is left out rather than escaped.
+_SAFE_LOG_VALUE = re.compile(r"^[\w.@:<>/-]{1,200}$")
+_MAX_LOGGED_PATHS = 10
+
+
+def _safe_log_value(value: Any) -> str | None:
+    if isinstance(value, bool) or not isinstance(value, str | int):
+        return None
+    text = str(value)
+    return text if _SAFE_LOG_VALUE.fullmatch(text) else None
+
+
+def _fallback_evidence(record: AuditRecord) -> str:
+    """`` key=value`` pairs for the fallback log line, from known fields only.
+
+    The audit document stays attached to the log record as before; this is the
+    readable rendition for formatters that ignore nested extras. ``error`` is
+    rendered only when it is a short token such as a failure category, and
+    ``extra`` contributes only the keys named here, never arbitrary content.
+    """
+
+    pairs: list[tuple[str, str | None]] = [
+        ("tenant", _safe_log_value(record.tenant_id)),
+        ("workspace", _safe_log_value(record.workspace_id)),
+        ("digest", _safe_log_value(record.inputs_hash)),
+        ("error", _safe_log_value(record.error)),
+        ("source", _safe_log_value(record.extra.get("source"))),
+        ("trace", _safe_log_value(record.extra.get("trace_id"))),
+        ("model", _safe_log_value(record.extra.get("model_name"))),
+    ]
+    paths = record.extra.get("failure_fields")
+    if isinstance(paths, list | tuple):
+        safe_paths = [_safe_log_value(item) for item in paths[:_MAX_LOGGED_PATHS]]
+        pairs.append(("paths", ",".join(item for item in safe_paths if item) or None))
+    return "".join(f" {key}={value}" for key, value in pairs if value)
+
+
+def _fallback_correlation(record: AuditRecord) -> dict[str, str]:
+    """Record attributes the console formatter already prints inline."""
+
+    correlation = {"app_id": _safe_log_value(record.app_id), "chat_id": _safe_log_value(record.chat_id)}
+    return {key: value for key, value in correlation.items() if value}
+
+
 def _hash_inputs(inputs: Any) -> str:
     """Return a deterministic SHA-256 hex digest of inputs."""
     try:
@@ -127,15 +174,17 @@ class AuditLogger:
         if collection is None:
             # Fallback: write to structured log so records are not lost.
             logger.info(
-                "AUDIT kind=%s actor=%s resource=%s action=%s outcome=%s",
+                "AUDIT kind=%s actor=%s resource=%s action=%s outcome=%s%s",
                 record.kind.value,
                 record.actor_id,
                 record.resource,
                 record.action,
                 record.outcome,
+                _fallback_evidence(record),
                 extra={
                     "audit_record": record.to_document(),
                     "event": "AUDIT",
+                    **_fallback_correlation(record),
                 },
             )
             return
@@ -143,13 +192,21 @@ class AuditLogger:
         try:
             await collection.insert_one(record.to_document())
         except Exception as exc:
-            # Never raise — log to structured log as fallback.
+            # Never raise — log to structured log as fallback. Only the
+            # exception type is logged: a driver message can quote the document.
             logger.error(
-                "AUDIT_WRITE_FAIL kind=%s actor=%s error=%s",
+                "AUDIT_WRITE_FAIL kind=%s actor=%s resource=%s action=%s outcome=%s%s write_error=%s",
                 record.kind.value,
                 record.actor_id,
-                exc,
-                extra={"audit_record": record.to_document()},
+                record.resource,
+                record.action,
+                record.outcome,
+                _fallback_evidence(record),
+                type(exc).__name__,
+                extra={
+                    "audit_record": record.to_document(),
+                    **_fallback_correlation(record),
+                },
             )
 
     async def log_workflow_start(
