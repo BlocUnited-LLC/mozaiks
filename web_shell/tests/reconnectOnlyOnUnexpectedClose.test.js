@@ -15,27 +15,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
-import vm from 'node:vm';
+import { shouldReconnectAfterClose as shouldReconnect } from '../../chat-ui/src/adapters/socketClose.js';
 import { fileURLToPath } from 'node:url';
 
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const chatPage = path.join(path.dirname(shell), 'chat-ui/src/pages/ChatPage.js');
 
-const loadPredicate = async () => {
-  const source = await fs.readFile(chatPage, 'utf8');
-  const start = source.indexOf('  const DELIBERATE_CLOSE_CODES');
-  assert.notEqual(start, -1, 'could not locate DELIBERATE_CLOSE_CODES');
-  const endMarker = '  };';
-  const end = source.indexOf(endMarker, source.indexOf('shouldReconnectAfterClose', start));
-  assert.notEqual(end, -1, 'could not locate the end of shouldReconnectAfterClose');
-  const snippet = source.slice(start, end + endMarker.length);
-  const ctx = { Set };
-  vm.runInNewContext(`${snippet}\nglobalThis.__fn = shouldReconnectAfterClose;`, ctx);
-  return ctx.__fn;
-};
-
-test('a close we initiated does not trigger a reconnect', async () => {
-  const shouldReconnect = await loadPredicate();
+test('a close we initiated does not trigger a reconnect', () => {
   // 1000 normal, 1005 no-status: both are our own close() call.
   for (const code of [1000, 1005]) {
     assert.equal(
@@ -46,21 +31,18 @@ test('a close we initiated does not trigger a reconnect', async () => {
 });
 
 test('being evicted by a newer connection does not trigger a reconnect', async () => {
-  const shouldReconnect = await loadPredicate();
   // The server sends 1001 when a replacement socket takes the slot. Retrying
   // here is the loop that produced the duplicate in the first place.
   assert.equal(shouldReconnect({ code: 1001, reason: '', wasClean: true }), false);
 });
 
 test('a dropped link still reconnects', async () => {
-  const shouldReconnect = await loadPredicate();
   // 1006 is the browser's abnormal-closure code: no close frame was received.
   assert.equal(shouldReconnect({ code: 1006, wasClean: false }), true);
   assert.equal(shouldReconnect({ code: 1011, wasClean: false }), true);
 });
 
 test('a transport that reports no code still reconnects', async () => {
-  const shouldReconnect = await loadPredicate();
   // Recovery must not depend on the close reason being available.
   for (const info of [undefined, null, {}, { code: undefined }]) {
     assert.equal(shouldReconnect(info), true, `absent code must be treated as unexpected: ${JSON.stringify(info)}`);

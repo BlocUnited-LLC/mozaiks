@@ -56,6 +56,35 @@ def _pm(client: AsyncIOMotorClient, database_name: str) -> AG2PersistenceManager
     return pm
 
 
+@pytest.mark.asyncio
+async def test_owned_artifact_read_matches_durable_session_identity_real_mongo() -> None:
+    client = AsyncIOMotorClient(_MONGO_URI)
+    database_name = f"mozaiks_boundary_test_{uuid4().hex}"
+    try:
+        pm = _pm(client, database_name)
+        scope = {"app_id": _APP_ID, "user_id": "designer", "workflow_name": _WORKFLOW, "chat_id": "draft"}
+        await pm.create_chat_session(**scope)
+        assert await pm.fetch_owned_workflow_artifact(**scope) is None
+
+        artifact = {"tool_call_id": "design-1", "display": "artifact", "tool_name": "present_design",
+                    "component_type": "Design", "workflow_name": _WORKFLOW, "payload": {"document_id": "page-1"}}
+        assert await pm.update_last_artifact(chat_id="draft", app_id=_APP_ID, artifact=artifact)
+        result = await pm.fetch_owned_workflow_artifact(**scope)
+        assert result is not None
+        assert {key: result[key] for key in artifact} == artifact
+        assert set(result) == set(artifact) | {"updated_at"}
+        for key in scope:
+            assert await pm.fetch_owned_workflow_artifact(**{**scope, key: "other"}) is None
+            assert await pm.fetch_owned_workflow_artifact(**{**scope, key: ""}) is None
+
+        artifact["tool_call_id"] = "design-2"
+        assert await pm.update_last_artifact(chat_id="draft", app_id=_APP_ID, artifact=artifact)
+        assert (await pm.fetch_owned_workflow_artifact(**scope))["tool_call_id"] == "design-2"
+    finally:
+        await client.drop_database(database_name)
+        client.close()
+
+
 async def _seed_session(pm: AG2PersistenceManager, chat_id: str) -> None:
     coll = await pm._coll()
     await coll.insert_one(
