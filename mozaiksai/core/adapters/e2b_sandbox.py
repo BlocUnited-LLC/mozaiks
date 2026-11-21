@@ -76,8 +76,7 @@ class E2BSandboxAdapter:
         details = await asyncio.to_thread(sandbox.get_info)
         metadata = getattr(details, "metadata", None)
         # Unknown provider metadata must not reveal a sealed session host.
-        purpose = metadata.get("purpose") if isinstance(metadata, dict) else None
-        if purpose not in _ORDINARY_PURPOSES:
+        if not isinstance(metadata, dict) or metadata.get("purpose") not in _ORDINARY_PURPOSES:
             return self._session_info(sandbox, metadata={"purpose": _SEALED_PURPOSE})
         if metadata.get("preview_mode") == "document":
             return self._session_info(sandbox, metadata={"preview_mode": "document"})

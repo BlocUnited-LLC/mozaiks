@@ -69,7 +69,7 @@ function OrderHelpPage({ params }) {
 
 `WorkflowChat` accepts `presentation="studio"` to use the same transcript, composer,
 streaming messages and status bar as Factory. Supply `userId` from the authenticated
-viewer, an authorized `appId`, a stable `getAccessToken` function and the
+viewer, an authorized `appId`, a `getAccessToken` function and the
 workflow's declared `initialContext`. Use `freshSession` for an isolated conversation.
 Changing the viewer, workflow, app or context closes the previous conversation.
 

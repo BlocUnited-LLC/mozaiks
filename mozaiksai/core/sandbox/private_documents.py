@@ -27,7 +27,7 @@ _CSS_IMPORT = re.compile(r"""(?:@import\s+|url\(\s*)["']?([^"'\s;)]+)""")
 def _page_input(files: Mapping[str, str | bytes], page: str):
     if page not in files or not page.startswith("ui/") or not page.endswith((".jsx", ".tsx", ".js")):
         raise ValueError("The selected preview page is unavailable")
-    inputs = {}
+    inputs: dict[str, str] = {}
     size = 0
     pending = [page]
     while pending:
@@ -85,26 +85,27 @@ async def private_document_renderer(*, app_id: str, user_id: str, target_app_id:
         build_registry_id=build_registry_id, document_only=True,
     )
     try:
-        if state.provider != "e2b" or not state.session_id:
+        session_id = state.session_id
+        if state.provider != "e2b" or not session_id:
             raise RuntimeError("Document preview allocation unavailable")
         _, port = resolve_preview_provider(provider="e2b")
         # Random names avoid collisions in E2B's sticky temporary directory.
         script_name = "mozaiks-compiler-" + uuid4().hex + ".cjs"
-        await port.write_files(session_id=state.session_id, cwd="/tmp", files={script_name: source})
+        await port.write_files(session_id=session_id, cwd="/tmp", files={script_name: source})
 
         async def render(files: Mapping[str, str | bytes], page: str) -> str:
             document_input = _page_input(files, page)
             job = "mozaiks-preview-" + uuid4().hex
             await port.write_files(
-                session_id=state.session_id, cwd="/tmp", files={job + ".json": json.dumps(document_input)},
+                session_id=session_id, cwd="/tmp", files={job + ".json": json.dumps(document_input)},
             )
             result = await port.run_command(
-                session_id=state.session_id, cwd="/tmp",
+                session_id=session_id, cwd="/tmp",
                 command=f"node --max-old-space-size=256 {script_name} {job}", timeout_seconds=35,
             )
             if not result.success:
                 raise DocumentCompileError("The page could not be compiled")
-            document = await port.read_file(session_id=state.session_id, path=f"/tmp/{job}.html")
+            document = await port.read_file(session_id=session_id, path=f"/tmp/{job}.html")
             if not isinstance(document, str) or not document.startswith("<!doctype html>") or len(document.encode()) > 2_000_000:
                 raise DocumentCompileError("Invalid compiled page")
             return document

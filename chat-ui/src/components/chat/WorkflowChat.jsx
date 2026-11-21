@@ -108,9 +108,15 @@ function WorkflowConversation({
   }, [chatId]);
 
   const resolvedAppId = appId || config.get('chat.defaultAppId') || 'default';
+  const tokenProvider = useRef(getAccessToken);
+  tokenProvider.current = getAccessToken;
+  const hasTokenProvider = typeof getAccessToken === 'function';
   const workflowApi = useMemo(
-    () => new WebSocketApiAdapter({ ...config.get('api'), ...(getAccessToken && { getAccessToken }) }),
-    [getAccessToken]
+    () => new WebSocketApiAdapter({
+      ...config.get('api'),
+      ...(hasTokenProvider && { getAccessToken: () => tokenProvider.current?.() }),
+    }),
+    [hasTokenProvider]
   );
 
   const handleRuntimeEvent = useCallback((rawEvent) => {
