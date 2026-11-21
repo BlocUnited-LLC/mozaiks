@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 logger = logging.getLogger(__name__)
 
+from mozaiksai.core.session.build_binding import RefinementModel, refinement_model_config
 from mozaiksai.core.workflow.paths import resolve_active_app_root
 from mozaiksai.resources import resolve_factory_app_root
 
@@ -103,6 +104,7 @@ class ControlPlaneConfig(BaseModel):
     schema_version: Literal["mozaiks.refinement.policy.v1"] = "mozaiks.refinement.policy.v1"
     enabled: bool = False
     profile: str | None = None
+    model_override: RefinementModel | None = None
     llm_profiles: dict[ControlPlaneLLMProfileId, ControlPlaneLLMProfileConfig] = Field(default_factory=dict)
     classifier: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
     coding: ControlPlaneCodingCapabilityConfig = Field(default_factory=ControlPlaneCodingCapabilityConfig)
@@ -135,6 +137,9 @@ class ControlPlaneConfig(BaseModel):
                 self.resolve_contract_surface_regeneration_llm_config()
         return self
 
+    def for_refinement_model(self, model: RefinementModel | None) -> ControlPlaneConfig:
+        return self if model is None else self.model_copy(update={"model_override": model})
+
     def classifier_enabled(self) -> bool:
         return bool(self.enabled and self.classifier.enabled)
 
@@ -155,6 +160,8 @@ class ControlPlaneConfig(BaseModel):
         model = llm_config.get("model")
         if not isinstance(model, str) or not model.strip():
             raise ValueError(f"{owner} LLM profile '{profile_id}' requires a non-empty model")
+        if self.model_override is not None:
+            return refinement_model_config(self.model_override)
         return dict(llm_config)
 
     def resolve_capability_llm_config(self, capability: str) -> dict[str, Any]:

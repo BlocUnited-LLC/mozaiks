@@ -357,6 +357,58 @@ const ChatPage = () => {
 
   const defaultWorkflow = resolveWorkflow(urlWorkflowName) || '';
   const [currentWorkflowName, setCurrentWorkflowName] = useState(defaultWorkflow);
+  const [refinementModels, setRefinementModels] = useState([]);
+  const [refinementModel, setRefinementModel] = useState('');
+  const [boundChatModels, setBoundChatModels] = useState(() => new Map());
+  const refinementModelRef = useRef('');
+  const submittedRefinementModelRef = useRef(null);
+  const showRefinementModelPicker = conversationMode === 'workflow' && currentWorkflowName === 'AppReview';
+  useEffect(() => {
+    if (!showRefinementModelPicker) return undefined;
+    const controller = new AbortController();
+    authFetch('/api/studio/refinement/models', { signal: controller.signal })
+      .then(response => response.ok ? response.json() : null)
+      .then(policy => {
+        if (!policy || controller.signal.aborted) return;
+        const models = Array.isArray(policy.models) ? policy.models : [];
+        const selected = models.some(model => model.id === refinementModelRef.current)
+          ? refinementModelRef.current
+          : models.some(model => model.id === policy.default) ? policy.default : models[0]?.id || '';
+        setRefinementModels(models);
+        setRefinementModel(selected);
+        refinementModelRef.current = selected;
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [showRefinementModelPicker]);
+
+  const activeRunModel = conversationMode === 'workflow'
+    ? boundChatModels.get(currentChatId)
+    : null;
+  const activeRunModelLabel = activeRunModel === 'gemini' ? 'Gemini 3.8 Flash'
+    : activeRunModel === 'openai' ? 'GPT-5 Nano' : null;
+  const refinementModelPicker = showRefinementModelPicker && refinementModels.length > 0 ? (
+    <select
+      aria-label="AI model"
+      className="h-8 max-w-full cursor-pointer rounded-full border border-transparent bg-card px-2.5 text-xs font-medium text-foreground hover:border-border focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-default disabled:text-muted-foreground"
+      value={refinementModel}
+      disabled={loading || Boolean(pendingHarnessDecision)}
+      onChange={event => {
+        refinementModelRef.current = event.target.value;
+        setRefinementModel(event.target.value);
+      }}
+    >
+      {refinementModels.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
+    </select>
+  ) : activeRunModelLabel ? (
+    <span
+      className="rounded-full px-2.5 py-1 text-xs font-medium text-muted-foreground"
+      aria-label={`Run model: ${activeRunModelLabel}`}
+      title="Model selected for this run"
+    >
+      {activeRunModelLabel}
+    </span>
+  ) : null;
   const currentWorkflowNameRef = useRef(defaultWorkflow);
 
   useEffect(() => {
@@ -2244,6 +2296,15 @@ const ChatPage = () => {
       if (!meta) {
         return false;
       }
+      const model = meta.refinement_model;
+      const knownModel = model === 'gemini' || model === 'openai' ? model : undefined;
+      setBoundChatModels(previous => {
+        if (previous.get(targetChatId) === knownModel) return previous;
+        const next = new Map(previous);
+        if (knownModel) next.set(targetChatId, knownModel);
+        else next.delete(targetChatId);
+        return next;
+      });
       observeSessionMeta(meta);
       if (isFailedWorkflowSession(meta.status)) setLoading(false);
 
@@ -2393,16 +2454,17 @@ const ChatPage = () => {
     // Handle chat_meta events (which may not have chat. prefix)
     if (data.type === 'chat_meta' || data.type === 'chat.chat_meta') {
       // Initial metadata handshake from backend
-      const { chatId: metaChatId, workflowName: metaWorkflowName } = applyWorkflowSessionMeta(data);
-      applySessionStatePendingHarnessDecision(data.session_state);
-      applySessionStatePendingTransition(data.session_state);
-      if (data.cache_seed !== undefined && data.cache_seed !== null) {
-        setCacheSeed(data.cache_seed);
+      const metaData = data.data && typeof data.data === 'object' ? data.data : data;
+      const { chatId: metaChatId, workflowName: metaWorkflowName } = applyWorkflowSessionMeta(metaData);
+      applySessionStatePendingHarnessDecision(metaData.session_state);
+      applySessionStatePendingTransition(metaData.session_state);
+      if (metaData.cache_seed !== undefined && metaData.cache_seed !== null) {
+        setCacheSeed(metaData.cache_seed);
         if (metaChatId) {
-          setStoredChatCacheSeed(metaChatId, data.cache_seed);
+          setStoredChatCacheSeed(metaChatId, metaData.cache_seed);
         }
       }
-      if (data.chat_exists === false && reviewContinuationRef.current?.chat_id !== metaChatId) {
+      if (metaData.chat_exists === false && reviewContinuationRef.current?.chat_id !== metaChatId) {
         // Backend indicates this chat_id had no persisted session (fresh after client-side reuse)
         setChatExists(false);
         clearStoredArtifactState(metaChatId);
@@ -2411,14 +2473,14 @@ const ChatPage = () => {
         lastArtifactEventRef.current = null;
         artifactCacheValidRef.current = false;
         artifactRestoredOnceRef.current = true; // prevent later restore effect
-      } else if (data.chat_exists === true) {
+      } else if (metaData.chat_exists === true) {
         setChatExists(true);
-        if (!data.last_artifact || !data.last_artifact.tool_name) {
+        if (!metaData.last_artifact || !metaData.last_artifact.tool_name) {
           handleMissingBackendArtifact(metaChatId, metaWorkflowName);
         }
 
-        if (data.last_artifact && data.last_artifact.tool_name) {
-          cacheServerLastArtifact(data.last_artifact, {
+        if (metaData.last_artifact && metaData.last_artifact.tool_name) {
+          cacheServerLastArtifact(metaData.last_artifact, {
             chatId: metaChatId,
             workflowName: metaWorkflowName,
           });
@@ -3770,11 +3832,17 @@ const ChatPage = () => {
           'default'
         );
         const resolvedUserId = user?.id || user?.user_id || user?.email || null;
+        const submittedModel = submittedRefinementModelRef.current;
+        const selectedModel = submittedModel?.chatId === currentChatId
+          ? submittedModel.model
+          : refinementModelRef.current;
+        submittedRefinementModelRef.current = null;
         const refinementRequest = {
           raw_user_request: revisionText,
           artifact_kind: artifactKind,
           artifact_key: artifactKey,
           source_surface: sourceSurface,
+          ...(selectedModel ? { refinement_model: selectedModel } : {}),
         };
         if (artifactVersionId) {
           refinementRequest.artifact_version_id = artifactVersionId;
@@ -5324,6 +5392,10 @@ const ChatPage = () => {
 
   const sendMessage = async (messageContent) => {
 
+    if (conversationMode === 'workflow' && currentWorkflowName === 'AppReview') {
+      submittedRefinementModelRef.current = { chatId: currentChatId, model: refinementModelRef.current };
+    }
+
     const usageChatId = conversationMode === 'ask' ? activeGeneralChatId : currentChatId;
     setChatStatusUsage(current => resetChatStatusRun(current, { mode: conversationMode, chatId: usageChatId }));
     setChatStatusProgress(current => beginChatStatusProgressTurn(current, {
@@ -6167,6 +6239,7 @@ const ChatPage = () => {
       chatStatus={chatStatus}
       transportType={transportType}
       workflowName={currentWorkflowName}
+      refinementModelPicker={refinementModelPicker}
       structuredOutputs={getWorkflow(currentWorkflowName)?.structuredOutputs || {}}
       startupMode={workflowConfig?.getWorkflowConfig(currentWorkflowName)?.startup_mode}
       onRetry={retryConnection}
@@ -6405,6 +6478,7 @@ const ChatPage = () => {
         chatStatus={chatStatus}
         transportType={transportType}
         workflowName={currentWorkflowName}
+        refinementModelPicker={refinementModelPicker}
         structuredOutputs={getWorkflow(currentWorkflowName)?.structuredOutputs || {}}
         startupMode={uiStartupMode}
         onRetry={retryConnection}

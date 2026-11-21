@@ -188,6 +188,7 @@ function TransitionRoute({ route }) {
   const [currentJourneyId, setCurrentJourneyId] = useState(route.sequence || null);
   const [accumulatedContext, setAccumulatedContext] = useState({});
   const [buildRegistryId, setBuildRegistryId] = useState(null);
+  const [refinementModel, setRefinementModel] = useState(null);
   const entryTransitionId = route.transition || null;
   const resolvedAppId = resolveRouteAppId(config, user);
   const resolvedUserId = resolveRouteUserId(user);
@@ -204,6 +205,8 @@ function TransitionRoute({ route }) {
       if (option_id != null) setAccumulatedContext(mergedContext);
       const selectedRegistryId = launchOptions.build_registry_id || buildRegistryId;
       if (selectedRegistryId) setBuildRegistryId(selectedRegistryId);
+      const selectedModel = launchOptions.refinement_model || refinementModel;
+      if (selectedModel) setRefinementModel(selectedModel);
 
       try {
         const res = await authFetch('/api/transitions/resolve', {
@@ -217,6 +220,7 @@ function TransitionRoute({ route }) {
             app_id: resolvedAppId,
             user_id: resolvedUserId,
             ...(selectedRegistryId ? { build_registry_id: selectedRegistryId } : {}),
+            ...(selectedModel ? { refinement_model: selectedModel } : {}),
           }),
         }, { auth });
 
@@ -249,7 +253,7 @@ function TransitionRoute({ route }) {
         throw err;
       }
     },
-    [accumulatedContext, auth, buildRegistryId, currentJourneyId, currentTransitionId, navigate, resolvedAppId, resolvedUserId]
+    [accumulatedContext, auth, buildRegistryId, currentJourneyId, currentTransitionId, navigate, refinementModel, resolvedAppId, resolvedUserId]
   );
 
   if (!currentTransitionId) return null;

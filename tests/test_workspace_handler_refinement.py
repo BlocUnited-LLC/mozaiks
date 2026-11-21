@@ -888,11 +888,16 @@ def _studio_flow(
     from mozaiksai.core.session.router import SessionRouter
     from mozaiksai.hosts import studio
     from tests.test_session_router import _FakePersistence
-    from tests.test_studio_workflow_trigger import _artifact_version, _async_classifier
+    from tests.test_studio_workflow_trigger import (
+        _artifact_version,
+        _async_classifier,
+        _isolate_studio_model_policy,
+    )
 
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
+    _isolate_studio_model_policy(monkeypatch)
     baseline = _baseline(app_id="app_1")
     archive = tmp_path / "parent.zip"
     with zipfile.ZipFile(archive, "w") as zipped:

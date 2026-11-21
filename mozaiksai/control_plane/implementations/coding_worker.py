@@ -820,6 +820,7 @@ class ScopedRefinementCodingWorker:
             usage_context=request.usage_context,
             run_build_binding=request.run_build_binding,
             selected_paths=tuple(request.files),
+            refinement_model=request.refinement_model,
         )
         request = request.model_copy(update={"dependency_graph": dependency_graph})
         provider_attempts: list[dict[str, str]] = []

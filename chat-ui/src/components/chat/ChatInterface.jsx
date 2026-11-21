@@ -159,6 +159,7 @@ const ModernChatInterface = ({
   chatStatus = null,
   transportType,
   workflowName,
+  refinementModelPicker,
   workflowHasChildren = false,
   conversationMode = 'workflow',
   onConversationModeChange,
@@ -266,6 +267,7 @@ const ModernChatInterface = ({
         active &&
         (active.tagName === 'INPUT' ||
          active.tagName === 'TEXTAREA' ||
+         active.tagName === 'SELECT' ||
          active.isContentEditable ||
          active === textareaRef.current)
       ) return;
@@ -920,7 +922,12 @@ const ModernChatInterface = ({
             )}
           </div>
         )}
-        <form onSubmit={onSubmitClick} className="flex gap-2 sm:gap-3 flex-row items-center">
+        <form
+          onSubmit={onSubmitClick}
+          className={refinementModelPicker
+            ? 'flex min-w-0 flex-col rounded-2xl border border-border bg-card focus-within:border-primary/60'
+            : 'flex flex-row items-center gap-2 sm:gap-3'}
+        >
           {/* Hidden file input (Upload) */}
           <input
             ref={fileInputRef}
@@ -929,7 +936,7 @@ const ModernChatInterface = ({
             onChange={onFileSelected}
           />
 
-          <div className="flex-1 relative min-w-0 flex items-center">
+          <div className="relative flex min-w-0 flex-1 items-center">
             <textarea
               ref={textareaRef}
               value={message}
@@ -945,7 +952,9 @@ const ModernChatInterface = ({
               placeholder={composerPlaceholder}
               disabled={isComposerDisabled}
               rows={1}
-              className={`w-full bg-white/10 border-2 rounded-lg sm:rounded-xl px-2.5 sm:px-3 py-1.5 sm:py-2 mt-0.5 text-[var(--color-text-primary)] text-slate-100 text-sm sm:text-base placeholder:text-[var(--color-text-secondary)] placeholder:text-slate-400 placeholder:text-xs sm:placeholder:text-sm focus:outline-none resize-none transition-all duration-300 transmission-typing-font min-h-[36px] sm:min-h-[40px] max-h-[120px] my-scroll1 backdrop-blur-sm ${
+              className={refinementModelPicker
+                ? 'min-h-10 w-full resize-none bg-transparent px-3 pt-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none sm:px-4 sm:text-base'
+                : `w-full bg-white/10 border-2 rounded-lg sm:rounded-xl px-2.5 sm:px-3 py-1.5 sm:py-2 mt-0.5 text-[var(--color-text-primary)] text-slate-100 text-sm sm:text-base placeholder:text-[var(--color-text-secondary)] placeholder:text-slate-400 placeholder:text-xs sm:placeholder:text-sm focus:outline-none resize-none transition-all duration-300 transmission-typing-font min-h-[36px] sm:min-h-[40px] max-h-[120px] my-scroll1 backdrop-blur-sm ${
                 hasUserInteracted
                   ? 'border-[rgba(var(--color-primary-light-rgb),0.5)] focus:border-[rgba(var(--color-primary-light-rgb),0.8)] focus:bg-white/15 focus:shadow-[0_0_25px_rgba(var(--color-primary-light-rgb),0.4)]'
                   : 'border-[rgba(var(--color-primary-light-rgb),0.3)] focus:border-[rgba(var(--color-primary-light-rgb),0.7)] focus:bg-white/15 focus:shadow-[0_0_30px_rgba(var(--color-primary-light-rgb),0.5)] shadow-[0_0_15px_rgba(var(--color-primary-light-rgb),0.2)]'
@@ -955,52 +964,55 @@ const ModernChatInterface = ({
                 overflowY: message.split('\n').length > 2 || message.length > 100 ? 'auto' : 'hidden'
               }}
             />
-            {!hasUserInteracted && (
+            {!refinementModelPicker && !hasUserInteracted && (
               <div className="absolute -top-1 -right-1 input-prompt-ping rounded-full subtle-ping" aria-hidden="true"></div>
             )}
           </div>
 
-          {/* Command Button - icon-only for simplicity */}
-          {onUploadFile && (
-            <button
-              type="button"
-              onClick={onUploadClick}
-              disabled={buttonText === 'NEXT' || isUploadingFile || hasPendingHarnessDecision || !!pendingComposerInputToolCall || !!pendingComposerReply}
-              className={
-                `px-2 py-1.5 rounded-md transition-all duration-300 min-w-[36px] sm:min-w-[40px] w-auto h-8 sm:h-9 oxanium font-bold text-[13px] flex items-center justify-center letter-spacing-wide border-2 flex-shrink-0 ` +
-                `${(buttonText === 'NEXT' || isUploadingFile)
-                  ? 'bg-gray-800/50 text-gray-400 cursor-not-allowed border-gray-600/50'
-                  : 'bg-white/10 text-white border-[rgba(var(--color-primary-light-rgb),0.35)] hover:border-[rgba(var(--color-primary-light-rgb),0.7)] hover:bg-white/15 active:scale-95'
-                }`
-              }
-              title={isUploadingFile ? 'Uploading…' : 'Upload a file'}
-              aria-label={isUploadingFile ? 'Uploading file' : 'Upload file'}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 sm:w-5 sm:h-5" aria-hidden="true">
-                <path fillRule="evenodd" d="M15.621 4.379a3 3 0 0 0-4.242 0l-7 7a3 3 0 0 0 4.241 4.243h.001l.497-.5a.75.75 0 0 1 1.064 1.057l-.498.501-.002.002a4.5 4.5 0 0 1-6.364-6.364l7-7a4.5 4.5 0 0 1 6.368 6.36l-3.455 3.553A2.625 2.625 0 1 1 9.52 9.52l3.45-3.451a.75.75 0 1 1 1.061 1.06l-3.45 3.451a1.125 1.125 0 0 0 1.587 1.595l3.454-3.553a3 3 0 0 0 0-4.243Z" clipRule="evenodd" />
-              </svg>
-            </button>
-          )}
-
-          <button
-            type="submit"
-            disabled={!message.trim() || hasPendingHarnessDecision}
-            className={`
-              px-2 py-1.5 rounded-md transition-all duration-300 min-w-[36px] sm:min-w-[40px] w-auto h-8 sm:h-9 oxanium font-bold text-[13px] flex items-center justify-center letter-spacing-wide border-2 flex-shrink-0
-              ${(!message.trim())
-                ? 'bg-gray-800/50 text-gray-400 cursor-not-allowed border-gray-600/50'
-                : 'bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.8)] to-[rgba(var(--color-primary-dark-rgb),0.8)] hover:from-[rgba(var(--color-primary-light-rgb),0.9)] hover:to-[rgba(var(--color-primary-light-rgb),0.9)] text-white border-[rgba(var(--color-primary-light-rgb),0.5)] hover:border-[rgba(var(--color-primary-light-rgb),0.7)] shadow-sm [box-shadow:0_0_0_rgba(var(--color-primary-rgb),0.1)] hover:[box-shadow:0_0_0_rgba(var(--color-primary-light-rgb),0.2)] active:scale-95'
-              }
-            `}
-          >
-            {buttonText === 'NEXT' ? (
-              <span className="text-[11px] font-bold tracking-widest" aria-label="Continue">NEXT</span>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 sm:w-5 sm:h-5" aria-hidden="true">
-                <path d="M3.105 2.288a.75.75 0 0 0-.826.95l1.414 4.926A1.5 1.5 0 0 0 5.135 9.25h6.115a.75.75 0 0 1 0 1.5H5.135a1.5 1.5 0 0 0-1.442 1.086l-1.414 4.926a.75.75 0 0 0 .826.95 28.897 28.897 0 0 0 15.293-7.154.75.75 0 0 0 0-1.115A28.897 28.897 0 0 0 3.105 2.288Z" />
-              </svg>
+          <div className={refinementModelPicker ? 'flex items-center gap-2 px-2 pb-2 pt-1 sm:px-3' : 'contents'}>
+            {onUploadFile && (
+              <button
+                type="button"
+                onClick={onUploadClick}
+                disabled={buttonText === 'NEXT' || isUploadingFile || hasPendingHarnessDecision || !!pendingComposerInputToolCall || !!pendingComposerReply}
+                className={
+                  `px-2 py-1.5 rounded-md transition-all duration-300 min-w-[36px] sm:min-w-[40px] w-auto h-8 sm:h-9 oxanium font-bold text-[13px] flex items-center justify-center letter-spacing-wide border-2 flex-shrink-0 ` +
+                  `${(buttonText === 'NEXT' || isUploadingFile)
+                    ? 'bg-gray-800/50 text-gray-400 cursor-not-allowed border-gray-600/50'
+                    : 'bg-white/10 text-white border-[rgba(var(--color-primary-light-rgb),0.35)] hover:border-[rgba(var(--color-primary-light-rgb),0.7)] hover:bg-white/15 active:scale-95'
+                  }`
+                }
+                title={isUploadingFile ? 'Uploading…' : 'Upload a file'}
+                aria-label={isUploadingFile ? 'Uploading file' : 'Upload file'}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 sm:w-5 sm:h-5" aria-hidden="true">
+                  <path fillRule="evenodd" d="M15.621 4.379a3 3 0 0 0-4.242 0l-7 7a3 3 0 0 0 4.241 4.243h.001l.497-.5a.75.75 0 0 1 1.064 1.057l-.498.501-.002.002a4.5 4.5 0 0 1-6.364-6.364l7-7a4.5 4.5 0 0 1 6.368 6.36l-3.455 3.553A2.625 2.625 0 1 1 9.52 9.52l3.45-3.451a.75.75 0 1 1 1.061 1.06l-3.45 3.451a1.125 1.125 0 0 0 1.587 1.595l3.454-3.553a3 3 0 0 0 0-4.243Z" clipRule="evenodd" />
+                </svg>
+              </button>
             )}
-          </button>
+
+            {refinementModelPicker && <div className="ml-auto flex min-w-0 items-center">{refinementModelPicker}</div>}
+            <button
+              type="submit"
+              aria-label={buttonText === 'NEXT' ? 'Continue' : 'Send message'}
+              disabled={!message.trim() || hasPendingHarnessDecision}
+              className={`
+                px-2 py-1.5 rounded-md transition-all duration-300 min-w-[36px] sm:min-w-[40px] w-auto h-8 sm:h-9 oxanium font-bold text-[13px] flex items-center justify-center letter-spacing-wide border-2 flex-shrink-0
+                ${(!message.trim())
+                  ? 'bg-gray-800/50 text-gray-400 cursor-not-allowed border-gray-600/50'
+                  : 'bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.8)] to-[rgba(var(--color-primary-dark-rgb),0.8)] hover:from-[rgba(var(--color-primary-light-rgb),0.9)] hover:to-[rgba(var(--color-primary-light-rgb),0.9)] text-white border-[rgba(var(--color-primary-light-rgb),0.5)] hover:border-[rgba(var(--color-primary-light-rgb),0.7)] shadow-sm [box-shadow:0_0_0_rgba(var(--color-primary-rgb),0.1)] hover:[box-shadow:0_0_0_rgba(var(--color-primary-light-rgb),0.2)] active:scale-95'
+                }
+              `}
+            >
+              {buttonText === 'NEXT' ? (
+                <span className="text-[11px] font-bold tracking-widest" aria-label="Continue">NEXT</span>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 sm:w-5 sm:h-5" aria-hidden="true">
+                  <path d="M3.105 2.288a.75.75 0 0 0-.826.95l1.414 4.926A1.5 1.5 0 0 0 5.135 9.25h6.115a.75.75 0 0 1 0 1.5H5.135a1.5 1.5 0 0 0-1.442 1.086l-1.414 4.926a.75.75 0 0 0 .826.95 28.897 28.897 0 0 0 15.293-7.154.75.75 0 0 0 0-1.115A28.897 28.897 0 0 0 3.105 2.288Z" />
+                </svg>
+              )}
+            </button>
+          </div>
         </form>
       </div>
 

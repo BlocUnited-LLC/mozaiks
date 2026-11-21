@@ -326,3 +326,16 @@ print(json.dumps(result, sort_keys=True))
         for seed in (1, 17)
     ]
     assert outputs[0] == outputs[1]
+
+@pytest.mark.asyncio
+async def test_explicit_provider_does_not_load_workspace_default(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from mozaiksai.core.workflow import llm_config
+
+    default_loader = AsyncMock(side_effect=AssertionError("Default provider should not be loaded"))
+    monkeypatch.setattr(llm_config, "_load_raw_config_list", default_loader)
+    selected = {"api_type": "openai", "model": "gpt-5-nano", "api_key": "test-key"}
+    _, config = await llm_config.get_llm_config(extra_config={"config_list": [selected]}, cache=False)
+    assert config["config_list"] == [selected]
+    default_loader.assert_not_awaited()

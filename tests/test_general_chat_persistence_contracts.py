@@ -222,7 +222,7 @@ def test_workflow_mode_switch_resumes_before_starting_new_workflow_run() -> None
     assert "rememberWorkflowChatSession(data.chat_id, resolvedWorkflowId)" in chat_page_source
     assert "setStoredActiveWorkflowName(resolvedWorkflowName)" in chat_page_source
     assert "setStoredActiveWorkflowName(resolvedWorkflow)" in controller_source
-    assert "applySessionStatePendingTransition(data.session_state)" in chat_page_source
+    assert "applySessionStatePendingTransition(metaData.session_state)" in chat_page_source
 
     router_state_index = controller_source.index("/api/session/state?")
     resume_index = controller_source.index("resumeWorkflowSession(candidateChatId, workflowToResume, { replayOnSwitch: false })")

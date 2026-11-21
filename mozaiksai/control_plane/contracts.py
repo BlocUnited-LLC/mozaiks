@@ -7,6 +7,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from mozaiksai.control_plane.config import RefinementModel
 from mozaiksai.core.session.build_binding import BuildIdentity, RunBuildBinding
 from mozaiksai.core.usage.context import AuxiliaryUsageContext
 
@@ -247,6 +248,7 @@ def acceptance_evidence_names(record: Any, evidence: Any) -> bool:
 
 
 class CodingWorkerRequest(BaseModel):
+    refinement_model: RefinementModel | None = None
     model_config = ConfigDict(extra="forbid")
 
     app_id: str

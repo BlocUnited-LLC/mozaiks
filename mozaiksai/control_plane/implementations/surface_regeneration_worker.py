@@ -135,7 +135,7 @@ class SurfaceRegenerationWorker:
                 },
             )
 
-        llm_config = self._load_config().resolve_contract_surface_regeneration_llm_config()
+        llm_config = self._load_config().for_refinement_model(refinement_request.refinement_model).resolve_contract_surface_regeneration_llm_config()
         system_prompt = self._load_system_prompt()
 
         accumulated: dict[str, str] = {}

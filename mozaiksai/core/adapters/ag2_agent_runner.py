@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from mozaiksai.core.adapters.llm_fallback import (
     close_ag2_session_http_client,
     llm_config_to_ag2_config,
+    resolve_configured_provider_key,
     response_schema_to_ag2,
 )
 from mozaiksai.core.usage.context import AuxiliaryUsageContext
@@ -147,7 +148,13 @@ class AG2StructuredAgentRunner:
         # llm_config_to_ag2_config so provider routing works correctly.
         config_list_llm = dict(llm_config)
         if "config_list" not in config_list_llm:
-            config_list_llm["config_list"] = [{**llm_config, "model": llm_config.get("model") or "gpt-4o"}]
+            entry = {**llm_config, "model": llm_config.get("model") or "gpt-4o"}
+            provider = entry.get("api_type")
+            if provider in {"google", "openai", "anthropic"} and not entry.get("api_key"):
+                key = resolve_configured_provider_key(provider)
+                if key:
+                    entry["api_key"] = key
+            config_list_llm["config_list"] = [entry]
         return Agent(
             agent_name, system_prompt, config=llm_config_to_ag2_config(config_list_llm), middleware=middleware,
         )
