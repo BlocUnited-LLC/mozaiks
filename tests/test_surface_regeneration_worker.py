@@ -192,6 +192,7 @@ async def test_page_worker_receives_saved_pack_design_and_domain_context_without
         ".env": 'PRIVATE_ENV_SENTINEL',
     })
     path = "ui/pages/custom/focus.jsx"
+    files[path] += "\n// Accent · café — 星"
     surface = _make_surface("page_binding", "Focus", [path], target_kind="page")
     worker = _make_worker_with_mock_llm([{
         "summary": "Responsive detail panel", "rationale": "Preserve the saved design",
@@ -203,6 +204,7 @@ async def test_page_worker_receives_saved_pack_design_and_domain_context_without
     )
     assert result.status == "success"
     call = worker._agent_runner.calls[0]
+    assert "Accent · café — 星" in call["user_prompt"]
     payload = _prompt_payload(call)
     assert payload["current_files"] == {path: files[path]}
     assert payload["affected_paths"] == [path]
