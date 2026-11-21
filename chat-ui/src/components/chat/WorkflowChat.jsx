@@ -156,12 +156,36 @@ function WorkflowConversation({
       case 'print':
       case 'message':
       case 'agent_message':
+        if (studio && event.replay) {
+          const content = getWorkflowEventContent(event);
+          if (!content) return;
+          const agentName = getWorkflowAgentName(event);
+          const sender = agentName.toLowerCase() === 'user' ? 'user' : 'assistant';
+          const replayed = { id: ++messageSequence.current, sender, agentName, content, replayIndex: event.index,
+            timestamp: event.timestamp || new Date().toISOString() };
+          if (sender === 'user' && pendingUser.current?.content === content) {
+            pendingUser.current = null;
+            setSendError('');
+          }
+          setMessages(items => {
+            const matches = item => item.sender === sender && (sender === 'user' || item.agentName === agentName);
+            const recorded = items.findIndex(item => matches(item) && Number.isInteger(event.index) && item.replayIndex === event.index);
+            if (recorded >= 0) return items;
+            const live = items.findIndex(item => matches(item) && item.replayIndex == null
+              && (item.content === content || (item.isStreaming && content.startsWith(item.content))));
+            if (live < 0) return [...items, replayed];
+            return items.map((item, index) => index === live ? { ...replayed, id: item.id } : item);
+          });
+          return;
+        }
         if (getWorkflowAgentName(event).toLowerCase() === 'user') {
           const text = getWorkflowEventContent(event);
-          if (text && pendingUser.current?.content !== text) {
+          if (text && pendingUser.current?.content === text) {
+            setSendError('');
+            pendingUser.current = null;
+          } else if (text) {
             setMessages(previous => [...previous, { id: event.id || ++messageSequence.current, sender: 'user', content: text }]);
           }
-          pendingUser.current = null;
           return;
         }
         receiveAnswer(true);
@@ -179,7 +203,7 @@ function WorkflowConversation({
           if (id && ['ui.render', 'chat.ui.render', 'chat.tool_call'].includes(rawEvent.type)
               && rawEvent.data?.tool_call_id === id && !seenArtifacts.current.has(id)) {
             seenArtifacts.current.add(id);
-            callbacksForSession.onArtifact?.(rawEvent, { chatId, afterUserInput: activeUserTurn.current });
+            callbacksForSession.onArtifact?.(rawEvent, { chatId, afterUserInput: activeUserTurn.current && !event.replay });
           }
           return;
         }
@@ -241,9 +265,9 @@ function WorkflowConversation({
       default:
         return;
     }
-  }, [chatId, workflow]);
+  }, [chatId, workflow, studio]);
 
-  const { connectionStatus } = useChatWebSocket({
+  const { connectionStatus, retryConnection } = useChatWebSocket({
     api: workflowApi,
     appId: resolvedAppId,
     userId,
@@ -251,6 +275,15 @@ function WorkflowConversation({
     workflowName: workflow,
     workflowConfigLoaded: true,
     onMessage: handleRuntimeEvent,
+    recoverOnDrop: studio && !ended,
+    onInterrupted: () => {
+      if (pendingUser.current) setSendError('Delivery of your last message is unconfirmed. Check the conversation before sending it again.');
+      streams.current.clear();
+      expectingUser.current = false;
+      activeUserTurn.current = false;
+      setCanReply(false);
+      setActivity('idle');
+    },
   });
 
   useEffect(() => {
@@ -405,7 +438,7 @@ function WorkflowConversation({
           baseUrl: workflowApi.getHttpBaseUrl(), token: getAccessToken ? getAccessToken() : platform.getAccessToken(),
         })}
         hideHeader={!showHeader} plainContainer isOnChatPage={false} appDisplayName={agent} workflowName={workflow}
-        connectionStatus={connectionStatus} chatStatus={{ phase, detail }}
+        connectionStatus={connectionStatus} onRetry={ended ? undefined : retryConnection} chatStatus={{ phase, detail }}
         composerDisabled={!canReply || connectionStatus !== 'connected' || ended} composerLabel={composerLabel}
         composerValue={inputValue} onComposerChange={setInputValue} transcriptLabel={transcriptLabel}/>
     </div>;

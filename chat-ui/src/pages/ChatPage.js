@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import Header from "../components/layout/Header";
 import Footer from "../components/layout/Footer";
 import ChatInterface from '../components/chat/ChatInterface';
+import { shouldReconnectAfterClose } from '../adapters/socketClose.js';
 import ArtifactPanel from '../components/chat/ArtifactPanel';
 import FluidChatLayout from '../components/chat/FluidChatLayout';
 import { TransitionScreen } from '../ui/screens/TransitionScreen';
@@ -4510,21 +4511,6 @@ const ChatPage = () => {
     } catch {}
   }, [cacheSeed, forceResetChat, currentChatId]);
 
-  // Close codes we initiated or were told about deliberately. Reconnecting
-  // after these produces a duplicate socket rather than recovering anything:
-  //   1000 normal — we called close()
-  //   1001 going away — the server evicted us for a newer connection
-  //   1005 no status — close() with no code, still our own doing
-  // Anything else (notably 1006, abnormal) means the link dropped under us and
-  // is worth retrying. An absent code is treated as unexpected so a transport
-  // that reports nothing still recovers.
-  const DELIBERATE_CLOSE_CODES = new Set([1000, 1001, 1005]);
-  const shouldReconnectAfterClose = (closeInfo) => {
-    const code = closeInfo?.code;
-    if (typeof code !== 'number') return true;
-    return !DELIBERATE_CLOSE_CODES.has(code);
-  };
-
   // Connect to streaming when API becomes available and chat ID exists
   useEffect(() => {
     if (!api) return;
@@ -4942,17 +4928,7 @@ const ChatPage = () => {
 
   // Retry connection function
   const retryConnection = useCallback(() => {
-  // console.debug('Retrying connection...');
-    setConnectionInitialized(false);
-    connectionInProgressRef.current = false;
-    setConnectionStatus('disconnected');
-    
-    // Trigger reconnection by setting up the connection again
-    setTimeout(() => {
-      if (currentChatId && workflowConfigLoaded) {
-        setConnectionStatus('connecting');
-      }
-    }, 1000);
+    if (currentChatId && workflowConfigLoaded) setConnectionRetryNonce(value => value + 1);
   }, [currentChatId, workflowConfigLoaded]);
 
   // Subscribe to DynamicUIHandler updates and insert tool_call render events into chat messages

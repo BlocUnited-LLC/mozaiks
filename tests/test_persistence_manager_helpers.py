@@ -32,7 +32,12 @@ Covers:
 """
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
+import pytest
+
 from mozaiksai.core.data.persistence.persistence_manager import (
+    AG2PersistenceManager,
     _has_index_with_keys,
     extract_last_artifact,
     extract_pending_input_request,
@@ -155,6 +160,23 @@ class TestExtractWorkflowUiState:
 # ---------------------------------------------------------------------------
 
 class TestExtractLastArtifact:
+    @pytest.mark.asyncio
+    async def test_owned_read_projects_only_the_artifact_from_the_exact_session(self, monkeypatch):
+        manager = AG2PersistenceManager()
+        collection = AsyncMock()
+        monkeypatch.setattr(manager, "_coll", AsyncMock(return_value=collection))
+        artifact = {"tool_call_id": "design-1", "payload": {"title": "Design"}}
+        collection.find_one.return_value = {"workflow_ui_state": {"last_artifact": artifact}}
+        scope = {"app_id": "app", "user_id": "owner", "workflow_name": "DesignHelp", "chat_id": "chat"}
+        assert await manager.fetch_owned_workflow_artifact(**scope) == artifact
+        collection.find_one.assert_awaited_once_with(
+            {"_id": "chat", "user_id": "owner", "workflow_name": "DesignHelp", "app_id": "app"},
+            {"_id": 0, "workflow_ui_state.last_artifact": 1},
+        )
+        for field in scope:
+            assert await manager.fetch_owned_workflow_artifact(**{**scope, field: None}) is None
+        collection.find_one.assert_awaited_once()
+
     def test_empty_doc_returns_none(self):
         assert extract_last_artifact({}) is None
 

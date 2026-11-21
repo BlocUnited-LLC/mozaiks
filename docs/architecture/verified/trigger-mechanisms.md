@@ -72,6 +72,10 @@ streaming messages and status bar as Factory. Supply `userId` from the authentic
 viewer, an authorized `appId`, a `getAccessToken` function and the
 workflow's declared `initialContext`. Use `freshSession` for an isolated conversation.
 Changing the viewer, workflow, app or context closes the previous conversation.
+After an unexpected socket interruption the chat reconnects to the same session
+with the current credential and requests resume from the last sequence. If that
+attempt fails, the status bar offers Reconnect. Unsent input stays in the
+composer. Only the user can send a turn again.
 
 For a workflow with a preview, declare a one-way artifact UI tool. Its authenticated
 WebSocket delivers `chat.tool_call` with `data.display` set to `artifact` and a unique
@@ -82,7 +86,13 @@ clear the displayed draft when the conversation changes and `onReplyActivity` fo
 notifications outside the chat.
 
 Validate the expected workflow, component, tool payload and resource identity in
-the consumer. Ask the owning module to prepare the draft and recheck the viewer
+the consumer. A module can verify the latest draft against
+`AG2PersistenceManager.fetch_owned_workflow_artifact` using the authenticated
+app and viewer, the expected workflow and the conversation ID. Compare its
+persisted tool call ID and resource binding before attributing an action to that
+draft. A newer artifact replaces the earlier one.
+
+Ask the owning module to prepare the draft and recheck the viewer
 before fetching either version. The module decides whether an operation may use a
 sandbox. Keep ordinary conversational replies and opening greetings free of render
 requests. Store and display a completed render only while its identity and expiry

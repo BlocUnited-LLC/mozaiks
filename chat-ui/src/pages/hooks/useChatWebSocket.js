@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import resolveWorkflow from '../../utils/resolveWorkflow';
+import { shouldReconnectAfterClose } from '../../adapters/socketClose.js';
 
 /**
  * Hook for managing WebSocket connection to the chat backend.
@@ -27,6 +28,8 @@ export function useChatWebSocket({
   workflowConfigLoaded,
   onMessage,
   onConnectionChange,
+  recoverOnDrop = false,
+  onInterrupted,
 }) {
   const [ws, setWs] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
@@ -41,6 +44,11 @@ export function useChatWebSocket({
   const [paused, setPaused] = useState(false);
   const onMessageRef = useRef(onMessage);
   onMessageRef.current = onMessage;
+  const onInterruptedRef = useRef(onInterrupted);
+  onInterruptedRef.current = onInterrupted;
+  const recoverOnDropRef = useRef(recoverOnDrop);
+  recoverOnDropRef.current = recoverOnDrop;
+  const automaticRetryAvailable = useRef(true);
 
   useEffect(() => {
     setCurrentWorkflowName(resolveWorkflow(urlWorkflowName) || '');
@@ -54,6 +62,8 @@ export function useChatWebSocket({
   useEffect(() => {
     if (!api || !workflowConfigLoaded || !chatId || !currentWorkflowName || paused) return;
     let closed = false;
+    let interrupted = false;
+    let retryTimer;
     let socket;
     setConnectionInitialized(true);
     setConnectionStatus('connecting');
@@ -67,22 +77,35 @@ export function useChatWebSocket({
       if (closed) return;
       setTransportType(transport?.transport || 'websocket');
       socket = api.createWebSocketConnection(appId, userId, {
-        onOpen: () => { if (!closed) setConnectionStatus('connected'); },
-        onMessage: data => { if (!closed) onMessageRef.current?.(data); },
-        onError: () => { if (!closed) setConnectionStatus('error'); },
-        onClose: () => {
-          if (closed) return;
+        onOpen: () => { if (!closed && !interrupted) setConnectionStatus('connected'); },
+        onMessage: data => {
+          if (closed || interrupted) return;
+          automaticRetryAvailable.current = true;
+          onMessageRef.current?.(data);
+        },
+        onError: () => { if (!closed && !interrupted) setConnectionStatus('error'); },
+        onClose: info => {
+          if (closed || interrupted) return;
+          interrupted = true;
           wsRef.current = null;
           setWs(null);
-          setConnectionStatus('disconnected');
+          onInterruptedRef.current?.();
+          if (recoverOnDropRef.current && automaticRetryAvailable.current && shouldReconnectAfterClose(info)) {
+            automaticRetryAvailable.current = false;
+            setConnectionStatus('reconnecting');
+            retryTimer = setTimeout(() => setAttempt(value => value + 1), 250);
+          } else {
+            setConnectionStatus('disconnected');
+          }
         },
-      }, currentWorkflowName, chatId);
+      }, currentWorkflowName, chatId, attempt > 0 ? { resumeSession: true, suppressHistoryReplay: true } : undefined);
       wsRef.current = socket;
       setWs(socket);
     }
     connect().catch(() => { if (!closed) setConnectionStatus('error'); });
     return () => {
       closed = true;
+      clearTimeout(retryTimer);
       socket?.close();
       wsRef.current = null;
       setWs(null);

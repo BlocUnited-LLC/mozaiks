@@ -4,6 +4,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium, expect } from '@playwright/test';
 import { build } from 'esbuild';
+import { reactAlias } from './artifactPreviewFixture.js';
 
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ui = path.resolve(shell, '../chat-ui/src');
@@ -17,9 +18,13 @@ test('an embedded Studio conversation renders the Factory chat and scopes previe
         return {chat_id: 'private-' + context.id};
       }
       async getWorkflowTransport() { return {transport:'websocket'}; }
-      createWebSocketConnection(app, user, callbacks, workflow, chat) {
+      createWebSocketConnection(app, user, callbacks, workflow, chat, options) {
         window.channels[chat] = callbacks;
-        queueMicrotask(callbacks.onOpen);
+        window.sockets.push({chat,options,token:this.config.getAccessToken()});
+        if (window.failNextSocket) {
+          window.failNextSocket=false;
+          queueMicrotask(() => callbacks.onClose({code:1006}));
+        } else queueMicrotask(callbacks.onOpen);
         return {close(){ window.closedChats.push(chat); }};
       }
       async sendMessageToWorkflow(text) { window.sent.push({text,token:this.config.getAccessToken()}); return true; }
@@ -39,7 +44,7 @@ test('an embedded Studio conversation renders the Factory chat and scopes previe
       import React, {useState} from 'react'; import {createRoot} from 'react-dom/client';
       import WorkflowChat from ${JSON.stringify(path.join(ui,'components/chat/WorkflowChat.jsx'))};
       import ArtifactPreviewPane from ${JSON.stringify(path.join(ui,'components/preview/ArtifactPreviewPane.jsx'))};
-      window.starts=[]; window.sent=[]; window.results=[]; window.candidates=[]; window.channels={}; window.closedChats=[];
+      window.starts=[]; window.sent=[]; window.results=[]; window.candidates=[]; window.channels={}; window.closedChats=[]; window.sockets=[];
       function Example() {
         const [id,setId]=useState('first'); const [draft,setDraft]=useState('');
         const [token,setToken]=useState('test-scope');
@@ -56,8 +61,7 @@ test('an embedded Studio conversation renders the Factory chat and scopes previe
       createRoot(document.getElementById('root')).render(<React.StrictMode><Example/></React.StrictMode>);
     `},
     bundle: true, write: false, jsx: 'automatic', loader: {'.js':'jsx', '.css':'empty', '.png':'dataurl'},
-    // CI installs each package independently. Mirror Vite's shared React runtime.
-    alias: { react: path.join(shell, 'node_modules/react'), 'react-dom': path.join(shell, 'node_modules/react-dom') },
+    alias: reactAlias,
     nodePaths: [path.join(shell, 'node_modules')], define: {'process.env.NODE_ENV':'"development"'},
     plugins: [{ name: 'transport', setup(builder) {
       builder.onResolve({filter:/.*/}, args => Object.hasOwn(boundaries,args.path) ? {path:args.path,namespace:'fixture'} : undefined);
@@ -122,10 +126,43 @@ test('an embedded Studio conversation renders the Factory chat and scopes previe
   assert.equal(state.starts.at(-1).token,'test-scope');
   assert.deepEqual(state.events, [{chatId:'private-first',afterUserInput:false},{chatId:'private-first',afterUserInput:true}]);
   assert.equal(state.replies.filter(text => text === 'Here is the design.').length,1);
+
+  // A network drop gets one automatic reconnect. If it fails, the retained
+  // composer and an explicit reconnect use the current token and same chat.
+  await page.evaluate(() => {
+    window.failNextSocket=true;
+    window.channels['private-first'].onClose({code:1006});
+  });
+  const reconnect = page.getByRole('button',{name:'Reconnect'});
+  await expect(reconnect).toBeVisible();
+  await expect(composer).toBeDisabled();
+  await expect(composer).toHaveValue('A last edit.');
+  await reconnect.click();
+  await page.waitForFunction(() => window.sockets.length === 3);
+  await emit('chat.awaiting_reply',{replay:true});
+  await expect(composer).toBeEnabled();
+  assert.deepEqual(await page.evaluate(() => window.sockets.slice(1)), Array(2).fill({
+    chat:'private-first',options:{resumeSession:true,suppressHistoryReplay:true},token:'rotated-scope',
+  }));
+  assert.equal(await page.evaluate(() => window.sent.length),2);
+
+  await send.click();
+  await page.evaluate(() => window.channels['private-first'].onClose({code:1006}));
+  await page.waitForFunction(() => window.sockets.length === 4);
+  await expect(page.getByRole('alert')).toContainText('Delivery of your last message is unconfirmed.');
+  await emit('chat.text',{agent:'user',content:'A last edit.',index:3,replay:true});
+  await emit('chat.text',{agent:'Designer',content:'Here is the design.',index:2,replay:true});
+  await expect(transcript.getByText('A last edit.')).toHaveCount(1);
+  await expect(transcript.getByText('Here is the design.')).toHaveCount(1);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await emit('chat.tool_call',{...artifact('missed'),replay:true});
+  assert.equal(await page.evaluate(() => window.candidates.at(-1).afterUserInput),false);
+  assert.equal(await page.evaluate(() => window.sent.length),3);
+  assert.equal(await page.evaluate(() => window.starts.length),1);
   await page.evaluate(() => window.select('second'));
   await page.waitForFunction(() => window.channels['private-second'] && window.closedChats.includes('private-first'));
   await emit('chat.tool_call',artifact('late'));
-  assert.equal(await page.evaluate(() => window.candidates.length),2);
+  assert.equal(await page.evaluate(() => window.candidates.length),3);
   await expect(transcript.getByText('Here is the design.')).toHaveCount(0);
   assert.deepEqual(errors,[]);
 });
