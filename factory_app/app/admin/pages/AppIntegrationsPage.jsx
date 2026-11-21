@@ -58,9 +58,11 @@ function AdapterEditor({ connector, editing, catalog, credentialStorageAvailable
         <label className="block text-sm">Display name
           <input className={fieldStyle} value={name} disabled={busy} onChange={event => setName(event.target.value)} />
         </label>
-        <label className="block text-sm">Notes
-          <textarea className={fieldStyle} value={notes} disabled={busy} onChange={event => setNotes(event.target.value)} />
-        </label>
+        <div className="text-sm">
+          <label htmlFor={formId + '-notes'}>Notes</label>
+          <textarea id={formId + '-notes'} className={fieldStyle} value={notes} disabled={busy}
+            onChange={event => setNotes(event.target.value)} />
+        </div>
         {credentialStorageAvailable ? (
           <div className="text-sm">
             <label htmlFor={formId + '-credential'}>API key or secret</label>

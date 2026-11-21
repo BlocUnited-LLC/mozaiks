@@ -1095,7 +1095,7 @@ async def _get_owned_dashboard_app_record(principal: UserPrincipal, dashboard_ap
         if getattr(app.state, "resolve_studio_dashboard_app_id", None) is not None:
             raise unavailable
         record = await _get_owned_app_record(dashboard_app_id, user_id)
-        # A legacy local registration may describe the loaded host itself.
+        # A local registration may describe the loaded host itself.
         if (record.get("chat_app_id") or record.get("app_id")) != host_app_id:
             raise unavailable
         return record
