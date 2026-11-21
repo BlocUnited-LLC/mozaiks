@@ -125,18 +125,22 @@ replaced from the verified pack source. The workspace-owned `backend/handler.py`
 is seeded once as a thin subclass and preserved from the admitted app source.
 App-owned pages and branding are separate from the pack's implementation.
 
-The app also authors `modules/content/contracts/fixtures.yaml` through the
-existing typed smoke-fixture contract. It names valid test inputs and the app's
-actual approved editor role, including prerequisite creates and returned record
-IDs where needed. It grants no runtime permission. This one declared
-`owner: generator` companion can coexist with the exact pack backend; arbitrary
-module helpers, service replacements and additional ownership exceptions cannot.
+Content 0.2.0 declares reusable smoke inputs on the generator-owned
+`modules/content/contracts/fixtures.yaml` entry in its build-context contract.
+For a selected pack and approved action grants, AppGenerator binds the recipe's
+empty role lists to the app's reviewed roles. The recipe covers create, update
+and archive. Each mutation that needs an existing entry first creates a
+disposable draft and reads its identifier from the response. These inputs only
+execute during a smoke run. An installed app still starts with no entries.
 
-The existing structural task gate treats module companion manifests as optional;
-backend certification alone therefore does not prove that fixtures were supplied.
-Keep explicit fixture tasks and successful positive runtime probes in acceptance.
-A fixture file, or an unauthorized-request test by itself, is not proof that an
-authorized editor can complete an action.
+The recipe changes the pack digest. A design pinned to an earlier Content
+version needs a new review before it can use the new version. Page layouts,
+branding and workspace handler extensions retain their existing owners.
+
+During acceptance, exercise each write over HTTP as an approved role and check
+that a caller without a grant is denied. Verify public list and detail
+visibility separately, including the empty state and visibility of draft and
+archived entries.
 
 For a page/brand change, refine those declared app files and preserve unrelated
 backend bytes. For an authorized handler customization, use the existing scoped
