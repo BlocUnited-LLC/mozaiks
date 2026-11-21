@@ -252,7 +252,7 @@ class StructuredOutputCodingProvider:
             "Validation execution is owned by the operator and runtime. Your strategy and command fields are advisory; they cannot choose host execution or skip required checks.",
             "Return JSON only.",
             "payload_json:",
-            json.dumps(payload, indent=2, sort_keys=True, default=str),
+            json.dumps(payload, indent=2, sort_keys=True, default=str, ensure_ascii=False),
             "",
             "Return a JSON object with this exact shape:",
             (

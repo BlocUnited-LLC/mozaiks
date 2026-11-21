@@ -505,10 +505,13 @@ class FileUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     path: str
-    content: str = Field(description="Full file contents; concrete .yaml/.yml files must be valid YAML.")
+    content: str = Field(description="Full source text without raw NUL characters; concrete .yaml/.yml files must be valid YAML.")
 
     @model_validator(mode="after")
-    def _validate_yaml_content(self) -> FileUpdate:
+    def _validate_source_content(self) -> FileUpdate:
+        nul = self.content.find("\x00")
+        if nul != -1:
+            raise ValueError(f"Generated source contains a raw NUL at character {nul}. Preserve the intended source text.")
         if PurePosixPath(self.path.replace("\\", "/")).suffix.lower() not in {".yaml", ".yml"}:
             return self
         try:
