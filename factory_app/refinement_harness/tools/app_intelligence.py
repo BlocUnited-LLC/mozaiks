@@ -31,16 +31,26 @@ async def get_app_intelligence_context(
 
     snapshot = loaded["snapshot"]
     resolved_query = str(query or tool_context.raw_user_request or "").strip()
+    coding = tool_context.checkpoint == "coding_requested"
+    if coding:
+        frameworks = snapshot.architecture.get("frameworks")
+        catalog = {
+            "snapshot_id": snapshot.snapshot_id,
+            "graph_hash": snapshot.graph_hash,
+            "architecture": {"frameworks": frameworks[:8] if isinstance(frameworks, list) else []},
+        }
+    else:
+        catalog = build_app_intelligence_catalog(snapshot)
     return {
         "present": True,
         "source": loaded["source"],
         "provenance": loaded.get("provenance"),
-        "app_intelligence_catalog": build_app_intelligence_catalog(snapshot),
+        "app_intelligence_catalog": catalog,
         "results": (
             search_app_intelligence_snapshot(
                 snapshot,
                 resolved_query,
-                max_results=_bounded_int(max_results, default=12, minimum=1, maximum=40),
+                max_results=_bounded_int(max_results, default=12, minimum=1, maximum=4 if coding else 40),
             )
             if resolved_query
             else []

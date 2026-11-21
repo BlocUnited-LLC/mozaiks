@@ -275,8 +275,7 @@ The Refinement Engine consumes the Context Graph through compact packs:
 - `get_context_graph_catalog`: scope-selection context with candidate files,
   matched nodes, edges, and semantic annotation candidates
 - `get_context_graph_scope`: coding context around explicitly selected files,
-  including symbols, related files, graph edges, and a bounded annotation
-  request
+  including symbol hints and a bounded set of related files and dependency edges
 
 The coding worker still edits only explicit scoped files. Graph context informs
 what should be included in scope; it does not grant permission to mutate
@@ -289,7 +288,7 @@ Checkpoint context is intentionally staged:
 | `request_submitted` refinement classifier | revision context, artifact summary, stale artifact families, AppContext freshness and ownership warnings | classify `patch`, `design`, `feature`, or `core` and choose a workflow sequence | raw source snippets or full graph dumps |
 | `scope_requested` refinement checkpoint | Context Graph catalog, artifact workspace catalog, bounded source search results | choose the narrowest safe file scope | full file contents and edit permission for related files |
 | `contract_surface_requested` refinement checkpoint | contract surface context, Context Graph catalog, bounded source search | map the request to module/page/workflow/config contract surfaces | arbitrary source browsing or code patching |
-| `coding_requested` refinement checkpoint | explicit scoped files, Context Graph scope, exact source reads for selected paths, related-file/source search as read-only context | produce a bounded patch | scope widening without reroute or human review |
+| `coding_requested` refinement checkpoint | full editable files, selected file contracts, pinned build lineage, bounded graph and search evidence | produce a bounded patch | persisted planning payloads, full search catalogs, annotation generation requests, or permission to widen scope |
 | `ExistingAppDiscovery` before chat | App Intelligence catalog, compact graph pack, source-context catalog, source retrieval tools, and repo/API/runtime evidence as fallback diagnostics | ground discovery and adoption mapping in code evidence | final authority over adoption or generated output |
 | `AppGenerator` and `AgentGenerator` startup | compact `context_graph_pack` from the current AppContext or selected artifact workspace | preserve existing app/workflow context during revision runs | raw `AppContextGraph` payloads or full source repositories |
 

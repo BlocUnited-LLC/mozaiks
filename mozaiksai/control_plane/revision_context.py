@@ -25,6 +25,7 @@ def _artifact_summary(
     *,
     source: str,
     input_artifacts: dict[str, Any] | None = None,
+    include_summary_payload: bool = True,
 ) -> dict[str, Any]:
     summary = {
         "present": True,
@@ -43,9 +44,10 @@ def _artifact_summary(
         "canonical_inputs_version": dict(artifact.canonical_inputs_version or {}),
         "updated_at": artifact.updated_at,
     }
-    summary_payload = extract_summary_payload(artifact)
-    if summary_payload is not None:
-        summary["summary_payload"] = summary_payload
+    if include_summary_payload:
+        summary_payload = extract_summary_payload(artifact)
+        if summary_payload is not None:
+            summary["summary_payload"] = summary_payload
     if input_artifacts:
         summary["input_artifacts"] = dict(input_artifacts)
     return summary
@@ -202,6 +204,49 @@ async def assemble_revision_context(
     user_id = str(tool_context.user_id or "").strip()
     if not app_id:
         return {"present": False, "reason": "missing_app_id"}
+
+    if tool_context.checkpoint == "coding_requested":
+        # Coding already has its write scope. Only the pinned record's lineage
+        # belongs here; planning payloads and run history remain runtime state.
+        current_artifact = None
+        current_artifact_source = "not_found"
+        if tool_context.build_record_id:
+            current_artifact, current_artifact_source = await _resolve_current_artifact(
+                artifact_store=artifact_store or get_artifact_store(),
+                app_id=app_id,
+                context=tool_context,
+            )
+            if current_artifact is not None and (
+                current_artifact.app_id != app_id
+                or current_artifact.id != tool_context.build_record_id
+                or (tool_context.build_family is not None and current_artifact.build_family != tool_context.build_family)
+                or (tool_context.build_key is not None and current_artifact.build_key != tool_context.build_key)
+            ):
+                current_artifact = None
+                current_artifact_source = "request_version_missing"
+        return {
+            "present": True,
+            "app_id": app_id,
+            "user_id": user_id or None,
+            "requested_workflow_id": tool_context.requested_workflow_id,
+            "source_surface": tool_context.source_surface,
+            "build_family": tool_context.build_family,
+            "build_key": tool_context.build_key,
+            "build_record_id": tool_context.build_record_id,
+            "current_build_record": (
+                _artifact_summary(
+                    current_artifact, source=current_artifact_source, include_summary_payload=False,
+                )
+                if current_artifact is not None
+                else {
+                    "present": False,
+                    "build_family": tool_context.build_family,
+                    "build_key": tool_context.build_key,
+                    "build_record_id": tool_context.build_record_id,
+                    "source": current_artifact_source,
+                }
+            ),
+        }
 
     pack = _load_pack(pack_loader)
     session_state = None
