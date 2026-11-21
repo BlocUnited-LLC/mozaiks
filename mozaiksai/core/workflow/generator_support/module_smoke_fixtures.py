@@ -156,7 +156,11 @@ def parse_module_smoke_fixtures(payload: Any) -> ModuleSmokeFixtures:
             stack.extend((item, depth + 1) for item in value.values())
         elif isinstance(value, list):
             stack.extend((item, depth + 1) for item in value)
-    if len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) > MAX_FIXTURE_BYTES:
+    try:
+        size = len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+    except TypeError as exc:
+        raise ValueError("module smoke fixtures require JSON-compatible values") from exc
+    if size > MAX_FIXTURE_BYTES:
         raise ValueError("module smoke fixtures exceed the byte bound")
     return ModuleSmokeFixtures.model_validate(payload)
 

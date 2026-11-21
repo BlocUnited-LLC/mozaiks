@@ -1164,7 +1164,7 @@ async def _run_one_task(
         raise ValueError(f"task {task.get('task_id')!r} references unknown agent {agent_name!r}")
     if getattr(agent, "_mozaiks_tool_outcome", None) is not None:
         raise ValueError(f"task agent {agent_name!r} declares a network-only tool outcome; use the task-batch failure policy")
-    code_owned_output = _code_owned_task_output(task, task_context)
+    code_owned_output = _code_owned_task_output(task, task_context, workflow_name=workflow_name)
     pack_paths = pack_owned_output_paths(base_context)
 
     async with semaphore:
@@ -1485,9 +1485,11 @@ def _build_scoped_worker_prompt(prompt: str, task_context: dict[str, Any]) -> st
     )
 
 
-def _code_owned_task_output(task: dict[str, Any], task_context: dict[str, Any]) -> dict[str, Any] | None:
+def _code_owned_task_output(
+    task: dict[str, Any], task_context: dict[str, Any], *, workflow_name: str,
+) -> dict[str, Any] | None:
     """Complete a task directly when its entire assignment has a deterministic source."""
-    if task.get("task_type") == "module_contract":
+    if workflow_name == "AppGenerator" and task.get("task_type") == "module_contract":
         return pack_smoke_fixture_task_output(task, task_context)
     if str(task.get("task_type") or "").strip() != "data_models":
         return None

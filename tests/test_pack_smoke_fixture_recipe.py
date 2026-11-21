@@ -3,7 +3,9 @@
 import asyncio
 import shutil
 from copy import deepcopy
+from datetime import date
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 import yaml
@@ -14,6 +16,8 @@ from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templat
     verified_pack_template_inventory,
     verify_pack_integrity,
 )
+from mozaiksai.core.adapters.ag2_task_batch_runner import AG2TaskBatchRunnerResult
+from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.generator_support.code_files import extract_code_file_map_from_payload
 from mozaiksai.core.workflow.generator_support.design_access_policy import access_policy_sha256
 from mozaiksai.core.workflow.generator_support.module_smoke_fixtures import (
@@ -39,9 +43,9 @@ def inputs():
 
 def test_fixture_only_task_materializes_one_admitted_file_with_reviewed_roles(inputs):
     task, context = inputs
-    output = _code_owned_task_output(task, context)
+    output = _code_owned_task_output(task, context, workflow_name="AppGenerator")
     assert output is not None
-    assert output == _code_owned_task_output(task, deepcopy(context))
+    assert output == _code_owned_task_output(task, deepcopy(context), workflow_name="AppGenerator")
     contract = output["module_contract"]
     assert set(contract) == {"module_id", "fixtures_yaml"}
     assert contract["module_id"] == "content"
@@ -68,21 +72,26 @@ def test_fixture_only_task_materializes_one_admitted_file_with_reviewed_roles(in
 
 
 @pytest.mark.asyncio
-async def test_fixture_only_task_completes_the_real_batch_without_calling_a_worker(inputs, monkeypatch):
+@pytest.mark.parametrize("workflow_name", ["AppGenerator", "AuthoringWorkflow"])
+async def test_pack_fixture_task_substitution_is_scoped_to_appgenerator(inputs, monkeypatch, workflow_name):
     task, context = inputs
     task["initial_message"] = "Produce the assigned Content smoke fixtures."
     batch = load_task_batches_config("AppGenerator", PACK.parent.parent / "workflows").batches[0]
 
-    async def unexpected_turn(*args, **kwargs):
-        pytest.fail("Deterministic fixture task attempted an AG2 turn")
-
-    monkeypatch.setattr("mozaiksai.core.workflow.task_batches.AG2TaskBatchRunner.run", unexpected_turn)
+    authored = {"module_contract": {"module_id": "content", "fixtures_yaml": _fixture()}}
+    worker = AsyncMock(return_value=AG2TaskBatchRunnerResult(status=RunStatus.COMPLETED, output=authored))
+    monkeypatch.setattr("mozaiksai.core.workflow.task_batches.AG2TaskBatchRunner.run", worker)
     outcome = await _run_one_task(
-        workflow_name="AppGenerator", batch=batch, task=task, all_task_items=[task], base_context=context,
+        workflow_name=workflow_name, batch=batch, task=task, all_task_items=[task], base_context=context,
         completed_task_outputs={}, current_batch_outputs={}, agents={task["initial_agent"]: object()},
         chat_id="smoke-fixture-chat", app_id=context["app_id"], user_id="fixture-observer",
         semaphore=asyncio.Semaphore(1), fresh_agents_per_task=False, agents_factory=None, context_authority_policy=None,
     )
+    if workflow_name == "AppGenerator":
+        worker.assert_not_awaited()
+    else:
+        worker.assert_awaited_once()
+        assert outcome["module_contract"] == authored["module_contract"]
     assert outcome["_task_id"] == task["task_id"]
     assert [(row["filename"], yaml.safe_load(row["content"])) for row in outcome["code_files"]] == [
         (FIXTURE, outcome["module_contract"]["fixtures_yaml"]),
@@ -94,20 +103,20 @@ def test_revision_with_app_authored_fixture_defers_and_preserves_it(inputs):
     context["build_mode"] = "revision"
     authored = yaml.safe_dump(_fixture(), sort_keys=False)
     context["generated_files"][FIXTURE] = authored
-    assert _code_owned_task_output(task, context) is None
+    assert _code_owned_task_output(task, context, workflow_name="AppGenerator") is None
     assert context["generated_files"][FIXTURE] == authored
 
 
 def test_mixed_task_still_needs_its_worker(inputs):
     task, context = inputs
     mixed = {**task, "owned_paths": [FIXTURE, "modules/content/contracts/profile.yaml"]}
-    assert _code_owned_task_output(mixed, context) is None
+    assert _code_owned_task_output(mixed, context, workflow_name="AppGenerator") is None
 
 
 def test_unselected_pack_does_not_supply_a_recipe(inputs):
     task, _ = inputs
     context = reviewed_pack_fixture({"app_build_plan": {"capability_packs": []}}, [])
-    assert _code_owned_task_output({**task, "capability_pack_id": None}, context) is None
+    assert _code_owned_task_output({**task, "capability_pack_id": None}, context, workflow_name="AppGenerator") is None
 
 
 def test_candidate_auth_cannot_supply_missing_reviewed_grant(inputs):
@@ -115,7 +124,7 @@ def test_candidate_auth_cannot_supply_missing_reviewed_grant(inputs):
     # The candidate auth.yaml still grants content.manage. Only the owner review counts.
     context = reviewed_pack_fixture(context, ["content"], access_policy={"roles": [], "grants": []})
     with pytest.raises(ValueError, match="(?i)grant|role|permission"):
-        _code_owned_task_output(task, context)
+        _code_owned_task_output(task, context, workflow_name="AppGenerator")
 
 
 def test_stale_reviewed_pack_pin_cannot_supply_a_recipe(inputs):
@@ -127,7 +136,7 @@ def test_stale_reviewed_pack_pin_cannot_supply_a_recipe(inputs):
         summary["access_policy"], summary["experience_spec"], pack_identities=review["pack_identities"],
     )
     with pytest.raises(PackIntegrityError, match="changed|renew|digest"):
-        _code_owned_task_output(task, context)
+        _code_owned_task_output(task, context, workflow_name="AppGenerator")
 
 
 @pytest.mark.parametrize("keep_original_recipe", [False, True], ids=["foreign-owner", "duplicate-claim"])
@@ -155,10 +164,10 @@ def test_other_selected_pack_cannot_claim_content_fixture(inputs, tmp_path, monk
     summary = context["design_docs_artifact"]["commit_metadata"]["metadata"]["summary_payload"]
     context = reviewed_pack_fixture(context, ["content", "guest"], access_policy=summary["access_policy"])
     with pytest.raises((ValueError, PackIntegrityError), match="(?i)conflict|fixture|owner|claim"):
-        _code_owned_task_output(task, context)
+        _code_owned_task_output(task, context, workflow_name="AppGenerator")
 
 
-@pytest.mark.parametrize("defect", ["owner", "path", "target-role", "setup-role", "invalid-literal"])
+@pytest.mark.parametrize("defect", ["owner", "path", "target-role", "setup-role", "invalid-literal", "yaml-date"])
 def test_pack_integrity_rejects_invalid_recipe_before_task_dispatch(tmp_path, defect):
     source = tmp_path / "content"
     shutil.copytree(PACK, source, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
@@ -174,6 +183,8 @@ def test_pack_integrity_rejects_invalid_recipe_before_task_dispatch(tmp_path, de
         fixtures[0]["roles"] = ["admin"]
     elif defect == "setup-role":
         fixtures[1]["setup"][0]["roles"] = ["admin"]
+    elif defect == "yaml-date":
+        fixtures[0]["params"][0]["value_json"] = date(2026, 11, 21)
     else:
         fixtures[0]["params"][0]["value_json"] = "invalid JSON"
     contract_file.write_text(yaml.safe_dump(contract, sort_keys=False), encoding="utf-8")
