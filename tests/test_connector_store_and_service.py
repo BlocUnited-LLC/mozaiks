@@ -3,6 +3,8 @@ from __future__ import annotations
 # ruff: noqa: I001
 
 import asyncio
+
+import pytest
 from datetime import UTC, datetime, timedelta
 
 from mozaiksai.core.workflow.generator_support.connector_service import (
@@ -573,3 +575,39 @@ def test_compute_connector_health_for_unknown_connector_is_deterministic() -> No
     assert health["missing_fields"] == ["api_key", "endpoint_url"]
     assert health["checked_by"] == "manual"
     assert health["frontend_safe"] is True
+
+
+@pytest.mark.asyncio
+async def test_selected_app_metadata_upsert_and_failed_rotation_preserve_active_connector(monkeypatch):
+    from mozaiksai.core.secrets import NoopConnectorVaultBackend
+    from mozaiksai.core.workflow.generator_support import connector_service
+
+    store = ConnectorStore(pm=_FakePersistenceManager())
+    identity = {"scope": "app", "scope_id": "demo", "service": "example"}
+    recorded = await connector_service.patch_connector(
+        **identity, display_name="Example", create_if_missing=True, user_id="alice", store=store
+    )
+    assert recorded["status"] == "metadata_only" and not recorded["secret_available"]
+    fields = [{"name": "key", "type": "secret"}]
+    active = await store.upsert(
+        **identity, display_name="Example Adapter", user_id="alice", status="active", secret_available=True,
+        secret_storage="mongo", required_fields=fields, extra={"provider": "acme", "integration_id": "acme_api"},
+    )
+    updated = await connector_service.patch_connector(**identity, notes="edited", create_if_missing=True, store=store)
+    assert updated["secret_available"] and updated["status"] == "active"
+    assert updated["required_fields"] == active["required_fields"]
+    monkeypatch.setattr(connector_service, "get_connector_vault_backend", NoopConnectorVaultBackend)
+    failed = await connector_service.save_connector(
+        **identity, secret_value="test-value", store=store, allow_metadata_only=False
+    )
+    assert failed["success"] is False
+    assert await store.get(**identity) == updated
+
+    backend = _FakeVaultBackend()
+    monkeypatch.setattr(connector_service, "get_connector_vault_backend", lambda: backend)
+    rotated = await connector_service.save_connector(
+        **identity, secret_value="rotated-test-value", store=store, allow_metadata_only=False
+    )
+    assert rotated["success"]
+    for field in ("display_name", "provider", "integration_id", "notes", "required_fields"):
+        assert rotated["connector"][field] == updated[field]

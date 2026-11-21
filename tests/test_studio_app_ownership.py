@@ -332,3 +332,86 @@ def test_host_bound_signed_builder_can_read_shared_dashboard_manifest(studio_cli
     assert registry.lookups == []
     response = client.get("/api/studio/dashboard?app_id=alice-app", headers=headers("builder", "factory"))
     assert response.status_code == 403
+
+
+def test_selected_dashboard_connectors_check_ownership_before_every_operation(studio_client, monkeypatch):
+    studio, client, headers, registry = studio_client
+    host = "studio-test"
+    monkeypatch.setattr(studio.app.state, "loaded_app_id", host, raising=False)
+    calls = {}
+
+    async def get_app(*, app_id, owner_user_id):
+        if app_id != f"{owner_user_id}-app":
+            return {"app": None}
+        return {"app": {
+            "app_id": app_id, "owner_user_id": owner_user_id, "chat_app_id": host,
+            "build_registry_id": f"reg-{owner_user_id}",
+        }}
+
+    monkeypatch.setattr(registry, "get_app_record", get_app)
+    for name in ("list_connectors", "patch_connector", "run_connector_health_check", "delete_connector"):
+        calls[name] = AsyncMock()
+        monkeypatch.setattr(studio, name, calls[name])
+
+    base = "/api/studio/integrations/connectors"
+    selection = {"dashboard_app_id": "alice-app"}
+    routes = [
+        ("GET", base, None), ("POST", base, {"service": "example"}),
+        ("PATCH", base + "/example", {"notes": "updated"}),
+        ("POST", base + "/example/health-check", None), ("DELETE", base + "/example", None),
+    ]
+    for method, path, data in routes:
+        foreign = client.request(method, path, params=selection, json=data, headers=headers("bob", host))
+        assert foreign.status_code == 404, (method, path, foreign.text)
+        anonymous = client.request(method, path, params=selection, json=data)
+        assert anonymous.status_code == 401
+        ambiguous = client.request(method, path, params={**selection, "app_id": host},
+                                   headers=headers("alice", host), json=data)
+        assert ambiguous.status_code == 400
+    for call in calls.values():
+        call.assert_not_awaited()
+
+    from factory_app.app.modules.workspace_integrations.backend.repo import (
+        IntegrationDeclarationsRepo,
+    )
+
+    declarations = AsyncMock(return_value=[
+        {"service": "example", "optional": True, "removable": True, "workspace_status": "configured",
+         "required_fields": [{"password": "sensitive-placeholder"}]},
+        {"service": "removed", "removed": True},
+    ])
+    monkeypatch.setattr(IntegrationDeclarationsRepo, "__init__", lambda self: None)
+    monkeypatch.setattr(IntegrationDeclarationsRepo, "get_for_app", declarations)
+    monkeypatch.setattr(studio, "get_connector_backend_summary", AsyncMock(return_value={
+        "configured": True, "vault_name": "sensitive-placeholder",
+    }))
+    calls["list_connectors"].return_value = [{
+        "service": "example", "ready": True, "secret_available": True,
+        "secret_name": "sensitive-placeholder", "public_config": {"key": "sensitive-placeholder"},
+    }]
+
+    selected = client.get(base, params=selection, headers=headers("alice", host))
+    assert selected.status_code == 200, selected.text
+    assert "sensitive-placeholder" not in selected.text and "workspace_status" not in selected.text
+    body = selected.json()
+    assert body["app_id"] == "alice-app"
+    assert body["connectors"] == [{"service": "example", "secret_available": True, "ready": True, "health": {}}]
+    assert body["credential_storage_available"] is True
+    assert len(body["declarations"]) == 1 and body["declarations"][0]["removable"] is False
+    assert body["declarations"][0]["service"] == "example"
+    assert all(set(entry) == {"id", "name", "category"} for entry in body["catalog"])
+    declarations.assert_awaited_once_with(app_id="alice-app")
+    calls["list_connectors"].assert_awaited_once_with(scope="app", scope_id="alice-app")
+
+    monkeypatch.setattr(studio, "save_connector", AsyncMock(return_value={
+        "success": False, "error": "sensitive-placeholder",
+    }))
+    for method, path in [("POST", base), ("PATCH", base + "/example")]:
+        monkeypatch.setattr(studio.ConnectorStore, "get", AsyncMock(return_value={"service": "example"}))
+        data = {"secret_value": "disposable-placeholder"}
+        if method == "POST":
+            data["service"] = "example"
+        failed = client.request(method, path, params=selection, headers=headers("alice", host), json=data)
+        assert failed.status_code == 503, failed.text
+        assert "sensitive-placeholder" not in failed.text and "disposable-placeholder" not in failed.text
+    calls["patch_connector"].assert_not_awaited()

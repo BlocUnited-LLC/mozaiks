@@ -420,12 +420,18 @@ async def save_connector(
     required_fields: Sequence[dict[str, Any]] | None = None,
     provider: str | None = None,
     integration_id: str | None = None,
+    allow_metadata_only: bool = True,
     logger: Any | None = None,
     store: ConnectorStore | None = None,
 ) -> dict[str, Any]:
     """Store secret in vault and save connector metadata."""
     connector_store = _get_store(store)
     normalized_service = _normalize_service(service)
+    if not allow_metadata_only:
+        existing = await connector_store.get(scope=scope, scope_id=str(scope_id), service=normalized_service) or {}
+        display_name = display_name or existing.get("display_name")
+        provider = provider or existing.get("provider")
+        integration_id = integration_id or existing.get("integration_id")
     now = datetime.now(UTC)
     backend = get_connector_vault_backend()
     backend_result = await _vault_store_secret(
@@ -438,6 +444,9 @@ async def save_connector(
         ttl_days=ttl_days,
     )
     success = bool(backend_result.get("success"))
+    if not success and not allow_metadata_only:
+        # A failed credential rotation must leave the last usable record intact.
+        return {"success": False, "connector": None, "health_check_supported": False}
     vault_provider = str(backend_result.get("provider") or "unmanaged")
     identity_fields = _connector_identity_fields(
         service=normalized_service,
@@ -459,7 +468,7 @@ async def save_connector(
         key_length=len(secret_value or ""),
         expires_at=expires_at,
         public_config=public_config,
-        required_fields=_normalize_required_fields(required_fields),
+        required_fields=_normalize_required_fields(required_fields) if required_fields is not None else None,
         status_reason=(
             f"Connector secret persisted via {vault_provider}."
             if success
@@ -578,6 +587,7 @@ async def patch_connector(
     expires_at: str | None = None,
     public_config: dict[str, Any] | None = None,
     required_fields: Sequence[dict[str, Any]] | None = None,
+    create_if_missing: bool = False,
     store: ConnectorStore | None = None,
 ) -> dict[str, Any] | None:
     """Update connector metadata fields."""
@@ -592,7 +602,8 @@ async def patch_connector(
         status=status,
         expires_at=expires_at,
         public_config=public_config,
-        required_fields=_normalize_required_fields(required_fields),
+        required_fields=_normalize_required_fields(required_fields) if required_fields is not None else None,
+        create_if_missing=create_if_missing,
     )
 
 

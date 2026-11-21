@@ -13,6 +13,7 @@ import os
 import stat
 import zipfile
 from asyncio import CancelledError, Lock, to_thread
+from collections import Counter
 from collections.abc import Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from datetime import UTC, datetime
@@ -129,6 +130,7 @@ from mozaiksai.core.runtime.app.metrics_loader import (
     MetricsConfigLoadError,
     load_metrics_config,
 )
+from mozaiksai.core.runtime.app.module_permissions import resolve_module_permissions
 from mozaiksai.core.runtime.app.paths import app_bundle_workspace_path
 from mozaiksai.core.runtime.app.studio_summary import (
     build_app_overview_summary,
@@ -163,6 +165,8 @@ from mozaiksai.core.workflow.generator_support.connector_health import run_conne
 from mozaiksai.core.workflow.generator_support.connector_service import (
     compute_connector_health,
     delete_connector,
+    get_connector,
+    get_connector_backend_summary,
     list_connectors,
     patch_connector,
     save_connector,
@@ -1069,6 +1073,92 @@ async def _get_owned_app_record(app_id: str, user_id: str) -> dict[str, Any]:
     return record
 
 
+class StudioDashboardBinding(BaseModel):
+    """Host projection of an owned Factory app into the Studio dashboard."""
+
+    dashboard_app_id: BuildIdentity
+    build_registry_id: BuildIdentity
+    target_app_id: BuildIdentity
+
+
+def _dashboard_host_scope(principal: UserPrincipal) -> tuple[str, str]:
+    host_app_id = getattr(app.state, "loaded_app_id", None) or platform_app._resolve_default_app_id()
+    return _resolve_studio_scope(principal, app_id=host_app_id)
+
+
+async def _get_owned_dashboard_app_record(principal: UserPrincipal, dashboard_app_id: str) -> dict[str, Any]:
+    """Authorize the dashboard selection before using its Factory target for reads or writes."""
+    host_app_id, user_id = _dashboard_host_scope(principal)
+    bindings_for = getattr(app.state, "list_studio_app_bindings", None)
+    unavailable = HTTPException(status_code=404, detail="Dashboard app not found")
+    if bindings_for is None:
+        if getattr(app.state, "resolve_studio_dashboard_app_id", None) is not None:
+            raise unavailable
+        record = await _get_owned_app_record(dashboard_app_id, user_id)
+        # A legacy local registration may describe the loaded host itself.
+        if (record.get("chat_app_id") or record.get("app_id")) != host_app_id:
+            raise unavailable
+        return record
+
+    rows = await bindings_for(host_app_id=host_app_id, owner_user_id=user_id, dashboard_app_id=dashboard_app_id)
+    if len(rows) != 1:
+        raise unavailable
+    try:
+        binding = StudioDashboardBinding.model_validate(rows[0])
+    except ValidationError as exc:
+        raise unavailable from exc
+    if binding.dashboard_app_id != dashboard_app_id:
+        raise unavailable
+    registry = _get_app_registry_service()
+    record = (await registry.get_app_record(build_registry_id=binding.build_registry_id, owner_user_id=user_id)).get("app")
+    if (
+        not isinstance(record, dict)
+        or record.get("build_registry_id") != binding.build_registry_id
+        or record.get("chat_app_id") != host_app_id
+        or record.get("app_id") != binding.target_app_id
+    ):
+        raise unavailable
+    return record
+
+
+async def _dashboard_ids_by_target(
+    principal: UserPrincipal, records: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Project links in one read, retaining metrics even when an older app has no portal."""
+    bindings_for = getattr(app.state, "list_studio_app_bindings", None)
+    host_app_id, user_id = _dashboard_host_scope(principal)
+    if bindings_for is None:
+        if getattr(app.state, "resolve_studio_dashboard_app_id", None) is not None:
+            return {}
+        return {
+            r["app_id"]: r["app_id"] for r in records
+            if (r.get("chat_app_id") or r.get("app_id")) == host_app_id
+        }
+    targets = {
+        r["build_registry_id"]: r["app_id"] for r in records
+        if r.get("chat_app_id") == host_app_id and r.get("build_registry_id")
+    }
+    if not targets:
+        return {}
+    rows = await bindings_for(
+        host_app_id=host_app_id, owner_user_id=user_id, build_registry_ids=list(targets),
+    )
+    projected: list[StudioDashboardBinding] = []
+    for row in rows:
+        try:
+            binding = StudioDashboardBinding.model_validate(row)
+        except ValidationError:
+            continue
+        if targets.get(binding.build_registry_id) == binding.target_app_id:
+            projected.append(binding)
+    target_counts = Counter(b.target_app_id for b in projected)
+    route_counts = Counter(b.dashboard_app_id for b in projected)
+    return {
+        b.target_app_id: b.dashboard_app_id for b in projected
+        if target_counts[b.target_app_id] == 1 and route_counts[b.dashboard_app_id] == 1
+    }
+
+
 def _analytics_funnel_for_record(record: dict[str, Any]) -> FunnelDef | None:
     """Load the app-declared funnel from the app's bundle, when present.
 
@@ -1118,13 +1208,16 @@ async def get_studio_analytics_portfolio(
         logger.exception("Analytics portfolio app listing failed")
         raise HTTPException(status_code=500, detail="Failed to list apps for analytics") from exc
 
-    rows = [
-        _analytics_app_row(record)
-        for record in records
-        if isinstance(record, dict) and record.get("app_id")
-    ]
+    records = [record for record in records if isinstance(record, dict) and record.get("app_id")]
+    rows = [_analytics_app_row(record) for record in records]
     try:
-        return await _get_owner_analytics_service().portfolio(rows, window)
+        dashboard_ids = await _dashboard_ids_by_target(principal, records)
+        result = await _get_owner_analytics_service().portfolio(rows, window)
+        for row in result["apps"]:
+            row["dashboard_app_id"] = dashboard_ids.get(row["app_id"])
+        return result
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("Analytics portfolio assembly failed")
         raise HTTPException(status_code=500, detail="Failed to build portfolio analytics") from exc
@@ -1134,13 +1227,17 @@ async def get_studio_analytics_portfolio(
 async def get_studio_analytics_app(
     app_id: str,
     period: str = "30d",
+    reference: Literal["target", "dashboard"] = "target",
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     """App View analytics for one owned app, including movement and funnel."""
 
     _, user_id = _resolve_studio_scope(principal)
     window = _analytics_period(period)
-    record = await _get_owned_app_record(app_id, user_id)
+    record = (
+        await _get_owned_dashboard_app_record(principal, app_id)
+        if reference == "dashboard" else await _get_owned_app_record(app_id, user_id)
+    )
     funnel = _analytics_funnel_for_record(record)
     try:
         return await _get_owner_analytics_service().app_analytics(
@@ -1156,13 +1253,17 @@ async def get_studio_analytics_metric_detail(
     app_id: str,
     metric_id: str,
     period: str = "30d",
+    reference: Literal["target", "dashboard"] = "target",
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     """Drill-down detail for one metric on one owned app."""
 
     _, user_id = _resolve_studio_scope(principal)
     window = _analytics_period(period)
-    record = await _get_owned_app_record(app_id, user_id)
+    record = (
+        await _get_owned_dashboard_app_record(principal, app_id)
+        if reference == "dashboard" else await _get_owned_app_record(app_id, user_id)
+    )
     try:
         peers = (await _get_app_registry_service().list_apps(owner_user_id=user_id)).get(
             "apps"
@@ -1197,16 +1298,74 @@ async def get_app_integrations(
     return await build_integrations_summary(app_id=app_id)
 
 
+async def _connector_scope(
+    principal: UserPrincipal, *, app_id: str | None, dashboard_app_id: str | None,
+) -> tuple[str, str]:
+    if dashboard_app_id is None:
+        return await _resolve_owned_app_scope(principal, app_id=app_id)
+    if app_id is not None:
+        raise HTTPException(status_code=400, detail="Choose one app selector")
+    record = await _get_owned_dashboard_app_record(principal, dashboard_app_id)
+    return record["app_id"], record["owner_user_id"]
+
+
+def _selected_connector_record(record: dict[str, Any]) -> dict[str, Any]:
+    fields = (
+        "service", "display_name", "notes", "status", "secret_available", "ready",
+        "expires_at", "updated_at", "health_check_supported",
+    )
+    result = {key: record[key] for key in fields if key in record}
+    health = record.get("health") or {}
+    result["health"] = {
+        key: health[key]
+        for key in ("status", "message", "last_checked_at", "missing_fields", "health_check_supported")
+        if key in health
+    }
+    return result
+
+
 @app.get("/api/studio/integrations/connectors")
 async def get_integration_connectors(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_studio_user),
+    dashboard_app_id: str | None = None,
 ):
-    app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
+    app_id, _ = await _connector_scope(principal, app_id=app_id, dashboard_app_id=dashboard_app_id)
     connectors = await list_connectors(scope=ConnectorStore.SCOPE_APP, scope_id=app_id)
+    if dashboard_app_id is None:
+        return {
+            "app_id": app_id,
+            "connectors": [_redact_connector_record(connector) for connector in connectors],
+        }
+    from factory_app.app.modules.workspace_integrations.backend.repo import (
+        IntegrationDeclarationsRepo,
+    )
+    from factory_app.app.modules.workspace_integrations.backend.schemas import INTEGRATIONS_CATALOG
+
+    actions = getattr(app.state, "module_action_surfaces", {}).get("workspace_integrations", {})
+    can_remove = (
+        "delete_app_integration_need" in actions
+        and actions["delete_app_integration_need"] not in {"internal", "admin_internal"}
+        and (
+            principal.has_local_development_access
+            or "workspace_integrations.manage" in resolve_module_permissions(principal, app=app)
+        )
+    )
+    declarations = await IntegrationDeclarationsRepo().get_for_app(app_id=app_id)
     return {
         "app_id": app_id,
-        "connectors": [_redact_connector_record(connector) for connector in connectors],
+        "connectors": [_selected_connector_record(connector) for connector in connectors],
+        "catalog": [{key: entry[key] for key in ("id", "name", "category")} for entry in INTEGRATIONS_CATALOG],
+        "declarations": [
+            {
+                **{key: row.get(key) for key in (
+                    "service", "catalog_id", "display_name", "kind", "purpose", "required_at", "optional",
+                )},
+                "removable": bool(row.get("removable") and can_remove),
+            }
+            for row in declarations if not row.get("removed")
+        ],
+        "credential_storage_available": bool((await get_connector_backend_summary()).get("configured")),
     }
 
 
@@ -1830,14 +1989,32 @@ async def create_studio_app_context_policy_override(
     )
 
 
+async def _connector_write_result(
+    app_id: str, service: str, dashboard_app_id: str | None,
+    record: dict[str, Any] | None, secret_result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if dashboard_app_id is None:
+        return {
+            "app_id": app_id,
+            "connector": _redact_connector_record(record),
+            "secret_result": _redact_secret_result(secret_result),
+        }
+    saved = await get_connector(scope=ConnectorStore.SCOPE_APP, scope_id=app_id, service=service)
+    if saved is None:
+        raise HTTPException(status_code=404, detail="Connector not found")
+    return {"app_id": app_id, "connector": _selected_connector_record(saved)}
+
+
 @app.post("/api/studio/integrations/connectors")
 async def create_or_update_integration_connector(
     body: IntegrationConnectorCreateRequest,
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_studio_user),
+    dashboard_app_id: str | None = None,
 ):
-    app_id, user_id = await _resolve_owned_app_scope(principal, app_id=app_id)
-    record = None
+    app_id, user_id = await _connector_scope(principal, app_id=app_id, dashboard_app_id=dashboard_app_id)
+    if dashboard_app_id is not None:
+        validate_path_id(body.service, "service")
     secret_result: dict[str, Any] | None = None
     if body.secret_value:
         secret_result = await save_connector(
@@ -1848,51 +2025,27 @@ async def create_or_update_integration_connector(
             secret_value=body.secret_value,
             display_name=body.display_name,
             ttl_days=body.ttl_days or 30,
+            allow_metadata_only=dashboard_app_id is None,
             public_config=body.public_config,
             required_fields=body.required_fields,
         )
-        record = secret_result.get("connector")
-    if (
-        body.display_name is not None
-        or body.notes is not None
-        or body.status is not None
-        or body.expires_at is not None
-        or body.public_config is not None
-    ):
-        record = await patch_connector(
-            scope=ConnectorStore.SCOPE_APP,
-            scope_id=app_id,
-            service=body.service,
-            user_id=user_id,
-            display_name=body.display_name,
-            notes=body.notes,
-            status=body.status or ("active" if (secret_result or {}).get("success") else "metadata_only"),
-            expires_at=body.expires_at,
-            public_config=body.public_config,
-            required_fields=body.required_fields,
-        )
-    if not record:
-        store = ConnectorStore()
-        record = await store.upsert(
-            scope=ConnectorStore.SCOPE_APP,
-            scope_id=app_id,
-            service=body.service,
-            display_name=body.display_name,
-            user_id=user_id,
-            status=body.status or "metadata_only",
-            secret_storage="unmanaged",
-            secret_available=False,
-            notes=body.notes,
-            expires_at=body.expires_at,
-            public_config=body.public_config,
-            required_fields=body.required_fields,
-            status_reason="Created manually from the integrations surface.",
-        )
-    return {
-        "app_id": app_id,
-        "connector": _redact_connector_record(record),
-        "secret_result": _redact_secret_result(secret_result),
-    }
+        if dashboard_app_id is not None and not secret_result.get("success"):
+            raise HTTPException(status_code=503, detail="Credential could not be saved")
+
+    record = await patch_connector(
+        scope=ConnectorStore.SCOPE_APP,
+        scope_id=app_id,
+        service=body.service,
+        user_id=user_id,
+        display_name=body.display_name,
+        notes=body.notes,
+        status=body.status,
+        expires_at=body.expires_at,
+        public_config=body.public_config,
+        required_fields=body.required_fields,
+        create_if_missing=not body.secret_value,
+    )
+    return await _connector_write_result(app_id, body.service, dashboard_app_id, record, secret_result)
 
 
 @app.patch("/api/studio/integrations/connectors/{service}")
@@ -1901,9 +2054,10 @@ async def patch_integration_connector(
     body: IntegrationConnectorPatchRequest,
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_studio_user),
+    dashboard_app_id: str | None = None,
 ):
     validate_path_id(service, "service")
-    app_id, user_id = await _resolve_owned_app_scope(principal, app_id=app_id)
+    app_id, user_id = await _connector_scope(principal, app_id=app_id, dashboard_app_id=dashboard_app_id)
     store = ConnectorStore()
     existing = await store.get(scope=ConnectorStore.SCOPE_APP, scope_id=app_id, service=service)
     if not existing:
@@ -1919,9 +2073,12 @@ async def patch_integration_connector(
             secret_value=body.secret_value,
             display_name=body.display_name,
             ttl_days=body.ttl_days or 30,
+            allow_metadata_only=dashboard_app_id is None,
             public_config=body.public_config,
             required_fields=body.required_fields,
         )
+        if dashboard_app_id is not None and not secret_result.get("success"):
+            raise HTTPException(status_code=503, detail="Credential could not be saved")
     record = await patch_connector(
         scope=ConnectorStore.SCOPE_APP,
         scope_id=app_id,
@@ -1934,11 +2091,7 @@ async def patch_integration_connector(
         public_config=body.public_config,
         required_fields=body.required_fields,
     )
-    return {
-        "app_id": app_id,
-        "connector": _redact_connector_record(record),
-        "secret_result": _redact_secret_result(secret_result),
-    }
+    return await _connector_write_result(app_id, service, dashboard_app_id, record, secret_result)
 
 
 @app.post("/api/studio/integrations/connectors/{service}/health-check")
@@ -1946,9 +2099,10 @@ async def check_integration_connector_health(
     service: str,
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_studio_user),
+    dashboard_app_id: str | None = None,
 ):
     validate_path_id(service, "service")
-    app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
+    app_id, _ = await _connector_scope(principal, app_id=app_id, dashboard_app_id=dashboard_app_id)
     result = await run_connector_health_check(app_id=app_id, service=service, checked_by="manual")
     return {
         "app_id": app_id,
@@ -1974,10 +2128,13 @@ async def remove_integration_connector(
     service: str,
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_studio_user),
+    dashboard_app_id: str | None = None,
 ):
     validate_path_id(service, "service")
-    app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
+    app_id, _ = await _connector_scope(principal, app_id=app_id, dashboard_app_id=dashboard_app_id)
     result = await delete_connector(scope=ConnectorStore.SCOPE_APP, scope_id=app_id, service=service)
+    if dashboard_app_id is not None and result.get("error"):
+        raise HTTPException(status_code=503, detail="Connector could not be removed")
     if not result.get("deleted"):
         raise HTTPException(status_code=404, detail=f"Connector not found: {service}")
     return {

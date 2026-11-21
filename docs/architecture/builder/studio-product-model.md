@@ -100,6 +100,21 @@ The host looks up the matching registration under that owner, host and Factory
 binding, and returns its route ID or `None`. A missing or invalid ID yields
 `404`. The destination dashboard still checks the caller's access.
 
+Revenue and adapter management use the app selected in Studio. In stock Studio,
+the dashboard ID is the owned Factory target. A host with distinct dashboard IDs
+supplies `list_studio_app_bindings(*, host_app_id, owner_user_id, dashboard_app_id=None, build_registry_ids=None)`
+on FastAPI app state. The async callback selects by one dashboard ID or a batch of
+Factory registry IDs. It returns the owner's stored associations in that host,
+each with `dashboard_app_id`, `build_registry_id`, and `target_app_id`. Studio
+checks the Factory registration and execution host before it reads metrics or
+changes adapters for the selected app.
+
+App analytics and metric detail requests from a dashboard use
+`reference=dashboard`. Direct analytics requests keep the existing Factory target
+ID convention. Portfolio rows carry the measured `app_id` and a separate
+`dashboard_app_id` for navigation. Older apps with no verified dashboard link
+still contribute their owned metrics to Performance.
+
 The shared navigation manifest is readable with a token bound to the loaded
 Studio host. Explicit app selections retain registry checks.
 
@@ -121,17 +136,11 @@ App-level routes:
 - `/apps/:appId/health` -> deep app health diagnostics, hidden from primary navigation
 - `/apps/:appId/access` -> app access
 - `/apps/:appId/usage` -> app usage
-- `/apps/:appId/integrations` -> app integration setup detail, hidden from primary navigation
+- `/apps/:appId/integrations` -> owner-managed connections and integration requirements for the selected app
 - `/apps/:appId/support` -> app support follow-up, help desk notes, and stalled run triage
 - `/apps/:appId/activity` -> app build review, artifact versions, validation state, review actions, and carry-forward audit detail, hidden from primary navigation
 
-Primary app navigation is:
-
-- Overview
-- Building
-- Access
-- Usage
-- Support
+The selected app’s navigation comes from `factory_app/app/dashboard/dashboard.yaml`. It includes Revenue, Integrations and the other app management pages enabled by the host.
 
 The Studio route model is canonical. Do not add route aliases for
 retired customer-facing terms such as `Hub`, `Treasury`, `Adapters`,
@@ -156,7 +165,7 @@ product billing routes.
 | `/apps/:appId/health` | App Health Diagnostics | Deep diagnostics across runtime, workflows, hosting, and integrations; routable but hidden from primary navigation |
 | `/apps/:appId/access` | App Access | App-scoped account access, plan assignment, and access blockers |
 | `/apps/:appId/usage` | App Usage | App-scoped input/output token usage, cost signals, totals, and averages |
-| `/apps/:appId/integrations` | App Integration Setup | App-declared integration needs with workspace provider status; routable but hidden from primary navigation |
+| `/apps/:appId/integrations` | Integrations | Owner-scoped connection setup, write-only credentials, manual health checks for supported services, and build requirements |
 | `/apps/:appId/support` | App Support | App-scoped help desk, escalations, stalled runs, and support diagnostics |
 | `/apps/:appId/activity` | Build Review | Build artifact versions, validation state, staged output, review actions, and carry-forward audit detail; routable but hidden from primary navigation |
 

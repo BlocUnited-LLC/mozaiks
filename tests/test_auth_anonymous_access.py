@@ -1736,11 +1736,6 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
     owned_app_routes = {
         "GET /api/studio/dashboard",
         "GET /api/studio/integrations",
-        "GET /api/studio/integrations/connectors",
-        "POST /api/studio/integrations/connectors",
-        "PATCH /api/studio/integrations/connectors/{service}",
-        "POST /api/studio/integrations/connectors/{service}/health-check",
-        "DELETE /api/studio/integrations/connectors/{service}",
         "GET /api/studio/apps/{app_id}/context",
         "POST /api/studio/apps/{app_id}/context/app-intelligence/index",
         "POST /api/studio/apps/{app_id}/context/source-import",
@@ -1752,12 +1747,21 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
         "POST /api/studio/apps/{app_id}/context/refresh-complete",
         "POST /api/studio/apps/{app_id}/context/override",
     }
+    connector_routes = {
+        "GET /api/studio/integrations/connectors",
+        "POST /api/studio/integrations/connectors",
+        "PATCH /api/studio/integrations/connectors/{service}",
+        "POST /api/studio/integrations/connectors/{service}/health-check",
+        "DELETE /api/studio/integrations/connectors/{service}",
+    }
+    analytics_app_routes = {
+        "GET /api/studio/analytics/apps/{app_id}",
+        "GET /api/studio/analytics/apps/{app_id}/metrics/{metric_id}",
+    }
     existing_registry_gates = {
         "GET /api/studio/build/dashboard-link": "get_app_record",
         "GET /api/studio/overview": "get_app_record",
         "GET /api/studio/build": "get_app_record",
-        "GET /api/studio/analytics/apps/{app_id}": "_get_owned_app_record",
-        "GET /api/studio/analytics/apps/{app_id}/metrics/{metric_id}": "_get_owned_app_record",
         "GET /api/studio/build/artifacts/{artifact_version_id}/download": "_resolve_studio_artifact_scope",
         "GET /api/studio/build/history": "_resolve_studio_artifact_scope",
         "GET /api/studio/build/artifacts/{artifact_version_id}/bundle": "_resolve_studio_artifact_scope",
@@ -1793,6 +1797,8 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
     }
     classified = (
         owned_app_routes
+        | connector_routes
+        | analytics_app_routes
         | existing_registry_gates.keys()
         | owner_scoped_registry_operations.keys()
         | execution_host_routes.keys()
@@ -1800,9 +1806,18 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
     )
     assert len(direct_route_list) == len(direct_routes) == 39
     assert direct_routes.keys() == classified
-    assert len(owned_app_routes) == 17
+    assert len(owned_app_routes) == 12
     for key in owned_app_routes:
         assert "_resolve_owned_app_scope" in named_calls(direct_routes[key].endpoint, awaited_only=True), key
+    for key in connector_routes:
+        assert "_connector_scope" in named_calls(direct_routes[key].endpoint, awaited_only=True), key
+    assert {"_resolve_owned_app_scope", "_get_owned_dashboard_app_record"} <= named_calls(
+        studio._connector_scope, awaited_only=True,
+    )
+    for key in analytics_app_routes:
+        assert {"_get_owned_app_record", "_get_owned_dashboard_app_record"} <= named_calls(
+            direct_routes[key].endpoint, awaited_only=True,
+        ), key
     for gates in (existing_registry_gates, owner_scoped_registry_operations):
         for key, expected_call in gates.items():
             assert expected_call in named_calls(direct_routes[key].endpoint, awaited_only=True), key

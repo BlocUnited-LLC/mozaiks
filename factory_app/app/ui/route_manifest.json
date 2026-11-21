@@ -281,16 +281,16 @@
     {
       "path": "/apps/:appId/integrations",
       "component": "AppIntegrationsPage",
-      "label": "App Integrations",
+      "label": "Integrations",
       "order": 26,
       "meta": {
         "surfaces": ["studio"],
         "title": "App Integrations",
+        "requiresAuth": true,
         "appShell": true,
-        "ai_context": "The user is on the App Integrations page. It shows required, optional, and app-specific services for one app, with live workspace setup status overlaid.",
+        "ai_context": "The user is on the App Integrations page. The owner manages this app’s connections, credentials and build requirements here.",
         "navigation": {
           "group": "app-studio",
-          "include": false,
           "scope": "local",
           "icon": "plug"
         }

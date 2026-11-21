@@ -1,302 +1,196 @@
-/**
- * AppIntegrationsPage — app-specific service requirements.
- *
- * Shows what the latest build says this app needs. Workspace-level credentials
- * are configured once at /integrations; this page only explains the app's
- * requirements and optional services.
- */
-import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useId, useState } from 'react'
+import { useParams } from 'react-router-dom'
 
-import { PageHeader, SummaryStrip } from '@mozaiks/chat-ui/ui'
+import { PageHeader } from '@mozaiks/chat-ui/ui'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
-  ActionButton,
-  API_BASE,
-  LinkButton,
-  Panel,
-  StatusPill,
-  StudioErrorState,
-  StudioInlineEmptyState,
-  StudioLoadingState,
+  ActionButton, Panel, StatusPill, StudioErrorState, StudioInlineEmptyState,
+  StudioLoadingState, StudioSlideOver,
 } from '../../ui/components/StudioShared.jsx'
+import { studioFetch, studioModuleAction } from './studioApi.js'
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+const fieldStyle = 'mt-1 block w-full rounded-md border border-border bg-background px-3 py-2 text-foreground'
 
-function humanize(value, fallback = 'Unknown') {
-  const s = String(value || '').trim()
-  return s ? s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : fallback
-}
-
-function isCatalogReady(decl) {
-  return Boolean(decl?.catalog_id) && decl?.workspace_status === 'configured'
-}
-
-function isCustomReady(decl) {
-  return !decl?.catalog_id && decl?.connector_status === 'ready'
-}
-
-function isReady(decl) {
-  return isCatalogReady(decl) || isCustomReady(decl)
-}
-
-function needsSetup(decl) {
-  if (isReady(decl)) return false
-  if (decl?.catalog_id) return decl.workspace_status === 'missing' || decl.workspace_status === 'partial'
-  return decl?.connector_status === 'not_configured' || decl?.connector_status === 'partial'
-}
-
-function serviceTone(decl) {
-  if (isReady(decl)) return 'success'
-  if (needsSetup(decl)) return 'warning'
-  return 'default'
-}
-
-function serviceLabel(decl) {
-  if (isReady(decl)) return 'Ready'
-  if (decl?.workspace_status === 'partial' || decl?.connector_status === 'partial') return 'Partial setup'
-  if (needsSetup(decl)) return 'Needs setup'
-  return 'Review'
-}
-
-function requiredAtLabel(value) {
-  const label = humanize(value, 'Runtime')
-  return `Needed at ${label.toLowerCase()}`
-}
-
-async function fetchAppIntegrationDeclarations(appId) {
-  const res = await fetch(
-    `${API_BASE}/api/modules/workspace_integrations/list_app_integration_needs`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ app_id: appId }),
-    },
-  )
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.json()
-}
-
-async function deleteAppIntegrationNeed(appId, service) {
-  const res = await fetch(`${API_BASE}/api/modules/workspace_integrations/delete_app_integration_need`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ app_id: appId, service }),
+async function requestConnectors(appId, { method = 'GET', service, check = false, body, signal } = {}) {
+  const suffix = service ? '/' + encodeURIComponent(service) : ''
+  const path = '/api/studio/integrations/connectors' + suffix + (check ? '/health-check' : '')
+  const query = new URLSearchParams({ dashboard_app_id: appId })
+  const response = await studioFetch(path + '?' + query, {
+    method, signal,
+    ...(body && { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.json()
+  if (!response.ok) {
+    if (response.status === 403 || response.status === 404) throw new Error('Integration or app unavailable to this account.')
+    if (response.status === 503) throw new Error('The credential store is unavailable. Try again after it is configured.')
+    throw new Error(`Integration request failed (HTTP ${response.status}).`)
+  }
+  return response.json()
 }
 
-// ── rows ─────────────────────────────────────────────────────────────────────
-
-function ServiceRow({ decl, onRemove, removing }) {
-  const setupNeeded = needsSetup(decl)
-  const isCustom = !decl.catalog_id
-
+function AdapterEditor({ connector, editing, catalog, credentialStorageAvailable, busy, error, onClose, onSave, onDelete }) {
+  const formId = useId()
+  const [service, setService] = useState(connector.service || '')
+  const [name, setName] = useState(connector.display_name || '')
+  const [notes, setNotes] = useState(connector.notes || '')
+  const [credential, setCredential] = useState('')
+  const footer = (
+    <div className="flex flex-wrap justify-end gap-2">
+      {editing && <ActionButton variant="destructive" disabled={busy} onClick={onDelete}>Delete integration</ActionButton>}
+      <ActionButton variant="secondary" disabled={busy} onClick={onClose}>Cancel</ActionButton>
+      <ActionButton form={formId} type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save integration'}</ActionButton>
+    </div>
+  )
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-border/55 bg-card/38 p-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-base font-semibold text-foreground">
-            {decl.display_name || humanize(decl.service)}
-          </h3>
-          <StatusPill tone={serviceTone(decl)}>{serviceLabel(decl)}</StatusPill>
-          <StatusPill tone="muted">{decl.optional ? 'Optional' : 'Required'}</StatusPill>
-          {isCustom && <StatusPill tone="muted">App-specific</StatusPill>}
-        </div>
+    <StudioSlideOver open title={editing ? 'Edit integration' : 'Add integration'} onClose={onClose} footer={footer}>
+      <form id={formId} className="space-y-4" onSubmit={event => {
+        event.preventDefault()
+        const serviceId = service.trim().toLowerCase()
+        const displayName = name.trim() || catalog.find(item => item.id === serviceId)?.name || serviceId
+        onSave(serviceId, { display_name: displayName, notes: notes.trim(), ...(credential && { secret_value: credential }) })
+      }}>
+        <label className="block text-sm">Service ID
+          <input className={fieldStyle} required maxLength={128} pattern="[A-Za-z0-9_.\-]+" value={service}
+            disabled={editing || busy} list={formId + '-services'} onChange={event => setService(event.target.value)}
+            placeholder="e.g. analytics_provider" />
+        </label>
+        <datalist id={formId + '-services'}>{catalog.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</datalist>
+        <label className="block text-sm">Display name
+          <input className={fieldStyle} value={name} disabled={busy} onChange={event => setName(event.target.value)} />
+        </label>
+        <label className="block text-sm">Notes
+          <textarea className={fieldStyle} value={notes} disabled={busy} onChange={event => setNotes(event.target.value)} />
+        </label>
+        {credentialStorageAvailable ? (
+          <label className="block text-sm">API key or secret
+            <input className={fieldStyle} type="password" autoComplete="new-password" value={credential}
+              disabled={busy} onChange={event => setCredential(event.target.value)} />
+            <span className="text-xs text-muted-foreground">{editing ? 'Leave blank to keep the saved credential.' : 'Optional for a connection record.'}</span>
+          </label>
+        ) : <p className="text-sm text-muted-foreground">Credential storage is unavailable. You can still save connection details.</p>}
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      </form>
+    </StudioSlideOver>
+  )
+}
 
-        {decl.purpose && (
-          <p className="mt-1 text-sm leading-6 text-muted-foreground">{decl.purpose}</p>
-        )}
-        <div className="mt-2 text-xs text-muted-foreground/70">
-          {requiredAtLabel(decl.required_at)}
-        </div>
-      </div>
+function SelectedAppIntegrations({ appId }) {
+  const [data, setData] = useState(null)
+  const [loadError, setLoadError] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [editor, setEditor] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [revision, setRevision] = useState(0)
 
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
-        {setupNeeded && decl.catalog_id && (
-          <LinkButton to="/integrations" size="sm">
-            Connect in workspace
-          </LinkButton>
+  useEffect(() => {
+    const controller = new AbortController()
+    requestConnectors(appId, { signal: controller.signal })
+      .then(result => {
+        if (controller.signal.aborted) return
+        setData(result)
+        setLoadError('')
+      })
+      .catch(error => {
+        if (!controller.signal.aborted) setLoadError(error.message)
+      })
+    return () => controller.abort()
+  }, [appId, revision])
+
+  async function update(action) {
+    if (busy) return
+    setBusy(true)
+    setActionError('')
+    try {
+      await action()
+      setEditor(null)
+      setRevision(value => value + 1)
+    } catch (error) {
+      setActionError(error.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  function closeEditor() {
+    if (busy) return
+    setEditor(null)
+    setActionError('')
+  }
+  function openEditor(record, editing = false) {
+    setActionError('')
+    setEditor({ record, editing })
+  }
+  if (loadError) return <StudioErrorState title="Integrations unavailable" message={loadError} />
+  if (!data) return <StudioLoadingState label="Loading integrations…" />
+  const { connectors, declarations, catalog } = data
+  return (
+    <div className="space-y-6">
+      <PageHeader title="Integrations" subtitle="Manage service connections for this app."
+        actions={[{ id: 'add-integration', label: 'Add integration' }]} onAction={() => openEditor({})} />
+      {actionError && !editor && <p role="alert" className="text-destructive">{actionError}</p>}
+      <Panel title="App connections">
+        {connectors.length === 0 ? <StudioInlineEmptyState title="No connections yet" description="Add an integration to configure a service for this app." /> : (
+          <ul className="divide-y divide-border">
+            {connectors.map(connector => (
+              <li key={connector.service} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <h3 className="font-semibold">{connector.display_name || connector.service}</h3>
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                    <span>{connector.service}</span>
+                    <StatusPill tone={connector.ready ? 'success' : 'muted'}>{connector.ready ? 'Ready' : (connector.status || 'Needs setup').replaceAll('_', ' ')}</StatusPill>
+                  </div>
+                  {connector.notes && <p className="mt-1 whitespace-pre-wrap text-sm">{connector.notes}</p>}
+                  {connector.health?.last_checked_at && <p className="text-xs text-muted-foreground">Last check · {connector.health.status}</p>}
+                </div>
+                <div className="flex gap-2">
+                  {connector.health_check_supported && <ActionButton size="sm" variant="secondary" disabled={busy} onClick={() => update(() => requestConnectors(appId, { service: connector.service, check: true, method: 'POST' }))}>Check status</ActionButton>}
+                  <ActionButton size="sm" variant="secondary" disabled={busy} onClick={() => openEditor(connector, true)}>Edit</ActionButton>
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
-        {setupNeeded && isCustom && (
-          <StatusPill tone="warning">Configure in app environment</StatusPill>
-        )}
-        {decl.removable && (
-          <ActionButton
-            variant="secondary"
-            size="sm"
-            onClick={() => onRemove(decl)}
-            disabled={removing}
-          >
-            {removing ? 'Removing...' : 'Remove from app'}
-          </ActionButton>
-        )}
-      </div>
+      </Panel>
+      {declarations.length > 0 && (
+        <Panel title="Build requirements">
+          <ul className="divide-y divide-border">{declarations.map(need => (
+            <li key={need.service} className="flex flex-wrap items-center justify-between gap-2 py-3">
+              <div><h3 className="font-semibold">{need.display_name || need.service}</h3>
+                <p className="text-sm text-muted-foreground">{need.optional ? 'Optional' : 'Required'}{need.required_at && ' at ' + need.required_at}{!need.catalog_id && ' · App-specific'}</p>
+                {need.purpose && <p className="text-sm">{need.purpose}</p>}
+              </div>
+              <div className="flex gap-2">
+                <ActionButton variant="secondary" disabled={busy} onClick={() => {
+                  const saved = connectors.find(item => item.service === need.service)
+                  openEditor(saved || { service: need.service, display_name: need.display_name }, Boolean(saved))
+                }}>Configure</ActionButton>
+              {need.removable && <ActionButton variant="secondary" disabled={busy} onClick={() => {
+                if (window.confirm('Remove this integration requirement from the app?')) update(() => studioModuleAction('workspace_integrations', 'delete_app_integration_need', { app_id: data.app_id, service: need.service }))
+              }}>Remove requirement</ActionButton>}
+              </div>
+            </li>
+          ))}</ul>
+        </Panel>
+      )}
+      {editor && <AdapterEditor connector={editor.record} editing={editor.editing} catalog={catalog} credentialStorageAvailable={data.credential_storage_available}
+        busy={busy} error={actionError} onClose={closeEditor}
+        onSave={(service, fields) => {
+          if (editor.editing) {
+            update(() => requestConnectors(appId, { service: editor.record.service, method: 'PATCH', body: fields }))
+          } else if (connectors.some(connector => connector.service === service)) {
+            setActionError('This service already has an integration. Open it to make changes.')
+          } else {
+            update(() => requestConnectors(appId, { method: 'POST', body: { service, ...fields } }))
+          }
+        }}
+        onDelete={() => {
+          if (window.confirm(`Delete the integration for ${editor.record.display_name || editor.record.service} from this app?`)) {
+            update(() => requestConnectors(appId, { method: 'DELETE', service: editor.record.service }))
+          }
+        }} />}
     </div>
   )
 }
 
-function ServiceSection({ title, subtitle, items, onRemove, removingService, empty }) {
-  if (!items.length) return empty || null
-  return (
-    <Panel title={title} subtitle={subtitle}>
-      <div className="space-y-3">
-        {items.map((decl) => (
-          <ServiceRow
-            key={decl.service}
-            decl={decl}
-            onRemove={onRemove}
-            removing={removingService === decl.service}
-          />
-        ))}
-      </div>
-    </Panel>
-  )
-}
-
-// ── page ─────────────────────────────────────────────────────────────────────
-
 export default function AppIntegrationsPage() {
-  const { appId = 'workspace-app' } = useParams()
-  const navigate = useNavigate()
-  const [declarations, setDeclarations] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [actionError, setActionError] = useState(null)
-  const [removingService, setRemovingService] = useState(null)
-
-  async function load() {
-    const payload = await fetchAppIntegrationDeclarations(appId)
-    setDeclarations(payload)
-  }
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function loadForEffect() {
-      try {
-        const payload = await fetchAppIntegrationDeclarations(appId)
-        if (!cancelled) {
-          setDeclarations(payload)
-          setError(null)
-        }
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load integrations.')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    loadForEffect()
-    return () => { cancelled = true }
-  }, [appId])
-
-  async function handleRemoveDeclaration(decl) {
-    const service = String(decl?.service || '').trim()
-    if (!service) return
-    const label = decl.display_name || humanize(service)
-    if (!window.confirm(`Remove ${label} from this app?`)) return
-
-    setRemovingService(service)
-    setActionError(null)
-    try {
-      await deleteAppIntegrationNeed(appId, service)
-      await load()
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Integration could not be removed.')
-    } finally {
-      setRemovingService(null)
-    }
-  }
-
-  if (loading) return <StudioLoadingState label="Loading integrations..." />
-  if (error) return <StudioErrorState title="Integrations Unavailable" message={error} />
-
-  const declList = Array.isArray(declarations?.declarations) ? declarations.declarations : []
-  const catalogServices = declList.filter((d) => Boolean(d.catalog_id))
-  const customServices = declList.filter((d) => !d.catalog_id)
-  const requiredServices = catalogServices.filter((d) => !d.optional)
-  const optionalServices = catalogServices.filter((d) => d.optional)
-  const readyCount = declList.filter(isReady).length
-  const setupCount = declList.filter(needsSetup).length
-
-  const summaryItems = [
-    {
-      id: 'ready',
-      label: 'Ready',
-      value: readyCount,
-      detail: 'Usable by this app',
-    },
-    {
-      id: 'setup',
-      label: 'Needs setup',
-      value: setupCount,
-      detail: setupCount > 0 ? 'Action required' : 'No blockers',
-    },
-    {
-      id: 'optional',
-      label: 'Optional',
-      value: declList.filter((d) => d.optional).length,
-      detail: 'Can be removed',
-    },
-  ]
-
-  return (
-    <WorkspaceLayout>
-      <div className="space-y-6">
-        <PageHeader
-          title="App Integrations"
-          subtitle="Services this app needs. Workspace connections are configured once and reused by apps that declare them."
-          actions={[{ id: 'workspace-integrations', label: 'Workspace integrations', variant: 'outline' }]}
-          onAction={(id) => {
-            if (id === 'workspace-integrations') navigate('/integrations')
-          }}
-        />
-
-        <SummaryStrip items={summaryItems} />
-
-        {actionError && (
-          <div className="rounded-md border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {actionError}
-          </div>
-        )}
-
-        {declList.length === 0 ? (
-          <StudioInlineEmptyState
-            title="No integrations declared"
-            description="Once a build identifies required services, they appear here. Workspace-level setup is still managed globally."
-            action={<LinkButton to="/integrations" variant="secondary">Open workspace integrations</LinkButton>}
-          />
-        ) : (
-          <div className="space-y-5">
-            <ServiceSection
-              title="Required"
-              subtitle="Services this app expects before its related features are fully usable."
-              items={requiredServices}
-              onRemove={handleRemoveDeclaration}
-              removingService={removingService}
-              empty={null}
-            />
-            <ServiceSection
-              title="Optional"
-              subtitle="Enhancements or defaults that can be removed from this app."
-              items={optionalServices}
-              onRemove={handleRemoveDeclaration}
-              removingService={removingService}
-              empty={null}
-            />
-            <ServiceSection
-              title="App-specific"
-              subtitle="Services not in the workspace catalog. These are configured in the app environment."
-              items={customServices}
-              onRemove={handleRemoveDeclaration}
-              removingService={removingService}
-              empty={null}
-            />
-          </div>
-        )}
-      </div>
-    </WorkspaceLayout>
-  )
+  const { appId } = useParams()
+  return <WorkspaceLayout><SelectedAppIntegrations key={appId} appId={appId} /></WorkspaceLayout>
 }

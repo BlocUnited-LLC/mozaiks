@@ -78,6 +78,12 @@ app:
       icon: palette
       order: 20
 
+    - id: integrations
+      label: Integrations
+      route: /apps/:appId/integrations
+      icon: plug
+      order: 26
+
     - id: launch
       label: Launch
       route: /apps/:appId/launch
