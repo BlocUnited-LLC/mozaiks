@@ -61,6 +61,27 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Agent replies rejected by structured-output validation now write an
+  `agent.output.rejected` record to the existing Mozaiks audit logger from the
+  live packet gate, the direct or resumed WAL check, and standalone task
+  batches, attributed to the initiating user. It adds an application-level
+  record next to AG2's native turn-failure audit: agent, workflow, chat, trace
+  id, failure category, error types with the field paths they apply to, and a
+  keyed digest of the reply (HMAC-SHA256, so a yes/no, enum or score reply
+  cannot be recovered by hashing the possible values). Set
+  `MOZAIKS_AUDIT_DIGEST_KEY` in the process environment to a randomly
+  generated key of 32+ characters (for example `python -c "import secrets;
+  print(secrets.token_hex(32))"`); digests compare across workers and restarts
+  only if they share that key. Without it a random per-process key is used and
+  digests compare only within that process. A
+  path keeps only what the schema proves
+  (declared fields and list or tuple indexes); mapping keys and any component
+  the schema cannot prove become `<redacted-field>`. The reply and Pydantic's
+  input-quoting message are never stored. Each boundary writes its own record;
+  in the normal fail-closed path a rejected packet is never committed, so only
+  one boundary sees it. Whether a record persists depends on the configured
+  audit store; without one it falls back to a log line. Validation still fails
+  closed, and an audit failure cannot change that.
 - Factory generation and final review offer an owner-account handoff into the app's OIDC flow. Owner entry verifies app Admin access, supports provider reauthentication, and carries self-host account setup guidance into exported environments and scaffold documentation.
 
 - Authenticated profile photo and banner uploads reuse the configured media content store. Factory app workbenches show the owner account and sign-in setup guidance.
