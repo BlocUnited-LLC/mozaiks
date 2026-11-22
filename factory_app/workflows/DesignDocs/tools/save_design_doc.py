@@ -33,6 +33,7 @@ from mozaiksai.core.workflow.generator_support.data_contract_fields import (
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
     access_policy_sha256,
     validate_design_page_roles,
+    validate_design_page_sign_in,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     canonical_read_actions_for_surface,
@@ -74,18 +75,19 @@ async def _review_access_policy(
     pack_authorization: PackAuthorization | None = None,
 ) -> dict[str, Any]:
     page_roles = validate_design_page_roles(experience_spec, policy)
+    page_sign_in = validate_design_page_sign_in(experience_spec, policy, require_explicit=True)
     identities = [row.model_dump() for row in (pack_authorization.identities if pack_authorization else ())]
     receipt = {
         "status": "not_required", "policy_sha256": access_policy_sha256(policy, experience_spec, pack_identities=identities),
         "target_app_id": binding.target_app_id, "build_id": binding.build_id,
         "pack_identities": identities,
     }
-    empty_scope = not identities and not policy["grants"] and not any(page_roles.values())
+    empty_scope = not identities and not policy["grants"] and not page_sign_in
     if empty_scope and not context_variables.get("design_docs_review_requested_changes"):
         return receipt
     user_id, chat_id = _cv_get(context_variables, "user_id"), _cv_get(context_variables, "chat_id")
     if not user_id or not chat_id:
-        raise ValueError("Role grants require an authenticated owner review in this chat")
+        raise ValueError("The app access policy requires an authenticated owner review in this chat")
     review_id = uuid4().hex
     labels = {role["role_id"]: role["label"] for role in policy["roles"]}
     checkpoints = [f"{role['label']} ({role['role_id']}): {role['description']}" for role in policy["roles"]]
@@ -104,17 +106,15 @@ async def _review_access_policy(
         for row in rows_for_pack_choices(context_variables, identities)
         if row.get("capability_source") == "managed_capability"
     )
-    checkpoints.extend(
-        f"Page {route}: " + (
-            "requires a verified role of " + ", ".join(f"{labels[role]} ({role})" for role in roles) + "."
-            if roles else "no page-role gate; authentication and record ownership still apply."
-        )
-        for route, roles in page_roles.items()
-    )
+    for route, roles in page_roles.items():
+        access = "sign-in required" if page_sign_in[route] else "open to anonymous visitors"
+        if roles:
+            access += " with a verified role of " + ", ".join(f"{labels[role]} ({role})" for role in roles)
+        checkpoints.append(f"Page {route}: {access}.")
     raw_response = await use_ui_tool(
         "save_design_docs_bundle",
         {
-            "title": "Review app packs and role permissions",
+            "title": "Review app packs and access permissions",
             "summary": "Approve the selected packs, any explicitly named managed provider, and who may perform the listed read and write actions and open each page. Available offerings are not automatically selected. People without a granted role cannot use restricted actions or pages. Login does not assign roles. Record ownership still applies.",
             "review_id": review_id, "checkpoints": checkpoints,
             "actions": [
@@ -913,6 +913,7 @@ def _materialize_facade_pages(
                 page = {
                     "name": name,
                     "route": route,
+                    "requiresAuth": True,
                     "ui_surface": "declarative_page",
                     "layout": "full-width",
                     "intent": intent,
@@ -1165,7 +1166,7 @@ async def save_design_docs_bundle(
             bundle.get("access_policy"), data_contract=data_contract, design_surface_map=surface_map,
             pack_authorization=pack_authorization,
         )
-        validate_design_page_roles(experience_spec, access_policy)
+        validate_design_page_sign_in(experience_spec, access_policy, require_explicit=True)
         if not frontend_markdown or not backend_markdown or not database_markdown:
             raise ValueError("DesignDocsBundle must include all three Markdown documents")
         normalization_messages = [

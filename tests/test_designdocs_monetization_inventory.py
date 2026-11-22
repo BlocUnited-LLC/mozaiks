@@ -37,14 +37,16 @@ def registered_offering_and_review(monkeypatch, tmp_path):
     from tests.test_factory_pack_selection import _enable_managed
 
     _enable_managed(tmp_path, monkeypatch)
-    async def approve(_tool, payload, **kwargs):
-        return {"action": "approve", "approved": True, "review_id": payload["review_id"]}
-    monkeypatch.setattr(save_design_doc, "use_ui_tool", AsyncMock(side_effect=approve))
+    monkeypatch.setattr(save_design_doc, "use_ui_tool", AsyncMock(side_effect=approve_page_access))
+
+
+async def approve_page_access(_tool, payload, **kwargs):
+    return {"action": "approve", "approved": True, "review_id": payload["review_id"]}
 
 
 def _bundle(*, pricing: bool, subscription: bool = False) -> dict:
     pages = [{
-        "name": "Reports", "ui_surface": "declarative_page", "route": "/reports", "layout": "full-width",
+        "name": "Reports", "ui_surface": "declarative_page", "route": "/reports", "requiresAuth": True, "layout": "full-width",
         "intent": "Review reports", "sections": [{
             "id": "reports", "primitive": "DataTable", "intent": "Read reports",
         }],
@@ -56,7 +58,7 @@ def _bundle(*, pricing: bool, subscription: bool = False) -> dict:
     }]
     if pricing:
         pages.append({
-            "name": "Subscriptions", "ui_surface": "declarative_page", "route": "/pricing", "layout": "full-width",
+            "name": "Subscriptions", "ui_surface": "declarative_page", "route": "/pricing", "requiresAuth": False, "layout": "full-width",
             "intent": "Compare plans and manage subscription", "sections": [{
                 "id": "plans", "primitive": "SurfaceCard",
                 "intent": "Compare available plans and select a subscription",
@@ -69,7 +71,7 @@ def _bundle(*, pricing: bool, subscription: bool = False) -> dict:
     if subscription:
         for name in ("Billing", "Usage"):
             pages.append({
-                "name": name, "ui_surface": "declarative_page", "route": f"/{name.lower()}", "layout": "full-width",
+                "name": name, "ui_surface": "declarative_page", "route": f"/{name.lower()}", "requiresAuth": True, "layout": "full-width",
                 "intent": f"Manage {name.lower()}", "sections": [{
                     "id": name.lower(), "primitive": "SurfaceCard", "intent": f"Show {name.lower()} status",
                 }],
@@ -146,7 +148,7 @@ def _save(context: ContextVariablesBridge, bundle: dict) -> dict:
 
 @pytest.fixture
 def persistence(monkeypatch):
-    """Only replace storage; validation, context writes, and outcome routing stay real."""
+    """Exercise real save and review logic with a simulated owner and storage."""
     store = Mock()
     store.mark_design_doc_status = AsyncMock()
     store.upsert_design_doc = AsyncMock()
@@ -156,6 +158,7 @@ def persistence(monkeypatch):
     monkeypatch.setattr(save_design_doc, "AG2PersistenceManager", Mock())
     monkeypatch.setattr(save_design_doc, "BuilderArtifactStore", store_factory)
     monkeypatch.setattr(save_design_doc, "persist_summary_artifact", summary)
+    monkeypatch.setattr(save_design_doc, "use_ui_tool", AsyncMock(side_effect=approve_page_access))
     return store, store_factory, summary
 
 

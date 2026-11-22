@@ -11,7 +11,7 @@ from typing import Any, Literal, Optional, Union, get_args, get_origin
 
 _UNION_ORIGINS = (Union, _types.UnionType) if hasattr(_types, "UnionType") else (Union,)
 
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, create_model
 
 from ..llm_config import get_llm_config
 from ..workflow_manager import workflow_manager
@@ -31,6 +31,7 @@ TYPE_MAP = {
     'int': int,
     'integer': int,
     'bool': bool,
+    'strict_bool': StrictBool,
     'optional_str': Optional[str],  # noqa: UP045
     'Optional[str]': Optional[str],  # noqa: UP045
     'list': list,

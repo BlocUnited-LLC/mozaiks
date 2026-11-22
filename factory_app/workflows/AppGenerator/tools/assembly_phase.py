@@ -39,7 +39,7 @@ from mozaiksai.core.workflow.generator_support.code_files import (
 )
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
     resolve_authored_module_access_policy,
-    resolve_design_access_policy,
+    resolve_scaffold_access,
 )
 from mozaiksai.core.workflow.generator_support.module_account_data import (
     materialize_module_account_handlers,
@@ -355,7 +355,7 @@ def _merge_code_files(
     ))
     file_map.update(synthesis_files)
     if "app.json" in file_map:
-        approved_policy = resolve_design_access_policy(context_variables)
+        approved_policy, requires_sign_in = resolve_scaffold_access(context_variables)
         pack_authorization = verified_pack_authorization(context_variables) if approved_policy and approved_policy["grants"] else None
         if pack_authorization and approved_policy is not None:
             validate_pack_permission_consumers(
@@ -370,7 +370,7 @@ def _merge_code_files(
         file_map.update(materialize_auth_scaffold(
             file_map, data_contract=data_contract, design_surface_map=design_surface_map,
             access_policy=approved_policy, auth_mode=(app_build_plan or {}).get("auth_mode"),
-            pack_authorization=pack_authorization,
+            pack_authorization=pack_authorization, requires_sign_in=requires_sign_in,
         ))
         if candidate_auth is not None:
             allowed_auth = [yaml.safe_load(file_map.get("config/auth.yaml", "null"))]

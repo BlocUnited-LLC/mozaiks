@@ -172,6 +172,19 @@ they must resolve in the canonical registry before qualification.
 
 ## Costs and evidence
 
+DesignDocs asks the owner to review sign-in for each page. A Content app can
+publish its index and detail pages to visitors while reserving its editor for
+an approved role. New designs declare a boolean `requiresAuth` on every
+ExperienceSpec page. AppGenerator projects the reviewed choice to
+`meta.requiresAuth` on a declarative page or `requiresAuth` on a custom
+route. Earlier approvals retain their existing behavior until a fresh review.
+The Content module independently checks writes against the granted permissions.
+
+Each page worker receives its owned paths. A custom detail worker returns its
+React bundle with an empty declarative page list. If a response also emits an
+unassigned page, the worker receives the filename to remove together with any
+errors in its assigned page. Admission checks the corrected response again.
+
 The content module makes no model or external-provider calls. It uses the
 existing app persistence boundary, backed by local MongoDB for local runtime
 verification. This avoids a new hosted service dependency. Agent generation,

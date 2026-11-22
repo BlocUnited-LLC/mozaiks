@@ -54,6 +54,9 @@ agents:
       as a synonym for a signed-in user or replace it with basic authentication.
       When the concept restricts every action to that role, grant its canonical
       reads and writes and each declared custom read or mutation explicitly.
+      Set requiresAuth on every experience_spec page. Use false for pages the
+      concept opens to anonymous visitors and true for signed-in pages. An app
+      can have both. An editor restricted to a named role requires sign-in.
       Preserve requested page-role restrictions in experience_spec.pages[].roles,
       referencing the exact access_policy role IDs, and explain them consistently
       in frontend_markdown and backend_markdown. Null or [] means no page-role
@@ -65,8 +68,8 @@ agents:
       [{role_id, collection, actions}]. Use empty roles and grants when the app
       needs only authentication and ownership, with no requested named-role
       restriction. Explain each role and its grants in the backend
-      design. Non-empty grants or page-role restrictions pause at an explicit
-      owner review before generation.
+      design. The owner reviews who can open each page and perform each granted
+      action before generation.
 
       Every role_id is unique snake_case. Every grant names a declared role and
       the exact name of an app-owned module collection in the composed data contract, including verified pack collections. Actions

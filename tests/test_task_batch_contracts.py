@@ -1208,3 +1208,50 @@ async def test_task_output_validation_uses_the_declared_retry_budget(repair: boo
     assert "[REJECTED TASK OUTPUT]" not in agent.ask_calls[0]["message"]
     rejected_json = agent.ask_calls[1]["message"].split("complete task output.\n", 1)[1]
     assert json.loads(rejected_json) == invalid
+
+
+@pytest.mark.asyncio
+async def test_page_worker_repair_drops_foreign_page_and_fixes_only_its_own_access_and_bindings():
+    from tests.reviewed_pack_fixture import reviewed_pack_fixture
+    from tests.test_page_schema_runtime_validation import _valid_page
+
+    config = _valid_payload()
+    config["batches"][0]["execution"]["retry_limit"] = 1
+    config["batches"][0]["result"]["require_owned_paths"] = True
+    task = {"task_id": "home", "task_type": "page_bundle", "initial_agent": "WorkerAgent",
+            "initial_message": "Build the home page.", "owned_paths": ["ui/pages/home.yaml"]}
+    page = {"name": "home", "route": "/home", "ui_surface": "declarative_page", "roles": [], "requiresAuth": False}
+    context = reviewed_pack_fixture({
+        "review_plan": {"tasks": [task]}, "experience_spec": {"pages": [page]}, "app_build_plan": {"pages": [page]},
+    }, [])
+
+    def invalid_table(action):
+        return {"id": "items", "primitive": "DataTable",
+                "config": {"columns": ["title"], "data_source": {"module_id": "reports", "action_id": action}}}
+
+    first = {"manifest": None, "pages": [
+        _valid_page(meta={"requiresAuth": True}, sections=[invalid_table("owned_unknown_read")]),
+        _valid_page(name="other", route="/other", sections=[invalid_table("foreign_unknown_read")]),
+    ]}
+    repaired = {"manifest": None, "pages": [_valid_page()]}
+
+    class RepairAgent(_RunnerAgent):
+        async def ask(self, message, **kwargs):
+            self.ask_calls.append({"message": message})
+            return _Reply(json.dumps(first if len(self.ask_calls) == 1 else repaired))
+
+    agent = RepairAgent("")
+    await execute_task_batches_for_trigger(
+        workflow_name="AppGenerator", trigger_agent="TriageAgent", batches_config=parse_task_batches_config(config),
+        agents={"WorkerAgent": agent}, context_variables=context, fresh_agents_per_task=False,
+    )
+    assert len(agent.ask_calls) == 2
+    feedback, original = agent.ask_calls[1]["message"].split("[REJECTED TASK OUTPUT]")
+    reason = feedback.split("[TASK VALIDATION FEEDBACK]")[1]
+    assert "ui/pages/other.yaml" in reason and "Remove these files" in reason
+    assert "owned_unknown_read" in reason and "requiresAuth=false" in reason
+    assert "foreign_unknown_read" not in reason
+    assert json.loads(original.split("complete task output.\n")[1]) == first
+    files = context["document_review_results"]["home"]["code_files"]
+    assert [entry["filename"] for entry in files] == ["ui/pages/home.yaml"]
+    assert yaml.safe_load(files[0]["content"])["meta"]["requiresAuth"] is False

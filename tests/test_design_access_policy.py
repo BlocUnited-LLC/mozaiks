@@ -227,7 +227,7 @@ def test_owner_approval_persists_exact_policy_and_projects_from_summary(monkeypa
     assert review["policy_sha256"] == access_policy_sha256(policy, summary["experience_spec"])
     assert review["build_id"] == "pricing_build"
     assert review["target_app_id"] == "reports-app"
-    assert "Page /reports: no page-role gate; authentication and record ownership still apply." in (
+    assert "Page /reports: sign-in required." in (
         save_design_doc.use_ui_tool.await_args.args[1]["checkpoints"]
     )
     assert detach(context.get("access_policy")) == policy
@@ -412,18 +412,62 @@ def test_stale_or_malformed_review_fails_closed(monkeypatch, persistence, overri
     persistence[1].assert_not_called()
 
 
-def test_empty_policy_needs_no_review(monkeypatch, persistence):
-    ui = AsyncMock(side_effect=AssertionError("No grants need review"))
+@pytest.mark.parametrize("requires_auth", [False, True])
+def test_owner_reviews_access_even_without_role_grants(monkeypatch, persistence, requires_auth):
+    ui = AsyncMock(side_effect=inventory.approve_page_access)
     monkeypatch.setattr(save_design_doc, "use_ui_tool", ui)
     context = ownership._context(managed=False)
-    result = inventory._save(context, inventory._bundle(pricing=False))
+    bundle = inventory._bundle(pricing=False)
+    bundle["experience_spec"]["pages"][0]["requiresAuth"] = requires_auth
+    result = inventory._save(context, bundle)
     assert result["outcome"] == "saved", result
-    ui.assert_not_awaited()
+    ui.assert_awaited_once()
+    access = "sign-in required" if requires_auth else "open to anonymous visitors"
+    assert f"Page /reports: {access}." in ui.await_args.args[1]["checkpoints"]
     summary = persistence[2].await_args.kwargs["summary_payload"]
     assert summary["access_policy"] == {"roles": [], "grants": []}
-    assert summary["access_policy_review"]["status"] == "not_required"
+    assert summary["access_policy_review"]["status"] == "approved"
     context.set("design_docs_artifact", _record(summary))
     assert resolve_design_access_policy(context) == {"roles": [], "grants": []}
+
+
+def test_mixed_auth_design_shows_each_route_before_owner_approval(monkeypatch, persistence):
+    bundle = inventory._bundle(pricing=True)
+    bundle["experience_spec"]["pages"][0]["roles"] = ["editor"]
+    bundle["access_policy"] = {"roles": [{"role_id": "editor", "label": "Editor", "description": "Edits reports."}], "grants": []}
+
+    async def owner_review(_tool, payload, **kwargs):
+        persistence[2].assert_not_awaited()
+        assert "Page /reports: sign-in required with a verified role of Editor (editor)." in payload["checkpoints"]
+        assert "Page /pricing: open to anonymous visitors." in payload["checkpoints"]
+        return {"action": "approve", "approved": True, "review_id": payload["review_id"]}
+
+    monkeypatch.setattr(save_design_doc, "use_ui_tool", AsyncMock(side_effect=owner_review))
+    result = inventory._save(inventory._context(monetized=True), bundle)
+    assert result["outcome"] == "saved", result
+    summary = persistence[2].await_args.kwargs["summary_payload"]
+    assert summary["access_policy_review"]["reviewed_by"] == "owner"
+    assert {p["route"]: p["requiresAuth"] for p in summary["experience_spec"]["pages"]} == {
+        "/reports": True, "/pricing": False,
+    }
+
+
+@pytest.mark.parametrize("omit,gate,roles", [(True, None, []), (False, "false", []), (False, False, ["editor"])])
+def test_fresh_design_never_promotes_an_ambiguous_page_gate(monkeypatch, persistence, omit, gate, roles):
+    bundle = inventory._bundle(pricing=False)
+    bundle["access_policy"] = {"roles": [{"role_id": "editor", "label": "Editor", "description": "Edits reports."}], "grants": []}
+    page = bundle["experience_spec"]["pages"][0]
+    page["roles"] = roles
+    if omit:
+        page.pop("requiresAuth")
+    else:
+        page["requiresAuth"] = gate
+    ui = AsyncMock()
+    monkeypatch.setattr(save_design_doc, "use_ui_tool", ui)
+    result = inventory._save(inventory._context(monetized=False), bundle)
+    assert result["outcome"] == "revise" and "requiresAuth" in result["error"]
+    ui.assert_not_awaited()
+    persistence[2].assert_not_awaited()
 
 
 @pytest.mark.parametrize("field,value,error", [

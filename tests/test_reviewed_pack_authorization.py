@@ -601,17 +601,17 @@ def test_design_review_binds_pack_actions_and_source_identity(social, persistenc
         resolve_design_access_policy(context)
 
 
-def test_empty_review_does_not_authorize_pack_actions(social, persistence, monkeypatch):
+def test_review_of_pages_without_packs_does_not_authorize_pack_actions(social, persistence, monkeypatch):
     selection, _, _, _, policy = social
     context = inventory._context(monetized=False)
     context.set("capability_packs", selection["capability_packs"])
-    ui = AsyncMock()
+    ui = AsyncMock(side_effect=inventory.approve_page_access)
     monkeypatch.setattr(save_design_doc, "use_ui_tool", ui)
     result = inventory._save(context, inventory._bundle(pricing=False))
     assert result["outcome"] == "saved", result
-    ui.assert_not_awaited()
+    ui.assert_awaited_once()
     summary = persistence[2].await_args.kwargs["summary_payload"]
-    assert summary["access_policy_review"]["status"] == "not_required"
+    assert summary["access_policy_review"]["status"] == "approved"
     summary["access_policy"] = policy
     context.set("design_docs_artifact", {
         "app_id": "reports-app", "build_family": "design_docs", "build_key": "design_docs",

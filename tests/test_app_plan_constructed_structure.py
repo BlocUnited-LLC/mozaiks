@@ -263,11 +263,12 @@ def test_complete_correct_plan_preserves_structure_and_restates_page_outputs():
     output_contract = (
         'Page output contract from final owned_paths: ["brand/theme_config.json", "app.json", '
         '"ui/pages/dashboard.yaml", "ui/pages/tasks.yaml"]. '
-        "This contract supersedes earlier artifact inclusion/exclusion wording in this task's "
-        "initial_message and acceptance_criteria, including page-only or no-manifest wording. "
-        "It does not change approved product behavior, routes, roles, layout, or bindings. "
+        "This contract supersedes earlier artifact inclusion/exclusion wording. "
         "Emit a non-null AppSchemaOutput.manifest to materialize app.json. Its page "
-        "inventory covers the full approved app_build_plan, not just this worker's pages. "
+        "inventory covers the full approved app_build_plan. "
+        f"Use manifest auth_strategy={json.dumps(plan.get('auth_strategy'))}, roles={json.dumps(plan.get('roles'))}. "
+        'AppSchemaOutput.pages must contain only these approved name/route pairs: '
+        '[["Dashboard", "/dashboard"], ["Tasks", "/tasks"]]. Set custom_route_bundle to null. '
         "Emit only pages and optional output fields whose materialized paths "
         "are owned by this task; leave unowned fields null. Do not widen owned_paths."
     )

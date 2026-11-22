@@ -23,6 +23,10 @@ owner consent. Thirty-one formerly implicit-provider successes now require an
 app design decision (29 missing Pricing inventories, two ambiguous ownerships).
 Their recorded bodies remain unchanged; ADR 0026 lists the expectation migration.
 
+The recorded output predates explicit per-page sign-in. The stored successful
+outcomes describe the historical contracts. Replay as a fresh proposal must now
+identify a page requiring a new decision before asking for owner approval.
+
 An intended change in outcome is accepted by regenerating the expectations and
 explaining every changed fixture in the pull request::
 
@@ -142,7 +146,7 @@ def test_the_fixture_is_the_recorded_corpus():
             assert set(label) == {"path", "field", "value", "rule"}, label
 
 
-def test_the_corpus_saves_all_but_its_judgment_cases():
+def test_historical_outcomes_preserve_the_original_saves_and_judgments():
     outcomes = [entry["expected"] for entry in CORPUS["fixtures"]]
     saved = [expected for expected in outcomes if expected["outcome"] == "saved"]
     judged = [expected for expected in outcomes if expected["outcome"] != "saved"]
@@ -151,13 +155,19 @@ def test_the_corpus_saves_all_but_its_judgment_cases():
 
 
 @pytest.mark.parametrize("entry", CORPUS["fixtures"], ids=[entry["id"] for entry in CORPUS["fixtures"]])
-def test_recorded_output_saves_or_names_its_judgment(entry):
+def test_recorded_output_saves_or_names_its_current_judgment(entry):
     expected = entry["expected"]
     actual = replay(entry)
 
+    pages = entry["experience_spec"]["pages"]
+    if expected["outcome"] == "saved" and all("requiresAuth" not in page for page in pages):
+        assert actual["outcome"] == "revise"
+        assert actual["error"] in {
+            f"Page {page['route']!r} must declare an explicit boolean requiresAuth" for page in pages
+        }
+        return
     if expected["outcome"] == "saved":
-        changed = {key: (expected.get(key), actual.get(key)) for key in {*expected, *actual} if expected.get(key) != actual.get(key)}
-        assert not changed, f"{entry['id']} changed (expected, actual): {json.dumps(changed, indent=1)[:3000]}"
+        assert actual == expected
         return
     assert actual["outcome"] == "revise", actual
     assert actual["error"] == expected["error"]
@@ -171,6 +181,11 @@ def _update() -> None:
     corpus = _corpus()
     changed = []
     for entry in corpus["fixtures"]:
+        if entry["expected"]["outcome"] == "saved" and all(
+            "requiresAuth" not in page for page in entry["experience_spec"]["pages"]
+        ):
+            # Keep historical success receipts attached to their original inputs.
+            continue
         actual = replay(entry)
         if actual["outcome"] == "saved":
             expected: dict[str, Any] = actual

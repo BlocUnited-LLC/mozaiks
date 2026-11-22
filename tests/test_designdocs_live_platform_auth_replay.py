@@ -50,17 +50,28 @@ def _fixture() -> dict:
     return json.loads(FIXTURE.read_text(encoding="utf-8"))
 
 
-def _save_attempt(index: int) -> tuple[ContextVariablesBridge, dict]:
+def _save_attempt(index: int, *, propose_sign_in: bool = True) -> tuple[ContextVariablesBridge, dict]:
     fixture = _fixture()
     context = ContextVariablesBridge(deepcopy(fixture["context_vars"]))
     # Current replay inputs explicitly select the provider; the capture is unchanged.
     context.set("workflow_name", "DesignDocs")
     context.set("pack_selection", pin_pack_choices(context, ["mozaikspay"]))
     bundle = deepcopy(fixture["attempts"][index])
+    # This new test proposal requests sign-in on every page. Its simulated
+    # owner review is independent of the archived design and its author.
+    if propose_sign_in:
+        for page in bundle["experience_spec"]["pages"]:
+            page["requiresAuth"] = True
     submitted = deepcopy(bundle)
     result = inventory._save(context, bundle)
     assert bundle == submitted, "the model's structured output is never edited in place"
     return context, result
+
+
+def test_archived_pages_need_a_new_sign_in_decision(persistence):
+    _, result = _save_attempt(0, propose_sign_in=False)
+    assert result["outcome"] == "revise" and "explicit boolean requiresAuth" in result["error"]
+    persistence[2].assert_not_awaited()
 
 
 def test_fixture_records_the_live_evidence():

@@ -25,6 +25,7 @@ from mozaiksai.core.workflow.context.authority import (
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    project_reviewed_page_access,
     resolve_authored_module_access_policy,
     resolve_design_access_policy,
 )
@@ -37,6 +38,7 @@ from .generator_support.code_files import (
     extract_code_file_entries_from_payload,
     extract_code_file_map_from_payload,
     materialize_data_contract,
+    planned_page_path,
     safe_relpath,
 )
 from .generator_support.module_account_data import materialize_task_module_account_handlers
@@ -1270,10 +1272,23 @@ async def _run_one_task(
                 # A page task's binding, identity and schema errors are raised
                 # together below, so its one bounded correction sees them all.
                 page_failures: list[str] = []
-                canonical_file_map = compile_authored_page_files(
-                    canonical_file_map, payload=output, context=task_context, failures=page_failures,
-                )
-                if page_failures and str(task.get("task_type") or "").strip() != "page_bundle":
+                is_page_task = str(task.get("task_type") or "").strip() == "page_bundle"
+                authored_files = canonical_file_map
+                if is_page_task and batch.result.require_owned_paths:
+                    # Keep the complete candidate for rejection. Only the owning worker
+                    # should receive instructions to repair a page's contents.
+                    emitted = set(canonical_file_map)
+                    rendered_failures.extend(_task_output_ownership_errors(batch, task, output, emitted_paths=emitted))
+                    try:
+                        _validate_exclusive_task_paths(task, output, all_task_items, emitted_paths=emitted)
+                    except ValueError as exc:
+                        rendered_failures.append(str(exc))
+                    owned = set(_normalize_owned_paths(task.get("owned_paths")))
+                    authored_files = {path: content for path, content in canonical_file_map.items() if path in owned}
+                canonical_file_map.update(compile_authored_page_files(
+                    authored_files, payload=output, context=task_context, failures=page_failures,
+                ))
+                if page_failures and not is_page_task:
                     raise ValueError("\n".join(page_failures))
                 policies = materialize_task_module_policies(
                     canonical_file_map, task=task,
@@ -1353,7 +1368,7 @@ async def _run_one_task(
                 ]
                 if canonical_code_files:
                     output["code_files"] = canonical_code_files
-                if str(task.get("task_type") or "").strip() == "page_bundle":
+                if is_page_task:
                     failed_pages = {failure.split(":", 1)[0] for failure in page_failures}
                     try:
                         output["code_files"] = _normalize_owned_page_files_from_plan(
@@ -1369,7 +1384,7 @@ async def _run_one_task(
                         path for path in _normalize_owned_paths(task.get("owned_paths"))
                         if _page_stem_from_path(path)
                     ]
-                ownership_failures = [*rendered_failures, *_task_output_ownership_errors(batch, task, output)]
+                ownership_failures = dict.fromkeys([*rendered_failures, *_task_output_ownership_errors(batch, task, output)])
                 if ownership_failures:
                     raise ValueError("\n".join(ownership_failures))
                 _validate_exclusive_task_paths(task, output, all_task_items)
@@ -1575,17 +1590,33 @@ def _normalize_owned_page_files_from_plan(
 
     plan_context = base_context if plan_context is None else plan_context
     pages = _planned_pages(plan_context)
-    validate_planned_custom_routes(
-        file_map, pages=pages,
-        owned_paths=set(_normalize_owned_paths(task.get("owned_paths"))),
-        baseline_files=base_context.get("generated_files") if base_context.get("build_mode") == "revision" else None,
-    )
+    owned = set(_normalize_owned_paths(task.get("owned_paths")))
+    failures: list[str] = []
+    if "ui/route_manifest.json" in owned and "ui/route_manifest.json" in file_map:
+        try:
+            owned_routes = {page["route"] for page in pages if page.get("ui_surface") == "custom_react_page"
+                            and planned_page_path(page) in owned}
+            projected = project_reviewed_page_access(
+                file_map, plan_context, owned_paths={"ui/route_manifest.json"}, owned_routes=owned_routes,
+            )
+            file_map["ui/route_manifest.json"] = projected["ui/route_manifest.json"]
+        except ValueError as exc:
+            failures.append(str(exc))
+    try:
+        validate_planned_custom_routes(
+            file_map, pages=pages, owned_paths=owned,
+            baseline_files=base_context.get("generated_files") if base_context.get("build_mode") == "revision" else None,
+        )
+    except ValueError as exc:
+        failures.append(str(exc))
     owned_page_paths = [
         path
         for path in _normalize_owned_paths(task.get("owned_paths"))
         if _page_stem_from_path(path)
     ]
     if not owned_page_paths:
+        if failures:
+            raise ValueError("\n".join(failures))
         return [
             {"filename": filename, "content": content}
             for filename, content in file_map.items()
@@ -1602,11 +1633,16 @@ def _normalize_owned_page_files_from_plan(
     data_contract = detach(base_context.get("data_contract"))
     surface_map = detach(base_context.get("design_surface_map"))
     # Validate every owned page before rejecting, so one correction sees it all.
-    failures: list[str] = []
     for path in owned_page_paths:
         stem = _page_stem_from_path(path)  # type: ignore[assignment]
         if not stem:
             continue
+        if path in file_map:
+            try:
+                projected = project_reviewed_page_access({path: file_map[path]}, plan_context, owned_paths={path})
+                file_map[path] = projected[path]
+            except ValueError as exc:
+                failures.append(str(exc))
         try:
             planned = planned_by_stem.get(stem)
             if not planned:
@@ -1679,6 +1715,8 @@ def _task_output_ownership_errors(
     batch: TaskBatchSpec,
     task: dict[str, Any],
     output: dict[str, Any],
+    *,
+    emitted_paths: set[str] | None = None,
 ) -> list[str]:
     """Every ownership error of one output: unowned and missing paths are reported together."""
     if not batch.result.require_owned_paths:
@@ -1689,7 +1727,8 @@ def _task_output_ownership_errors(
     if not owned_paths:
         return [f"task batch {batch.id!r} requires owned_paths, but task {task_id!r} declares none"]
 
-    emitted_paths = set(extract_code_file_map_from_payload(output))
+    if emitted_paths is None:
+        emitted_paths = set(extract_code_file_map_from_payload(output))
     if not emitted_paths:
         return [f"task batch {batch.id!r} task {task_id!r} did not emit any code files"]
 
@@ -1699,6 +1738,7 @@ def _task_output_ownership_errors(
     if unexpected:
         errors.append(
             f"task batch {batch.id!r} task {task_id!r} emitted files outside owned_paths: {unexpected}"
+            + (". Remove these files from the page output." if task.get("task_type") == "page_bundle" else "")
         )
 
     missing = sorted(owned_paths.difference(emitted_paths).difference(optional_paths))
@@ -1711,8 +1751,9 @@ def _task_output_ownership_errors(
 
 def _validate_exclusive_task_paths(
     task: dict[str, Any], output: dict[str, Any], task_items: list[dict[str, Any]],
+    *, emitted_paths: set[str] | None = None,
 ) -> None:
-    emitted = set(extract_code_file_map_from_payload(output))
+    emitted = set(extract_code_file_map_from_payload(output)) if emitted_paths is None else emitted_paths
     for other in task_items:
         if other["task_id"] == task["task_id"]:
             continue

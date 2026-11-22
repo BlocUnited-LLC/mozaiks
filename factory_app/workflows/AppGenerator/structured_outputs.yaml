@@ -139,6 +139,13 @@ models:
       route:
         type: str
         description: Primary route path for the page.
+      requiresAuth:
+        type: union
+        variants:
+        - strict_bool
+        - 'null'
+        default: null
+        description: Copy the reviewed ExperienceSpec page's requiresAuth. The planner fills an omitted choice from its review. Roles and shell mode do not determine sign-in.
       roles:
         type: optional_list
         items: str
@@ -5279,7 +5286,7 @@ models:
         - bool
         - 'null'
         default: null
-        description: Optional route auth override. Omit for the default authenticated page behavior; set false only for public pages.
+        description: Copy the reviewed sign-in choice for this route. The Factory projects an omitted choice from its review. The runtime defaults to signed in.
       requiresRole:
         type: union
         variants:
@@ -5515,7 +5522,7 @@ models:
         description: Component registry key that ui/index.js will register for this route.
       requiresAuth:
         type: bool
-        description: Whether the route requires an authenticated user.
+        description: Copy the reviewed sign-in choice for this custom route.
       order:
         type: union
         variants:

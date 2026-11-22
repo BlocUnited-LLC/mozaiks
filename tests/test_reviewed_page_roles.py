@@ -84,7 +84,7 @@ def test_page_only_restriction_is_visible_and_owner_reviewed_before_save(monkeyp
     bundle["experience_spec"]["pages"][0]["roles"] = ["member"]
     async def approve(_tool, payload, **_kwargs):
         persistence[2].assert_not_awaited()
-        assert "Page /reports: requires a verified role of Member (member)." in payload["checkpoints"]
+        assert "Page /reports: sign-in required with a verified role of Member (member)." in payload["checkpoints"]
         assert "Login does not assign roles" in payload["summary"]
         return {"action": "approve", "approved": True, "review_id": payload["review_id"]}
     ui = AsyncMock(side_effect=approve)

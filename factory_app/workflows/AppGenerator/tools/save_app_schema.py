@@ -59,6 +59,7 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     validate_custom_page_files,
 )
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_design_page_sign_in,
     validate_page_role_preservation,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
@@ -1186,7 +1187,7 @@ def _persist_to_filesystem(
         "appName": manifest_dict["app_name"],
         "startup": {"landing_spot": default_route},
         "targets": {"web": True, "mobile": False},
-        "authRequired": auth_required or data_contract_requires_auth(
+        "authRequired": auth_required or any(resolve_design_page_sign_in(context_variables).values()) or data_contract_requires_auth(
             data_contract if data_contract is not None else auth_data_contract
         ),
         "admins": app_admin_bootstrap(
@@ -1473,6 +1474,11 @@ def save_app_schema(
                 sorted(f"ui/pages/{_page_file_stem(page)}.yaml" for page in pack_pages),
             )
         page_list = [page for page in typed_pages if page not in pack_pages]
+        custom_route_bundle = _normalize_custom_route_bundle(custom_route_bundle)
+        validate_page_role_preservation(
+            page_list, context_variables, fill_missing=True,
+            custom_routes=custom_route_bundle.get("route_manifest") if isinstance(custom_route_bundle, dict) else None,
+        )
         modules = module_action_index_from_context(context_variables)
         workflows = workflow_names_from_context(context_variables)
         data_contract = detach(_context_get(context_variables, "data_contract"))
@@ -1506,7 +1512,7 @@ def save_app_schema(
             baseline_pages.update({page["name"]: page for page in page_list})
             page_list = list(baseline_pages.values())
             if custom_route_bundle is None:
-                custom_route_bundle = detach(_context_get(context_variables, "app_custom_route_bundle"))
+                custom_route_bundle = _normalize_custom_route_bundle(_context_get(context_variables, "app_custom_route_bundle"))
         if page_list and not isinstance(page_list, list):
             raise ValueError("save_app_schema: pages must be a list")
         # The same deterministic repairs the task-batch lane runs. This lane used to
@@ -1528,7 +1534,6 @@ def save_app_schema(
         )
         shell_config = _normalize_shell_config(shell_config)
         asset_manifest = _strip_none(_to_plain(asset_manifest))
-        custom_route_bundle = _normalize_custom_route_bundle(custom_route_bundle)
 
         # One rejection carries every defect it can see. Reporting the first one and
         # stopping meant a page with three independent faults needed three turns

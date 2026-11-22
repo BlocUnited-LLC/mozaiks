@@ -373,6 +373,12 @@ models:
       route:
         type: str
         description: Primary route path for the page.
+      requiresAuth:
+        type: strict_bool
+        description: >
+          Explicit sign-in decision for this route. Use false when visitors may
+          open the page anonymously and true when opening it requires sign-in.
+          A page with verified role restrictions always requires sign-in.
       roles:
         type: optional_list
         items: str
