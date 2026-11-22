@@ -20,6 +20,7 @@ import {
   isExpired,
   isExpiring,
   isRejected,
+  lastCheckDisplay,
   needsAttention,
   saveAndCheckConnector,
   statusLabel,
@@ -281,8 +282,9 @@ function SetupSlideOver({
   const isConnected = effectiveStatus(item) === 'configured' && !needsAttention(item, connector)
   // Primary secret key name for the inline connect form (first required secret)
   const primaryKeyName = secrets[0]?.name || item.connector_key || null
-  // The provider's own key page. `item.setup_url` is a Studio path, not this.
+  // The provider's own key page. The catalog row's `setup_url` is a Studio path, not this.
   const setupUrl = item.provider_setup_url || null
+  const lastCheck = lastCheckDisplay(connector, { statusLabel: humanize })
 
   const footer = (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -430,12 +432,10 @@ function SetupSlideOver({
               Last health check
             </div>
             <div className="flex items-center gap-2">
-              <StatusPill tone={statusTone(connector.health.status)}>
-                {humanize(connector.health.status)}
-              </StatusPill>
+              <StatusPill tone={lastCheck.tone}>{lastCheck.label}</StatusPill>
             </div>
-            {connector.health.message && (
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">{connector.health.message}</p>
+            {lastCheck.message && (
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{lastCheck.message}</p>
             )}
           </div>
         )}
@@ -636,7 +636,10 @@ export default function WorkspaceIntegrationsPage() {
   }, [activeItem])
 
   async function load(preserveCategory = false) {
-    setLoading(true)
+    // Only the first load replaces the page with a loading state. A reload
+    // keeps the lists and the open panel on screen, so what the owner typed
+    // in the panel is still there when it returns.
+    if (!preserveCategory) setLoading(true)
     try {
       const payload = await fetchIntegrations()
       setData(payload)

@@ -29,9 +29,12 @@ This project follows a practical pre-1.0 changelog format:
   or delete the server refused, and links "Get API key" to the provider's page
   instead of a Studio path that does not exist.
 - A saved integration key that fails its check with the provider is listed
-  under Needs attention as "Check failed", not under Connected. After a save
-  the page waits for that check and, if it fails, keeps the setup panel open
-  with the provider's reason.
+  under Needs attention as "Check failed", not under Connected, and so is a
+  service saved with only some of the values it needs. After a save the page
+  waits for that check and, if it fails, keeps the setup panel open with the
+  provider's reason. Once the values are corrected the service reads Connected
+  again: a connector's stored health no longer keeps the error code of an
+  earlier check after a check that reports none.
 - Studio's AI models page is in the workspace menu, and says why it cannot be
   changed when sign-in is off.
 - Studio's app Health page lists specific problems (latest build validation,
@@ -175,8 +178,7 @@ This project follows a practical pre-1.0 changelog format:
   lives in `mozaiksai.core.admin.contract`. App-backend admin panels may name
   `activity`. AppGenerator declares Overview, Usage, Operations, and Settings
   for every app, Access for an app with sign-in, and any other admin page only
-  when a panel renders on it. It no longer plans built-in app-backend panels,
-  which no generated backend can serve.
+  when a panel renders on it.
 - `GET /api/admin/stats` returns `failed_chats`. `GET /api/admin/runs` and
   `/api/admin/sessions` give a failed session its end time, and their
   timestamps carry a UTC offset (they were read as local time in the browser).

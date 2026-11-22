@@ -29,13 +29,15 @@ export function StatsPanel({ usageState }) {
 
   const summary = summarizeUsage(data)
   if (!summary) return <ErrorBox message="AI usage unavailable: the server sent no totals." />
+  // Below the limit the first card already says "All recorded model calls".
+  const cappedNote = summary.capped ? summary.windowNote : undefined
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
       <StatCard label="Total tokens" value={formatCount(summary.totalTokens)} sub={summary.windowNote} accent />
-      <StatCard label="Input tokens" value={formatCount(summary.promptTokens)} />
-      <StatCard label="Output tokens" value={formatCount(summary.completionTokens)} />
-      <StatCard label="Model calls" value={formatCount(summary.modelCalls)} sub={summary.capped ? summary.windowNote : undefined} />
+      <StatCard label="Input tokens" value={formatCount(summary.promptTokens)} sub={cappedNote} />
+      <StatCard label="Output tokens" value={formatCount(summary.completionTokens)} sub={cappedNote} />
+      <StatCard label="Model calls" value={formatCount(summary.modelCalls)} sub={cappedNote} />
       <StatCard label="Estimated cost" value={formatCost(summary.cost)} sub={summary.costNote} />
     </div>
   )

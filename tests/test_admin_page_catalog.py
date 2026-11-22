@@ -19,6 +19,7 @@ import yaml
 
 from factory_app.workflows.AppGenerator.tools.app_backend_admin_contract import (
     APP_BACKEND_ADMIN_SECTION_IDS,
+    AppBackendAdminConfig,
     AppBackendAdminPanel,
 )
 from mozaiksai.core.admin.contract import (
@@ -179,15 +180,30 @@ def test_registry_agent_inclusion_rules() -> None:
     assert "agent_backend_required" not in registry_agent
 
 
-def test_no_prompt_shows_a_builtin_app_backend_panel() -> None:
-    """Built-in panels read app-backend routes nothing serves; no prompt may model one."""
-    agents = _read("factory_app/workflows/AppGenerator/agents.yaml")
-    assert '"renderer": "builtin"' not in agents
-    assert "renderer: builtin`" in agents  # only inside the two "do not" rules
-    sections = _agent_sections(agents)
-    for name in ("AppPlanAgent", "ControllerAgent"):
-        rule = [line for line in sections[name].splitlines() if "renderer: builtin" in line]
-        assert rule and all("Do NOT plan" in line or "Do not emit" in line for line in rule), name
+def test_controller_example_validates_against_its_own_output_schema() -> None:
+    """The panel shape the controller's prompt shows must be one its schema accepts.
+
+    A review round replaced this example with a schema panel carrying
+    ``config.api_endpoint``. The controller's structured-output model forbids
+    that field, so an agent following the example would have been refused.
+    """
+    controller = _agent_sections(_read("factory_app/workflows/AppGenerator/agents.yaml"))["ControllerAgent"]
+    example = re.search(r'"panels": (\[\{.*\}\])\s*$', controller, flags=re.MULTILINE)
+    assert example, "ControllerAgent must show an app-backend admin panel example"
+    panels = json.loads(example.group(1).replace('"..."', '"x"'))
+    assert len(panels) == 1
+    panel = panels[0]
+    # No field outside the typed panel model, and no free-form endpoint string.
+    schema = yaml.safe_load(_read("factory_app/workflows/AppGenerator/structured_outputs.yaml"))
+    assert set(panel) <= set(schema["models"]["AppBackendAdminPanel"]["fields"])
+    assert "api_endpoint" not in example.group(1)
+    # With real values in place of the placeholders it is a valid config.
+    AppBackendAdminConfig.model_validate(
+        {
+            "schema_version": "mozaiks.admin.app_backend.v1",
+            "panels": [{**panel, "section": "overview", "builtin_panel": "stats"}],
+        }
+    )
 
 
 def test_registry_icon_hints_resolve_in_the_portal() -> None:

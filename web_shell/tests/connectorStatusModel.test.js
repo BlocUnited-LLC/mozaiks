@@ -16,6 +16,7 @@ const {
   hasFailedCheck,
   integrationGroup,
   isRejected,
+  lastCheckDisplay,
   needsAttention,
   saveAndCheckConnector,
   statusLabel,
@@ -58,9 +59,14 @@ test("what a health record says", () => {
   assert.equal(checkOutcome({ status: "healthy" }), "passed");
   assert.equal(checkOutcome(REFUSED), "failed");
   assert.equal(checkOutcome(INCOMPLETE_VALUES), "failed");
-  assert.equal(checkOutcome({ status: "unknown", error_code: "invalid_key_format" }), "failed");
+  assert.equal(checkOutcome({ status: "unknown", error_code: "missing_api_base" }), "failed");
+  // A malformed value is reported as unhealthy by the server.
+  assert.equal(checkOutcome({ status: "unhealthy", error_code: "invalid_key_format" }), "failed");
   assert.equal(checkOutcome(UNREACHABLE), "inconclusive");
-  assert.equal(checkOutcome({ status: "unknown", error_code: "connection_error" }), "inconclusive");
+  // Codes that may be transient say nothing about the saved values.
+  for (const code of ["connection_error", "unexpected_status", "secret_unavailable", "ratelimited", "service_unavailable"]) {
+    assert.equal(checkOutcome({ status: "unknown", error_code: code }), "inconclusive", code);
+  }
   // A database provider reports a connection error as unhealthy: that is a failure.
   assert.equal(checkOutcome({ status: "unhealthy", error_code: "connection_error" }), "failed");
   assert.equal(checkOutcome({ status: "pending_validation", error_code: null }), "none");
@@ -92,6 +98,22 @@ test("a provider that could not be reached does not change the list", () => {
   const connector = savedConnector(UNREACHABLE);
   assert.equal(hasFailedCheck(connector), false);
   assert.deepEqual(classify(item(), connector), { group: "connected", label: "Connected", tone: "success" });
+});
+
+test("a connector the owner has fixed is connected again", () => {
+  // The record after a later check that found nothing wrong but can only
+  // confirm the shape of the values (it answers `configured`, stored as
+  // pending_validation). The server clears the earlier error code.
+  const fixed = savedConnector({
+    status: "pending_validation",
+    message: "Connector has required configuration; run its provider health check before use.",
+    error_code: null,
+  });
+  assert.equal(checkOutcome(fixed.health), "none");
+  assert.deepEqual(classify(item(), fixed), { group: "connected", label: "Connected", tone: "success" });
+  assert.equal(connectorCredentialState(fixed), "ok");
+  // The response to that same check reports no problem, after a save or a test.
+  assert.equal(checkProblemMessage({ status: "unknown", error_code: null, message: "Credentials are present." }, "Google"), null);
 });
 
 test("a failed check is not hidden by an environment variable or an incomplete connector", () => {
@@ -178,6 +200,28 @@ test("Test connection reports what the check found, without claiming a save", ()
     "Anthropic could not be checked: Could not reach the provider. Use Test connection to try again.",
   );
   assert.equal(checkProblemMessage({ status: "healthy" }, "Anthropic", { afterSave: false }), null);
+});
+
+test("the panel's last-check block agrees with the status beside it", () => {
+  const word = (status) => `[${status}]`;
+  // Values missing: the stored status is still pending_validation. Showing it
+  // next to "Check failed" would contradict it.
+  assert.deepEqual(lastCheckDisplay(savedConnector(INCOMPLETE_VALUES), { statusLabel: word }), {
+    label: "Failed",
+    tone: "destructive",
+    message: "The check found required values missing. Use Test connection to see which.",
+  });
+  // The provider's own answer is shown as it is.
+  assert.deepEqual(lastCheckDisplay(savedConnector(REFUSED), { statusLabel: word }), {
+    label: "[unhealthy]",
+    tone: "destructive",
+    message: "Anthropic credential is invalid or has insufficient permissions.",
+  });
+  assert.deepEqual(lastCheckDisplay(savedConnector({ status: "healthy", message: "Key is valid." }), { statusLabel: word }), {
+    label: "[healthy]",
+    tone: "success",
+    message: "Key is valid.",
+  });
 });
 
 test("the stored record gives a reason only when the provider gave one", () => {

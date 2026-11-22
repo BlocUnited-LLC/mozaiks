@@ -30,22 +30,25 @@ export function isExpiring(connector) {
   return connectorLifecycle(connector) === 'expiring'
 }
 
-// `error_code` values a check reports when it could not ask the provider at
-// all. They say nothing about the saved values.
-const INCONCLUSIVE_ERROR_CODES = new Set(['timeout', 'connection_error', 'unexpected_status'])
-
 /**
  * What a health record says. Accepts a connector's `health` or a
  * `check_workspace_connector_health` response; both carry `status`,
  * `message`, and `error_code`.
  *
  * - `passed`: the provider accepted the saved values.
- * - `failed`: the saved values cannot work. The provider refused them
- *   (`status: unhealthy`), or the check found them missing or malformed and
- *   said so in `error_code` (`missing_credentials`, `invalid_key_format`, ...)
- *   while leaving `status` at `unknown` or `pending_validation`.
- * - `inconclusive`: the provider could not be asked (timeout, connection error).
+ * - `failed`: the saved values cannot work. Either the check said so with
+ *   `status: unhealthy` (a refused key, a malformed value, an unreachable
+ *   database), or it found required values missing. That second case is
+ *   reported as `error_code: missing_credentials` or `missing_api_base` with
+ *   the status left at `unknown` or `pending_validation`, and the server
+ *   still calls the connector ready.
+ * - `inconclusive`: the check ran into something that says nothing about the
+ *   saved values: a timeout, a connection error, an unexpected HTTP status, a
+ *   secret that could not be read just now, a provider-specific error.
  * - `none`: no check has reported anything.
+ *
+ * Only `missing_*` codes count as a failure on their own. Any other code may
+ * be transient, and calling it a failure would flag a working connection.
  */
 export function checkOutcome(health) {
   if (!health || typeof health !== 'object') return 'none'
@@ -53,7 +56,7 @@ export function checkOutcome(health) {
   if (health.status === 'unhealthy') return 'failed'
   const code = String(health.error_code || '').trim()
   if (!code) return 'none'
-  return INCONCLUSIVE_ERROR_CODES.has(code) ? 'inconclusive' : 'failed'
+  return code.startsWith('missing_') ? 'failed' : 'inconclusive'
 }
 
 /** The connector's last health check found that it cannot work as saved. */
@@ -144,6 +147,28 @@ export function displayTone(item) {
   const resolvedStatus = item?.display_status || item?.status
   if (resolvedStatus === 'missing' && Number(item?.app_usage_count || 0) === 0) return 'default'
   return statusTone(resolvedStatus)
+}
+
+/**
+ * How to show a connector's last check in its panel: `{ label, tone, message }`.
+ *
+ * When the check found required values missing, the stored status is still
+ * `pending_validation` and its message is a generic line. Showing those beside
+ * "Check failed" contradicts it, so that case gets its own wording.
+ *
+ * @param {object|null} connector
+ * @param {{ statusLabel?: (status: string) => string }} [options]  how the page words a raw status
+ */
+export function lastCheckDisplay(connector, { statusLabel: wordStatus = (status) => String(status) } = {}) {
+  const health = connector?.health || {}
+  if (hasFailedCheck(connector) && health.status !== 'unhealthy') {
+    return {
+      label: 'Failed',
+      tone: 'destructive',
+      message: 'The check found required values missing. Use Test connection to see which.',
+    }
+  }
+  return { label: wordStatus(health.status), tone: statusTone(health.status), message: health.message || null }
 }
 
 function providerName(displayName) {

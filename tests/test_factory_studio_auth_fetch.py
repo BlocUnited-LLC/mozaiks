@@ -112,6 +112,24 @@ def test_workspace_integrations_uses_authenticated_fetch_for_module_actions() ->
         assert f"integrationsAction('{action}'" in source
 
 
+def test_workspace_integrations_links_get_api_key_to_the_provider() -> None:
+    """"Get API key" opens the provider's page, never the catalog's Studio path.
+
+    ``setup_url`` on a catalog row is ``/integrations/{id}``, which is not a
+    route. The server sends the provider's own page as ``provider_setup_url``.
+    """
+    source = _read(PAGES / "WorkspaceIntegrationsPage.jsx")
+
+    assert "const setupUrl = item.provider_setup_url || null" in source
+    assert "item.setup_url" not in source
+    # The link opens in a new tab without handing the page a reference back.
+    link = source[source.index("{setupUrl && (") :]
+    link = link[: link.index("</a>")]
+    assert "href={setupUrl}" in link
+    assert 'target="_blank"' in link and 'rel="noopener noreferrer"' in link
+    assert "Get API key" in link
+
+
 def test_no_studio_page_calls_the_backend_without_the_session() -> None:
     """Every Studio page goes through studioFetch; none calls fetch on its own."""
     offenders = []

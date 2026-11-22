@@ -5458,20 +5458,14 @@ models:
         - schema
         - custom_component
         description: >
-          Panel rendering mode. `schema` is the normal deterministic path and
-          `custom_component` is the bounded escape hatch. `builtin` mounts a shipped
-          panel that reads its data from app-backend routes (GET /api/admin/stats,
-          GET /api/admin/users, POST /api/admin/users/action); the generated
-          services/routes/admin.py serves only GET /api/admin/config, so a generated
-          app backend must not declare a builtin panel.
+          Panel rendering mode. `schema` is the normal deterministic path, `builtin`
+          mounts a shipped panel, and `custom_component` is the bounded escape hatch.
       builtin_panel:
         type: union
         variants:
         - str
         - 'null'
-        description: >
-          Built-in panel id when renderer=builtin; one of stats, users, subscriptions.
-          Null for schema and custom_component panels.
+        description: Built-in panel id when renderer=builtin. Must be one of stats, users, subscriptions.
       layout:
         type: union
         variants:

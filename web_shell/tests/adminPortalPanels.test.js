@@ -291,15 +291,30 @@ test("at the usage limit the page says the numbers are a window", () => {
   const html = withFixtures({ "/api/admin/runs": runs, [USAGE_ENDPOINT]: ledger }, null, () => render("UsageSection", panels));
 
   const window = `Latest ${USAGE_EVENT_LIMIT.toLocaleString()} model calls`;
-  assert.equal(stat(html, "Total tokens").sub, window);
-  assert.equal(stat(html, "Model calls").sub, window);
+  for (const card of ["Total tokens", "Input tokens", "Output tokens", "Model calls"]) {
+    assert.equal(stat(html, card).sub, window, card);
+  }
   assert.equal(stat(html, "Estimated cost").sub, `${window} only. Estimated from model prices`);
   assert.match(html, /Tokens and cost are counted from the latest 1,000 model calls\./);
 
   // Below the limit none of that is shown.
   const below = withFixtures({ "/api/admin/runs": runs, [USAGE_ENDPOINT]: usage() }, null, () => render("UsageSection", panels));
-  assert.equal(stat(below, "Model calls").sub, null);
+  assert.equal(stat(below, "Total tokens").sub, "All recorded model calls");
+  for (const card of ["Input tokens", "Output tokens", "Model calls"]) {
+    assert.equal(stat(below, card).sub, null, card);
+  }
   assert.ok(!below.includes("Tokens and cost are counted from"));
+});
+
+test("the pack usage panel asks for the same window as the framework cards", async () => {
+  // It asked for the endpoint's default (500 calls) and printed "Total tokens
+  // consumed" beside framework cards that total 1,000, on the same page.
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(path.join(admin, "components", "AdminAppUsagePanel.jsx"), "utf8");
+  assert.match(source, /import \{ USAGE_ENDPOINT, summarizeUsage \} from '\.\.\/adminUsage\.js'/);
+  assert.match(source, /fetchJson\(`\$\{apiBaseUrl\}\$\{USAGE_ENDPOINT\}`\)/);
+  assert.ok(!source.includes("/api/admin/usage`"), "the panel must not build its own usage URL");
+  assert.match(source, /summary\?\.capped/);
 });
 
 test("admin panels that call the platform API send the session token", async () => {

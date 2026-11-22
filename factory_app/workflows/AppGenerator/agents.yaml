@@ -527,9 +527,9 @@ agents:
           1. `app.json` `admins` (bundle-relative; physical workspace path `app/app.json`) owns bootstrap/access for the framework admin shell.
           2. Module-owned `modules/{pack_name}/contracts/admin.yaml` files declaring feature panels that render on the pages of the unified `/admin` shell.
         - If the app uses a split app backend and needs app-business admin panels, that backend must expose `GET {app_backend_url}/api/admin/config` returning `schema_version: mozaiks.admin.app_backend.v1` with `panels[]`. Each panel sets `section` to the standard admin page it appears on (`overview | access | usage | billing | activity | operations | settings | integrations | support`) and uses the explicit renderer contract:
+          - `renderer: builtin` with `builtin_panel: stats | users | subscriptions`
           - `renderer: schema` with `layout` + `sections[]`
           - `renderer: custom_component` with `component`
-          Do NOT plan `renderer: builtin` panels: a built-in panel reads its data from app-backend routes that the generated `services/routes/admin.py` does not serve, so it would render as unavailable.
           Do NOT invent nested `panels.app/modules/runtime` groups or implicit built-in panel ids.
         - When those app-business panels are required, include an app-level `task_type: api_surface` build task with `capability_pack_id: null`, `initial_agent: ControllerAgent`, and `owned_paths: ["backend/admin_config.py", "services/routes/admin.py"]`.
           - The api_surface task must emit the typed `ControllerOutput.app_backend_admin_config` object as the canonical source of truth for that surface.
@@ -2850,7 +2850,6 @@ agents:
         - That route must be a self-contained FastAPI `APIRouter` — import only from `fastapi` and `backend.admin_config`.
         - The config payload is validated at codegen time; `backend/admin_config.py` returns a plain dict.
         - Do not invent nested admin groups, standalone admin shells, or alternate admin route families.
-        - Give each panel `renderer: schema` (with `sections[]` whose `api_endpoint` is a route this backend serves) or `renderer: custom_component`. Do not emit `renderer: builtin`: a built-in panel reads its data from app-backend routes that `services/routes/admin.py` does not serve, so it would render as unavailable.
       - Auth is handled by the platform host — do not implement auth logic in adapters.
 
       **Downstream**:
@@ -2913,7 +2912,7 @@ agents:
         "mode": "app_backend_admin_surface",
         "app_backend_admin_config": {
           "schema_version": "mozaiks.admin.app_backend.v1",
-          "panels": [{ "id": "...", "label": "...", "section": "...", "order": 10, "renderer": "schema", "layout": "full-width", "sections": [{ "id": "...", "primitive": "...", "config": { "api_endpoint": "..." } }], "permissions": ["..."] }]
+          "panels": [{ "id": "...", "label": "...", "section": "...", "order": 10, "renderer": "builtin", "builtin_panel": "...", "permissions": ["..."] }]
         },
         "code_files": [
           { "filename": "backend/admin_config.py", "content": "..." },
@@ -2996,8 +2995,8 @@ agents:
       - `integrations` — label `Integrations`; path `/admin/integrations`; icon `plug`; order 70
       - `support` — label `Support`; path `/admin/support`; icon `support`; order 80
 
-      **Inclusion rules** — a page with nothing on it is a broken page, so include a
-      standard page only when something renders there:
+      **Inclusion rules** — a page with nothing to show is a broken page, so include a
+      standard page only when it has content, or (for `access`) a stated purpose:
       - `overview`, `usage`, `operations`, and `settings` — always include. The
         framework fills these itself: headline numbers on `overview`, AI usage and
         recent runs on `usage`, recent sessions on `operations`, and the app's details

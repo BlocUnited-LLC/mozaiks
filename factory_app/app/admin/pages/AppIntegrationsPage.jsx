@@ -7,6 +7,7 @@ import {
   ActionButton, Panel, StatusPill, StudioErrorState, StudioInlineEmptyState,
   StudioLoadingState, StudioSlideOver,
 } from '../../ui/components/StudioShared.jsx'
+import { hasFailedCheck } from './connectorStatusModel.js'
 import { studioFetch, studioModuleAction } from './studioApi.js'
 
 const fieldStyle = 'mt-1 block w-full rounded-md border border-border bg-background px-3 py-2 text-foreground'
@@ -140,7 +141,9 @@ function SelectedAppIntegrations({ appId }) {
                   <h3 className="break-words font-semibold">{connector.display_name || connector.service}</h3>
                   <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                     <span>{connector.service}</span>
-                    <StatusPill tone={connector.ready ? 'success' : 'muted'}>{connector.ready ? 'Ready' : (connector.status || 'Needs setup').replaceAll('_', ' ')}</StatusPill>
+                    {hasFailedCheck(connector)
+                      ? <StatusPill tone="destructive">Check failed</StatusPill>
+                      : <StatusPill tone={connector.ready ? 'success' : 'muted'}>{connector.ready ? 'Ready' : (connector.status || 'Needs setup').replaceAll('_', ' ')}</StatusPill>}
                     {connector.secret_available && <span>Credential saved</span>}
                   </div>
                   {connector.notes && <p className="mt-1 whitespace-pre-wrap break-words text-sm">{connector.notes}</p>}

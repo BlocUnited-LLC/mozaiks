@@ -1144,6 +1144,9 @@ async function mockStudioApis(page) {
           health: { status: 'pending_validation', health_check_supported: true } },
         { service: 'custom_search', display_name: 'Search connection', ready: false,
           health: { status: 'unknown', health_check_supported: false } },
+        // Its values are stored (ready), and the provider refused them.
+        { service: 'refused_mail', display_name: 'Refused connection', ready: true,
+          health: { status: 'unhealthy', message: 'Credential is invalid.', error_code: 'auth_failed', health_check_supported: true } },
       ],
       declarations: buildAppIntegrationDeclarationsPayload(appId).declarations,
       catalog: [{ id: 'postmark', name: 'Postmark', category: 'email' }],
@@ -1683,6 +1686,82 @@ test('workspace integrations route stays responsive across desktop and mobile wi
   }
 });
 
+test('workspace integrations keeps the setup panel open when the provider refuses a saved key', async ({ page }) => {
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', async (route) => {
+    await route.fulfill({ json: buildOnboardingStatusPayload({ dismissed: true }) });
+  });
+  // The server's side of a save: the key is stored, the provider refuses it,
+  // and from then on the connector list carries that result.
+  const calls = [];
+  let saved = false;
+  const refused = {
+    status: 'unhealthy',
+    message: 'Slack bot token is invalid or revoked.',
+    error_code: 'auth_failed',
+    health_check_supported: true,
+  };
+  await page.route('**/api/modules/workspace_integrations/save_workspace_connector**', async (route) => {
+    calls.push('save');
+    saved = true;
+    await route.fulfill({ json: { success: true, health_check_supported: true, connector: { service: 'slack', ready: true } } });
+  });
+  await page.route('**/api/modules/workspace_integrations/check_workspace_connector_health**', async (route) => {
+    calls.push('check');
+    await route.fulfill({ json: refused });
+  });
+  await page.route('**/api/modules/workspace_integrations/list_workspace_connectors**', async (route) => {
+    const payload = buildWorkspaceConnectorsPayload();
+    if (saved) {
+      calls.push('list');
+      payload.connectors.push({
+        service: 'slack',
+        display_name: 'Slack',
+        secret_available: true,
+        configured: true,
+        ready: true,
+        lifecycle_status: 'active',
+        health: refused,
+      });
+    }
+    await route.fulfill({ json: payload });
+  });
+
+  await page.goto('/integrations');
+  const main = page.locator('main');
+  await expect(main.getByRole('heading', { name: 'Available' })).toBeVisible();
+
+  // Slack has no connector yet, so its card offers Connect.
+  await main.getByRole('button', { name: 'Connect', exact: true }).click();
+  const drawer = page.getByRole('dialog', { name: 'Slack' });
+  await expect(drawer.getByText('Available', { exact: true }).first()).toBeVisible();
+  await drawer.locator('input[type="password"]').fill('not-a-real-token');
+  await drawer.getByRole('button', { name: 'Save & connect' }).click();
+
+  // The panel stays open, says what the provider said, and shows the new
+  // status, not the "Available" it opened with.
+  await expect(
+    drawer.getByText('The key was saved, but the check with Slack failed: Slack bot token is invalid or revoked.', { exact: true }),
+  ).toBeVisible();
+  await expect(drawer.getByText('Check failed', { exact: true }).first()).toBeVisible();
+  await expect(drawer.getByText('Available', { exact: true })).toHaveCount(0);
+  // What was typed is still there for a correction: the reload did not rebuild the panel.
+  await expect(drawer.locator('input[type="password"]')).toHaveValue('not-a-real-token');
+  // The provider was asked before the list was read again.
+  expect(calls.slice(0, 3)).toEqual(['save', 'check', 'list']);
+
+  // In the list, the service needs attention; it is not connected.
+  await drawer.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(main.getByText('Check failed', { exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Replace key', exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Connect', exact: true })).toHaveCount(0);
+
+  // Closing the panel cleared its message: another service's panel opens without it.
+  await main.getByRole('button', { name: 'Manage' }).first().click();
+  const other = page.getByRole('dialog', { name: 'Mozaiks Pay' });
+  await expect(other.getByText('Credential source')).toBeVisible();
+  await expect(other.getByText(/The key was saved, but/)).toHaveCount(0);
+});
+
 test('workspace AI models route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.route('**/api/studio/settings/ai-models', async route => {
     await route.fulfill({
@@ -2020,6 +2099,10 @@ test('app integrations route stays responsive across desktop and mobile widths',
   const connections = main.getByRole('listitem');
   await expect(connections.filter({ hasText: 'Payments connection' }).getByRole('button', { name: 'Check status' })).toBeVisible();
   await expect(connections.filter({ hasText: 'Search connection' }).getByRole('button', { name: 'Check status' })).toHaveCount(0);
+  // A connector the provider refused is not shown as ready.
+  const refused = connections.filter({ hasText: 'Refused connection' });
+  await expect(refused.getByText('Check failed', { exact: true })).toBeVisible();
+  await expect(refused.getByText('Ready', { exact: true })).toHaveCount(0);
   await expect(main.getByText(SECRET_SENTINEL)).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
   expect(providerUrlRequests).toHaveLength(0);

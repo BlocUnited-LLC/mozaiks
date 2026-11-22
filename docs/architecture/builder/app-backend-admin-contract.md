@@ -160,7 +160,7 @@ appear on.
 ### `renderer: "builtin"`
 
 Target, not current: no backend in this repository serves a built-in panel end
-to end, and AppGenerator must not emit one.
+to end.
 
 A built-in panel is a shipped React panel in `AppAdminDashboard` that reads its
 data from further app-backend routes. Declaring one is only useful when the
@@ -173,8 +173,10 @@ backend also serves those routes:
 | `subscriptions` | `GET /api/admin/stats` returning `total_users`, `tier_breakdown` |
 
 The generated `app/services/routes/admin.py` serves only
-`GET /api/admin/config`, so a generated backend that declared a built-in panel
-would show "unavailable" in its place. Use `schema` or `custom_component`.
+`GET /api/admin/config`, so a generated backend that declares a built-in panel
+shows "unavailable" in its place. AppGenerator's prompts still offer this
+renderer; the open question of what a generated split backend should emit
+instead is tracked with the other gaps of this lane.
 
 Required:
 

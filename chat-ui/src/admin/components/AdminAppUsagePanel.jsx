@@ -11,6 +11,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { authFetch } from '../../adapters/api.js'
+import { USAGE_ENDPOINT, summarizeUsage } from '../adminUsage.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -59,7 +60,13 @@ function UsageSummary({ usage }) {
   // The usage ledger names the call count `llm_calls`.
   const totalCalls = usage.totals?.llm_calls
   if (!totalTokens && !totalCalls) return null
+  // At the endpoint's limit these are the latest calls, not a lifetime total.
+  const summary = summarizeUsage(usage)
   return (
+    <>
+    {summary?.capped ? (
+      <p className="mb-2 text-xs text-muted-foreground">{summary.windowNote} only.</p>
+    ) : null}
     <div className="grid grid-cols-2 gap-3 mb-4">
       {totalTokens != null && (
         <div className="rounded-xl border border-border bg-card px-4 py-3 text-center">
@@ -74,6 +81,7 @@ function UsageSummary({ usage }) {
         </div>
       )}
     </div>
+    </>
   )
 }
 
@@ -106,7 +114,9 @@ export default function AdminAppUsagePanel({ panel, apiBaseUrl = '' }) {
     setLoading(true)
     setError(null)
     try {
-      const body = await fetchJson(`${apiBaseUrl}/api/admin/usage`)
+      // The same request as the framework usage cards on this page, so the
+      // two never show different totals for the same app.
+      const body = await fetchJson(`${apiBaseUrl}${USAGE_ENDPOINT}`)
       setData(body)
     } catch (e) {
       setError(e.message)
