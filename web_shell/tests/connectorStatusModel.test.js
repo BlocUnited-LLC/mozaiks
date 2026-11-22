@@ -11,6 +11,7 @@ const {
   checkOutcome,
   checkProblemMessage,
   connectorCredentialState,
+  connectorVerdict,
   displayTone,
   failedCheckReason,
   hasFailedCheck,
@@ -188,6 +189,34 @@ test("what the owner is told about the check that follows a save", () => {
   assert.equal(checkProblemMessage({ status: "healthy" }, "Anthropic"), null);
   assert.equal(checkProblemMessage({ status: "pending_validation" }, "Anthropic"), null);
   assert.equal(checkProblemMessage(null, "Anthropic"), null);
+});
+
+test("one verdict per connector for both app pages", () => {
+  // The shapes the server sends on both app connection lists.
+  const cases = [
+    [savedConnector(REFUSED), "Check failed", "destructive"],
+    [savedConnector(INCOMPLETE_VALUES), "Check failed", "destructive"],
+    [savedConnector({ status: "healthy" }, { lifecycle_status: "expired", ready: false }), "Expired", "destructive"],
+    [savedConnector(), "Ready", "success"],
+    [savedConnector({ status: "healthy" }), "Ready", "success"],
+    [savedConnector(UNREACHABLE), "Ready", "success"],
+    // A connection record saved without a credential.
+    [{ service: "crm", status: "metadata_only", lifecycle_status: "metadata_only", ready: false, secret_available: false, health: {} }, "Needs secret", "warning"],
+    // A credential saved, setup not complete: the stored status still says "active".
+    [savedConnector({ status: "not_configured" }, { ready: false }), "Needs setup", "warning"],
+  ];
+  for (const [connector, pill, tone] of cases) {
+    const verdict = connectorVerdict(connector);
+    assert.deepEqual([verdict.pill, verdict.tone], [pill, tone], JSON.stringify(connector));
+  }
+  assert.equal(connectorVerdict(savedConnector(REFUSED)).detail, "Anthropic credential is invalid or has insufficient permissions.");
+});
+
+test("a retry hint names the button the page has", () => {
+  assert.equal(
+    checkProblemMessage(UNREACHABLE, "Mail", { afterSave: false, retryAction: "Check status" }),
+    "Mail could not be checked: Could not reach the provider. Use Check status to try again.",
+  );
 });
 
 test("Test connection reports what the check found, without claiming a save", () => {

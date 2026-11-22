@@ -12,7 +12,7 @@ import {
 } from '../../ui/components/StudioShared.jsx'
 import AppStudioHero, { formatCompactNumber, formatDateTimeLabel } from './AppStudioChrome.jsx'
 import { getAppStudioSnapshot } from './appStudioDataHelpers.js'
-import { connectorCredentialState, failedCheckReason } from './connectorStatusModel.js'
+import { connectorCredentialState, connectorVerdict } from './connectorStatusModel.js'
 import {
   averageFinishedRunSeconds,
   buildHealthState,
@@ -53,22 +53,6 @@ function RuntimeSignalsRow({ metrics }) {
       </span>
     </div>
   )
-}
-
-// Wording for one connector, by `connectorCredentialState`.
-function credentialCopy(connector) {
-  const state = connectorCredentialState(connector)
-  if (state === 'missing') return { detail: 'Credential still needs to be saved.', pill: 'Needs secret', tone: 'warning' }
-  if (state === 'expired') return { detail: 'The saved credential has expired.', pill: 'Expired', tone: 'destructive' }
-  if (state === 'check_failed') {
-    return {
-      detail: failedCheckReason(connector) || 'The last check found this connection cannot be used as saved.',
-      pill: 'Check failed',
-      tone: 'destructive',
-    }
-  }
-  if (state === 'incomplete') return { detail: 'A credential is saved, but setup is not complete.', pill: 'Needs setup', tone: 'warning' }
-  return { detail: 'Credential is configured.', pill: 'Ready', tone: 'success' }
 }
 
 export default function AppHealthPage() {
@@ -176,7 +160,7 @@ export default function AppHealthPage() {
             {snapshot.appConnectors.length > 0 ? (
               <div className="space-y-3">
                 {snapshot.appConnectors.map((connector) => {
-                  const credential = credentialCopy(connector)
+                  const credential = connectorVerdict(connector)
                   return (
                     <div key={connector.service} className="flex items-center justify-between rounded-2xl border border-border bg-card/70 px-4 py-3">
                       <div>

@@ -1140,9 +1140,15 @@ async function mockStudioApis(page) {
     await route.fulfill({ json: {
       app_id: appId,
       connectors: [
-        { service: 'mozaikspay', display_name: 'Payments connection', ready: true,
+        { service: 'mozaikspay', display_name: 'Payments connection', ready: true, secret_available: true,
+          status: 'active', lifecycle_status: 'active',
           health: { status: 'pending_validation', health_check_supported: true } },
-        { service: 'custom_search', display_name: 'Search connection', ready: false,
+        // A connection record saved without a credential.
+        { service: 'custom_search', display_name: 'Search connection', ready: false, secret_available: false,
+          status: 'metadata_only', lifecycle_status: 'metadata_only',
+          health: { status: 'unknown', health_check_supported: false } },
+        { service: 'old_crm', display_name: 'Expired connection', ready: false, secret_available: true,
+          status: 'active', lifecycle_status: 'expired',
           health: { status: 'unknown', health_check_supported: false } },
         // Its values are stored (ready), and the provider refused them.
         { service: 'refused_mail', display_name: 'Refused connection', ready: true, secret_available: true,
@@ -2110,8 +2116,11 @@ test('app integrations route stays responsive across desktop and mobile widths',
   const connections = main.getByRole('listitem');
   await expect(connections.filter({ hasText: 'Payments connection' }).getByRole('button', { name: 'Check status' })).toBeVisible();
   await expect(connections.filter({ hasText: 'Search connection' }).getByRole('button', { name: 'Check status' })).toHaveCount(0);
+  // Each connection shows the verdict the app Health page gives it.
+  await expect(connections.filter({ hasText: 'Search connection' }).getByText('Needs secret', { exact: true })).toBeVisible();
+  await expect(connections.filter({ hasText: 'Expired connection' }).getByText('Expired', { exact: true })).toBeVisible();
   // A connector the provider refused, or whose check found values missing,
-  // is not shown as ready: the same verdict the app Health page gives.
+  // is not shown as ready.
   for (const name of ['Refused connection', 'Partial connection']) {
     const row = connections.filter({ hasText: name });
     await expect(row.getByText('Check failed', { exact: true })).toBeVisible();

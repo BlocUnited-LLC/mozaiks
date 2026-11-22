@@ -321,6 +321,11 @@ def test_a_check_that_reports_no_error_clears_the_code_an_earlier_check_left(mon
     # Both connection lists carry the code, so both pages give the same verdict.
     assert listed_health(selected=False)["error_code"] == "missing_credentials"
     assert listed_health(selected=True)["error_code"] == "missing_credentials"
+    # And the lifecycle (expired, revoked, ...) the verdict also reads.
+    rows = asyncio.run(list_connectors(scope=ConnectorStore.SCOPE_APP, scope_id="app_1", store=store))
+    row = next(row for row in rows if row["service"] == "analytics_provider")
+    assert row["lifecycle_status"]
+    assert studio._selected_connector_record(row)["lifecycle_status"] == row["lifecycle_status"]
 
     second = asyncio.run(run_connector_health_check(app_id="app_1", service="analytics_provider", store=store))
     assert second["error_code"] is None

@@ -7,7 +7,7 @@ import {
   ActionButton, Panel, StatusPill, StudioErrorState, StudioInlineEmptyState,
   StudioLoadingState, StudioSlideOver,
 } from '../../ui/components/StudioShared.jsx'
-import { checkProblemMessage, connectorCredentialState, lastCheckDisplay } from './connectorStatusModel.js'
+import { checkProblemMessage, connectorVerdict, lastCheckDisplay } from './connectorStatusModel.js'
 import { studioFetch, studioModuleAction } from './studioApi.js'
 
 const fieldStyle = 'mt-1 block w-full rounded-md border border-border bg-background px-3 py-2 text-foreground'
@@ -26,16 +26,6 @@ async function requestConnectors(appId, { method = 'GET', service, check = false
     throw new Error(`Integration request failed (HTTP ${response.status}).`)
   }
   return response.json()
-}
-
-// The pill beside a connection. A failed check or an expired credential is
-// shown the way the app Health page shows it; otherwise the stored readiness.
-function connectionPill(connector) {
-  const state = connectorCredentialState(connector)
-  if (state === 'check_failed') return { label: 'Check failed', tone: 'destructive' }
-  if (state === 'expired') return { label: 'Expired', tone: 'destructive' }
-  if (connector.ready) return { label: 'Ready', tone: 'success' }
-  return { label: (connector.status || 'Needs setup').replaceAll('_', ' '), tone: 'muted' }
 }
 
 function AdapterEditor({ connector, editing, catalog, credentialStorageAvailable, busy, error, onClose, onSave, onDelete }) {
@@ -116,7 +106,7 @@ function SelectedAppIntegrations({ appId }) {
     setBusy(true)
     setActionError('')
     try {
-      // An action may return a sentence to show after the list reloads.
+      // An action may return a sentence to show; the list reloads alongside it.
       const notice = await action()
       setEditor(null)
       setRevision(value => value + 1)
@@ -153,7 +143,8 @@ function SelectedAppIntegrations({ appId }) {
                   <h3 className="break-words font-semibold">{connector.display_name || connector.service}</h3>
                   <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                     <span>{connector.service}</span>
-                    <StatusPill tone={connectionPill(connector).tone}>{connectionPill(connector).label}</StatusPill>
+                    {/* The same verdict the app Health page gives for this connector. */}
+                    <StatusPill tone={connectorVerdict(connector).tone}>{connectorVerdict(connector).pill}</StatusPill>
                     {connector.secret_available && <span>Credential saved</span>}
                   </div>
                   {connector.notes && <p className="mt-1 whitespace-pre-wrap break-words text-sm">{connector.notes}</p>}
@@ -162,7 +153,7 @@ function SelectedAppIntegrations({ appId }) {
                 <div className="flex gap-2">
                   {connector.health?.health_check_supported && <ActionButton size="sm" variant="secondary" disabled={busy} onClick={() => update(async () => {
                     const result = await requestConnectors(appId, { service: connector.service, check: true, method: 'POST' })
-                    return checkProblemMessage(result?.health, connector.display_name || connector.service, { afterSave: false })
+                    return checkProblemMessage(result?.health, connector.display_name || connector.service, { afterSave: false, retryAction: 'Check status' })
                   })}>Check status</ActionButton>}
                   <ActionButton size="sm" variant="secondary" disabled={busy} onClick={() => openEditor(connector, true)}>Edit</ActionButton>
                 </div>

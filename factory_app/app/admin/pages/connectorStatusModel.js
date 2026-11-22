@@ -85,6 +85,27 @@ export function connectorCredentialState(connector) {
   return 'ok'
 }
 
+/**
+ * What the app pages show for one connector: `{ state, pill, tone, detail }`.
+ * The app Health page and the app Integrations page both use this, so the two
+ * never give different verdicts for the same connector.
+ */
+export function connectorVerdict(connector) {
+  const state = connectorCredentialState(connector)
+  if (state === 'missing') return { state, pill: 'Needs secret', tone: 'warning', detail: 'Credential still needs to be saved.' }
+  if (state === 'expired') return { state, pill: 'Expired', tone: 'destructive', detail: 'The saved credential has expired.' }
+  if (state === 'check_failed') {
+    return {
+      state,
+      pill: 'Check failed',
+      tone: 'destructive',
+      detail: failedCheckReason(connector) || 'The last check found this connection cannot be used as saved.',
+    }
+  }
+  if (state === 'incomplete') return { state, pill: 'Needs setup', tone: 'warning', detail: 'A credential is saved, but setup is not complete.' }
+  return { state, pill: 'Ready', tone: 'success', detail: 'Credential is configured.' }
+}
+
 /** Merge a saved connector's state into its catalog row. */
 export function withConnectorOverlay(item, connector) {
   if (!connector) return item
@@ -194,9 +215,10 @@ export function failedCheckReason(connector) {
  *
  * @param {object|null} health  the `check_workspace_connector_health` response
  * @param {string} displayName  the service's name, for the sentence
- * @param {{ afterSave?: boolean }} [options]  true when the check followed a save
+ * @param {{ afterSave?: boolean, retryAction?: string }} [options]  `afterSave`: the check
+ *   followed a save; `retryAction`: the name of the button that runs a check on this page
  */
-export function checkProblemMessage(health, displayName, { afterSave = true } = {}) {
+export function checkProblemMessage(health, displayName, { afterSave = true, retryAction = 'Test connection' } = {}) {
   const outcome = checkOutcome(health)
   if (outcome !== 'failed' && outcome !== 'inconclusive') return null
   const reason = String(health.message || '').trim()
@@ -204,7 +226,7 @@ export function checkProblemMessage(health, displayName, { afterSave = true } = 
   const happened = outcome === 'failed' ? `the check with ${provider} failed` : `${provider} could not be checked`
   const lead = afterSave ? `The key was saved, but ${happened}` : `${happened[0].toUpperCase()}${happened.slice(1)}`
   const sentence = reason ? `${lead}: ${reason}` : `${lead}.`
-  return outcome === 'failed' ? sentence : `${sentence.replace(/\.?$/, '.')} Use Test connection to try again.`
+  return outcome === 'failed' ? sentence : `${sentence.replace(/\.?$/, '.')} Use ${retryAction} to try again.`
 }
 
 /**
