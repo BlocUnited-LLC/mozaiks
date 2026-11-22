@@ -150,6 +150,19 @@ def test_invalid_action_href_has_actionable_input_free_feedback(href: str) -> No
     assert "private-token" not in diagnostic.message
 
 
+def test_invalid_navigation_query_suggests_route_params_or_in_place_editing():
+    page = _valid_page()
+    page["sections"][0]["config"]["actions"] = [{
+        "label": "Edit", "action_type": "navigate", "href": "/editor?private-key={selected_row.id}",
+    }]
+    with pytest.raises(PageSchemaValidationError) as rejected:
+        validate_page_schema(page)
+    issue = rejected.value.diagnostics[0]
+    assert issue.code == "page_schema.page_href"
+    assert "approved path parameters" in issue.message and "form" in issue.message
+    assert "private-key" not in issue.message
+
+
 @pytest.mark.parametrize(
     ("field", "value", "code_fragment"),
     [

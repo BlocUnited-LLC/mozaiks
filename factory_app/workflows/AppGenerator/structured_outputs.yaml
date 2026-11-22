@@ -5678,7 +5678,7 @@ models:
         description: Contract fields or upstream design references this file satisfies.
       content:
         type: str
-        description: Complete React source for the custom page file.
+        description: Complete React source. The shell passes a route descriptor. Read URL parameters with useParams from react-router-dom and import each React hook and UI component used.
 
   AppCustomRouteBundle:
     type: model

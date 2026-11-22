@@ -188,6 +188,10 @@ Each page worker receives its owned paths. A custom detail worker returns its
 React bundle with an empty declarative page list. If a response also emits an
 unassigned page, the worker receives the filename to remove together with any
 errors in its assigned page. Admission checks the corrected response again.
+Custom page files reference the manifest entry's ID. For a parameterized
+detail route, the React component reads the URL parameter with `useParams()`.
+An editor can bind an in-place form to the selected row and submit the
+reviewed Content action directly.
 
 The content module makes no model or external-provider calls. It uses the
 existing app persistence boundary, backed by local MongoDB for local runtime

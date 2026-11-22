@@ -168,10 +168,16 @@ def validate_custom_page_files(custom_route_bundle: dict[str, Any]) -> None:
             raise ValueError(f"{path}.path must be unique")
         route_id = entry.get("route_id")
         if route_id not in route_by_id:
+            matching_ids = [
+                identifier for identifier, route in route_by_id.items()
+                if isinstance(identifier, str) and entry.get("registry_key")
+                and route.get("component") == entry["registry_key"]
+            ]
+            hint = f" Set {path}.route_id to {matching_ids[0]!r}." if len(matching_ids) == 1 else ""
             raise ValueError(
                 f"{path}.route_id '{route_id}' must reference a declared "
                 "custom_route_bundle.route_manifest[*].id so the route path, component key, "
-                "custom page file, and ui/index.js registration can be generated together"
+                f"custom page file, and ui/index.js registration can be generated together.{hint}"
             )
         for field in ("component_name", "registry_key", "purpose", "content"):
             value = entry.get(field)

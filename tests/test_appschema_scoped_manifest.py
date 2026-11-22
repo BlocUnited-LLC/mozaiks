@@ -174,6 +174,19 @@ def test_custom_page_files_cannot_replace_derived_registry(schema_model, stage, 
     assert typed == before
 
 
+def test_route_url_used_as_page_file_id_reports_the_exact_matching_component_id(schema_model):
+    typed, _, _ = _planned_custom_candidate(schema_model)
+    route = typed["custom_route_bundle"]["route_manifest"][0]
+    file = typed["custom_route_bundle"]["page_files"][0]
+    file["route_id"] = route["path"]
+    with pytest.raises(ValueError) as rejected:
+        extract_code_file_map_from_payload(typed)
+    assert f"Set custom_route_bundle.page_files[0].route_id to {route['id']!r}" in str(rejected.value)
+    assert file["route_id"] == route["path"]
+    file["route_id"] = route["id"]
+    assert file["path"] in extract_code_file_map_from_payload(typed)
+
+
 def test_custom_registry_feedback_allows_corrected_page_retry(schema_model):
     typed, task, plan = _planned_custom_candidate(schema_model)
     page_files = typed["custom_route_bundle"]["page_files"]
