@@ -14,10 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from logs.logging_config import get_core_logger
-from mozaiksai.core.admin.contract import (
-    DEFAULT_RUNTIME_PANELS,
-    build_default_admin_config,
-)
+from mozaiksai.core.admin.contract import DEFAULT_RUNTIME_PANELS
 from mozaiksai.core.admin.email_promotion import is_admin_by_email, is_app_admin
 from mozaiksai.core.admin.paths import resolve_admin_app_root as resolve_admin_app_root_path
 from mozaiksai.core.admin.registry import load_admin_registry
@@ -30,9 +27,6 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
 _bearer = HTTPBearer(auto_error=False)
-
-
-DEFAULT_ADMIN_CONFIG = build_default_admin_config()
 
 
 def _utc_now() -> datetime:
@@ -141,10 +135,15 @@ def _count_assistant_turns(messages: Any) -> int:
     return sum(1 for message in messages if isinstance(message, dict) and message.get("role") == "assistant")
 
 
+def _session_ended_at(doc: dict[str, Any]) -> Any:
+    """When a session stopped. A failed session records ``failed_at``, not ``completed_at``."""
+    return doc.get("completed_at") or doc.get("failed_at")
+
+
 def _compute_session_runtime_sec(doc: dict[str, Any], *, now: datetime) -> float:
     stored_duration = float(doc.get("duration_sec") or 0.0)
     created_at = doc.get("created_at")
-    completed_at = doc.get("completed_at")
+    completed_at = _session_ended_at(doc)
 
     if hasattr(created_at, "tzinfo") and created_at.tzinfo is None:
         created_at = created_at.replace(tzinfo=UTC)
@@ -191,6 +190,11 @@ async def _build_persisted_admin_stats(*, app_id: str | None = None) -> dict[str
                         "$cond": [{"$eq": ["$status", int(WorkflowStatus.COMPLETED)]}, 1, 0]
                     }
                 },
+                "failed_chats": {
+                    "$sum": {
+                        "$cond": [{"$eq": ["$status", int(WorkflowStatus.FAILED)]}, 1, 0]
+                    }
+                },
             }
         },
     ]
@@ -200,6 +204,7 @@ async def _build_persisted_admin_stats(*, app_id: str | None = None) -> dict[str
         "active_chats": int(aggregate.get("active_chats") or 0),
         "tracked_chats": int(aggregate.get("tracked_chats") or 0),
         "completed_chats": int(aggregate.get("completed_chats") or 0),
+        "failed_chats": int(aggregate.get("failed_chats") or 0),
         "telemetry_source": "ag2_opentelemetry",
     }
 
@@ -227,6 +232,7 @@ async def _build_persisted_admin_runs(
             "status": 1,
             "created_at": 1,
             "completed_at": 1,
+            "failed_at": 1,
             "duration_sec": 1,
             "messages": 1,
         },
@@ -242,7 +248,7 @@ async def _build_persisted_admin_runs(
                 "workflow_name": doc.get("workflow_name"),
                 "user_id": doc.get("user_id"),
                 "started_at": _serialize_datetime(doc.get("created_at")),
-                "ended_at": _serialize_datetime(doc.get("completed_at")),
+                "ended_at": _serialize_datetime(_session_ended_at(doc)),
                 "agent_turns": _count_assistant_turns(doc.get("messages")),
                 "runtime_sec": _compute_session_runtime_sec(doc, now=now),
                 "status": int(doc.get("status")) if doc.get("status") is not None else None,
@@ -566,7 +572,8 @@ async def get_admin_sessions(
                 "user_id": 1,
                 "status": 1,
                 "created_at": 1,
-                "ended_at": 1,
+                "completed_at": 1,
+                "failed_at": 1,
                 "duration_sec": 1,
             },
         ).sort("created_at", -1).limit(limit)
@@ -574,6 +581,7 @@ async def get_admin_sessions(
         sessions = []
         async for doc in cursor:
             doc["id"] = str(doc.pop("_id"))
+            doc["ended_at"] = _session_ended_at(doc)
             sessions.append(doc)
 
         return {"sessions": sessions, "total": len(sessions)}

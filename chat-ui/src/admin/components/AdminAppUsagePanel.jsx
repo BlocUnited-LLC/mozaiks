@@ -55,7 +55,8 @@ function WalletTotalRow({ wallet }) {
 function UsageSummary({ usage }) {
   if (!usage) return null
   const totalTokens = usage.totals?.total_tokens
-  const totalCalls = usage.totals?.total_calls ?? usage.totals?.event_count
+  // The usage ledger names the call count `llm_calls`.
+  const totalCalls = usage.totals?.llm_calls
   if (!totalTokens && !totalCalls) return null
   return (
     <div className="grid grid-cols-2 gap-3 mb-4">

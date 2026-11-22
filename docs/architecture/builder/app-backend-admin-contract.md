@@ -33,12 +33,22 @@ _ADMIN_CONFIG = {
     "schema_version": "mozaiks.admin.app_backend.v1",
     "panels": [
         {
-            "id": "app.access",
-            "label": "Access",
-            "section": "access",
+            "id": "billing.summary",
+            "label": "Billing",
+            "section": "billing",
             "order": 10,
-            "renderer": "builtin",
-            "builtin_panel": "users",
+            "renderer": "schema",
+            "layout": "full-width",
+            "sections": [
+                {
+                    "id": "billing-table",
+                    "primitive": "DataTable",
+                    "config": {
+                        "api_endpoint": "/api/admin/billing",
+                        "columns": [{"key": "plan", "label": "Plan"}],
+                    },
+                }
+            ],
         }
     ],
 }
@@ -79,11 +89,11 @@ async def _get_admin_config():
   "panels": [
     {
       "id": "app.access",
-      "label": "Access",
+      "label": "Members",
       "section": "access",
       "order": 10,
-      "renderer": "builtin",
-      "builtin_panel": "users",
+      "renderer": "custom_component",
+      "component": "MembersAdminPanel",
       "permissions": ["admin.users.read"]
     },
     {
@@ -123,18 +133,48 @@ Shared panel fields:
 
 - `id`: stable panel id
 - `label`: human-facing label
-- `section`: one of
-  `overview | access | billing | usage | activity | settings | integrations | support`
-- `order`: sort order within section
-- `renderer`: one of `builtin | schema | custom_component`
+- `section`: the standard admin page the panel appears on, one of
+  `overview | access | usage | billing | activity | operations | settings | integrations | support`
+- `order`: sort order within the page
+- `renderer`: one of `schema | custom_component | builtin`
 - `permissions`: optional permission or role ids enforced by the backend
+
+`section` uses the standard admin page ids owned by
+`mozaiksai/core/admin/contract.py` (`STANDARD_ADMIN_PAGES`). The admin shell
+renders the panel on that page, together with the page's module panels, in
+ascending `order`. The page must be declared in the app's
+`admin/admin_registry.yaml`; a panel on an undeclared page has no route to
+appear on.
+
+## Shell Behavior
+
+- The shell requests the config once per admin visit.
+- `404` from `GET {app_backend_url}/api/admin/config` means the backend
+  contributes no panels. It is not an error.
+- Any other failure, or a config with no valid panel, is shown on the admin
+  pages as "Panels from the connected backend could not be loaded".
+- A panel that fails validation is skipped; the rest still render.
 
 ## Renderer Modes
 
 ### `renderer: "builtin"`
 
-Use this only for shipped app-backend admin surfaces already implemented by
-`AppAdminDashboard`.
+Target, not current: no backend in this repository serves a built-in panel end
+to end, and AppGenerator must not emit one.
+
+A built-in panel is a shipped React panel in `AppAdminDashboard` that reads its
+data from further app-backend routes. Declaring one is only useful when the
+backend also serves those routes:
+
+| `builtin_panel` | Routes the backend must serve |
+|---|---|
+| `stats` | `GET /api/admin/stats` returning `total_users`, `active_users_30d`, `new_users_7d`, `suspended_users`, `tier_breakdown` |
+| `users` | `GET /api/admin/users?page&limit&q&disabled` returning `items[]`, `total`, `pages`; `POST /api/admin/users/action` with `{action, targetIds}` where `action` is `suspendUser` or `unsuspendUser` |
+| `subscriptions` | `GET /api/admin/stats` returning `total_users`, `tier_breakdown` |
+
+The generated `app/services/routes/admin.py` serves only
+`GET /api/admin/config`, so a generated backend that declared a built-in panel
+would show "unavailable" in its place. Use `schema` or `custom_component`.
 
 Required:
 

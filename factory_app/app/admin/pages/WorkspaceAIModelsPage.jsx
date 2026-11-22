@@ -16,6 +16,11 @@ export default function WorkspaceAIModelsPage() {
     const controller = new AbortController()
     studioFetch(settingsURL, { signal: controller.signal })
       .then(response => {
+        // The server admits only a signed-in workspace administrator, so with
+        // sign-in off there is nothing to load; say that rather than "could not load".
+        if (response.status === 401 || response.status === 403) {
+          throw new Error('AI model settings can be changed only by a signed-in workspace administrator.')
+        }
         if (!response.ok) throw new Error('Could not load workspace AI model settings.')
         return response.json()
       })

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import yaml
@@ -35,30 +36,75 @@ def test_admin_portal_is_the_only_registered_admin_page() -> None:
     assert "AppAdminDashboard" not in admin_source
 
 
-def test_admin_portal_embeds_app_admin_panels() -> None:
+def test_admin_portal_renders_every_page_through_one_layout() -> None:
     source = _read("chat-ui/src/pages/AdminPage.jsx")
-    users_source = _read("chat-ui/src/admin/pages/UsersSection.jsx")
 
     assert "WorkspaceLayout" in source
-    assert "AdminOverviewPanel" in source
     assert "AdminSectionRoute" in source
-    # Routing now handles all canonical sections, not just access/usage
+    # Routing handles any page id, not a fixed few.
     assert "^\\/apps\\/[^/]+\\/([^/]+)\\/?$" in source
     assert "raw === 'activity'" not in source
     assert "raw === 'audit'" not in source
     assert "raw === 'logs'" not in source
-    assert "AdminSectionRoute" in source
     assert "useLocation" in source
-    assert 'title="Usage"' in source
-    # page-based routing: sections reference page ids, not section= attributes
     assert "pagePanels" in source
-    assert "BillingSection" not in source
-    assert "IntegrationsSection" not in source
-    assert "SupportSection" not in source
-    assert "AdminExtensionPanels" in source
     assert "normalizeRuntimePanels" in source
     assert "BuilderWorkspacePanel" not in source
-    assert "AppAdminPanels" in users_source
+
+    # Only pages the framework has content for get a section component.
+    framework_pages = source[source.index("const FRAMEWORK_PAGES = {"):]
+    framework_pages = framework_pages[: framework_pages.index("}")]
+    assert re.findall(r"^\s*([a-z]+):", framework_pages, flags=re.MULTILINE) == [
+        "overview",
+        "usage",
+        "operations",
+        "settings",
+    ]
+
+    # Every page, not only Access, shows app-backend panels and module panels.
+    body = source[source.index("<AdminWorkspaceLayout"):]
+    assert "<AppAdminPanels panels={backendPanels}" in body
+    assert "<AdminExtensionPanels panels={modulePanels} />" in body
+    assert "<EmptyState>" in body
+    assert "p.section === activePage" in source
+
+
+def test_admin_portal_has_no_unrendered_section_components() -> None:
+    """Each file in admin/pages is a section AdminPage actually mounts."""
+    source = _read("chat-ui/src/pages/AdminPage.jsx")
+    section_files = sorted(path.name for path in (_workspace() / "chat-ui/src/admin/pages").glob("*.jsx"))
+
+    assert section_files == [
+        "OperationsSection.jsx",
+        "OverviewSection.jsx",
+        "SettingsSection.jsx",
+        "UsageSection.jsx",
+    ]
+    for name in section_files:
+        assert f"'../admin/pages/{name}'" in source
+
+
+def test_admin_sections_read_token_numbers_only_from_the_usage_endpoint() -> None:
+    """/api/admin/stats, /runs, and /sessions carry no token or cost fields."""
+    removed_fields = (
+        "total_prompt_tokens",
+        "total_completion_tokens",
+        "total_agent_turns",
+        "total_errors",
+        "total_cost",
+        "usage_prompt_tokens_final",
+        "usage_completion_tokens_final",
+        "usage_total_cost_final",
+    )
+    for path in sorted((_workspace() / "chat-ui/src/admin").rglob("*.js*")):
+        text = path.read_text(encoding="utf-8")
+        for field in removed_fields:
+            assert field not in text, f"{path.name} reads {field}, which no admin endpoint returns"
+
+    usage_helpers = _read("chat-ui/src/admin/adminUsage.js")
+    assert "export const USAGE_ENDPOINT = `/api/admin/usage?limit=${USAGE_EVENT_LIMIT}`" in usage_helpers
+    assert "USAGE_ENDPOINT" in _read("chat-ui/src/admin/pages/OverviewSection.jsx")
+    assert "USAGE_ENDPOINT" in _read("chat-ui/src/admin/pages/UsageSection.jsx")
 
 
 def test_platform_shell_registers_admin_section_routes() -> None:
@@ -71,12 +117,14 @@ def test_platform_shell_registers_admin_section_routes() -> None:
     for path in [
         "/apps/:appId/overview",
         "/apps/:appId/building",
-        "/apps/:appId/access",
         "/apps/:appId/usage",
         "/apps/:appId/activity",
     ]:
         assert path in route_manifest
         assert path not in registry_source
+    # Pages with no data source behind them are not mounted at all.
+    assert "/apps/:appId/access" not in route_manifest
+    assert '"path": "/users"' not in route_manifest
 
     # The first-party Studio does not expose a standalone /admin page.
     assert "path: /admin" not in registry_source

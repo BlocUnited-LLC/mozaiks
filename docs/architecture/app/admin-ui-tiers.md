@@ -9,9 +9,17 @@ components and broken Studio layouts.
 ## Tier 1 — AdminPortal Schema Panels
 
 **What it is:** Panels rendered inside the framework-owned AdminPortal shell at
-`/admin`. Panels slot into semantic admin sections (`overview`, `access`,
-`billing`, `usage`, `activity`, `operations`, `settings`, `integrations`,
-`support`) without owning their own route.
+`/admin`. A panel appears on one admin page without owning a route of its own.
+The standard pages are:
+
+```text
+overview | access | usage | billing | activity | operations | settings | integrations | support
+```
+
+A page exists in an app only when its `admin/admin_registry.yaml` declares it.
+The framework shows content of its own on `overview`, `usage`, `operations`,
+and `settings`; the other pages hold only the panels that reference them. See
+[Admin System](admin-system.md#standard-admin-pages).
 
 **When to use:** For module-owned operator data surfaces — record tables, summary
 metrics, approval queues, activity feeds, and settings forms that belong inside
@@ -28,10 +36,10 @@ the standard admin shell.
 
 - `renderer: schema` — panel config using the same primitive system as
   `ui/pages/*.yaml` (DataTable, Form, SummaryStrip, etc.)
-- `renderer: builtin` — built-in platform panels (`stats`, `users`,
-  `subscriptions`)
 - `renderer: custom_component` — bounded React customization; component declared
   in module JS stubs and registered through `ui/index.js`
+
+Each panel sets `page` to a page id the registry declares.
 
 **Generator rule:** This is the default generated admin path. AppGenerator
 generates `admin/admin_registry.yaml` via `AdminRegistryAgent`. Module panels
@@ -57,6 +65,13 @@ pages:
     path: /admin
     icon: dashboard
     order: 0
+    scope: app
+    enabled: true
+  - id: activity
+    label: Activity
+    path: /admin/activity
+    icon: history
+    order: 40
     scope: app
     enabled: true
   - id: operations

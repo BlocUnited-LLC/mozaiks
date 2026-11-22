@@ -15,6 +15,45 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- A generated app's admin portal shows real numbers. Overview, Usage, and
+  Operations read token and cost totals from the usage ledger instead of fields
+  no endpoint returned (they showed 0 and `$0.0000`), a failed run is listed as
+  failed instead of running, and a page with nothing on it says so instead of
+  rendering blank.
+- Admin panels that a connected app backend declares appear on the admin page
+  they name. Before, only panels for Access were shown. Module and backend
+  panels are shown in their declared `order`.
+- Studio's workspace Integrations page sends the signed-in session with every
+  request; it failed with 401 whenever sign-in was on. It also reports a save
+  or delete the server refused, and links "Get API key" to the provider's page
+  instead of a Studio path that does not exist.
+- Studio's AI models page is in the workspace menu, and says why it cannot be
+  changed when sign-in is off.
+- Studio's app Health page lists specific problems (latest build validation,
+  failed runs, integrations missing a credential) instead of a fixed score and
+  figures that could not change.
+- The Studio menu and the dashboard manifest declare the same pages; a test now
+  runs the route validator on the real files.
+
+### Changed
+
+- One catalog of standard admin pages
+  (`overview | access | usage | billing | activity | operations | settings | integrations | support`)
+  lives in `mozaiksai.core.admin.contract`. App-backend admin panels may name
+  `activity`. AppGenerator declares an admin page only when something renders
+  on it, and no longer plans built-in app-backend panels, which no generated
+  backend can serve.
+- `GET /api/admin/stats` returns `failed_chats`. `GET /api/admin/runs` and
+  `/api/admin/sessions` give a failed session its end time.
+
+### Removed
+
+- Studio's workspace Users page and app Access page. Neither had a data source,
+  so both could only show zeros. User counts remain on Performance and on each
+  app's Users page.
+
+### Fixed
+
 - Studio owners can open Revenue and manage connections for the app they select in My Apps, including in hosts with a separate dashboard app ID.
 - Factory distinguishes available pack offerings from the explicit, versioned
   pack selection in the owner-reviewed DesignDocs artifact. Planning, template

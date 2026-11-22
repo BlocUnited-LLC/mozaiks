@@ -205,7 +205,6 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert (_workspace() / "web_shell" / "playwright.responsive.config.js").exists()
     assert (_workspace() / "web_shell" / "playwright" / "apps.responsive.smoke.spec.js").exists()
     assert "workspace usage route stays responsive across desktop and mobile widths" in smoke_source
-    assert "workspace users route stays responsive across desktop and mobile widths" in smoke_source
     assert "workspace integrations route stays responsive across desktop and mobile widths" in smoke_source
     assert "workspace support route stays responsive across desktop and mobile widths" in smoke_source
     assert "create app transition overlay can return to Apps" in smoke_source
@@ -219,7 +218,6 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert "app usage route stays responsive across desktop and mobile widths" in smoke_source
     assert "app support route stays responsive across desktop and mobile widths" in smoke_source
     assert "app billing route stays responsive across desktop and mobile widths" not in smoke_source
-    assert "app access route stays responsive across desktop and mobile widths" in smoke_source
     assert "app build review route stays responsive across desktop and mobile widths" in smoke_source
     assert "app hosting route stays responsive across desktop and mobile widths" not in smoke_source
     assert "mobile app Studio navigation keeps route transitions stable" in smoke_source
@@ -242,7 +240,6 @@ def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
         "AppsPage": "apps route stays responsive across desktop and mobile widths",
         "WorkspacePerformancePage": "workspace performance route stays responsive across desktop and mobile widths",
         "WorkspaceUsagePage": "workspace usage route stays responsive across desktop and mobile widths",
-        "WorkspaceUsersPage": "workspace users route stays responsive across desktop and mobile widths",
         "WorkspaceIntegrationsPage": "workspace integrations route stays responsive across desktop and mobile widths",
         "WorkspaceAIModelsPage": "workspace AI models route stays responsive across desktop and mobile widths",
         "UserSupportPage": "workspace support route stays responsive across desktop and mobile widths",
@@ -252,7 +249,6 @@ def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
         "AppUsersPage": "app users analytics route stays responsive across desktop and mobile widths",
         "DashboardPortalPage": "app building route stays responsive across desktop and mobile widths",
         "AppHealthPage": "app health route stays responsive across desktop and mobile widths",
-        "AppAccessPage": "app access route stays responsive across desktop and mobile widths",
         "AppUsagePage": "app usage route stays responsive across desktop and mobile widths",
         "AppIntegrationsPage": "app integrations route stays responsive across desktop and mobile widths",
         "AppSupportPage": "app support route stays responsive across desktop and mobile widths",

@@ -662,26 +662,6 @@ function buildWorkspaceSupportPayload() {
   };
 }
 
-function buildWorkspaceUsersPayload() {
-  return {
-    total_users: 184,
-    active_users: 136,
-    new_users: 12,
-    by_app: {
-      [APP_ID]: {
-        total_users: 118,
-        active_users: 91,
-        new_users: 8,
-      },
-      'partner-delivery-studio': {
-        total_users: 66,
-        active_users: 45,
-        new_users: 4,
-      },
-    },
-  };
-}
-
 function buildOnboardingStatusPayload({ dismissed = false, progress = 0, steps = {} } = {}) {
   const defaultSteps = {
     create_app: { completed: false, completed_at: null },
@@ -1011,14 +991,6 @@ async function mockStudioApis(page) {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(appsPayload),
-    });
-  });
-
-  await page.route('**/api/admin/users', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(buildWorkspaceUsersPayload()),
     });
   });
 
@@ -1654,32 +1626,6 @@ test('workspace usage route stays responsive across desktop and mobile widths', 
   }
 });
 
-test('workspace users route stays responsive across desktop and mobile widths', async ({ page }) => {
-  await page.goto('/users');
-  const main = page.locator('main');
-
-  await expect(main.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
-  await expect(main.getByPlaceholder('Search apps...')).toBeVisible();
-  const summaryMetrics = main.getByLabel('Summary metrics');
-  await expect(summaryMetrics.getByText('Total users')).toBeVisible();
-  await expect(summaryMetrics.getByText('Active users')).toBeVisible();
-  await expect(summaryMetrics.getByText('Apps with users')).toBeVisible();
-  await expectNoHorizontalOverflow(page);
-
-  const viewport = page.viewportSize();
-  expect(viewport).not.toBeNull();
-
-  if (viewport.width < 768) {
-    await expect(main.locator('article').filter({ hasText: 'Campaign Revision Workbench' }).first()).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
-  } else {
-    await expect(main.getByRole('row', { name: /Campaign Revision Workbench/i }).first()).toBeVisible();
-    await expect(main.getByRole('columnheader', { name: 'Total users' })).toBeVisible();
-    await expect(main.getByRole('columnheader', { name: 'Active' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
-  }
-});
-
 test('workspace integrations route stays responsive across desktop and mobile widths', async ({ page }) => {
   // Dismiss onboarding tour so its tooltip does not overlap the fixed-position
   // "Open Studio navigation" / "Manage" buttons during mobile interaction checks.
@@ -1743,6 +1689,28 @@ test('workspace AI models route stays responsive across desktop and mobile width
   await expect(page.getByRole('combobox', { name: 'Default model' })).toHaveValue('gemini');
   await expect(page.getByText('Provider key missing', { exact: true })).toBeVisible();
   await expectNoHorizontalOverflow(page);
+
+  // The page is in the workspace menu, not reachable only by typing its address.
+  // (The mobile menu is covered by the mobile workspace navigation test.)
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+  if (viewport.width >= 768) {
+    const navigation = page.getByRole('navigation', { name: 'Workspace navigation' });
+    await expect(navigation.locator('a[href="/settings/ai-models"]')).toBeVisible();
+    await expect(navigation.locator('a[href="/settings/ai-models"]')).toHaveAttribute('aria-current', 'page');
+    // Pages with no data source behind them are not offered.
+    await expect(navigation.locator('a[href="/users"]')).toHaveCount(0);
+  }
+});
+
+test('workspace AI models route explains itself when sign-in is off', async ({ page }) => {
+  await page.route('**/api/studio/settings/ai-models', async route => {
+    await route.fulfill({ status: 403, json: { detail: 'Workspace administrator access required.' } });
+  });
+  await page.goto('/settings/ai-models');
+  await expect(page.getByRole('alert')).toHaveText(
+    'AI model settings can be changed only by a signed-in workspace administrator.',
+  );
 });
 
 test('workspace support route stays responsive across desktop and mobile widths', async ({ page }) => {
@@ -2245,27 +2213,6 @@ test('app support route stays responsive across desktop and mobile widths', asyn
   }
 });
 
-test('app access route stays responsive across desktop and mobile widths', async ({ page }) => {
-  await page.goto(`/apps/${APP_ID}/access`);
-  const main = page.locator('main');
-
-  await expect(main.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Account management' })).toBeVisible();
-  await expect(main.getByPlaceholder('Search by name, email, status, or plan')).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Export' }).first()).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Access state' })).toBeVisible();
-  await expectNoHorizontalOverflow(page);
-
-  const viewport = page.viewportSize();
-  expect(viewport).not.toBeNull();
-
-  if (viewport.width < 768) {
-    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
-  } else {
-    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
-  }
-});
-
 test.describe('saved artifact review', () => {
   test.beforeEach(async ({ page }) => {
     await page.route('**/api/modules/user_onboarding/get_onboarding_status**', route => route.fulfill({
@@ -2597,9 +2544,9 @@ test('mobile app Studio navigation keeps route transitions stable', async ({ pag
       detail: async () => expect(main.getByRole('heading', { name: 'Workflow breakdown' })).toBeVisible(),
     },
     {
-      href: `/apps/${APP_ID}/access`,
-      heading: 'Users',
-      detail: async () => expect(main.getByRole('heading', { name: 'Account management' })).toBeVisible(),
+      href: `/apps/${APP_ID}/health`,
+      heading: 'Health',
+      detail: async () => expect(main.getByRole('heading', { name: 'Current app health' })).toBeVisible(),
     },
   ];
 
@@ -2629,6 +2576,15 @@ test('mobile workspace Studio navigation keeps route transitions stable', async 
       body: JSON.stringify(buildOnboardingStatusPayload({ dismissed: true })),
     });
   });
+  await page.route('**/api/studio/settings/ai-models', async (route) => {
+    await route.fulfill({
+      json: {
+        default: 'gemini',
+        allowed: ['gemini'],
+        models: [{ id: 'gemini', label: 'Gemini 3.8 Flash', configured: true }],
+      },
+    });
+  });
 
   await page.goto('/apps');
   const main = page.locator('main');
@@ -2652,6 +2608,11 @@ test('mobile workspace Studio navigation keeps route transitions stable', async 
         const campaignCard = main.locator('article').filter({ hasText: 'Campaign Revision Workbench' }).first();
         await expect(campaignCard).toBeVisible();
       },
+    },
+    {
+      href: '/settings/ai-models',
+      heading: 'AI models',
+      detail: async () => expect(page.getByRole('combobox', { name: 'Default model' })).toHaveValue('gemini'),
     },
     {
       href: '/apps',

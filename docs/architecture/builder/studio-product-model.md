@@ -125,22 +125,33 @@ continues through the app's declared Admin surface.
 Workspace-level routes:
 
 - `/apps` -> workspace app portfolio home
+- `/performance` -> portfolio revenue and user performance
 - `/usage` -> workspace workflow token usage and cost totals
 - `/integrations` -> workspace provider setup and integration catalog
+- `/support` -> apps with support chats, each linking to that app's inbox
+- `/settings/ai-models` -> default and allowed AI models for builds; signed-in workspace administrators only
 
 App-level routes:
 
 - `/apps/:appId` -> redirects to `/apps/:appId/overview`
-- `/apps/:appId/overview` -> App Studio overview with operational health summary
+- `/apps/:appId/overview` -> App Studio overview
+- `/apps/:appId/revenue` -> recurring-revenue analytics
+- `/apps/:appId/audience` -> user analytics and the lifecycle funnel
 - `/apps/:appId/building` -> manifest-backed Building portal for build requests, artifacts, approvals, and workflow launch
-- `/apps/:appId/health` -> deep app health diagnostics, hidden from primary navigation
-- `/apps/:appId/access` -> app access
 - `/apps/:appId/usage` -> app usage
+- `/apps/:appId/health` -> what needs attention: latest build validation, failed runs, integrations missing a credential
 - `/apps/:appId/integrations` -> owner-managed connections and integration requirements for the selected app
 - `/apps/:appId/support` -> app support follow-up, help desk notes, and stalled run triage
 - `/apps/:appId/activity` -> app build review, artifact versions, validation state, review actions, and carry-forward audit detail, hidden from primary navigation
 
-The selected app’s navigation comes from `factory_app/app/dashboard/dashboard.yaml`. It includes Revenue, Integrations and the other app management pages enabled by the host.
+A Studio menu lists the routes in `factory_app/app/ui/route_manifest.json`.
+Each one is also an enabled portal in `factory_app/app/dashboard/dashboard.yaml`,
+and `tests/test_dashboard_manifest.py` fails when the two lists differ.
+
+A page is mounted only when Studio has data for it. There is no workspace
+Users page and no app Access page: Studio has no account directory to read, so
+both could only show zeros. User counts are on Performance and on each app's
+Users page.
 
 The Studio route model is canonical. Do not add route aliases for
 retired customer-facing terms such as `Hub`, `Treasury`, `Adapters`,
@@ -156,14 +167,18 @@ product billing routes.
 | Route | Surface | Notes |
 | --- | --- | --- |
 | `/apps` | My Apps | Primary Studio workspace home and app portfolio |
+| `/performance` | Performance | Portfolio revenue and user metrics, trend, and per-app comparison |
 | `/usage` | Workspace Usage | Cross-app workflow input/output tokens, totals, and averages |
 | `/integrations` | Workspace Integrations | Workspace provider setup, catalog coverage, and safe credential-presence status |
+| `/support` | Workspace Support | Apps with support chats, each linking to that app's support inbox |
+| `/settings/ai-models` | AI models | Default and allowed AI models for Factory builds and refinements |
 | `/create` | Workflow entrypoint | Workflow-owned fresh create path; not part of the persistent Studio nav and never an implicit resume surface |
 | `/apps/:appId` | App Studio | Redirects to app overview |
-| `/apps/:appId/overview` | App Overview | App-scoped summary, next actions, operational health, connected services, build state, and activity |
+| `/apps/:appId/overview` | App Overview | App-scoped summary, next actions, connected services, build state, and activity |
+| `/apps/:appId/revenue` | App Revenue | Recurring-revenue metrics, trend, and the MRR movement bridge |
+| `/apps/:appId/audience` | App Users | Acquisition, engagement, conversion, and the app's lifecycle funnel |
 | `/apps/:appId/building` | Building | Generic dashboard portal rendered from `dashboard/dashboard.yaml`; build requests, artifacts, approvals, and workflow launch |
-| `/apps/:appId/health` | App Health Diagnostics | Deep diagnostics across runtime, workflows, hosting, and integrations; routable but hidden from primary navigation |
-| `/apps/:appId/access` | App Access | App-scoped account access, plan assignment, and access blockers |
+| `/apps/:appId/health` | App Health | Specific things to fix, from the latest build's validation result, failed runs, and integrations missing a credential |
 | `/apps/:appId/usage` | App Usage | App-scoped input/output token usage, cost signals, totals, and averages |
 | `/apps/:appId/integrations` | Integrations | Owner-scoped connection setup, write-only credentials, manual health checks for supported services, and build requirements |
 | `/apps/:appId/support` | App Support | App-scoped help desk, escalations, stalled runs, and support diagnostics |

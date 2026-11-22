@@ -27,19 +27,26 @@ action appears only once.
 
 ## Portals
 
-The default App Dashboard has these portal lanes:
+The first-party Studio mounts these App Dashboard portals. Each one is a page
+in the app's Studio menu:
 
 | Portal | Route | Purpose |
 | --- | --- | --- |
 | Overview | `/apps/:appId/overview` | App identity, lifecycle state, KPIs, and next step. |
+| Revenue | `/apps/:appId/revenue` | Recurring-revenue metrics, trend, and MRR movement. Empty until a billing integration records revenue. |
+| Users | `/apps/:appId/audience` | Acquisition, engagement, conversion, and the app's lifecycle funnel. |
 | Building | `/apps/:appId/building` | Build requests, artifact versions, approval queue, and build workflow launches. |
-| Branding | `/apps/:appId/branding` | Brand kit, themes, logos, generated media, and promoted assets. |
-| Launch | `/apps/:appId/launch` | Landing page, hosting, domains, and deployment readiness. |
-| Growth | `/apps/:appId/growth` | Marketing campaigns, landing page improvement, and campaign assets. |
-| Users | `/apps/:appId/access` | Users, roles, invitations, access blockers, and policy summaries. |
-| Usage | `/apps/:appId/usage` | App chats, workflows, tokens, cost, quotas, and usage limits. |
+| Token Usage | `/apps/:appId/usage` | App chats, workflows, tokens, and cost. |
+| Health | `/apps/:appId/health` | What needs attention: the latest build's validation result, failed runs, and integrations missing a credential. |
+| Integrations | `/apps/:appId/integrations` | The app's connections, credentials, and build requirements. |
 | Support | `/apps/:appId/support` | App-scoped support threads and follow-up. |
-| Settings | `/apps/:appId/settings` | App configuration and management forms. |
+
+The default dashboard contract also declares Branding, Launch, Growth, Users
+(access), and Settings portals. The first-party Studio has no page for them, so
+its `dashboard/dashboard.yaml` disables them; a host that mounts those pages
+enables them in its own manifest. A portal is never left enabled without a
+page: `tests/test_dashboard_manifest.py` runs the route validator on the real
+manifest and route files.
 
 Apps may hide or extend portals through the dashboard manifest. Capability packs
 can contribute panels without taking over the whole dashboard.
@@ -67,14 +74,6 @@ Support conversations for this app, organized by status: **Needs reply**,
 **In progress**, and **Resolved**. Open a conversation to reply to a user or
 assign it to an operator.
 
-## Access
-
-**Route:** `/apps/:appId/access`
-
-Who can use this app, what role they have, what plan they are on, and whether
-anyone is blocked or needs attention. Shows account status, last activity, and
-any access flags for each account.
-
 ## Usage
 
 **Route:** `/apps/:appId/usage`
@@ -83,13 +82,26 @@ Token and cost detail for this app broken down by workflow and chat. Expand a
 workflow group to see individual chats. When model pricing is incomplete, a
 pricing status notice appears collapsed at the bottom.
 
-## Diagnostic Pages
+## Health
 
-These pages are linked from Overview or Support when something needs
-investigation. They are not listed in primary navigation.
+**Route:** `/apps/:appId/health`
+
+A short list of specific things to fix, built only from signals Studio has: the
+newest build's validation result, how many of the app's recorded runs failed,
+and which connected services still lack a credential. There is no health score
+and no uptime figure; this Studio has no source for either.
+
+## Account Access
+
+The first-party Studio has no page listing an app's accounts. It has no account
+directory to read: an app's users live in that app's sign-in provider. A host
+product that manages accounts mounts its own Access page and enables the
+`users` portal in its dashboard manifest.
+
+## Detail Pages
+
+This page is linked from other pages and is not listed in the menu.
 
 | Page | Route | Opens from |
 | --- | --- | --- |
-| Health diagnostics | `/apps/:appId/health` | Overview when a runtime or integration issue needs investigation |
-| Integration setup | `/apps/:appId/integrations` | Overview when a required service is not connected, or workspace Integrations |
-| Build history | `/apps/:appId/activity` | Building when you need the full artifact preservation audit detail |
+| Build review | `/apps/:appId/activity` | Overview and Building, to review a saved build and its artifact history |

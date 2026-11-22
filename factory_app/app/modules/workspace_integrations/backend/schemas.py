@@ -316,6 +316,13 @@ def build_integration_response(
     ):
         if metadata_key in spec:
             response[metadata_key] = spec[metadata_key]
+    # Two different links. ``provider_setup_url`` is the provider's own page
+    # where the key is created (from the catalog entry). ``setup_url`` is the
+    # Studio path a build's readiness step sends the owner to; it is not a
+    # place to get a key and must not be rendered as one.
+    provider_setup_url = spec.get("setup_url")
+    if isinstance(provider_setup_url, str) and provider_setup_url.startswith("https://"):
+        response["provider_setup_url"] = provider_setup_url
     if status == "missing":
         response["setup_url"] = f"/integrations/{spec['id']}"
     return response

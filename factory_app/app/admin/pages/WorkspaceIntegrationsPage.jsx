@@ -4,13 +4,13 @@ import { PageHeader, SummaryStrip } from '@mozaiks/chat-ui/ui'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ActionButton,
-  API_BASE,
   StatusPill,
   StudioErrorState,
   StudioInlineEmptyState,
   StudioLoadingState,
   StudioSlideOver,
 } from '../../ui/components/StudioShared.jsx'
+import { studioFetch } from './studioApi.js'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -219,64 +219,50 @@ function CategoryTabs({ categories, active, onChange }) {
 
 // ── API ───────────────────────────────────────────────────────────────────────
 
-async function fetchIntegrations() {
-  const res = await fetch(`${API_BASE}/api/modules/workspace_integrations/list_integrations`, {
+// Every call goes through studioFetch so it carries the signed-in session. A
+// bare fetch here sent no token and failed with 401 whenever sign-in was on.
+async function integrationsAction(action, input = {}) {
+  const res = await studioFetch(`/api/modules/workspace_integrations/${action}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
+    body: JSON.stringify(input),
   })
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
   return res.json()
 }
 
-async function fetchWorkspaceConnectors() {
-  const res = await fetch(`${API_BASE}/api/modules/workspace_integrations/list_workspace_connectors`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
-  })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.json()
+function fetchIntegrations() {
+  return integrationsAction('list_integrations')
 }
 
+function fetchWorkspaceConnectors() {
+  return integrationsAction('list_workspace_connectors')
+}
+
+// A save or delete the server refuses still answers 200, with the outcome in
+// the body. Treat a refusal as a failure instead of closing the panel on it.
 async function saveConnectorKey(service, secretValue, displayName) {
-  const res = await fetch(`${API_BASE}/api/modules/workspace_integrations/save_workspace_connector`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ service, secret_value: secretValue, display_name: displayName }),
+  const result = await integrationsAction('save_workspace_connector', {
+    service,
+    secret_value: secretValue,
+    display_name: displayName,
   })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.json()
+  if (result?.success === false) throw new Error(result.error || 'The key could not be stored.')
+  return result
 }
 
-async function saveNote(integrationId, note) {
-  const res = await fetch(`${API_BASE}/api/modules/workspace_integrations/set_integration_note`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ integration_id: integrationId, note }),
-  })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.json()
+function saveNote(integrationId, note) {
+  return integrationsAction('set_integration_note', { integration_id: integrationId, note })
 }
 
 async function deleteWorkspaceConnector(service) {
-  const res = await fetch(`${API_BASE}/api/modules/workspace_integrations/delete_workspace_connector`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ service }),
-  })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.json()
+  const result = await integrationsAction('delete_workspace_connector', { service })
+  if (result?.deleted === false) throw new Error(result.error || 'The connector could not be removed.')
+  return result
 }
 
-async function checkWorkspaceConnector(service) {
-  const res = await fetch(`${API_BASE}/api/modules/workspace_integrations/check_workspace_connector_health`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ service }),
-  })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.json()
+function checkWorkspaceConnector(service) {
+  return integrationsAction('check_workspace_connector_health', { service })
 }
 
 // ── SetupSlideOver ────────────────────────────────────────────────────────────
@@ -326,7 +312,8 @@ function SetupSlideOver({
   const isConnected = effectiveStatus(item) === 'configured' && !needsAttention(item, connector)
   // Primary secret key name for the inline connect form (first required secret)
   const primaryKeyName = secrets[0]?.name || item.connector_key || null
-  const setupUrl = item.setup_url || null
+  // The provider's own key page. `item.setup_url` is a Studio path, not this.
+  const setupUrl = item.provider_setup_url || null
 
   const footer = (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

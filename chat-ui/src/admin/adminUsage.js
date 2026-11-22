@@ -1,0 +1,107 @@
+/**
+ * Pure helpers for the admin portal's framework panels.
+ *
+ * Token and cost numbers come only from `GET /api/admin/usage` (the runtime
+ * usage ledger). `GET /api/admin/stats`, `/runs`, and `/sessions` describe
+ * conversation lifecycle and carry no token fields.
+ */
+
+// The usage endpoint totals the most recent model calls, up to this many.
+export const USAGE_EVENT_LIMIT = 1000;
+export const USAGE_ENDPOINT = `/api/admin/usage?limit=${USAGE_EVENT_LIMIT}`;
+
+const PLACEHOLDER = '—';
+
+function finiteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+export function formatCount(value) {
+  const number = finiteNumber(value);
+  return number === null ? PLACEHOLDER : number.toLocaleString();
+}
+
+export function formatCost(value) {
+  const number = finiteNumber(value);
+  if (number === null) return PLACEHOLDER;
+  return `$${number.toFixed(number !== 0 && Math.abs(number) < 1 ? 4 : 2)}`;
+}
+
+export function formatDuration(seconds) {
+  const number = finiteNumber(seconds);
+  if (number === null) return PLACEHOLDER;
+  if (number < 60) return `${number.toFixed(1)}s`;
+  const minutes = Math.floor(number / 60);
+  const rest = Math.round(number - minutes * 60);
+  if (minutes < 60) return `${minutes}m ${rest}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+export function formatTimestamp(value) {
+  if (!value) return PLACEHOLDER;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? PLACEHOLDER : date.toLocaleString();
+}
+
+/**
+ * Session status as stored by the runtime: 0 in progress, 1 completed, 2 failed.
+ * Anything else is still in progress as far as the runtime knows.
+ */
+export function sessionStatus(status) {
+  if (status === 1) return { label: 'complete', variant: 'success' };
+  if (status === 2) return { label: 'failed', variant: 'error' };
+  return { label: 'in progress', variant: 'warning' };
+}
+
+/**
+ * Whether the usage response carries a real cost. `cost_source` is
+ * `not_configured` when no model in it has a price, so its cost of 0 is not a
+ * measurement and must not be shown as "$0.00".
+ */
+export function isUsagePriced(usage) {
+  return Boolean(usage) && typeof usage.cost_source === 'string' && usage.cost_source !== 'not_configured';
+}
+
+/**
+ * Totals from a `/api/admin/usage` response, with the wording needed to show
+ * them honestly: which calls they cover, and whether the cost is priced.
+ */
+export function summarizeUsage(usage) {
+  const totals = usage && typeof usage === 'object' ? usage.totals : null;
+  if (!totals || typeof totals !== 'object') return null;
+
+  const modelCalls = finiteNumber(totals.llm_calls) ?? 0;
+  const promptTokens = finiteNumber(totals.prompt_tokens) ?? 0;
+  const completionTokens = finiteNumber(totals.completion_tokens) ?? 0;
+  const totalTokens = finiteNumber(totals.total_tokens) ?? promptTokens + completionTokens;
+  const priced = isUsagePriced(usage);
+
+  let costNote = 'Estimated from model prices';
+  if (!priced) costNote = modelCalls > 0 ? 'No price is set for the models used' : 'No model calls yet';
+  else if (usage.cost_source === 'mixed') costNote = 'Some models have no price set';
+
+  return {
+    modelCalls,
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    cost: priced ? finiteNumber(totals.estimated_cost_usd) ?? 0 : null,
+    costNote,
+    windowNote:
+      modelCalls >= USAGE_EVENT_LIMIT
+        ? `Latest ${USAGE_EVENT_LIMIT.toLocaleString()} model calls`
+        : 'All recorded model calls',
+  };
+}
+
+/** Per-run usage rows keyed by chat id, for joining onto the runs list. */
+export function usageByChatId(usage) {
+  const rows = usage && Array.isArray(usage.by_run) ? usage.by_run : [];
+  const byChat = new Map();
+  rows.forEach((row) => {
+    if (row && typeof row.chat_id === 'string' && row.chat_id) byChat.set(row.chat_id, row);
+  });
+  return byChat;
+}

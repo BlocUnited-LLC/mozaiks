@@ -11,7 +11,7 @@ import {
 } from '../../ui/components/StudioShared.jsx'
 import AppStudioHero, { formatCompactNumber, formatDateTimeLabel } from './AppStudioChrome.jsx'
 import { getAppStudioSnapshot, sumBy } from './appStudioDataHelpers.js'
-import { buildHealthState, formatPercentValue } from './studioHealthModel.js'
+import { buildHealthState, validationLabel, validationTone } from './studioHealthModel.js'
 import { useAppStudioData } from './useAppStudioData.js'
 
 
@@ -47,6 +47,16 @@ function RuntimeSignalsRow({ metrics }) {
   )
 }
 
+function Tile({ label, value, detail = null }) {
+  return (
+    <div className="rounded-2xl border border-border bg-card/70 px-4 py-3">
+      <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{label}</div>
+      <div className="mt-2 text-2xl font-semibold text-foreground">{value}</div>
+      {detail ? <div className="mt-1 text-xs text-muted-foreground">{detail}</div> : null}
+    </div>
+  )
+}
+
 export default function AppHealthPage() {
   const { appId = 'workspace-app' } = useParams()
   const { data, loading, error, dataMode } = useAppStudioData(appId)
@@ -55,29 +65,28 @@ export default function AppHealthPage() {
   if (loading) return <StudioLoadingState label="Loading app health…" />
   if (error || !data?.summary) return <StudioErrorState title="Health Unavailable" message={error || 'No health summary returned.'} />
 
+  // Every number on this page comes from an endpoint that returns it:
+  // run counts from /api/admin/stats, recent runs from /api/admin/runs, the
+  // build from /api/studio/build/history, connectors from /api/studio/integrations.
   const latestArtifact = snapshot.buildHistory[0] || null
-  const averageLatency = snapshot.runs.length > 0
-    ? Math.round(sumBy(snapshot.runs, (run) => run.runtime_sec || 0) / snapshot.runs.length)
+  const latestValidationStatus = latestArtifact ? latestArtifact.validation_status || 'pending' : null
+  const recentRuns = snapshot.runs
+  const trackedRuns = Number(snapshot.stats.tracked_chats || 0)
+  const failedRuns = Number(snapshot.stats.failed_chats || 0)
+  const averageRunSeconds = recentRuns.length > 0
+    ? Math.round(sumBy(recentRuns, (run) => run.runtime_sec || 0) / recentRuns.length)
     : null
   const integrationIssues = snapshot.appConnectors.filter((connector) => !connector.secret_available).length
-  const health = buildHealthState({
-    status: snapshot.lifecycleState,
-    totalErrors: Number(snapshot.stats.total_errors || 0),
-    runtimeReadiness: snapshot.summary.workspace?.runtime_readiness,
-    latestValidationStatus: latestArtifact?.validation_status,
-    uptimePercent: snapshot.deploymentRecord?.uptime_percent ?? null,
-    hasDeploymentFailure: Boolean(snapshot.deploymentRecord?.failed),
-    integrationIssues,
-  })
-  const errorRate = snapshot.runs.length > 0
-    ? Math.round((Number(snapshot.stats.total_errors || 0) / snapshot.runs.length) * 100)
-    : 0
+  const health = buildHealthState({ latestValidationStatus, failedRuns, trackedRuns, integrationIssues })
+  const averageRunLabel = averageRunSeconds != null ? `${averageRunSeconds}s` : 'No runs yet'
+  const recentRunsDetail = recentRuns.length > 0 ? `Across the ${recentRuns.length} most recent` : null
+
   const summaryItems = [
-    { id: 'score', label: 'Health Score', value: `${health.score}/100`, detail: health.label },
-    { id: 'uptime', label: 'Uptime', value: health.uptimeLabel, detail: 'Observed hosting uptime' },
-    { id: 'errors', label: 'Error Rate', value: snapshot.runs.length > 0 ? `${errorRate}%` : '0%', detail: 'Runs with recent friction' },
-    { id: 'latency', label: 'Avg Latency', value: averageLatency != null ? `${averageLatency}s` : 'Pending', detail: 'Observed across recent runs' },
-    { id: 'integrations', label: 'Integration Gaps', value: formatCompactNumber(integrationIssues, '0'), detail: 'Setup items still incomplete' },
+    { id: 'status', label: 'Status', value: health.label, detail: health.issues.length > 0 ? `${health.issues.length} to look at` : 'Nothing to look at' },
+    { id: 'build', label: 'Latest build', value: validationLabel(latestValidationStatus), detail: 'Validation result' },
+    { id: 'failed', label: 'Failed runs', value: formatCompactNumber(failedRuns, '0'), detail: `Of ${formatCompactNumber(trackedRuns, '0')} recorded` },
+    { id: 'runtime', label: 'Avg run time', value: averageRunLabel, detail: recentRunsDetail || 'Recent runs' },
+    { id: 'integrations', label: 'Integration gaps', value: formatCompactNumber(integrationIssues, '0'), detail: 'Missing a credential' },
   ]
 
   return (
@@ -88,19 +97,15 @@ export default function AppHealthPage() {
           summary={snapshot.summary}
           dataMode={dataMode}
           title="Health"
-          currentSection="Health"
-          subtitle="See the overall health of the app itself across runtime posture, workflow reliability, hosting, and integrations."
+          subtitle="What needs attention for this app: its latest build, runs that failed, and integrations missing a credential."
           summaryItems={summaryItems}
         />
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.02fr)_minmax(0,0.98fr)]">
-          <Panel eyebrow="Overall" title="Current app health" subtitle="Keep the overall health signal explicit before jumping into deeper app management pages.">
+          <Panel eyebrow="Overall" title="Current app health" subtitle="Each item below is a specific thing to fix. An empty list means none of these checks found a problem.">
             <div className="rounded-[1.75rem] border border-border/70 bg-card/60 px-5 py-5">
               <div className="flex flex-wrap items-center justify-between gap-4">
-                <div>
-                  <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Overall health</div>
-                  <div className="mt-2 text-4xl font-semibold text-foreground">{health.score}/100</div>
-                </div>
+                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Overall health</div>
                 <StatusPill tone={health.tone}>{health.label}</StatusPill>
               </div>
 
@@ -108,32 +113,24 @@ export default function AppHealthPage() {
                 {health.issues.length > 0 ? health.issues.map((issue) => (
                   <div key={issue} className="rounded-2xl border border-border/70 bg-background/60 px-4 py-3">{issue}</div>
                 )) : (
-                  <div className="rounded-2xl border border-border/70 bg-background/60 px-4 py-3">No major health risks are currently highlighted for this app.</div>
+                  <div className="rounded-2xl border border-border/70 bg-background/60 px-4 py-3">
+                    The latest build, recorded runs, and integration credentials show nothing to fix.
+                  </div>
                 )}
               </div>
             </div>
           </Panel>
 
-          <Panel eyebrow="Validation" title="Release confidence" subtitle="Tie health back to the latest artifact, runtime readiness, and deployment posture.">
-            <div className="space-y-3">
-              <div className="rounded-2xl border border-border bg-card/70 px-4 py-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Latest build artifact</div>
-                    <div className="mt-2 font-semibold text-foreground">{latestArtifact ? `Build version ${latestArtifact.version_number}` : 'No build version yet'}</div>
-                  </div>
-                  {latestArtifact ? <StatusPill tone={latestArtifact.validation_status === 'passed' ? 'success' : latestArtifact.validation_status === 'failed' ? 'destructive' : 'warning'}>{latestArtifact.validation_status || 'pending'}</StatusPill> : null}
+          <Panel eyebrow="Validation" title="Release confidence" subtitle="The newest build and whether it passed validation.">
+            <div className="rounded-2xl border border-border bg-card/70 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Latest build artifact</div>
+                  <div className="mt-2 font-semibold text-foreground">{latestArtifact ? `Build version ${latestArtifact.version_number}` : 'No build version yet'}</div>
                 </div>
-                <div className="mt-2 text-sm text-muted-foreground">{latestArtifact ? formatDateTimeLabel(latestArtifact.created_at) : 'Validation will appear here once a build version exists.'}</div>
+                {latestArtifact ? <StatusPill tone={validationTone(latestValidationStatus)}>{validationLabel(latestValidationStatus)}</StatusPill> : null}
               </div>
-              <div className="rounded-2xl border border-border bg-card/70 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Runtime readiness</div>
-                <div className="mt-2 font-semibold text-foreground">{health.runtimeLabel}</div>
-              </div>
-              <div className="rounded-2xl border border-border bg-card/70 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Hosting uptime</div>
-                <div className="mt-2 font-semibold text-foreground">{formatPercentValue(snapshot.deploymentRecord?.uptime_percent)}</div>
-              </div>
+              <div className="mt-2 text-sm text-muted-foreground">{latestArtifact ? formatDateTimeLabel(latestArtifact.created_at) : 'Validation will appear here once a build version exists.'}</div>
             </div>
           </Panel>
         </div>
@@ -141,20 +138,11 @@ export default function AppHealthPage() {
         <RuntimeSignalsRow metrics={data?.runtimeMetrics} />
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)]">
-          <Panel eyebrow="Workflows" title="Workflow reliability" subtitle="Use the workflow panel to spot run volume, latency, and error concentration without opening raw traces.">
+          <Panel eyebrow="Workflows" title="Workflow reliability" subtitle="How many of this app's runs were recorded, how many failed, and how long recent ones took.">
             <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-border bg-card/70 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Workflow runs</div>
-                <div className="mt-2 text-2xl font-semibold text-foreground">{formatCompactNumber(snapshot.runs.length, '0')}</div>
-              </div>
-              <div className="rounded-2xl border border-border bg-card/70 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Runtime errors</div>
-                <div className="mt-2 text-2xl font-semibold text-foreground">{formatCompactNumber(snapshot.stats.total_errors, '0')}</div>
-              </div>
-              <div className="rounded-2xl border border-border bg-card/70 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Average latency</div>
-                <div className="mt-2 text-2xl font-semibold text-foreground">{averageLatency != null ? `${averageLatency}s` : 'Pending'}</div>
-              </div>
+              <Tile label="Recorded runs" value={formatCompactNumber(trackedRuns, '0')} />
+              <Tile label="Failed runs" value={formatCompactNumber(failedRuns, '0')} />
+              <Tile label="Average run time" value={averageRunLabel} detail={recentRunsDetail} />
             </div>
           </Panel>
 

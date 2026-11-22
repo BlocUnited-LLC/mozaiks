@@ -2505,7 +2505,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Icon hint string matched to the frontend icon map (e.g. dashboard, users, billing, chart, server, settings, plug, history, support). Null only when no icon applies.
+        description: Icon hint string matched to the frontend icon map (dashboard, access, chart, billing, history, server, settings, plug, support, apps, pulse, operations). Null only when no icon applies.
       order:
         type: int
         description: Sort position within the nav for this scope.
@@ -5437,16 +5437,20 @@ models:
         values:
         - overview
         - access
-        - billing
         - usage
+        - billing
+        - activity
         - operations
         - settings
         - integrations
         - support
-        description: Semantic admin section where this app-backend panel appears.
+        description: >
+          Standard admin page this app-backend panel appears on. The panel is shown
+          only when admin/admin_registry.yaml declares a page with this id. Must stay
+          aligned with STANDARD_ADMIN_PAGE_IDS in mozaiksai/core/admin/contract.py.
       order:
         type: int
-        description: Sort order within the section.
+        description: Sort order within the page.
       renderer:
         type: literal
         values:
@@ -5454,14 +5458,20 @@ models:
         - schema
         - custom_component
         description: >
-          Panel rendering mode. `schema` is the normal deterministic path, `builtin`
-          mounts a shipped panel, and `custom_component` is the bounded escape hatch.
+          Panel rendering mode. `schema` is the normal deterministic path and
+          `custom_component` is the bounded escape hatch. `builtin` mounts a shipped
+          panel that reads its data from app-backend routes (GET /api/admin/stats,
+          GET /api/admin/users, POST /api/admin/users/action); the generated
+          services/routes/admin.py serves only GET /api/admin/config, so a generated
+          app backend must not declare a builtin panel.
       builtin_panel:
         type: union
         variants:
         - str
         - 'null'
-        description: Built-in panel id when renderer=builtin. Must be one of stats, users, subscriptions.
+        description: >
+          Built-in panel id when renderer=builtin; one of stats, users, subscriptions.
+          Null for schema and custom_component panels.
       layout:
         type: union
         variants:
