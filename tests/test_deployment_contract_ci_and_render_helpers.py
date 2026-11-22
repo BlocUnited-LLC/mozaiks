@@ -365,6 +365,26 @@ class TestRenderDockerfile:
         result = _render_dockerfile(spec)
         assert f"EXPOSE {DEFAULT_RUNTIME_PORT}" in result
 
+    def test_serves_as_an_unprivileged_user_that_owns_the_app(self):
+        lines = _render_dockerfile({}).splitlines()
+        create_user = (
+            "RUN groupadd --gid 10001 mozaiks && useradd --create-home --uid 10001 --gid 10001 mozaiks"
+            " && chown 10001:10001 /app"
+        )
+        cmd_index = next(i for i, line in enumerate(lines) if line.startswith("CMD "))
+
+        # The user owns /app and every copied file, and the image switches to
+        # it, by number, before the start command runs.
+        assert lines.index(create_user) < lines.index("COPY --chown=10001:10001 . .") < cmd_index
+        assert [line for line in lines if line.startswith("USER ")] == ["USER 10001:10001"]
+        assert lines.index("USER 10001:10001") < cmd_index
+        assert "COPY . ." not in lines
+
+    def test_logs_go_to_a_directory_the_app_user_can_write(self):
+        # The default log directory is inside the installed package. The real
+        # boot is proven by tests/test_generated_app_container_smoke.py.
+        assert "ENV LOGS_BASE_DIR=/app/logs" in _render_dockerfile({}).splitlines()
+
 
 # ---------------------------------------------------------------------------
 # 6. _render_compose
@@ -403,3 +423,9 @@ class TestRenderCompose:
     def test_result_ends_with_newline(self):
         result = _render_compose({})
         assert result.endswith("\n")
+
+    def test_omits_the_obsolete_version_key(self):
+        # Compose v2 ignores the top-level version key and warns about it.
+        lines = _render_compose({}).splitlines()
+        assert lines[0] == "services:"
+        assert not any(line.startswith("version:") for line in lines)

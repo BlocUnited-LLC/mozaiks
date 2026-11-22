@@ -856,6 +856,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Generated app container images now serve as an unprivileged `mozaiks` user
+  (uid 10001) that owns `/app`, instead of as root, and write their logs under
+  `/app/logs`. The generated `docker-compose.yml` also drops the obsolete
+  `version` key that Compose v2 warns about.
+- The production Compose file (`infra/compose/docker-compose.prod.yml`)
+  publishes its bundled MongoDB, which has no authentication, on `127.0.0.1`
+  only instead of on every network interface.
 - Generated media ignores provider-supplied publication authority. Public reads
   require server-owned public visibility, and explicit promotion records that
   visibility. Private/backer-only visibility overrides old promotion metadata;
@@ -964,6 +971,10 @@ This project follows a practical pre-1.0 changelog format:
   with the same version, repair older empty secret contracts and missing app IDs,
   restore a missing refinement regeneration profile, and configure local-only
   Studio access.
+- `mozaiks serve` no longer tells first-run users to fill in `OPENAI_API_KEY`
+  when it creates `.env`: it points to the model provider key and `MONGO_URI`
+  that the file lists. The self-hosting guide states that the production
+  Compose file uses its bundled MongoDB and does not read `MONGO_URI`.
 
 
 ## 0.2.0 - 2026-10-17

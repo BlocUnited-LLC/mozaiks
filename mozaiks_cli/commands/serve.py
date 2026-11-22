@@ -50,7 +50,10 @@ def run(args) -> None:
     env_example = workspace / ".env.example"
     if not env_file.exists() and env_example.exists():
         shutil.copy(env_example, env_file)
-        print(f"Created {env_file} from .env.example — fill in your OPENAI_API_KEY and MONGO_URI before use.")
+        print(
+            f"Created {env_file} from .env.example — fill in the model provider key "
+            "and MONGO_URI it lists before use."
+        )
     load_workspace_dotenv(workspace)
 
     # The host runs with this process's environment; say now, before anything

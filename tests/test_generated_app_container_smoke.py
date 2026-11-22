@@ -192,6 +192,14 @@ async def test_materialized_generated_app_image_boots_and_serves_runtime(
         assert health is not None
         assert health[0] == 200
         assert health[1]["status"] == "healthy"
+        # The host process itself runs as the unprivileged user, not as root.
+        host_process_uid = subprocess.run(
+            ["docker", "exec", container, "stat", "-c", "%u", "/proc/1"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert host_process_uid == "10001"
         page_status, page = _request_json(f"http://127.0.0.1:{host_port}/api/pages/reports")
         assert page_status == 200
         assert page["sections"][0]["config"]["api_endpoint"] == (

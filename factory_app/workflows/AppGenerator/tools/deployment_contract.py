@@ -12,6 +12,11 @@ from typing import Any
 
 DEFAULT_RUNTIME_PORT = 8000
 DEFAULT_HEALTH_PATH = "/api/health"
+# The generated image serves as this unprivileged user, matching the uid that
+# the repo's preview and sandbox images use.
+GENERATED_APP_USER = "mozaiks"
+GENERATED_APP_USER_UID = 10001
+GENERATED_APP_LOGS_DIR = "/app/logs"
 DEFAULT_PROFILE = "generic_container"
 PRODUCTION_DEPLOYMENT_PROFILES = frozenset(
     {
@@ -1198,18 +1203,30 @@ def _render_dockerfile(spec: dict[str, Any]) -> str:
     port = int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)  # type: ignore[union-attr]
     start_command = json.dumps(_platform_start_command(port), separators=(",", ":"))
     runtime_env = _auth_runtime_env(spec)
+    app_owner = f"{GENERATED_APP_USER_UID}:{GENERATED_APP_USER_UID}"
     return "\n".join(
         [
             "FROM python:3.13-slim",
             "WORKDIR /app",
             "COPY requirements.txt ./",
             "RUN pip install --no-cache-dir -r requirements.txt",
-            "COPY . .",
+            # Serve as an unprivileged user that owns the app directory: the host
+            # writes its .env, agent guidance and logs there on start.
+            f"RUN groupadd --gid {GENERATED_APP_USER_UID} {GENERATED_APP_USER}"
+            f" && useradd --create-home --uid {GENERATED_APP_USER_UID}"
+            f" --gid {GENERATED_APP_USER_UID} {GENERATED_APP_USER}"
+            f" && chown {app_owner} /app",
+            f"COPY --chown={app_owner} . .",
+            # The default log directory is inside the installed package, which
+            # this user cannot write.
+            f"ENV LOGS_BASE_DIR={GENERATED_APP_LOGS_DIR}",
             *(
                 [f"ENV {' '.join(f'{key}={value}' for key, value in runtime_env.items())}"]
                 if runtime_env
                 else []
             ),
+            # Numeric, so a platform that requires a non-root user can verify it.
+            f"USER {app_owner}",
             f"EXPOSE {port}",
             f"CMD {start_command}",
             "",
@@ -1222,7 +1239,6 @@ def _render_compose(spec: dict[str, Any]) -> str:
     port = int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)  # type: ignore[union-attr]
     return "\n".join(
         [
-            "version: '3.9'",
             "services:",
             "  app:",
             "    build:",
