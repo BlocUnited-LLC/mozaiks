@@ -26,16 +26,19 @@ export function formatCount(value) {
 export function formatCost(value) {
   const number = finiteNumber(value);
   if (number === null) return PLACEHOLDER;
+  // A real cost too small for four decimals must not read as zero.
+  if (number > 0 && number < 0.00005) return '<$0.0001';
   return `$${number.toFixed(number !== 0 && Math.abs(number) < 1 ? 4 : 2)}`;
 }
 
 export function formatDuration(seconds) {
   const number = finiteNumber(seconds);
   if (number === null) return PLACEHOLDER;
-  if (number < 60) return `${number.toFixed(1)}s`;
-  const minutes = Math.floor(number / 60);
-  const rest = Math.round(number - minutes * 60);
-  if (minutes < 60) return `${minutes}m ${rest}s`;
+  if (number < 59.95) return `${number.toFixed(1)}s`;
+  // Round once, then split, so 119.7 s reads "2m 0s" and never "1m 60s".
+  const total = Math.round(number);
+  const minutes = Math.floor(total / 60);
+  if (minutes < 60) return `${minutes}m ${total % 60}s`;
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
@@ -93,9 +96,18 @@ export function summarizeUsage(usage) {
   const totalTokens = finiteNumber(totals.total_tokens) ?? promptTokens + completionTokens;
   const priced = isUsagePriced(usage);
 
+  // The endpoint totals at most USAGE_EVENT_LIMIT calls. At the limit the
+  // numbers are a window, not the app's lifetime total, and every card that
+  // shows one says so.
+  const capped = modelCalls >= USAGE_EVENT_LIMIT;
+  const windowNote = capped
+    ? `Latest ${USAGE_EVENT_LIMIT.toLocaleString()} model calls`
+    : 'All recorded model calls';
+
   let costNote = 'Estimated from model prices';
   if (!priced) costNote = modelCalls > 0 ? 'No price is set for the models used' : 'No model calls yet';
   else if (unpricedCallCount(usage) > 0) costNote = 'Some models have no price set';
+  if (capped) costNote = `${windowNote} only. ${costNote}`;
 
   return {
     modelCalls,
@@ -104,10 +116,8 @@ export function summarizeUsage(usage) {
     totalTokens,
     cost: priced ? finiteNumber(totals.estimated_cost_usd) ?? 0 : null,
     costNote,
-    windowNote:
-      modelCalls >= USAGE_EVENT_LIMIT
-        ? `Latest ${USAGE_EVENT_LIMIT.toLocaleString()} model calls`
-        : 'All recorded model calls',
+    capped,
+    windowNote,
   };
 }
 

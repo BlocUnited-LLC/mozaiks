@@ -173,11 +173,13 @@ This project follows a practical pre-1.0 changelog format:
 - One catalog of standard admin pages
   (`overview | access | usage | billing | activity | operations | settings | integrations | support`)
   lives in `mozaiksai.core.admin.contract`. App-backend admin panels may name
-  `activity`. AppGenerator declares an admin page only when something renders
-  on it, and no longer plans built-in app-backend panels, which no generated
-  backend can serve.
+  `activity`. AppGenerator declares Overview, Usage, Operations, and Settings
+  for every app, Access for an app with sign-in, and any other admin page only
+  when a panel renders on it. It no longer plans built-in app-backend panels,
+  which no generated backend can serve.
 - `GET /api/admin/stats` returns `failed_chats`. `GET /api/admin/runs` and
-  `/api/admin/sessions` give a failed session its end time.
+  `/api/admin/sessions` give a failed session its end time, and their
+  timestamps carry a UTC offset (they were read as local time in the browser).
 - Factory design agents receive verified selected-pack capabilities, actions and
   ownership boundaries while retaining app-specific design intent. The shipped
   catalog no longer selects unrequested packs. Social 0.1.18 and Messaging

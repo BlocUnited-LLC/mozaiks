@@ -294,10 +294,13 @@ def test_first_party_studio_dashboard_matches_its_route_manifest() -> None:
     result = validate_dashboard_manifest_routes(manifest, route_pages)
 
     assert [(issue.code, issue.route) for issue in result.issues] == []
-    # Each default portal is either mounted here or switched off here.
-    declared = {portal.id for portal in manifest.app.portals} | {portal.id for portal in manifest.workspace.portals}
+    # The file itself takes a position on every default portal: mounted or
+    # switched off. (The merged manifest always contains the defaults, so this
+    # reads the raw file.)
     default = build_default_dashboard_manifest()
-    assert {portal.id for portal in default.app.portals} | {portal.id for portal in default.workspace.portals} <= declared
+    for scope in ("workspace", "app"):
+        in_file = {portal["id"] for portal in raw[scope]["portals"]}
+        assert {portal.id for portal in getattr(default, scope).portals} <= in_file, scope
 
 
 def test_first_party_studio_menu_icons_resolve() -> None:

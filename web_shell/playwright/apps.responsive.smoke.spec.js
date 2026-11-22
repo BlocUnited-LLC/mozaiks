@@ -156,7 +156,14 @@ function buildAppStudioPayload(appId = APP_ID) {
       },
     },
     stats: {
+      // What GET /api/admin/stats returns: conversation counts by outcome.
+      active_chats: 1,
       tracked_chats: 14,
+      completed_chats: 11,
+      failed_chats: 2,
+      telemetry_source: 'ag2_opentelemetry',
+      // The server does not return the fields below. They remain only for
+      // pages that have not been moved off them yet.
       total_cost: 242.5,
       total_errors: 2,
       total_tool_calls: 5,
@@ -169,6 +176,9 @@ function buildAppStudioPayload(appId = APP_ID) {
         {
           chat_id: 'run-1',
           workflow_name: 'RevisionOrchestrator',
+          // status is what GET /api/admin/runs returns: 1 completed, 0 in progress.
+          status: 1,
+          agent_turns: 6,
           errors: 2,
           tool_calls: 3,
           cost: 123.4,
@@ -182,6 +192,8 @@ function buildAppStudioPayload(appId = APP_ID) {
         {
           chat_id: 'run-2',
           workflow_name: 'DeployGuard',
+          status: 0,
+          agent_turns: 3,
           errors: 0,
           tool_calls: 2,
           cost: 89.1,
@@ -2168,6 +2180,17 @@ test('app health route stays responsive across desktop and mobile widths', async
   await expect(main.getByRole('heading', { name: 'Current app health' })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Workflow reliability' })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Integration posture' })).toBeVisible();
+  // The numbers come from what the endpoints return: failed_chats and
+  // tracked_chats from stats, finished runs from runs, and each connector's
+  // credential and last check.
+  await expect(main.getByText('2 of 14 runs ended with an error.', { exact: true })).toBeVisible();
+  await expect(main.getByText('1 integration is not working.', { exact: true })).toBeVisible();
+  await expect(main.getByText('2 integrations are not set up yet.', { exact: true })).toBeVisible();
+  // run-2 is still in progress, so only run-1 (18 s) is averaged.
+  // The summary strip hides its detail line on narrow screens; the panel's metric always shows it.
+  await expect(main.getByText('Across the 1 most recent finished run', { exact: true }).last()).toBeVisible();
+  await expect(main.getByText('Manual review required before workflow use.', { exact: true })).toBeVisible();
+  await expect(main.getByText('Check failed', { exact: true })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();

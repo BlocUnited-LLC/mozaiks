@@ -5,21 +5,22 @@
  * Registered as a custom_component panel on the Usage admin page.
  * Fetches from /api/me/tokens (the same OSS endpoint the profile tab uses).
  *
- * Panel props: { panel, apiBaseUrl, auth }
+ * Panel props: { panel, apiBaseUrl }
  */
 
 import { useState, useEffect, useCallback } from 'react'
+import { authFetch } from '../../adapters/api.js'
 import { SectionHeading } from './AdminPrimitives.jsx'
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-async function fetchWithAuth(url, auth) {
-  const token = await auth?.getToken?.()
-  const headers = {}
-  if (token) headers['Authorization'] = `Bearer ${token}`
-  const res = await fetch(url, { headers })
+// authFetch resolves the platform backend and attaches the current session
+// token. (The `auth` prop is the auth adapter; it has no `getToken`, so reading
+// the token from it sent every request without credentials.)
+async function fetchJson(url) {
+  const res = await authFetch(url)
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
   return res.json()
 }
@@ -90,7 +91,7 @@ function ErrorBox({ message }) {
 // Root
 // ---------------------------------------------------------------------------
 
-export default function AdminMyUsagePanel({ panel, apiBaseUrl = '', auth }) {
+export default function AdminMyUsagePanel({ panel, apiBaseUrl = '' }) {
   const [wallets, setWallets] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -99,14 +100,14 @@ export default function AdminMyUsagePanel({ panel, apiBaseUrl = '', auth }) {
     setLoading(true)
     setError(null)
     try {
-      const body = await fetchWithAuth(`${apiBaseUrl}/api/me/tokens`, auth)
+      const body = await fetchJson(`${apiBaseUrl}/api/me/tokens`)
       setWallets(body.wallets ?? [])
     } catch (e) {
       setError(e.message)
     } finally {
       setLoading(false)
     }
-  }, [apiBaseUrl, auth])
+  }, [apiBaseUrl])
 
   useEffect(() => { load() }, [load])
 

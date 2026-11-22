@@ -46,7 +46,8 @@ const backendPanels = {
 test("admin pages use declared metadata and preserve Studio section routing", async (t) => {
   const stubs = {
     "../context/ChatUIContext": `const useChatUI = () => ({
-  user: { roles: ["admin"] },
+  // ?as=visitor signs in someone without the admin role.
+  user: { roles: new URLSearchParams(location.search).get("as") === "visitor" ? ["user"] : ["admin"] },
   config: { appBackendUrl: location.origin + "/backend" },
   auth: null,
 });
@@ -125,8 +126,10 @@ createRoot(document.getElementById("root")).render(<BrowserRouter><AdminPage rou
   });
   // "panels" serves the config, "missing" has no admin route, "broken" fails.
   let backendMode = "panels";
+  let backendRequests = 0;
   const server = http.createServer((req, res) => {
     if (req.url === "/backend/api/admin/config") {
+      backendRequests += 1;
       res.statusCode = backendMode === "panels" ? 200 : backendMode === "missing" ? 404 : 500;
       res.setHeader("Content-Type", "application/json");
       res.end(backendMode === "panels" ? JSON.stringify(backendPanels) : "{}");
@@ -197,4 +200,18 @@ createRoot(document.getElementById("root")).render(<BrowserRouter><AdminPage rou
   await page.goto(`${origin}/admin`);
   await expect(page.getByRole("alert")).toContainText("Panels from the connected backend could not be loaded: 500");
   await expect(page.locator("[data-framework]")).toHaveText("overview content");
+
+  // A signed-in visitor without the admin role is refused, and the shell asks
+  // the connected backend for nothing on their behalf.
+  backendMode = "panels";
+  backendRequests = 0;
+  await page.goto(`${origin}/admin?as=visitor`);
+  await expect(page.getByText("Admin role required.", { exact: true })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  assert.equal(backendRequests, 0);
+  assert.equal(await page.locator("[data-framework]").count(), 0);
+  // The same page for an admin does ask.
+  await page.goto(`${origin}/admin`);
+  await expect(heading("Overview")).toBeVisible();
+  await expect.poll(() => backendRequests).toBeGreaterThan(0);
 });

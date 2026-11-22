@@ -49,6 +49,16 @@ def _get_app_registry_collection():
 
 
 def _serialize_datetime(value: Any) -> str | None:
+    """ISO 8601 with a UTC offset.
+
+    The Mongo client returns naive datetimes, and they are UTC. Sent without an
+    offset, a browser reads them as local time and shows every timestamp shifted
+    by the viewer's UTC offset.
+    """
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value.isoformat()
     if hasattr(value, "isoformat"):
         try:
             return value.isoformat()
@@ -581,7 +591,11 @@ async def get_admin_sessions(
         sessions = []
         async for doc in cursor:
             doc["id"] = str(doc.pop("_id"))
-            doc["ended_at"] = _session_ended_at(doc)
+            ended_at = _session_ended_at(doc)
+            for field in ("created_at", "completed_at", "failed_at"):
+                if field in doc:
+                    doc[field] = _serialize_datetime(doc[field])
+            doc["ended_at"] = _serialize_datetime(ended_at)
             sessions.append(doc)
 
         return {"sessions": sessions, "total": len(sessions)}

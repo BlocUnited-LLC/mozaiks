@@ -10,7 +10,9 @@ import { USAGE_ENDPOINT, formatCost, formatCount, summarizeUsage } from '../admi
  */
 export function OverviewSection() {
   const stats = useAdminFetch('/api/admin/stats', 15000)
-  const usage = useAdminFetch(USAGE_ENDPOINT, 60000)
+  // The usage body carries up to 1,000 events; these three totals do not
+  // need it more often than this.
+  const usage = useAdminFetch(USAGE_ENDPOINT, 300000)
   const counts = stats.data
   const summary = summarizeUsage(usage.data)
   const failed = counts?.failed_chats ?? 0

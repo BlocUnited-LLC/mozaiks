@@ -106,12 +106,88 @@ def test_admin_registry_agent_declares_each_standard_page_exactly() -> None:
     ]
 
 
+def _agent_sections(agents: str) -> dict[str, str]:
+    """The text of each agent's entry in agents.yaml, by agent name."""
+    starts = [(match.start(), match.group(1)) for match in re.finditer(r"^- name: (\w+)\s*$", agents, flags=re.MULTILINE)]
+    return {
+        name: agents[start : (starts[index + 1][0] if index + 1 < len(starts) else len(agents))]
+        for index, (start, name) in enumerate(starts)
+    }
+
+
 def test_generator_prompts_place_panels_only_on_standard_pages() -> None:
     agents = _read("factory_app/workflows/AppGenerator/agents.yaml")
-    placed = set(re.findall(r"→ `page: ([a-z-]+)`", agents))
-    assert placed == set(STANDARD_ADMIN_PAGE_IDS)
+    placing = {
+        name: set(re.findall(r"→ `page: ([a-z-]+)`", text))
+        for name, text in _agent_sections(agents).items()
+        if "→ `page: " in text
+    }
+    # The planner, the module contract agent, and the registry agent each state
+    # the placement rule. Each copy must name every standard page, so one copy
+    # cannot lose a page while the others hide it.
+    assert {"AppPlanAgent", "AdminRegistryAgent"} <= set(placing)
+    assert len(placing) == 3
+    for name, placed in placing.items():
+        assert placed == set(STANDARD_ADMIN_PAGE_IDS), f"{name} places panels on {sorted(placed)}"
     # A module panel names its page with `page`; `section` belongs to app-backend panels.
     assert "→ `section: " not in agents
+
+
+def _pack_template_admin_pages() -> dict[str, set[str]]:
+    """Page ids the shipped capability packs' own admin panels render on, by pack id."""
+    pages: dict[str, set[str]] = {}
+    for contract in sorted((ROOT / "factory_app/build_context").glob("*/templates/modules/*/contracts/admin.yaml")):
+        pack_id = contract.relative_to(ROOT / "factory_app/build_context").parts[0]
+        panels = yaml.safe_load(contract.read_text(encoding="utf-8")).get("panels") or []
+        pages.setdefault(pack_id, set()).update(panel["page"] for panel in panels)
+    return pages
+
+
+def test_registry_agent_declares_the_pages_capability_pack_panels_use() -> None:
+    """A pack's admin.yaml is copied in at assembly, after the registry agent runs.
+
+    The agent cannot read those panels, so its prompt lists each pack's page.
+    If a pack gains a panel on another page and this list is not updated, the
+    first registry misses the page and the bundle scanner rejects the bundle.
+    """
+    shipped = _pack_template_admin_pages()
+    assert shipped, "expected at least one capability pack with admin panels"
+    registry_agent = _agent_sections(_read("factory_app/workflows/AppGenerator/agents.yaml"))["AdminRegistryAgent"]
+    listed: dict[str, set[str]] = {}
+    for pack_id, page in re.findall(r"^\s*- `([a-z_]+)` pack: page `([a-z-]+)`\s*$", registry_agent, flags=re.MULTILINE):
+        listed.setdefault(pack_id, set()).add(page)
+    assert listed == shipped
+    # The plan field the agent matches against is named, and it is told why.
+    assert "`capability_pack_id`" in registry_agent
+    assert "after you run" in registry_agent
+
+
+def test_registry_agent_inclusion_rules() -> None:
+    registry_agent = _agent_sections(_read("factory_app/workflows/AppGenerator/agents.yaml"))["AdminRegistryAgent"]
+    # The four pages the framework fills are always declared.
+    assert "- `overview`, `usage`, `operations`, and `settings` — always include." in registry_agent
+    assert "1. Always include `overview`, `usage`, `operations`, and `settings`." in registry_agent
+    # Access follows sign-in: DesignDocs routes user administration to it.
+    assert "- `access` — include when the app has sign-in (`app_build_plan.auth_strategy`" in registry_agent
+    # The pages with no framework content are declared only for a panel.
+    assert "- `billing`, `activity`, `integrations`, and `support` — the framework shows" in registry_agent
+    # Both places a panel reference lives are named by field.
+    assert "`admin_yaml.panels[].page`" in registry_agent
+    assert "`app_backend_admin_config.panels[].section`" in registry_agent
+    # The retired rule (pages inferred from whether the app "runs AI workflows") is gone.
+    assert "runs AI workflows" not in registry_agent
+    assert "agent_backend_required" not in registry_agent
+
+
+def test_no_prompt_shows_a_builtin_app_backend_panel() -> None:
+    """Built-in panels read app-backend routes nothing serves; no prompt may model one."""
+    agents = _read("factory_app/workflows/AppGenerator/agents.yaml")
+    assert '"renderer": "builtin"' not in agents
+    assert "renderer: builtin`" in agents  # only inside the two "do not" rules
+    sections = _agent_sections(agents)
+    for name in ("AppPlanAgent", "ControllerAgent"):
+        rule = [line for line in sections[name].splitlines() if "renderer: builtin" in line]
+        assert rule and all("Do NOT plan" in line or "Do not emit" in line for line in rule), name
 
 
 def test_registry_icon_hints_resolve_in_the_portal() -> None:

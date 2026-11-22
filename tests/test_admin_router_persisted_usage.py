@@ -108,9 +108,13 @@ async def test_failed_session_has_an_end_time_in_runs_and_sessions(monkeypatch: 
 
     Reading only ``completed_at`` left every failed run with no end time, so
     the portal listed it as still running.
+
+    The stored datetimes are naive, as the Mongo client returns them (they are
+    UTC). Sent without an offset, a browser would read them as local time.
     """
     now = datetime(2026, 5, 8, 12, 0, tzinfo=UTC)
-    failed_at = now - timedelta(minutes=4)
+    stored_now = now.replace(tzinfo=None)
+    failed_at = stored_now - timedelta(minutes=4)
     collection = _FakeChatSessionsCollection(
         find_docs=[
             {
@@ -119,9 +123,9 @@ async def test_failed_session_has_an_end_time_in_runs_and_sessions(monkeypatch: 
                 "workflow_name": "PlanBuilder",
                 "user_id": "user-1",
                 "status": 2,
-                "created_at": now - timedelta(minutes=5),
+                "created_at": stored_now - timedelta(minutes=5),
                 "failed_at": failed_at,
-                "duration_sec": 60.0,
+                # No stored duration: the runtime can only come from failed_at.
                 "messages": [{"role": "assistant", "content": "Draft"}],
             },
             {
@@ -130,7 +134,7 @@ async def test_failed_session_has_an_end_time_in_runs_and_sessions(monkeypatch: 
                 "workflow_name": "PlanBuilder",
                 "user_id": "user-2",
                 "status": 0,
-                "created_at": now - timedelta(minutes=1),
+                "created_at": stored_now - timedelta(minutes=1),
                 "duration_sec": 0.0,
                 "messages": [],
             },
@@ -143,9 +147,12 @@ async def test_failed_session_has_an_end_time_in_runs_and_sessions(monkeypatch: 
 
     by_id = {run["chat_id"]: run for run in runs}
     assert by_id["chat-failed"]["status"] == 2
-    assert by_id["chat-failed"]["ended_at"] == failed_at.isoformat()
+    assert by_id["chat-failed"]["started_at"] == "2026-05-08T11:55:00+00:00"
+    assert by_id["chat-failed"]["ended_at"] == "2026-05-08T11:56:00+00:00"
+    # One minute from start to failure, not the five minutes since it started.
     assert by_id["chat-failed"]["runtime_sec"] == 60.0
     assert by_id["chat-running"]["ended_at"] is None
+    assert by_id["chat-running"]["runtime_sec"] == 60.0
     assert collection.find_calls[0][1]["failed_at"] == 1
 
     class _Client(dict):
@@ -158,8 +165,11 @@ async def test_failed_session_has_an_end_time_in_runs_and_sessions(monkeypatch: 
     response = await admin_router.get_admin_sessions(app_id="app-1", workflow=None, limit=10, user=principal)
 
     sessions = {session["id"]: session for session in response["sessions"]}
-    assert sessions["chat-failed"]["ended_at"] == failed_at
+    assert sessions["chat-failed"]["ended_at"] == "2026-05-08T11:56:00+00:00"
+    assert sessions["chat-failed"]["failed_at"] == "2026-05-08T11:56:00+00:00"
+    assert sessions["chat-failed"]["created_at"] == "2026-05-08T11:55:00+00:00"
     assert sessions["chat-running"]["ended_at"] is None
+    assert sessions["chat-running"]["created_at"] == "2026-05-08T11:59:00+00:00"
     # The projection asks for the fields a session really stores.
     projection = collection.find_calls[-1][1]
     assert projection.get("completed_at") == 1 and projection.get("failed_at") == 1

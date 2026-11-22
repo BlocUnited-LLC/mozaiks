@@ -30,13 +30,35 @@ export function isExpiring(connector) {
   return connectorLifecycle(connector) === 'expiring'
 }
 
+// `error_code` values a check reports when it could not ask the provider at
+// all. They say nothing about the saved values.
+const INCONCLUSIVE_ERROR_CODES = new Set(['timeout', 'connection_error', 'unexpected_status'])
+
 /**
- * The connector's last health check failed. The provider may have refused the
- * credential (`error_code: auth_failed`) or the check may not have reached it
- * (`connection_error`, `timeout`); `health.message` says which.
+ * What a health record says. Accepts a connector's `health` or a
+ * `check_workspace_connector_health` response; both carry `status`,
+ * `message`, and `error_code`.
+ *
+ * - `passed`: the provider accepted the saved values.
+ * - `failed`: the saved values cannot work. The provider refused them
+ *   (`status: unhealthy`), or the check found them missing or malformed and
+ *   said so in `error_code` (`missing_credentials`, `invalid_key_format`, ...)
+ *   while leaving `status` at `unknown` or `pending_validation`.
+ * - `inconclusive`: the provider could not be asked (timeout, connection error).
+ * - `none`: no check has reported anything.
  */
+export function checkOutcome(health) {
+  if (!health || typeof health !== 'object') return 'none'
+  if (health.status === 'healthy') return 'passed'
+  if (health.status === 'unhealthy') return 'failed'
+  const code = String(health.error_code || '').trim()
+  if (!code) return 'none'
+  return INCONCLUSIVE_ERROR_CODES.has(code) ? 'inconclusive' : 'failed'
+}
+
+/** The connector's last health check found that it cannot work as saved. */
 export function hasFailedCheck(connector) {
-  return Boolean(connector) && connector.health?.status === 'unhealthy'
+  return Boolean(connector) && checkOutcome(connector.health) === 'failed'
 }
 
 /** The provider itself refused the saved credential. */
@@ -45,39 +67,44 @@ export function isRejected(connector) {
 }
 
 /**
- * Whether a connector can be used, for pages that only need that:
- * `missing` (nothing saved), `check_failed` (saved, last check failed), or `ok`.
+ * Whether one connector can be used, for pages that only need that:
+ * - `missing`: no credential is saved;
+ * - `expired`: the saved credential has expired;
+ * - `check_failed`: the last check found it cannot work as saved;
+ * - `incomplete`: a credential is saved but required setup is missing;
+ * - `ok`: none of the above is known.
  */
 export function connectorCredentialState(connector) {
   if (!connector?.secret_available) return 'missing'
-  return hasFailedCheck(connector) ? 'check_failed' : 'ok'
+  if (isExpired(connector)) return 'expired'
+  if (hasFailedCheck(connector)) return 'check_failed'
+  if (connector.ready === false) return 'incomplete'
+  return 'ok'
 }
 
 /** Merge a saved connector's state into its catalog row. */
 export function withConnectorOverlay(item, connector) {
+  if (!connector) return item
   const lifecycle = connectorLifecycle(connector)
-  if (connector?.ready) {
-    let displayStatus = 'configured'
-    if (hasFailedCheck(connector)) displayStatus = 'unhealthy'
-    else if (lifecycle === 'expiring') displayStatus = 'expiring'
-    const connectorStatus = { configured: 'ready', unhealthy: 'check_failed', expiring: 'expiring' }[displayStatus]
+  const overlay = {
+    connector_lifecycle: lifecycle,
+    connector_days_until_expiry: connector.days_until_expiry ?? null,
+  }
+  // A failed check outranks everything except expiry: whatever else is true
+  // of the connector, it does not work.
+  if (hasFailedCheck(connector) && lifecycle !== 'expired') {
+    return { ...item, ...overlay, display_status: 'unhealthy', workspace_connector_status: 'check_failed' }
+  }
+  if (connector.ready) {
+    const expiring = lifecycle === 'expiring'
     return {
       ...item,
-      display_status: displayStatus,
-      workspace_connector_status: connectorStatus,
-      connector_lifecycle: lifecycle,
-      connector_days_until_expiry: connector?.days_until_expiry ?? null,
+      ...overlay,
+      display_status: expiring ? 'expiring' : 'configured',
+      workspace_connector_status: expiring ? 'expiring' : 'ready',
     }
   }
-  if (connector) {
-    return {
-      ...item,
-      workspace_connector_status: lifecycle === 'expired' ? 'expired' : 'partial',
-      connector_lifecycle: lifecycle,
-      connector_days_until_expiry: connector?.days_until_expiry ?? null,
-    }
-  }
-  return item
+  return { ...item, ...overlay, workspace_connector_status: lifecycle === 'expired' ? 'expired' : 'partial' }
 }
 
 export function effectiveStatus(item) {
@@ -119,18 +146,73 @@ export function displayTone(item) {
   return statusTone(resolvedStatus)
 }
 
+function providerName(displayName) {
+  return String(displayName || '').trim() || 'the provider'
+}
+
 /**
- * What to tell the owner after a key is saved and then checked with the
- * provider. Returns null when the check passed or did not run.
+ * Why a connector's last check failed, from its stored health record, or ''.
+ *
+ * The stored record keeps the provider's own sentence only when its status is
+ * `unhealthy`. When the failure was reported through `error_code`, the stored
+ * message is a generic status line and says nothing about the cause.
+ */
+export function failedCheckReason(connector) {
+  const health = connector?.health
+  if (!health || health.status !== 'unhealthy') return ''
+  return String(health.message || '').trim()
+}
+
+/**
+ * What to tell the owner about a check the page just ran. Returns null when
+ * the check passed or reported nothing.
  *
  * @param {object|null} health  the `check_workspace_connector_health` response
  * @param {string} displayName  the service's name, for the sentence
+ * @param {{ afterSave?: boolean }} [options]  true when the check followed a save
  */
-export function failedCheckMessage(health, displayName) {
-  if (!health || health.status !== 'unhealthy') return null
-  const provider = String(displayName || '').trim() || 'the provider'
+export function checkProblemMessage(health, displayName, { afterSave = true } = {}) {
+  const outcome = checkOutcome(health)
+  if (outcome !== 'failed' && outcome !== 'inconclusive') return null
   const reason = String(health.message || '').trim()
-  return reason
-    ? `The key was saved, but the check with ${provider} failed: ${reason}`
-    : `The key was saved, but the check with ${provider} failed.`
+  const provider = providerName(displayName)
+  const happened = outcome === 'failed' ? `the check with ${provider} failed` : `${provider} could not be checked`
+  const lead = afterSave ? `The key was saved, but ${happened}` : `${happened[0].toUpperCase()}${happened.slice(1)}`
+  const sentence = reason ? `${lead}: ${reason}` : `${lead}.`
+  return outcome === 'failed' ? sentence : `${sentence.replace(/\.?$/, '.')} Use Test connection to try again.`
+}
+
+/**
+ * Save a key, ask the provider about it, then reload, in that order.
+ *
+ * The check is awaited before the reload so the reloaded list carries its
+ * result; when the check was fire-and-forget the list showed "Connected" for
+ * a key the provider had just refused.
+ *
+ * @param {object} steps
+ * @param {() => Promise<object>} steps.save    stores the key; rejects when the server refuses it
+ * @param {() => Promise<object>} steps.check   runs the provider health check
+ * @param {() => Promise<void>} steps.reload    reloads the page's lists
+ * @param {string} steps.displayName
+ * @returns {Promise<{ problem: string|null }>} `problem` is what to show the owner, or null when the key works
+ */
+export async function saveAndCheckConnector({ save, check, reload, displayName }) {
+  let saveResult
+  try {
+    saveResult = await save()
+  } catch (error) {
+    // A refused save can still have rewritten the stored record.
+    await Promise.resolve(reload()).catch(() => {})
+    throw error
+  }
+  let problem = null
+  if (saveResult?.health_check_supported) {
+    try {
+      problem = checkProblemMessage(await check(), displayName)
+    } catch {
+      problem = `The key was saved, but the check with ${providerName(displayName)} could not run. Use Test connection to try again.`
+    }
+  }
+  await reload()
+  return { problem }
 }

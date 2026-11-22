@@ -10,7 +10,7 @@ const { averageFinishedRunSeconds, buildHealthState, formatRunDuration, validati
 );
 
 test("nothing wrong reports no issues and no score", () => {
-  const health = buildHealthState({ latestValidationStatus: "passed", failedRuns: 0, trackedRuns: 12, integrationIssues: 0 });
+  const health = buildHealthState({ latestValidationStatus: "passed", failedRuns: 0, trackedRuns: 12, integrationsNotSetUp: 0, integrationsNotWorking: 0 });
   assert.deepEqual(health, { label: "No issues found", tone: "success", issues: [] });
   assert.ok(!("score" in health), "health must not carry a numeric score");
 });
@@ -43,39 +43,39 @@ test("failed runs are counted against the recorded total", () => {
   assert.equal(buildHealthState({ failedRuns: 1, trackedRuns: 1 }).tone, "destructive");
 });
 
-test("integrations missing a credential need attention", () => {
-  assert.deepEqual(buildHealthState({ latestValidationStatus: "passed", integrationIssues: 1 }), {
+test("integrations that are not set up need attention", () => {
+  assert.deepEqual(buildHealthState({ latestValidationStatus: "passed", integrationsNotSetUp: 1 }), {
     label: "Needs attention",
     tone: "warning",
-    issues: ["1 integration still needs a credential."],
+    issues: ["1 integration is not set up yet."],
   });
-  assert.deepEqual(buildHealthState({ integrationIssues: 3 }).issues, ["3 integrations still need a credential."]);
+  assert.deepEqual(buildHealthState({ integrationsNotSetUp: 3 }).issues, ["3 integrations are not set up yet."]);
 });
 
-test("an integration that fails its check is a problem, even though a credential is saved", () => {
-  assert.deepEqual(buildHealthState({ latestValidationStatus: "passed", integrationCheckFailures: 1 }), {
+test("an integration that does not work is a problem, even though a credential is saved", () => {
+  assert.deepEqual(buildHealthState({ latestValidationStatus: "passed", integrationsNotWorking: 1 }), {
     label: "Problems found",
     tone: "destructive",
-    issues: ["1 integration failed its last check."],
+    issues: ["1 integration is not working."],
   });
-  assert.deepEqual(buildHealthState({ integrationCheckFailures: 2 }).issues, ["2 integrations failed their last check."]);
+  assert.deepEqual(buildHealthState({ integrationsNotWorking: 2 }).issues, ["2 integrations are not working."]);
 });
 
 test("every finding is listed, most serious state wins", () => {
   const health = buildHealthState({
-    latestValidationStatus: "failed", failedRuns: 4, trackedRuns: 9, integrationIssues: 2, integrationCheckFailures: 1,
+    latestValidationStatus: "failed", failedRuns: 4, trackedRuns: 9, integrationsNotSetUp: 2, integrationsNotWorking: 1,
   });
   assert.equal(health.label, "Problems found");
   assert.deepEqual(health.issues, [
     "The latest build failed validation.",
     "4 of 9 runs ended with an error.",
-    "1 integration failed its last check.",
-    "2 integrations still need a credential.",
+    "1 integration is not working.",
+    "2 integrations are not set up yet.",
   ]);
 });
 
 test("counts that are missing or not numbers are treated as none", () => {
-  assert.deepEqual(buildHealthState({ failedRuns: undefined, trackedRuns: null, integrationIssues: "x" }).issues, []);
+  assert.deepEqual(buildHealthState({ failedRuns: undefined, trackedRuns: null, integrationsNotSetUp: "x", integrationsNotWorking: NaN }).issues, []);
   assert.deepEqual(buildHealthState({ failedRuns: -3 }).issues, []);
 });
 
@@ -108,8 +108,13 @@ test("average run time counts only runs that have ended", () => {
 
 test("run durations read as time, and a missing one is not shown as 0s", () => {
   assert.deepEqual(
-    [1.24, 9.96, 42.4, 125, 3725].map(formatRunDuration),
-    ["1.2s", "10.0s", "42s", "2m 5s", "1h 2m"],
+    [1.24, 9.94, 42.4, 125, 3725].map(formatRunDuration),
+    ["1.2s", "9.9s", "42s", "2m 5s", "1h 2m"],
+  );
+  // Values that round up to the next unit carry, instead of showing 60 of the smaller one.
+  assert.deepEqual(
+    [9.96, 59.6, 119.7, 3599.6].map(formatRunDuration),
+    ["10s", "1m 0s", "2m 0s", "1h 0m"],
   );
   assert.equal(formatRunDuration(null), null);
   assert.equal(formatRunDuration(undefined), null);

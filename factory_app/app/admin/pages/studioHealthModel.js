@@ -1,7 +1,7 @@
 /**
  * App health from signals Studio actually has: the latest build's validation
- * result, how many of the app's runs failed, and which connected services still
- * lack a credential.
+ * result, how many of the app's runs failed, and which connected services are
+ * not set up or not working.
  *
  * There is no numeric score. A score needs a baseline, and the only baseline
  * available was a fixed number per lifecycle stage; that reads as a
@@ -58,11 +58,12 @@ export function averageFinishedRunSeconds(runs) {
 export function formatRunDuration(seconds) {
   if (seconds === null || seconds === undefined || !Number.isFinite(Number(seconds))) return null
   const value = Number(seconds)
-  if (value < 10) return `${value.toFixed(1)}s`
-  if (value < 60) return `${Math.round(value)}s`
-  const minutes = Math.floor(value / 60)
-  const rest = Math.round(value - minutes * 60)
-  if (minutes < 60) return `${minutes}m ${rest}s`
+  if (value < 9.95) return `${value.toFixed(1)}s`
+  // Round once, then split, so 119.7 s reads "2m 0s" and never "1m 60s".
+  const total = Math.round(value)
+  if (total < 60) return `${total}s`
+  const minutes = Math.floor(total / 60)
+  if (minutes < 60) return `${minutes}m ${total % 60}s`
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 }
 
@@ -71,20 +72,20 @@ export function formatRunDuration(seconds) {
  * @param {string|null} signals.latestValidationStatus  validation_status of the newest build, or null when none exists
  * @param {number} signals.failedRuns     runs that ended with an error (`failed_chats` from /api/admin/stats)
  * @param {number} signals.trackedRuns    all recorded runs (`tracked_chats`)
- * @param {number} signals.integrationIssues  connected services without a saved credential
- * @param {number} signals.integrationCheckFailures  connected services whose last health check failed
+ * @param {number} signals.integrationsNotSetUp  connected services with no saved credential or incomplete setup
+ * @param {number} signals.integrationsNotWorking  connected services whose last check failed or whose credential expired
  */
 export function buildHealthState({
   latestValidationStatus = null,
   failedRuns = 0,
   trackedRuns = 0,
-  integrationIssues = 0,
-  integrationCheckFailures = 0,
+  integrationsNotSetUp = 0,
+  integrationsNotWorking = 0,
 } = {}) {
   const failed = count(failedRuns)
   const tracked = count(trackedRuns)
-  const gaps = count(integrationIssues)
-  const failingChecks = count(integrationCheckFailures)
+  const notSetUp = count(integrationsNotSetUp)
+  const notWorking = count(integrationsNotWorking)
   const issues = []
   let severe = false
 
@@ -104,14 +105,15 @@ export function buildHealthState({
     )
   }
 
-  if (failingChecks > 0) {
-    // A connection that fails its check does not work now, whatever is saved.
+  if (notWorking > 0) {
+    // A connection that fails its check or has expired does not work now,
+    // whatever is saved.
     severe = true
-    issues.push(`${plural(failingChecks, 'integration')} failed ${failingChecks === 1 ? 'its' : 'their'} last check.`)
+    issues.push(`${plural(notWorking, 'integration')} ${notWorking === 1 ? 'is' : 'are'} not working.`)
   }
 
-  if (gaps > 0) {
-    issues.push(`${plural(gaps, 'integration')} still ${gaps === 1 ? 'needs' : 'need'} a credential.`)
+  if (notSetUp > 0) {
+    issues.push(`${plural(notSetUp, 'integration')} ${notSetUp === 1 ? 'is' : 'are'} not set up yet.`)
   }
 
   if (issues.length === 0) return { label: 'No issues found', tone: 'success', issues }

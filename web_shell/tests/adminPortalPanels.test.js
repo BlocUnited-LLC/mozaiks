@@ -133,8 +133,15 @@ test("usage summary says which calls the totals cover and whether cost is priced
   assert.equal(unpriced.cost, null);
   assert.equal(unpriced.costNote, "No price is set for the models used");
 
+  assert.equal(priced.capped, false);
+  assert.equal(priced.costNote, "Estimated from model prices");
+
+  // At the limit the totals are a window. Every number that could be read as
+  // a lifetime total says so, the cost included.
   const capped = summarizeUsage(usage({ totals: { ...usage().totals, llm_calls: USAGE_EVENT_LIMIT } }));
+  assert.equal(capped.capped, true);
   assert.equal(capped.windowNote, `Latest ${USAGE_EVENT_LIMIT.toLocaleString()} model calls`);
+  assert.equal(capped.costNote, `Latest ${USAGE_EVENT_LIMIT.toLocaleString()} model calls only. Estimated from model prices`);
 
   // "mixed" only says the calls were priced from more than one source. The note
   // must come from whether any call has no price at all.
@@ -161,9 +168,15 @@ test("formatters never turn a missing number into a zero", () => {
   assert.equal(formatCost(null), "—");
   assert.equal(formatCost(0.0123), "$0.0123");
   assert.equal(formatCost(12.5), "$12.50");
+  assert.equal(formatCost(0), "$0.00");
+  // A real cost too small for four decimals is not shown as zero.
+  assert.equal(formatCost(0.00003), "<$0.0001");
+  assert.equal(formatCost(0.00005), "$0.0001");
   assert.equal(formatDuration(undefined), "—");
   assert.equal(formatDuration(42.25), "42.3s");
   assert.equal(formatDuration(125), "2m 5s");
+  // Values that round up to the next unit carry, instead of showing 60 of the smaller one.
+  assert.deepEqual([59.97, 119.7, 3599.6].map(formatDuration), ["1m 0s", "2m 0s", "1h 0m"]);
   assert.deepEqual(sessionStatus(0), { label: "in progress", variant: "warning" });
   assert.deepEqual(sessionStatus(1), { label: "complete", variant: "success" });
   assert.deepEqual(sessionStatus(2), { label: "failed", variant: "error" });
@@ -269,6 +282,38 @@ test("a run whose models have no price shows no dollar figure, even when other r
     ["Part", "a", "u", "complete", "1", "500", "$0.0002", "5.0s"],
   ]);
   assert.deepEqual(stat(html, "Estimated cost"), { value: "$0.0123", sub: "Some models have no price set" });
+});
+
+test("at the usage limit the page says the numbers are a window", () => {
+  const runs = { runs: [{ chat_id: "c-old", workflow_name: "Old", app_id: "a", user_id: "u", status: 1, agent_turns: 1, runtime_sec: 5 }] };
+  const ledger = usage({ totals: { ...usage().totals, llm_calls: USAGE_EVENT_LIMIT } });
+  const panels = { runtimePanels: [{ id: "stats", page: "usage" }, { id: "runs", page: "usage" }] };
+  const html = withFixtures({ "/api/admin/runs": runs, [USAGE_ENDPOINT]: ledger }, null, () => render("UsageSection", panels));
+
+  const window = `Latest ${USAGE_EVENT_LIMIT.toLocaleString()} model calls`;
+  assert.equal(stat(html, "Total tokens").sub, window);
+  assert.equal(stat(html, "Model calls").sub, window);
+  assert.equal(stat(html, "Estimated cost").sub, `${window} only. Estimated from model prices`);
+  assert.match(html, /Tokens and cost are counted from the latest 1,000 model calls\./);
+
+  // Below the limit none of that is shown.
+  const below = withFixtures({ "/api/admin/runs": runs, [USAGE_ENDPOINT]: usage() }, null, () => render("UsageSection", panels));
+  assert.equal(stat(below, "Model calls").sub, null);
+  assert.ok(!below.includes("Tokens and cost are counted from"));
+});
+
+test("admin panels that call the platform API send the session token", async () => {
+  // The auth adapter has no `getToken`. Two panels read the token from it, so
+  // with sign-in on every request went out without credentials. They use the
+  // shared authFetch now, which attaches the current token itself.
+  const { readFile } = await import("node:fs/promises");
+  for (const name of ["AdminAppUsagePanel.jsx", "AdminMyUsagePanel.jsx"]) {
+    const source = await readFile(path.join(admin, "components", name), "utf8");
+    assert.match(source, /import \{ authFetch \} from '\.\.\/\.\.\/adapters\/api\.js'/, name);
+    assert.match(source, /await authFetch\(url\)/, name);
+    assert.ok(!/\.getToken\b/.test(source), `${name} must not read a token from the auth prop`);
+    assert.ok(!/[^a-zA-Z]fetch\(url/.test(source.replace(/authFetch\(url/g, "")), `${name} must not call fetch directly`);
+  }
 });
 
 test("usage page renders only the panels the config names", () => {

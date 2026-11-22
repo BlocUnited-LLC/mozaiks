@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
+  Metric,
   StudioErrorState,
   StudioInlineEmptyState,
   StudioLoadingState,
@@ -11,7 +12,7 @@ import {
 } from '../../ui/components/StudioShared.jsx'
 import AppStudioHero, { formatCompactNumber, formatDateTimeLabel } from './AppStudioChrome.jsx'
 import { getAppStudioSnapshot } from './appStudioDataHelpers.js'
-import { connectorCredentialState } from './connectorStatusModel.js'
+import { connectorCredentialState, failedCheckReason } from './connectorStatusModel.js'
 import {
   averageFinishedRunSeconds,
   buildHealthState,
@@ -54,24 +55,19 @@ function RuntimeSignalsRow({ metrics }) {
   )
 }
 
-function Tile({ label, value, detail = null }) {
-  return (
-    <div className="rounded-2xl border border-border bg-card/70 px-4 py-3">
-      <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{label}</div>
-      <div className="mt-2 text-2xl font-semibold text-foreground">{value}</div>
-      {detail ? <div className="mt-1 text-xs text-muted-foreground">{detail}</div> : null}
-    </div>
-  )
-}
-
-// Wording for one connector's credential, by `connectorCredentialState`.
+// Wording for one connector, by `connectorCredentialState`.
 function credentialCopy(connector) {
   const state = connectorCredentialState(connector)
   if (state === 'missing') return { detail: 'Credential still needs to be saved.', pill: 'Needs secret', tone: 'warning' }
+  if (state === 'expired') return { detail: 'The saved credential has expired.', pill: 'Expired', tone: 'destructive' }
   if (state === 'check_failed') {
-    const reason = String(connector?.health?.message || '').trim()
-    return { detail: reason || 'The last check of this connection failed.', pill: 'Check failed', tone: 'destructive' }
+    return {
+      detail: failedCheckReason(connector) || 'The last check found this connection cannot be used as saved.',
+      pill: 'Check failed',
+      tone: 'destructive',
+    }
   }
+  if (state === 'incomplete') return { detail: 'A credential is saved, but setup is not complete.', pill: 'Needs setup', tone: 'warning' }
   return { detail: 'Credential is configured.', pill: 'Ready', tone: 'success' }
 }
 
@@ -92,13 +88,14 @@ export default function AppHealthPage() {
   const failedRuns = Number(snapshot.stats.failed_chats || 0)
   // Finished runs only: a run still in progress has no duration yet.
   const averageRun = averageFinishedRunSeconds(snapshot.runs)
-  // A saved credential is not a working one: a connector whose last check
-  // failed is counted separately from one with nothing saved.
+  // A saved credential is not a working one. Count what cannot be used yet
+  // (nothing saved, or setup incomplete) apart from what is broken (the last
+  // check failed, or the credential expired).
   const credentialStates = snapshot.appConnectors.map(connectorCredentialState)
-  const integrationIssues = credentialStates.filter((state) => state === 'missing').length
-  const integrationCheckFailures = credentialStates.filter((state) => state === 'check_failed').length
+  const integrationsNotSetUp = credentialStates.filter((state) => state === 'missing' || state === 'incomplete').length
+  const integrationsNotWorking = credentialStates.filter((state) => state === 'check_failed' || state === 'expired').length
   const health = buildHealthState({
-    latestValidationStatus, failedRuns, trackedRuns, integrationIssues, integrationCheckFailures,
+    latestValidationStatus, failedRuns, trackedRuns, integrationsNotSetUp, integrationsNotWorking,
   })
   const averageRunLabel = formatRunDuration(averageRun.seconds) || 'No finished runs yet'
   const recentRunsDetail = averageRun.count > 0
@@ -113,8 +110,8 @@ export default function AppHealthPage() {
     {
       id: 'integrations',
       label: 'Integration gaps',
-      value: formatCompactNumber(integrationIssues + integrationCheckFailures, '0'),
-      detail: 'Missing a credential or failing a check',
+      value: formatCompactNumber(integrationsNotSetUp + integrationsNotWorking, '0'),
+      detail: 'Not set up, or not working',
     },
   ]
 
@@ -126,7 +123,7 @@ export default function AppHealthPage() {
           summary={snapshot.summary}
           dataMode={dataMode}
           title="Health"
-          subtitle="What needs attention for this app: its latest build, runs that failed, and integrations missing a credential."
+          subtitle="What needs attention for this app: its latest build, runs that failed, and integrations that are not set up or not working."
           summaryItems={summaryItems}
         />
 
@@ -169,9 +166,9 @@ export default function AppHealthPage() {
         <div className="grid gap-6 xl:grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)]">
           <Panel eyebrow="Workflows" title="Workflow reliability" subtitle="How many of this app's runs were recorded, how many failed, and how long recent ones took.">
             <div className="grid gap-3 sm:grid-cols-3">
-              <Tile label="Recorded runs" value={formatCompactNumber(trackedRuns, '0')} />
-              <Tile label="Failed runs" value={formatCompactNumber(failedRuns, '0')} />
-              <Tile label="Average run time" value={averageRunLabel} detail={recentRunsDetail} />
+              <Metric label="Recorded runs" value={formatCompactNumber(trackedRuns, '0')} />
+              <Metric label="Failed runs" value={formatCompactNumber(failedRuns, '0')} />
+              <Metric label="Average run time" value={averageRunLabel} detail={recentRunsDetail} />
             </div>
           </Panel>
 

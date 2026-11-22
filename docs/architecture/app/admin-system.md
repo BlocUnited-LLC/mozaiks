@@ -142,9 +142,21 @@ What each page shows:
 | `access`, `billing`, `activity`, `integrations`, `support` | none | only |
 
 A page with no framework content and no panel shows an empty state, so a
-registry should declare `access`, `billing`, `activity`, `integrations`, or
-`support` only when a panel references it. `usage` and `operations` are worth
-declaring for any app that runs AI workflows.
+registry should declare `billing`, `activity`, `integrations`, or `support`
+only when a panel references it. AppGenerator's registry step declares:
+
+- `overview`, `usage`, `operations`, and `settings` for every app. The
+  framework fills them, and every generated app has an assistant whose usage
+  and sessions they show.
+- `access` when the app has sign-in. Until a panel provides user
+  administration, the page says that accounts are managed by the app's
+  sign-in provider.
+- every page a module panel or an app-backend panel names.
+- the page each selected capability pack's own panels use. A pack's
+  `contracts/admin.yaml` is copied into the bundle at assembly, after the
+  registry step, so that step takes those pages from a list in its prompt.
+  `tests/test_admin_page_catalog.py` keeps that list equal to the pack
+  templates.
 
 A registry may also declare its own page id (a capability pack's `commerce`
 page, for example). It renders the panels that reference it under the registry
@@ -303,7 +315,8 @@ surfaces.
 - Every generated module admin panel must set `page` to a page id declared in
   `admin/admin_registry.yaml`, and the registry must declare every page a
   panel references.
-- Declare a standard page only when something renders on it.
+- Declare `overview`, `usage`, `operations`, and `settings` always, `access`
+  when the app has sign-in, and any other page only when a panel renders on it.
 - Prefer `renderer: schema` with `layout + sections[]`.
 - Use `renderer: custom_component` only when the shipped primitive system
   cannot express the panel cleanly.

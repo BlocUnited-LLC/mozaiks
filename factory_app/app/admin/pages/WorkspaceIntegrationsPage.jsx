@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { PageHeader, SummaryStrip } from '@mozaiks/chat-ui/ui'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
@@ -11,15 +11,17 @@ import {
   StudioSlideOver,
 } from '../../ui/components/StudioShared.jsx'
 import {
+  checkProblemMessage,
   displayTone,
   effectiveStatus,
-  failedCheckMessage,
+  failedCheckReason,
   hasFailedCheck,
   integrationGroup,
   isExpired,
   isExpiring,
   isRejected,
   needsAttention,
+  saveAndCheckConnector,
   statusLabel,
   statusTone,
   withConnectorOverlay,
@@ -44,7 +46,6 @@ function appUsageLabel(item) {
 
 function connectorLabel(connector, item) {
   if (isExpired(connector)) return 'Workspace connector (expired)'
-  if (hasFailedCheck(connector)) return 'Workspace connector (check failed)'
   if (isExpiring(connector)) {
     const days = connector?.days_until_expiry
     return `Workspace connector (expires in ${days != null ? `${days}d` : 'soon'})`
@@ -60,10 +61,10 @@ function connectorDescription(connector, item) {
     return 'This connector has expired. Update the key to reconnect and restore app access to this service.'
   }
   if (hasFailedCheck(connector)) {
-    // The server's message says whether the provider refused the key or the
-    // check could not reach it.
-    const reason = String(connector?.health?.message || '').trim()
-    return `A key is saved, but the last check of this connection failed${reason ? `: ${reason}` : '.'}`
+    const reason = failedCheckReason(connector)
+    return reason
+      ? `A key is saved, but the last check of this connection failed: ${reason}`
+      : 'A key is saved, but the last check found that it cannot be used as saved. Use Test connection to see why.'
   }
   if (isExpiring(connector)) {
     const days = connector?.days_until_expiry
@@ -82,6 +83,15 @@ function connectorDescription(connector, item) {
     return 'At least one app needs this service, but the workspace does not have a complete connector or environment setup yet.'
   }
   return 'This service is available for future apps. No app currently depends on it.'
+}
+
+// Tone of the "Workspace connector" pill: it names where the credential comes
+// from, and must not read as healthy when that credential does not work.
+function storedConnectorTone(connector) {
+  if (!connector?.service) return 'default'
+  if (isExpired(connector) || hasFailedCheck(connector)) return 'destructive'
+  if (isExpiring(connector)) return 'warning'
+  return 'success'
 }
 
 function actionLabel(item, connector) {
@@ -242,13 +252,17 @@ function SetupSlideOver({
   const [copied, setCopied] = useState(null)
   const [keyVisible, setKeyVisible] = useState(false)
 
+  const itemId = item?.id ?? null
+  const savedNote = item?.note || ''
   useEffect(() => {
     if (open) {
-      setNote(item?.note || '')
       setApiKey('')
       setKeyVisible(false)
     }
-  }, [open, item])
+  }, [open, itemId])
+  useEffect(() => {
+    if (open) setNote(savedNote)
+  }, [open, itemId, savedNote])
 
   function copyToClipboard(text) {
     navigator.clipboard?.writeText(text).then(() => {
@@ -348,7 +362,7 @@ function SetupSlideOver({
             Credential source
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <StatusPill tone={hasStoredConnector ? 'success' : 'default'}>
+            <StatusPill tone={storedConnectorTone(connector)}>
               {hasStoredConnector ? 'Workspace connector' : connectorLabel(connector, item)}
             </StatusPill>
           </div>
@@ -614,6 +628,12 @@ export default function WorkspaceIntegrationsPage() {
   const [checking, setChecking] = useState(false)
   const [actionError, setActionError] = useState(null)
   const [activeCategory, setActiveCategory] = useState(ALL_TAB)
+  // The service whose panel is open now. A save waits for the provider check,
+  // and the owner can close the panel or open another one meanwhile.
+  const activeItemId = useRef(null)
+  useEffect(() => {
+    activeItemId.current = activeItem?.id ?? null
+  }, [activeItem])
 
   async function load(preserveCategory = false) {
     setLoading(true)
@@ -652,25 +672,25 @@ export default function WorkspaceIntegrationsPage() {
     if (!keyValue?.trim()) return
     setSaving(true)
     setActionError(null)
+    // If the owner closes this panel or opens another before the check
+    // returns, the result is not theirs to see there: the reloaded list shows it.
+    const stillOpen = () => activeItemId.current === service
     try {
-      const saveResult = await saveConnectorKey(service, keyValue.trim(), displayName)
-      // Ask the provider about the key before reporting it as connected. The
-      // check is awaited so the reload below carries its result; a check that
-      // cannot run is not a rejection.
-      let health = null
-      if (saveResult?.health_check_supported) {
-        health = await checkWorkspaceConnector(service).catch(() => null)
-      }
-      await load(true)
-      const failure = failedCheckMessage(health, displayName)
-      if (failure) {
+      const { problem } = await saveAndCheckConnector({
+        save: () => saveConnectorKey(service, keyValue.trim(), displayName),
+        check: () => checkWorkspaceConnector(service),
+        reload: () => load(true),
+        displayName,
+      })
+      if (!stillOpen()) return
+      if (problem) {
         // Keep the panel open so the owner can enter a working key.
-        setActionError(failure)
+        setActionError(problem)
       } else {
         setActiveItem(null)
       }
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Key could not be saved.')
+      if (stillOpen()) setActionError(err instanceof Error ? err.message : 'Key could not be saved.')
     } finally {
       setSaving(false)
     }
@@ -714,10 +734,15 @@ export default function WorkspaceIntegrationsPage() {
     setChecking(true)
     setActionError(null)
     try {
-      await checkWorkspaceConnector(service)
+      const health = await checkWorkspaceConnector(service)
       await load(true)
+      // Say what the check found; the list only shows that it failed.
+      const problem = checkProblemMessage(health, connector.display_name || service, { afterSave: false })
+      if (problem && activeItemId.current === service) setActionError(problem)
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Health check could not run.')
+      if (activeItemId.current === service) {
+        setActionError(err instanceof Error ? err.message : 'Health check could not run.')
+      }
     } finally {
       setChecking(false)
     }
@@ -726,6 +751,12 @@ export default function WorkspaceIntegrationsPage() {
   function closeSlideOver() {
     setActiveItem(null)
     setActionError(null)
+  }
+
+  function openSlideOver(item) {
+    // An error belongs to the panel it happened in.
+    setActionError(null)
+    setActiveItem(item)
   }
 
   if (loading) return <StudioLoadingState label="Loading integrations..." />
@@ -739,6 +770,11 @@ export default function WorkspaceIntegrationsPage() {
   const integrations = rawIntegrations.map((item) =>
     withConnectorOverlay(item, connectorsByService.get(item.id)),
   )
+  // The open panel shows the service as it is now, not as it was when its
+  // card was clicked: a save or a check changes its status.
+  const activeIntegration = activeItem
+    ? integrations.find((item) => item.id === activeItem.id) || activeItem
+    : null
   const activeConnector = activeItem ? connectorsByService.get(activeItem.id) : null
 
   const inGroup = (group) => (item) => integrationGroup(item) === group
@@ -819,7 +855,7 @@ export default function WorkspaceIntegrationsPage() {
                     title={group.title}
                     items={group.items}
                     connectorsByService={connectorsByService}
-                    onOpen={setActiveItem}
+                    onOpen={openSlideOver}
                   />
                 ))}
               </div>
@@ -829,7 +865,7 @@ export default function WorkspaceIntegrationsPage() {
 
         <SetupSlideOver
           open={Boolean(activeItem)}
-          item={activeItem}
+          item={activeIntegration}
           connector={activeConnector}
           connectorError={connectorError}
           onClose={closeSlideOver}

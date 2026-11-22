@@ -35,7 +35,7 @@ export function StatsPanel({ usageState }) {
       <StatCard label="Total tokens" value={formatCount(summary.totalTokens)} sub={summary.windowNote} accent />
       <StatCard label="Input tokens" value={formatCount(summary.promptTokens)} />
       <StatCard label="Output tokens" value={formatCount(summary.completionTokens)} />
-      <StatCard label="Model calls" value={formatCount(summary.modelCalls)} />
+      <StatCard label="Model calls" value={formatCount(summary.modelCalls)} sub={summary.capped ? summary.windowNote : undefined} />
       <StatCard label="Estimated cost" value={formatCost(summary.cost)} sub={summary.costNote} />
     </div>
   )
@@ -50,6 +50,7 @@ export function RunsPanel({ usageState }) {
 
   const runs = runsState.data?.runs ?? []
   const usageByRun = usageByChatId(usageState.data)
+  const usageWindow = summarizeUsage(usageState.data)
 
   return (
     <div>
@@ -65,6 +66,12 @@ export function RunsPanel({ usageState }) {
           Refresh
         </button>
       </div>
+      {usageWindow?.capped ? (
+        <p className="mb-3 text-xs text-muted-foreground">
+          Tokens and cost are counted from the {usageWindow.windowNote.toLowerCase()}. An older run
+          shows —, and a run that began before them shows only part of its total.
+        </p>
+      ) : null}
       {runs.length === 0 ? (
         <p className="text-sm text-muted-foreground italic">No runs recorded yet.</p>
       ) : (
@@ -124,7 +131,7 @@ const USAGE_PANELS = {
 
 export function UsageSection({ runtimePanels = [] }) {
   // One usage request feeds both panels.
-  const usageState = useAdminFetch(USAGE_ENDPOINT, 30000)
+  const usageState = useAdminFetch(USAGE_ENDPOINT, 60000)
 
   return (
     <section>

@@ -107,6 +107,26 @@ def test_admin_sections_read_token_numbers_only_from_the_usage_endpoint() -> Non
     assert "USAGE_ENDPOINT" in _read("chat-ui/src/admin/pages/UsageSection.jsx")
 
 
+def test_admin_portal_usage_window_fits_the_server_limit() -> None:
+    """The portal asks for a number of usage events the endpoint accepts.
+
+    The portal labels its totals "Latest N model calls" from its own constant.
+    If N were above the endpoint's maximum the request would be refused (422)
+    and every usage card would show an error.
+    """
+    import inspect
+
+    from mozaiksai.core.admin import router as admin_router
+
+    limit = inspect.signature(admin_router.get_admin_usage).parameters["limit"].default
+    bounds = {type(item).__name__: item for item in limit.metadata}
+    server_minimum, server_maximum = bounds["Ge"].ge, bounds["Le"].le
+
+    declared = re.search(r"^export const USAGE_EVENT_LIMIT = (\d+);$", _read("chat-ui/src/admin/adminUsage.js"), re.MULTILINE)
+    assert declared, "adminUsage.js must declare USAGE_EVENT_LIMIT as a number"
+    assert server_minimum <= int(declared.group(1)) <= server_maximum
+
+
 def test_platform_shell_registers_admin_section_routes() -> None:
     platform_source = _read("mozaiksai/hosts/platform.py") + "\n" + _read("mozaiksai/hosts/shell_config.py")
     registry_source = _read("factory_app/app/admin/admin_registry.yaml")
