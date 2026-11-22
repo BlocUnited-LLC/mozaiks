@@ -10,7 +10,11 @@ from mozaiksai.core.app_context import (
 )
 from mozaiksai.core.artifacts.store import ArtifactStore
 
-from ._context_graph import load_context_graph_for_tool, normalize_graph_context
+from ._context_graph import (
+    load_context_graph_for_tool,
+    normalize_graph_context,
+    normalize_selected_paths,
+)
 
 
 async def get_app_intelligence_context(
@@ -31,8 +35,10 @@ async def get_app_intelligence_context(
 
     snapshot = loaded["snapshot"]
     resolved_query = str(query or tool_context.raw_user_request or "").strip()
-    coding = tool_context.checkpoint == "coding_requested"
-    if coding:
+    compact = tool_context.checkpoint == "coding_requested" and bool(
+        normalize_selected_paths(tool_context.extra.get("selected_file_paths"))
+    )
+    if compact:
         frameworks = snapshot.architecture.get("frameworks")
         catalog = {
             "snapshot_id": snapshot.snapshot_id,
@@ -50,7 +56,7 @@ async def get_app_intelligence_context(
             search_app_intelligence_snapshot(
                 snapshot,
                 resolved_query,
-                max_results=_bounded_int(max_results, default=12, minimum=1, maximum=4 if coding else 40),
+                max_results=_bounded_int(max_results, default=12, minimum=1, maximum=4 if compact else 40),
             )
             if resolved_query
             else []

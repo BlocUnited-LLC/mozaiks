@@ -595,7 +595,10 @@ async def test_app_intelligence_tool_summarizes_artifact_zip(tmp_path: Path) -> 
     assert any(result["section"] == "capabilities" for result in intelligence["results"])
 
     coding = await get_app_intelligence_context(
-        context=context.model_copy(update={"checkpoint": "coding_requested"}),
+        context=context.model_copy(update={
+            "checkpoint": "coding_requested",
+            "extra": {"selected_file_paths": ["app/modules/reports/backend/handler.py"]},
+        }),
         artifact_store=store,
     )
     catalog = coding["app_intelligence_catalog"]

@@ -287,6 +287,10 @@ model. Routing seeds and request metadata stay in the runtime for preparation,
 tool execution, and resumption. Checkpoint tools can project task-specific
 evidence from that state into the prompt.
 
+App Intelligence returns a compact catalog when the coding checkpoint already
+has selected files. Workspace inspection without a selected scope includes the
+coverage and policy used by the overview card.
+
 Checkpoint context is intentionally staged:
 
 | Checkpoint or workflow | Context provided | Purpose | What is not provided |
