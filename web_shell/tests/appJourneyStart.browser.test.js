@@ -86,7 +86,7 @@ async function fixture(t) {
   } = {}) => {
     const page = await browser.newPage({ reducedMotion: 'reduce' });
     subtest.after(() => page.close());
-    const calls = { creates: [], resolves: [], errors: [], unexpected: [], github: [], githubPages: [] };
+    const calls = { creates: [], resolves: [], models: [], errors: [], unexpected: [], github: [], githubPages: [] };
     let releaseCreate;
     let releaseResolve;
     const creationGate = holdCreate ? new Promise(resolve => { releaseCreate = resolve; }) : Promise.resolve();
@@ -107,6 +107,13 @@ async function fixture(t) {
       const json = (body, status = 200) => route.fulfill({ status, json: body });
       if (url.origin === baseUrl && (request.isNavigationRequest() || url.pathname === '/fixture.js')) return route.continue();
       if (url.origin !== baseUrl) { calls.unexpected.push(request.url()); return route.abort(); }
+      if (url.pathname === '/api/studio/refinement/models' && request.method() === 'GET') {
+        calls.models.push({ headers: request.headers() });
+        return json({
+          default: 'model-default',
+          models: [{ id: 'model-default', label: 'Default model' }, { id: 'model-choice', label: 'Chosen model' }],
+        });
+      }
       if (url.pathname === '/api/studio/apps' && request.method() === 'POST') {
         calls.creates.push({ body: request.postDataJSON(), headers: request.headers() });
         await creationGate;
@@ -252,6 +259,30 @@ test('registered app journeys use the normal factory selectors and shell transit
     assert.equal(body.journey_id, 'build');
     assert.equal(body.context_variables.monetization_enabled, true);
     assert.equal(Object.hasOwn(body.context_variables, 'build_registry_id'), false);
+  });
+
+  await t.test('model selection reaches the initial build transition', async subtest => {
+    const { page, calls } = await open(subtest);
+    const picker = page.getByRole('combobox', { name: 'AI model' });
+    await expect(picker).toHaveValue('model-default');
+    await picker.selectOption('model-choice');
+    await greenfield(page).click();
+    await expect(page.getByRole('heading', { name: 'Workflow opened' })).toBeVisible();
+    assert.equal(calls.models[0].headers.authorization, 'Bearer fixture-token');
+    assert.equal(calls.resolves[0].body.refinement_model, 'model-choice');
+  });
+
+  await t.test('model selection survives brownfield intermediate transitions', async subtest => {
+    const { page, calls } = await open(subtest);
+    const picker = page.getByRole('combobox', { name: 'AI model' });
+    await expect(picker).toHaveValue('model-default');
+    await picker.selectOption('model-choice');
+    await brownfield(page).click();
+    await page.getByRole('button', { name: /Add AI Workflows/ }).click();
+    await page.getByPlaceholder('acme-corp/my-app').fill('example/customer-app');
+    await page.getByRole('button', { name: 'Scan & Start Discovery', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Workflow opened' })).toBeVisible();
+    assert.deepEqual(calls.resolves.map(({ body }) => body.refinement_model), Array(3).fill('model-choice'));
   });
 
   await t.test('brownfield keeps one registered target through path selection and repository intake', async subtest => {

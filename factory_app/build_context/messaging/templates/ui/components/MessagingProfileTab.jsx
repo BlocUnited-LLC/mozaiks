@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { moduleAction } from "../lib/moduleApi.js";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { API_BASE, authHeaders, moduleAction } from "../lib/moduleApi.js";
 
 function relativeTime(value) {
   if (!value) return "";
@@ -25,7 +25,13 @@ function messageTime(value) {
 }
 
 export default function MessagingProfileTab({ data }) {
-  const threads = useMemo(() => (Array.isArray(data?.threads) ? data.threads : []), [data]);
+  const [threads, setThreads] = useState(Array.isArray(data?.threads) ? data.threads : []);
+  const [creating, setCreating] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [recipients, setRecipients] = useState("");
+  const createPending = useRef(false);
+  const mounted = useRef(true);
+  const sendPending = useRef(false);
   const [selectedId, setSelectedId] = useState(threads[0]?.thread_id || null);
   const [selectedThread, setSelectedThread] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -34,6 +40,67 @@ export default function MessagingProfileTab({ data }) {
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  useEffect(() => { setThreads(Array.isArray(data?.threads) ? data.threads : []); }, [data]);
+
+  async function refreshConversations() {
+    if (refreshing) return;
+    setRefreshing(true);
+    setError(null);
+    try {
+      const result = await moduleAction('messages', 'list_threads', {});
+      if (!mounted.current) return;
+      const updated = Array.isArray(result?.threads) ? result.threads : [];
+      setThreads(updated);
+      if (!selectedIdRef.current) setSelectedId(updated[0]?.thread_id || null);
+    } catch (failure) {
+      if (mounted.current) setError(failure.message || 'Could not refresh conversations.');
+    } finally {
+      if (mounted.current) setRefreshing(false);
+    }
+  }
+
+  async function createConversation(event) {
+    event.preventDefault();
+    const usernames = [...new Set(recipients.split(',').map(value => value.trim()).filter(Boolean))];
+    if (!usernames.length || createPending.current) return;
+    createPending.current = true;
+    setCreating(true);
+    setError(null);
+    try {
+      const participantIds = await Promise.all(usernames.map(async username => {
+        const response = await fetch(`${API_BASE}/api/users/${encodeURIComponent(username)}`, { headers: authHeaders() });
+        if (!response.ok) throw new Error(`Could not find user ${username}.`);
+        const profile = await response.json();
+        if (!profile.user_id) throw new Error(`Could not find user ${username}.`);
+        return profile.user_id;
+      }));
+      if (!mounted.current) return;
+      const result = await moduleAction('messages', 'create_thread', {
+        participant_ids: [...new Set(participantIds)],
+        thread_type: participantIds.length === 1 ? 'direct' : 'group',
+      });
+      if (!mounted.current) return;
+      if (!result?.success || !result.thread?.thread_id) throw new Error(result?.error || 'Could not create conversation.');
+      setThreads(current => [result.thread, ...current.filter(thread => thread.thread_id !== result.thread.thread_id)]);
+      setSelectedId(result.thread.thread_id);
+      setRecipients('');
+      setShowCreate(false);
+    } catch (failure) {
+      if (mounted.current) setError(failure.message || 'Could not create conversation.');
+    } finally {
+      createPending.current = false;
+      if (mounted.current) setCreating(false);
+    }
+  }
 
   const visibleThreads = useMemo(() => {
     const value = query.trim().toLowerCase();
@@ -47,6 +114,8 @@ export default function MessagingProfileTab({ data }) {
       return undefined;
     }
     let active = true;
+    setSelectedThread(null);
+    setMessages([]);
     setLoading(true);
     setError(null);
     moduleAction("messages", "get_thread", { thread_id: selectedId, message_limit: 100 })
@@ -64,20 +133,25 @@ export default function MessagingProfileTab({ data }) {
   async function sendMessage(event) {
     event.preventDefault();
     const value = body.trim();
-    if (!value || !selectedId || sending) return;
+    if (!value || !selectedId || sendPending.current) return;
+    const threadId = selectedId;
+    sendPending.current = true;
     setSending(true);
     setError(null);
     try {
       const sent = await moduleAction("messages", "send_message", { thread_id: selectedId, body: value });
       if (!sent?.success) throw new Error(sent?.error || "Could not send message.");
+      if (!mounted.current || selectedIdRef.current !== threadId) return;
       setBody("");
       const result = await moduleAction("messages", "get_thread", { thread_id: selectedId, message_limit: 100 });
+      if (!mounted.current || selectedIdRef.current !== threadId) return;
       setMessages(Array.isArray(result?.messages) ? result.messages : []);
       setSelectedThread(result?.thread || selectedThread);
     } catch (_error) {
-      setError("Could not send message.");
+      if (mounted.current && selectedIdRef.current === threadId) setError("Could not send message.");
     } finally {
-      setSending(false);
+      sendPending.current = false;
+      if (mounted.current) setSending(false);
     }
   }
 
@@ -86,7 +160,13 @@ export default function MessagingProfileTab({ data }) {
       <aside style={{ minWidth: 0, borderRight: "1px solid var(--color-border)" }}>
         <header style={{ borderBottom: "1px solid var(--color-border)", padding: 12 }}>
           <strong>Messages</strong>
-          <a href="/messages" style={{ display: "block", marginTop: 8 }}>New conversation</a>
+          <button type="button" onClick={refreshConversations} disabled={refreshing}>Refresh</button>
+          <button type="button" onClick={() => setShowCreate(current => !current)}>New conversation</button>
+          {showCreate && <form onSubmit={createConversation}>
+            <label>Usernames<input value={recipients} onChange={event => setRecipients(event.target.value)} placeholder="Usernames, comma separated" disabled={creating} /></label>
+            <button type="submit" disabled={creating || !recipients.trim()}>{creating ? 'Creating…' : 'Start conversation'}</button>
+          </form>}
+          {error && <p role="alert">{error}</p>}
           <input aria-label="Search conversations" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search conversations" style={{ display: "block", marginTop: 10, maxWidth: "100%", width: "100%" }} />
         </header>
         <div>
@@ -97,7 +177,7 @@ export default function MessagingProfileTab({ data }) {
       <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
         {selectedThread ? <>
           <header style={{ borderBottom: "1px solid var(--color-border)", padding: 12 }}><strong>{threadTitle(selectedThread)}</strong></header>
-          <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>{loading ? <p>Loading conversation...</p> : error ? <p role="alert" style={{ color: "var(--color-error)" }}>{error}</p> : messages.length ? messages.map((message) => <div key={message.message_id} style={{ marginBottom: 10 }}><p style={{ margin: 0 }}>{message.body}</p><span style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>{messageTime(message.created_at)}</span></div>) : <p>No messages yet. Say something.</p>}</div>
+          <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>{loading ? <p>Loading conversation...</p> : messages.length ? messages.map((message) => <div key={message.message_id} style={{ marginBottom: 10 }}><p style={{ margin: 0 }}>{message.body}</p><span style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>{messageTime(message.created_at)}</span></div>) : <p>No messages yet. Say something.</p>}</div>
           <form onSubmit={sendMessage} style={{ borderTop: "1px solid var(--color-border)", display: "flex", gap: 8, padding: 12 }}><input aria-label="Message conversation" value={body} onChange={(event) => setBody(event.target.value)} placeholder="Message conversation..." style={{ flex: 1, minWidth: 0 }} /><button type="submit" disabled={!body.trim() || sending}>{sending ? "Sending..." : "Send"}</button></form>
         </> : <div style={{ alignItems: "center", display: "flex", flex: 1, justifyContent: "center", padding: 24, textAlign: "center" }}><div><strong>Your conversation space</strong><p style={{ color: "var(--color-text-secondary)" }}>Select a conversation to start messaging.</p></div></div>}
       </div>

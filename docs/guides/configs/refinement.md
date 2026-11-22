@@ -53,6 +53,28 @@ support temperature, use `llm_config.temperature`. Profile fields are strict:
 declared profile with a non-empty model; inline capability `llm_config` and
 unknown capability fields are rejected when the policy loads.
 
+### Studio AI models
+
+Open **AI models** in the Studio workspace navigation to set the default and
+allowed models for new Factory builds and refinements. This requires a signed-in
+workspace administrator. Configure provider keys in the workspace secret policy
+before enabling them. Studio displays provider availability without returning
+key values.
+
+Factory prefers Gemini 3.8 Flash. A workspace with only an allowed OpenAI key
+can start builds with GPT-5 Nano. Choose a model when starting an app build.
+The chat composer shows the model attached to an active build. In App Review,
+use the dropdown inside the composer, below the message text and beside Send,
+to choose the model for a new refinement. Studio saves the choice with the run
+so routed workflows and approval continue with that model.
+
+For file-based configuration, `model_override: gemini` or
+`model_override: openai` in `app/config/refinement_policy.yaml` supplies
+the initial Studio default and selects the refinement engine's structured
+checkpoint model when no per-run choice exists. Without an override, the
+declared capability profiles apply to engine calls without a selection.
+ACP coding and media generation use their separate provider configuration.
+
 ### Model profiles and coding agents
 
 `llm_profiles` configures AG2 structured-output calls. A profile name describes
@@ -166,6 +188,16 @@ graph prompt pack when a verified app bundle is available. A new app without
 a source build has no dependency assessment. An unavailable or invalid
 requested build has no fallback to current app evidence.
 
+## AppGenerator backend revisions
+
+When a reviewed app revision owns only existing module `backend/repo.py` and
+`backend/service.py` files, the worker receives their admitted sources and the
+module contract. Factory carries the existing action declarations and module
+files from the verified build and retains the scoped implementation edits.
+Assembly checks for changes outside that module scope before bundle validation.
+Edits that require changing a module contract must include that contract in
+the reviewed plan.
+
 ## Boundaries
 
 | Concern | File |
@@ -180,3 +212,8 @@ requested build has no fallback to current app evidence.
 - [AI Startup](ai-startup.md)
 - [Workflow Registry](../extending-ai-functionality/05-workflow-sequences.md)
 - [Refinement Harness Architecture](../../architecture/workflows/refinement-harness-architecture.md)
+
+Studio review can revalidate a saved inline refinement draft after an interrupted
+validation. Revalidate draft reads the saved bundle, verifies its archive digest,
+and runs the contained Docker checks. A passing result makes the draft eligible
+for the usual acceptance checks. The action does not run a coding agent.

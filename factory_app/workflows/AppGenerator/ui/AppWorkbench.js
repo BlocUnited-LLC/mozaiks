@@ -87,9 +87,15 @@ const AppWorkbench = ({
       { id: 'close', label: 'Close', variant: 'secondary' },
     ]).map((action) => action.id === 'download_complete' ? { ...action, label: 'Confirm app bundle' } : action),
   } : payload;
-  const codingResultTone = codingResult?.status === 'validated' && savedDraftId
+  const reviewedValidation = artifactReview?.artifact_version_id === (savedDraftId || activeArtifactVersionId)
+    ? artifactReview?.validation_result
+    : null;
+  const candidateStatus = reviewedValidation?.validation_status === 'passed' ? 'validated'
+    : reviewedValidation?.validation_status === 'failed' ? 'failed'
+      : codingResult?.status;
+  const codingResultTone = candidateStatus === 'validated' && savedDraftId
     ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
-    : codingResult?.status === 'failed'
+    : candidateStatus === 'failed'
       ? 'border-red-500/30 bg-red-500/10 text-red-200'
       : 'border-amber-400/30 bg-amber-400/10 text-amber-100';
   const codingResultMessage = {
@@ -97,7 +103,7 @@ const AppWorkbench = ({
     planned: savedDraftId ? 'Draft saved; validation is incomplete.' : 'Refinement planned; no draft was saved.',
     failed: savedDraftId ? 'Draft saved; validation failed.' : 'Refinement failed; no draft was saved.',
     ineligible: 'This change is not eligible for scoped refinement.',
-  }[codingResult?.status] || 'Refinement has not completed.';
+  }[candidateStatus] || 'Refinement has not completed.';
 
   // Preview ownership follows the persisted artifact version and build target.
   const artifactVersionId = activeArtifactVersionId;
@@ -127,7 +133,9 @@ const AppWorkbench = ({
     validationStrategy,
     integrationTestResult,
     integrationPassed,
-  } = useAppValidationWorkbench(payload, config, codingResult, activeArtifactVersionId);
+  } = useAppValidationWorkbench(
+    payload, config, codingResult, activeArtifactVersionId, reviewedValidation
+  );
 
   const {
     sandboxStatus,
@@ -422,10 +430,12 @@ const AppWorkbench = ({
         throw new Error(body.detail || `Artifact ${action} failed.`);
       }
       const confirmation = { accept: 'accepted', reject: 'rejected', promote: 'promoted' }[action];
-      if (body[confirmation] !== true) throw new Error(`Artifact ${action} was not confirmed. Refresh the review before retrying.`);
+      if (action !== 'revalidate' && body[confirmation] !== true) throw new Error(`Artifact ${action} was not confirmed. Refresh the review before retrying.`);
       if (isCurrent()) {
         setArtifactReview(body.review || null);
-        setArtifactReviewNotice(action === 'promote'
+        setArtifactReviewNotice(action === 'revalidate'
+          ? body.validation_status === 'passed' ? 'Draft validation passed.' : 'Draft validation did not pass. Review the checks below.'
+          : action === 'promote'
           ? body.restart_required
             ? 'Version activated. Restart the app to load this version.'
             : 'Version activated.'
@@ -501,6 +511,7 @@ const AppWorkbench = ({
           {(showSplit || showPreview) && (
             <div className={showSplit ? 'min-w-0 @min-[72rem]:col-span-4' : 'min-w-0 @min-[72rem]:col-span-12'}>
               <PreviewPane
+                files={filesMap}
                 previewUrl={livePreviewUrl}
                 sandboxStatus={sandboxStatus}
                 sandboxSyncing={sandboxSyncing}
@@ -587,14 +598,14 @@ const AppWorkbench = ({
                 <summary className="cursor-pointer">Refinement details</summary>
                 {codingResult.plan?.summary && <div className="mt-1">{codingResult.plan.summary}</div>}
                 <div className="mt-1 break-words [overflow-wrap:anywhere]">
-                  Status: {codingResult.status}
+                  Status: {candidateStatus}
                   {savedDraftId ? ` • Draft ${savedDraftId}` : ''}
                 </div>
               </details>
-              {savedDraftId && codingResult.status !== 'validated' && (
+              {savedDraftId && artifactVersionId !== savedDraftId && (
                 <div className="mt-1">The editor and preview still show version {artifactVersionId}. Inspect the saved draft below.</div>
               )}
-              {codingResult.error && <div className="mt-1">{codingResult.error}</div>}
+              {codingResult.error && !reviewedValidation && <div className="mt-1">{codingResult.error}</div>}
               {savedDraftId && (
                 <button type="button" className="mt-2 underline" onClick={() => handleHarnessDecisionAction({ action_type: 'review_patch' })}>
                   Review patch
@@ -706,8 +717,18 @@ const AppWorkbench = ({
               </details>
             )}
 
-            {(artifactReview.can_accept || artifactReview.can_reject || artifactReview.can_promote) && (
+            {(artifactReview.can_revalidate || artifactReview.can_accept || artifactReview.can_reject || artifactReview.can_promote) && (
               <div className="mt-3 flex flex-wrap gap-3">
+                {artifactReview.can_revalidate && (
+                  <button
+                    type="button"
+                    className={toolbarBtn(!artifactReviewBusy && !refinementStarting)}
+                    disabled={artifactReviewBusy || refinementStarting}
+                    onClick={() => handleArtifactReviewAction('revalidate')}
+                  >
+                    Revalidate draft
+                  </button>
+                )}
                 {artifactReview.can_accept && (
                   <button
                     type="button"

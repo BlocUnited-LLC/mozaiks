@@ -8,7 +8,7 @@ extends: default
 workspace:
   portals:
     - id: portfolio
-      label: Apps
+      label: My Apps
       route: /apps
       icon: apps
       order: 0
@@ -77,6 +77,12 @@ app:
       route: /apps/:appId/branding
       icon: palette
       order: 20
+
+    - id: integrations
+      label: Integrations
+      route: /apps/:appId/integrations
+      icon: plug
+      order: 26
 
     - id: launch
       label: Launch

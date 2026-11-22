@@ -11,6 +11,7 @@ import { build } from 'esbuild';
 import { chromium, expect } from '@playwright/test';
 import postcss from 'postcss';
 import tailwindcss from '@tailwindcss/postcss';
+import { previewExport, reactAlias } from './artifactPreviewFixture.js';
 
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const compiled = await build({
@@ -210,8 +211,8 @@ test('review workspace previews owned snapshots and keeps revision evidence sepa
     `},
     bundle:true, write:false, jsx:'automatic', loader:{'.js':'jsx','.png':'dataurl'}, nodePaths:[path.join(shell,'node_modules')],
     alias:{'@mozaiks/chat-ui/core/ui/DownloadCenter.js':path.join(root,'chat-ui/src/core/ui/DownloadCenter.js'),
-      react:path.join(shell,'node_modules/react'),'react-dom':path.join(shell,'node_modules/react-dom')},
-    plugins:[{name:'review-transport', setup(builder) {
+      ...reactAlias},
+    plugins:[previewExport, {name:'review-transport', setup(builder) {
       builder.onResolve({filter:/@mozaiks\/chat-ui\/ui|studioApi\.js$|websocketAuth\.js$|adapters\/api\.js$/}, args => ({path:args.path,namespace:'fixture'}));
       builder.onLoad({filter:/.*/,namespace:'fixture'}, ({path: name}) => ({loader:'jsx',resolveDir:shell,contents:
         name.endsWith('studioApi.js') ? 'export const getStudioAccessToken = () => null; export const studioFetch = (...args) => fetch(...args);'
@@ -616,6 +617,11 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
     changed_files: id === 'baseline' ? [] : [{path:'README.md', change_type:'modified', diff_preview:'-Original contents\n+Candidate contents'}],
     can_accept: id !== 'baseline' && scenario.status === 'validated' && !accepted,
     can_reject: id !== 'baseline', can_promote:scenario.promotion === true && accepted,
+    can_revalidate: id === 'candidate' && scenario.revalidation === true && scenario.validation !== 'passed',
+    ...(id === 'candidate' && scenario.revalidated ? {
+      artifact_version_id: id,
+      validation_result: candidateValidation(),
+    } : {}),
     risk_notes:['A binary asset was omitted from the text diff.'],
     validation_blocker: id !== 'baseline' && scenario.status !== 'validated' ? 'Validation has not passed.' : null,
   });
@@ -637,10 +643,17 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
       res.end(JSON.stringify(triggerResult()));
       return;
     }
-    const match = req.url.match(/^\/api\/studio\/build\/artifacts\/(baseline|candidate)\/(review|reject|accept|promote)\?build_registry_id=owned-build$/);
+    const match = req.url.match(/^\/api\/studio\/build\/artifacts\/(baseline|candidate)\/(review|reject|accept|promote|revalidate)\?build_registry_id=owned-build$/);
     if (!match) { res.statusCode=404; res.end('{"detail":"Unexpected fixture route"}'); return; }
     if (scenario.reviewError && match[1] === 'candidate') {
       res.statusCode=503; res.end('{"detail":"Saved draft review is unavailable."}'); return;
+    }
+    if (match[2] === 'revalidate') {
+      scenario.revalidated = true;
+      scenario.status = 'validated';
+      scenario.validation = 'passed';
+      res.end(JSON.stringify({validation_status:'passed', review:review(match[1])}));
+      return;
     }
     if (scenario.promotion && match[2] === 'accept') accepted = true;
     const confirmed = {accept:'accepted', reject:'rejected', promote:'promoted'}[match[2]];
@@ -795,6 +808,23 @@ test('workbench reviews saved candidates without rerunning coding or replacing a
       const payload = JSON.parse(requests.filter(r=>r.url==='/fixture-trigger')[1].body)[2].trigger_payload;
       assert.equal(Object.hasOwn(payload,'coding_request'),false);
       assert.equal(payload.harness_action.action_id,'run_recommended_workflow');
+    } finally { await page.close(); }
+  });
+  await t.test('revalidating the saved draft replaces stale validation evidence', async () => {
+    scenario = {status:'failed', validation:'failed', saved:true, revalidation:true};
+    const page = await browser.newPage();
+    try {
+      await page.goto(`http://127.0.0.1:${server.address().port}/?initial=true`);
+      const panel = page.getByRole('region', {name:'Artifact review'});
+      const result = page.getByRole('status', {name:'Refinement result'});
+      await expect(result.getByText('Required checks failed.', {exact:true})).toBeVisible();
+      await expect(panel.getByRole('button', {name:'Accept artifact',exact:true})).toHaveCount(0);
+      await panel.getByRole('button', {name:'Revalidate draft',exact:true}).click();
+      await expect(panel.getByRole('button', {name:'Accept artifact',exact:true})).toBeEnabled();
+      await expect(result).toContainText('Draft validated and saved for review.');
+      await expect(result.getByText('Required checks failed.', {exact:true})).toHaveCount(0);
+      await expect(page.getByText('Validation passed', {exact:true})).toBeVisible();
+      await expect(page.getByLabel('Preview version')).toHaveText('baseline');
     } finally { await page.close(); }
   });
   await t.test('pending Apply disables review mutations and a scope question preserves completed candidate evidence', async () => {

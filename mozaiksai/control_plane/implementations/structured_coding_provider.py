@@ -57,7 +57,8 @@ class StructuredOutputCodingProvider:
     async def execute(self, request: CodingWorkerRequest) -> StagedPatchProposal:
         tool_context_loaded = False
         try:
-            llm_config = self._load_config().resolve_capability_llm_config("coding")
+            config = self._load_config().for_refinement_model(request.refinement_model)
+            llm_config = config.resolve_capability_llm_config("coding")
             system_prompt = self._load_system_prompt()
             control_plane_context = await self._load_control_plane_context(request)
             tool_context_loaded = bool(control_plane_context)
@@ -251,7 +252,7 @@ class StructuredOutputCodingProvider:
             "Validation execution is owned by the operator and runtime. Your strategy and command fields are advisory; they cannot choose host execution or skip required checks.",
             "Return JSON only.",
             "payload_json:",
-            json.dumps(payload, indent=2, sort_keys=True, default=str),
+            json.dumps(payload, indent=2, sort_keys=True, default=str, ensure_ascii=False),
             "",
             "Return a JSON object with this exact shape:",
             (

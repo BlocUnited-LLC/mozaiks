@@ -50,6 +50,7 @@ test("materialized profile controls send friend requests, accept them, and reply
           if(action==='list_friend_requests')return {requests:window.requests};
           if(action==='list_friends')return {friends:window.friends};
           if(action==='accept_friend_request'){window.requests=[];window.friends=[{friendship_id:'friend',friend_user_id:'bob'}];}
+          if(action==='create_thread')return {success:true,thread:{thread_id:'created',title:'Charlie'}};
           if(action==='get_thread')return {thread:{thread_id:'thread',title:'Bob'},messages:window.messages};
           if(action==='send_message'&&window.refuseSend)return {success:false,error:'Access denied'};
           if(action==='send_message')window.messages.push({message_id:'two',sender_id:'alice',body:params.body});
@@ -111,12 +112,11 @@ test("materialized profile controls send friend requests, accept them, and reply
       (row) => row.action === "send_message" && row.params.body === "Hello Bob",
     ),
   );
-  assert.equal(
-    await page
-      .getByRole("link", { name: "New conversation" })
-      .getAttribute("href"),
-    "/messages",
-  );
+  await page.getByRole("button", {name: "New conversation", exact: true}).click();
+  await page.getByLabel("Usernames", {exact: true}).fill("charlie");
+  await page.getByRole("button", {name: "Start conversation", exact: true}).click();
+  await page.waitForFunction(() => window.actions.some(row => row.action === 'create_thread'));
+  assert.equal(await page.getByRole('link', {name: 'New conversation'}).count(), 0);
   await page.evaluate(() => { window.refuseSend = true; });
   await page.getByLabel("Message conversation").fill("Unsent draft");
   await page.getByRole("button", { name: "Send", exact: true }).click();

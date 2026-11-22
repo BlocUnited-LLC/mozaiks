@@ -65,7 +65,7 @@ before(async () => {
           askMessages,setAskMessages,activeGeneralChatId,setActiveGeneralChatId,
           unreadChatCount,setUnreadChatCount,setConversationMode:noop,setActiveChatId:noop,setActiveWorkflowName:noop,
           isChatOverlayOpen,setIsChatOverlayOpen,
-        }}>{mounted&&<Widget/>}</ChatContext.Provider>;
+        }}>{mounted&&<Widget supportModule={window.initialSupportModule}/> }</ChatContext.Provider>;
       }
       createRoot(document.getElementById('root')).render(<BrowserRouter><Fixture/></BrowserRouter>);
     `, resolveDir: shell, loader: 'jsx' },
@@ -103,13 +103,14 @@ const transcript = (gid = 'saved', messages = [
   { event_id: 'answer-1', sequence: 2, role: 'assistant', content: 'A saved answer' },
 ], changes = {}) => ({ app_id: 'sample-app', user_id: 'alice', chat_id: gid, found: true, messages, ...changes });
 
-async function fixture(t, width = 1280, initialGeneralId = 'saved', workflows = []) {
+async function fixture(t, width = 1280, initialGeneralId = 'saved', workflows = [], supportModule = 'workspace_support') {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   t.after(async () => { await page.close(); assert.deepEqual(errors, []); });
   await page.addInitScript(id => { window.initialGeneralId = id; }, initialGeneralId);
   await page.addInitScript(sessions => { window.initialWorkflowSessions = sessions; }, workflows);
+  await page.addInitScript(module => { window.initialSupportModule = module; }, supportModule);
   await page.goto(origin);
   await page.getByRole('button', { name: 'Open assistant', exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.connections.length)).toBe(1);
@@ -163,7 +164,7 @@ test('widget surfaces, support input and workflow picker follow light and dark a
     await expect(input).toHaveValue('Readable operator request');
     assert.deepEqual(await input.evaluate(el=>({text:getComputedStyle(el).color,background:getComputedStyle(el).backgroundColor})),{text:rgb(text),background:rgb(header)});
     await page.getByRole('button',{name:'Send request',exact:true}).click();
-    const failure=page.getByText('Could not send the request. Open your profile support tab and try again.',{exact:true});
+    const failure=page.getByText('Could not send your request. Please try again.',{exact:true});
     await expect(failure).toBeVisible();
     assert.equal(await failure.evaluate(el=>getComputedStyle(el).color),rgb(error));
     await page.getByTitle('Back to chat',{exact:true}).click();
@@ -526,3 +527,21 @@ for (const fresh of [false, true]) {
     await expect(page.getByRole('log')).toHaveText('draft survives retry');
   });
 }
+
+
+test('generated support submits to the app module and opens its profile ticket', async t => {
+  const page = await fixture(t, 1280, 'saved', [], 'support');
+  let submitted;
+  await page.route('**/api/modules/support/create_support_request', async route => {
+    submitted=route.request().postDataJSON();
+    await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({success:true,request:{request_id:'ticket',message_thread_id:'thread'}})});
+  });
+  await page.getByTitle('Get help from an operator',{exact:true}).click();
+  await page.getByPlaceholder('What do you need help with?').fill('Please help');
+  await page.getByRole('button',{name:'Send request',exact:true}).click();
+  await expect(page).toHaveURL(/\/me\?.*request_id=ticket/);
+  assert.equal(submitted.params.message,'Please help');
+  assert.equal(submitted.params.subject_app_id,undefined);
+  assert.equal(submitted.params.conversation_transcript,undefined);
+  assert.deepEqual(await submissions(page),[]);
+});

@@ -25,6 +25,7 @@ from mozaiksai.core.workflow.context.authority import (
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_authored_module_access_policy,
     resolve_design_access_policy,
 )
 
@@ -43,6 +44,7 @@ from .generator_support.module_action_inventory import (
     all_module_actions,
     approved_workflow_surface_ids,
     pack_owned_output_paths,
+    scoped_module_implementation_sources,
     ungated_module_actions,
 )
 from .generator_support.module_authored_code import invalid_python_diagnostics
@@ -53,11 +55,20 @@ from .generator_support.module_entitlement_gates import (
 )
 from .generator_support.module_policy import materialize_task_module_policies
 from .generator_support.module_read_actions import materialize_module_read_implementations
+from .generator_support.module_revision import (
+    scoped_service_revision_paths,
+    validate_scoped_service_repositories,
+)
+from .generator_support.module_smoke_fixtures import pack_smoke_fixture_task_output
 from .generator_support.module_write_actions import (
     close_module_actions,
     code_owned_schema_paths,
     materialize_module_write_implementations,
     materialize_task_module_schemas,
+)
+from .generator_support.page_action_bindings import (
+    planned_page_writes,
+    validate_required_page_writes,
 )
 from .generator_support.page_plan_utils import (
     _page_stem_from_path,
@@ -1153,8 +1164,8 @@ async def _run_one_task(
         raise ValueError(f"task {task.get('task_id')!r} references unknown agent {agent_name!r}")
     if getattr(agent, "_mozaiks_tool_outcome", None) is not None:
         raise ValueError(f"task agent {agent_name!r} declares a network-only tool outcome; use the task-batch failure policy")
-    code_owned_output = _code_owned_task_output(task, task_context)
-    pack_paths = pack_owned_output_paths(task_context)
+    code_owned_output = _code_owned_task_output(task, task_context, workflow_name=workflow_name)
+    pack_paths = pack_owned_output_paths(base_context)
 
     async with semaphore:
         runner_result = None
@@ -1176,7 +1187,7 @@ async def _run_one_task(
                 # Every owned path is rendered from the contract: there is nothing for the
                 # worker to author, so the task completes without an AG2 turn.
                 logger.info(
-                    "TASK_CODE_OWNED: task=%s agent=%s skipped; owned paths are rendered from data_contract",
+                    "TASK_CODE_OWNED: task=%s agent=%s skipped; owned paths are rendered from verified contracts",
                     task.get("task_id"), agent_name,
                 )
                 runner_result = AG2TaskBatchRunnerResult(
@@ -1231,6 +1242,7 @@ async def _run_one_task(
                     for key in ("data_contract", "design_surface_map"):
                         if detach(task_context.get(key)) != detach(base_context.get(key)):
                             raise ValueError(f"Task context cannot replace {key} beneath approved role grants")
+                authored_access_policy = resolve_authored_module_access_policy(base_context)
                 subscription_contract = resolve_subscription_contract(task_context)
                 companion_files = dict(base_context.get("generated_files") or {})
                 for dependency in (task_context.get("dependency_task_outputs") or {}).values():
@@ -1239,7 +1251,7 @@ async def _run_one_task(
                     output, app_build_plan=base_context.get("app_build_plan"),
                     data_contract=task_context.get("data_contract"),
                     design_surface_map=task_context.get("design_surface_map"),
-                    access_policy=approved_access_policy,
+                    access_policy=authored_access_policy,
                     subscription_contract=subscription_contract, companion_files=companion_files,
                 ))
                 canonical_code_files = extract_code_file_entries_from_payload(
@@ -1291,19 +1303,25 @@ async def _run_one_task(
                 for dependency in (task_context.get("dependency_task_outputs") or {}).values():
                     read_sources.update(extract_code_file_map_from_payload(dependency))
                 read_sources.update(canonical_file_map)
-                canonical_file_map.update(materialize_module_read_implementations(
-                    read_sources, app_build_plan=task_context.get("app_build_plan"),
-                    data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
-                    subscription_contract=subscription_contract,
-                ))
-                read_sources.update(canonical_file_map)
-                canonical_file_map.update(materialize_module_write_implementations(
-                    read_sources, app_build_plan=task_context.get("app_build_plan"),
-                    data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
-                    subscription_contract=subscription_contract,
-                    access_policy=approved_access_policy,
-                    design_surface_map=task_context.get("design_surface_map"),
-                ))
+                revision_paths = scoped_service_revision_paths(base_context, base_context.get("generated_files") or {})
+                if revision_paths:
+                    validate_scoped_service_repositories(
+                        read_sources, revision_paths.intersection(canonical_file_map),
+                    )
+                elif sources := scoped_module_implementation_sources(read_sources, task.get("owned_paths") or []):
+                    reads = materialize_module_read_implementations(
+                        sources, app_build_plan=task_context.get("app_build_plan"),
+                        data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
+                        subscription_contract=subscription_contract,
+                    )
+                    canonical_file_map.update(reads)
+                    canonical_file_map.update(materialize_module_write_implementations(
+                        {**sources, **reads}, app_build_plan=task_context.get("app_build_plan"),
+                        data_contract=task_context.get("data_contract"), owned_paths=task.get("owned_paths") or [],
+                        subscription_contract=subscription_contract,
+                        access_policy=authored_access_policy,
+                        design_surface_map=task_context.get("design_surface_map"),
+                    ))
                 canonical_file_map = compile_module_entitlement_gates(
                     canonical_file_map,
                     gates_by_module=approved_subscription_gates(
@@ -1340,7 +1358,7 @@ async def _run_one_task(
                     failed_pages = {failure.split(":", 1)[0] for failure in page_failures}
                     try:
                         output["code_files"] = _normalize_owned_page_files_from_plan(
-                            output.get("code_files"), task=task, base_context=task_context,
+                            output.get("code_files"), task=task, base_context=task_context, plan_context=base_context,
                             reject_api_endpoints=False, skip_paths=failed_pages,
                         )
                     except ValueError as exc:
@@ -1468,8 +1486,12 @@ def _build_scoped_worker_prompt(prompt: str, task_context: dict[str, Any]) -> st
     )
 
 
-def _code_owned_task_output(task: dict[str, Any], task_context: dict[str, Any]) -> dict[str, Any] | None:
-    """A data_models task whose every owned path is contract-rendered has nothing to author."""
+def _code_owned_task_output(
+    task: dict[str, Any], task_context: dict[str, Any], *, workflow_name: str,
+) -> dict[str, Any] | None:
+    """Complete a task directly when its entire assignment has a deterministic source."""
+    if workflow_name == "AppGenerator" and task.get("task_type") == "module_contract":
+        return pack_smoke_fixture_task_output(task, task_context)
     if str(task.get("task_type") or "").strip() != "data_models":
         return None
     owned = _normalize_owned_paths(task.get("owned_paths"))
@@ -1536,6 +1558,7 @@ def _normalize_owned_page_files_from_plan(
     *,
     task: dict[str, Any],
     base_context: dict[str, Any],
+    plan_context: dict[str, Any] | None = None,
     reject_api_endpoints: bool = True,
     skip_paths: set[str] | None = None,
 ) -> list[dict[str, str]]:
@@ -1551,8 +1574,10 @@ def _normalize_owned_page_files_from_plan(
                 continue
             file_map[safe] = str(content)
 
+    plan_context = base_context if plan_context is None else plan_context
+    pages = _planned_pages(plan_context)
     validate_planned_custom_routes(
-        file_map, pages=_planned_pages(base_context),
+        file_map, pages=pages,
         owned_paths=set(_normalize_owned_paths(task.get("owned_paths"))),
         baseline_files=base_context.get("generated_files") if base_context.get("build_mode") == "revision" else None,
     )
@@ -1567,8 +1592,9 @@ def _normalize_owned_page_files_from_plan(
             for filename, content in file_map.items()
         ]
 
+    required_writes = planned_page_writes(pages, plan_context)
     planned_by_stem: dict[str, dict[str, Any]] = {}
-    for page in _planned_pages(base_context):
+    for page in pages:
         for stem in _page_stems(page):
             planned_by_stem.setdefault(stem, page)
 
@@ -1599,6 +1625,7 @@ def _normalize_owned_page_files_from_plan(
                     workflow_names=workflows, data_contract=data_contract, design_surface_map=surface_map,
                 )
             validate_planned_page(file_map[path], planned, path)
+            validate_required_page_writes(file_map[path], planned["route"], required_writes, path, identity_validated=True)
         except ValueError as exc:
             message = str(exc)
             failures.append(message if message.startswith(f"{path}:") else f"{path}: {message}")

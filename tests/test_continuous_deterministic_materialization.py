@@ -29,6 +29,7 @@ from mozaiksai.core.validation import (
 )
 from tests.factory_context import factory_context
 from tests.import_utils import import_module_directly
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 WORKFLOWS_ROOT = WORKSPACE / "factory_app" / "workflows"
@@ -45,8 +46,10 @@ PACK_OUTPUT_PATHS = frozenset(
 
 
 class _Context:
-    def __init__(self, initial: dict[str, Any] | None = None) -> None:
+    def __init__(self, initial: dict[str, Any] | None = None, *, reviewed_pack_ids=None) -> None:
         self.data = factory_context(initial)
+        if reviewed_pack_ids is not None:
+            self.data = reviewed_pack_fixture(self.data, reviewed_pack_ids)
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.data.get(key, default)
@@ -429,7 +432,7 @@ async def _materialize(
             "readiness_profile": "host_operator_platform",
             "evidence_mode": "local_no_spend",
             "capability_packs": _selected_packs(),
-        }
+        }, reviewed_pack_ids=["operator_readiness"],
     )
     plan = typed_plan.AppBuildPlan.model_dump(mode="json")
     app_build_plan(AppBuildPlan=plan, context_variables=context)
@@ -462,7 +465,7 @@ def test_plan_rejects_unresolved_task_reference() -> None:
     plan["build_tasks"][1]["depends_on"] = ["missing.contract"]
 
     with pytest.raises(ValueError, match="unknown task ids"):
-        app_build_plan(AppBuildPlan=plan, context_variables=_Context())
+        app_build_plan(AppBuildPlan=plan, context_variables=_Context({"capability_packs": _selected_packs()}, reviewed_pack_ids=["operator_readiness"]))
 
 
 @pytest.mark.asyncio

@@ -10,8 +10,9 @@ from factory_app.workflows.AppGenerator.tools.app_plan_review import (
     review_app_build_plan,
     validate_plan_origins,
 )
-from mozaiksai.core.session.build_context import normalize_pack_descriptor
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
+from tests.reviewed_pack_fixture import registered_pack_fixture, reviewed_pack_fixture
 from tests.test_app_plan_review import _context, _plan
 from tests.test_continuous_deterministic_materialization import _load_models
 
@@ -173,12 +174,11 @@ def test_page_only_app_needs_no_capability_provider_or_backend_workers():
 
 
 @pytest.mark.parametrize("source", ["framework_pack", "operator_pack"])
-def test_selected_registered_ui_provider_remains_valid(source):
+def test_selected_registered_ui_provider_remains_valid(source, tmp_path, monkeypatch):
     context = _ui_context()
-    context.set("capability_packs", [{
-        "id": "ui_pack", "surface_id": "reports", "surface_kind": "ui_only",
-        "capability_source": source,
-    }])
+    descriptor = registered_pack_fixture(tmp_path, monkeypatch, "ui_pack", source)
+    context.set("capability_packs", [descriptor])
+    context = ContextVariablesBridge(reviewed_pack_fixture(context.snapshot(), ["ui_pack"]))
     plan = _page_plan()
     plan["capability_packs"] = [{
         "capability_pack_id": "ui_pack", "surface_id": "reports",
@@ -191,12 +191,11 @@ def test_selected_registered_ui_provider_remains_valid(source):
     assert plan == original
 
 
-def test_ui_only_page_task_may_bind_a_selected_provider_on_the_same_surface():
+def test_ui_only_page_task_may_bind_a_selected_provider_on_the_same_surface(tmp_path, monkeypatch):
     context = _ui_context()
-    context.set("capability_packs", [{
-        "id": "ui_pack", "surface_id": "reports", "surface_kind": "ui_only",
-        "capability_source": "framework_pack",
-    }])
+    descriptor = registered_pack_fixture(tmp_path, monkeypatch, "ui_pack", "framework_pack")
+    context.set("capability_packs", [descriptor])
+    context = ContextVariablesBridge(reviewed_pack_fixture(context.snapshot(), ["ui_pack"]))
     plan = _page_plan()
     plan["capability_packs"] = [{
         "capability_pack_id": "ui_pack", "surface_id": "reports",
@@ -234,26 +233,17 @@ def test_source_capability_hint_does_not_register_a_provider(surface_id, source,
     assert plan == original
 
 
-def _real_descriptor(tmp_path, pack_id, source):
-    """The descriptor shape a selected build context actually projects."""
-    return normalize_pack_descriptor(
-        {"pack": {"id": pack_id, "capability_source": source},
-         "capabilities": [{"capability_id": f"{pack_id}.view"}]},
-        context_root=tmp_path / pack_id,
-    )
-
-
-def _selected_ui_context(tmp_path, pack_id, source, surface_id=None):
+def _selected_ui_context(tmp_path, monkeypatch, pack_id, source, surface_id=None):
     context = _ui_context()
     surface_id = surface_id or pack_id
     context.set("design_surface_map", {"surfaces": [{
         "surface_id": surface_id, "surface_kind": "ui_only", "owner": "app",
         "primary_entities": [], "source_capability_packs": [pack_id],
     }]})
-    descriptor = _real_descriptor(tmp_path, pack_id, source)
+    descriptor = registered_pack_fixture(tmp_path, monkeypatch, pack_id, source)
     assert "surface_id" not in descriptor and "surface_kind" not in descriptor
     context.set("capability_packs", [descriptor])
-    return context
+    return ContextVariablesBridge(reviewed_pack_fixture(context.snapshot(), [pack_id]))
 
 
 def _cached_pack(context, pack_id):
@@ -265,8 +255,8 @@ def _cached_pack(context, pack_id):
 
 
 @pytest.mark.parametrize("source", ["operator_pack", "framework_pack"])
-def test_selected_real_pack_on_a_ui_only_surface_is_admitted_when_the_plan_omits_it(tmp_path, source):
-    context = _selected_ui_context(tmp_path, "files", source)
+def test_selected_real_pack_on_a_ui_only_surface_is_admitted_when_the_plan_omits_it(tmp_path, source, monkeypatch):
+    context = _selected_ui_context(tmp_path, monkeypatch, "files", source)
 
     result = review_app_build_plan(AppBuildPlan=_page_plan(), context_variables=context)
 
@@ -275,8 +265,8 @@ def test_selected_real_pack_on_a_ui_only_surface_is_admitted_when_the_plan_omits
 
 
 @pytest.mark.parametrize("source", ["operator_pack", "framework_pack"])
-def test_selected_real_pack_bound_to_its_ui_only_surface_is_admitted(tmp_path, source):
-    context = _selected_ui_context(tmp_path, "files", source)
+def test_selected_real_pack_bound_to_its_ui_only_surface_is_admitted(tmp_path, source, monkeypatch):
+    context = _selected_ui_context(tmp_path, monkeypatch, "files", source)
     plan = _page_plan()
     plan["capability_packs"] = [{
         **_plan()["capability_packs"][0], "capability_pack_id": "files",
@@ -292,8 +282,8 @@ def test_selected_real_pack_bound_to_its_ui_only_surface_is_admitted(tmp_path, s
 
 
 @pytest.mark.parametrize("wrong_source", ["framework_pack", "managed_capability", "generated_module"])
-def test_selected_ui_provider_with_a_wrong_source_label_is_repaired(tmp_path, wrong_source):
-    context = _selected_ui_context(tmp_path, "files", "operator_pack")
+def test_selected_ui_provider_with_a_wrong_source_label_is_repaired(tmp_path, wrong_source, monkeypatch):
+    context = _selected_ui_context(tmp_path, monkeypatch, "files", "operator_pack")
     plan = _page_plan()
     plan["capability_packs"] = [{
         **_plan()["capability_packs"][0], "capability_pack_id": "files",

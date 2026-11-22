@@ -6,6 +6,7 @@ import { useTheme } from '../styles/useTheme';
 import { Button } from '../ui/primitives/Button.jsx';
 import { safeReturnPath } from './authAdapter.js';
 import { authFetch } from '../adapters/api.js';
+import { relayBrowserAuthorization } from './browserAuthorizationTransport.js';
 
 function AuthCard({ title, children }) {
   useTheme();
@@ -23,7 +24,8 @@ function AuthCard({ title, children }) {
 
 export function LoginPage() {
   const location = useLocation();
-  return new URLSearchParams(location.search).get('owner') === '1' ? <OwnerAccountSetup /> : <SignInPage />;
+  const query = new URLSearchParams(location.search);
+  return query.get('owner') === '1' && query.get('inspect') !== 'login' ? <OwnerAccountSetup /> : <SignInPage />;
 }
 
 function OwnerAccountSetup() {
@@ -108,12 +110,16 @@ function SignInPage() {
   const fallback = contract?.routes?.post_login_default || '/';
   const returnPath = safeReturnPath(new URLSearchParams(location.search).get('returnTo'), fallback);
   const [pending, setPending] = useState(false);
+  const signingIn = useRef(false);
   const [error, setError] = useState('');
   const label = contract?.login_methods?.find(method => method.kind === 'oidc_redirect' && method.primary)?.label || 'Sign in';
 
-  if (!loading && user) return <Navigate to={returnPath} replace />;
+  const inspecting = new URLSearchParams(location.search).get('inspect') === 'login';
+  if (!inspecting && !loading && user) return <Navigate to={returnPath} replace />;
 
   async function signIn() {
+    if (signingIn.current) return;
+    signingIn.current = true;
     setPending(true);
     setError('');
     try {
@@ -123,6 +129,8 @@ function SignInPage() {
       console.error('Sign-in could not start:', failure);
       setError('Sign-in could not start. Please try again.');
       setPending(false);
+    } finally {
+      signingIn.current = false;
     }
   }
 
@@ -146,6 +154,7 @@ export function AuthCallbackPage() {
     let cancelled = false;
     async function complete() {
       try {
+        if (relayBrowserAuthorization(routes?.callback)) return;
         if (typeof auth?.handleCallback !== 'function') throw new Error('This app has no sign-in callback handler');
         const result = await auth.handleCallback();
         if (!cancelled) navigate(safeReturnPath(result?.returnPath, routes?.post_login_default || '/'), { replace: true });

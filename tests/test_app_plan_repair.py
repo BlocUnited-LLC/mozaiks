@@ -40,6 +40,8 @@ from factory_app.workflows.AppGenerator.tools.app_plan_review import (
     validate_plan_origins,
 )
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from tests.appgenerator_subscription_fixture import subscription_contract
+from tests.reviewed_pack_fixture import registered_pack_fixture, reviewed_pack_fixture
 
 
 class _Context:
@@ -242,7 +244,7 @@ def _registered_provider_pack(workspace: Path) -> dict[str, Any]:
     return discover_pack_descriptors(root, config)[0]
 
 
-def test_a_registered_managed_capability_is_kept(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_reviewed_registered_managed_capability_is_kept(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Dropping is for capabilities with no provider, not for managed ones."""
     plan = _plan_with_an_invented_capability()
     workspace = tmp_path / "build_context"
@@ -255,6 +257,7 @@ def test_a_registered_managed_capability_is_kept(tmp_path: Path, monkeypatch: py
             "capability_packs": [_registered_provider_pack(workspace)],
         }
     )
+    context = _Context(reviewed_pack_fixture(context._values, ["notifications_pack"]))
 
     repairs = _repair_plan(plan, context)
 
@@ -535,19 +538,15 @@ def test_unbacked_provider_source_on_an_approved_surface_becomes_generated_modul
         validate_plan_origins(plan, context)
 
 
-def test_an_installed_provider_pack_is_not_rewritten() -> None:
+def test_a_reviewed_registered_provider_pack_is_not_rewritten(tmp_path, monkeypatch) -> None:
     """Only unbacked sources are adopted; a real provider pack stays as it is."""
     plan = _plan_as_the_model_wrote_it()
     plan["capability_packs"][0]["capability_pack_id"] = "habits_module"
     plan["capability_packs"][0]["capability_source"] = "framework_pack"
-    context = _Context(
-        {
-            "design_surface_map": _design_surface_map(),
-            "capability_packs": [
-                {"id": "habits_module", "capability_source": "framework_pack"}
-            ],
-        }
-    )
+    descriptor = registered_pack_fixture(tmp_path, monkeypatch, "habits_module", "framework_pack")
+    context = _Context(reviewed_pack_fixture({
+        "design_surface_map": _design_surface_map(), "capability_packs": [descriptor],
+    }, ["habits_module"]))
 
     repairs = _repair_plan(plan, context)
 
@@ -565,6 +564,7 @@ def test_an_installed_provider_pack_is_not_rewritten() -> None:
 )
 def test_repair_rejects_reserved_surface_without_converting_or_synthesizing_it(
     source: str | None, surface_id: str, entity: str, operation: str, owner: str,
+    tmp_path, monkeypatch,
 ) -> None:
     design = {"surfaces": [{
         "surface_id": surface_id, "surface_kind": "module", "owner": "app",
@@ -577,6 +577,12 @@ def test_repair_rejects_reserved_surface_without_converting_or_synthesizing_it(
             "pack_source_path": str(Path(__file__).resolve().parents[1] / "factory_app/build_context/mozaikspay"),
         }] if owner == "MozaiksPay" else [],
     })
+    if owner == "MozaiksPay":
+        from tests.test_factory_pack_selection import _enable_managed
+
+        _enable_managed(tmp_path, monkeypatch)
+        context.set("subscription_contract", subscription_contract("reports"))
+        context = ContextVariablesBridge(reviewed_pack_fixture(context.snapshot(), ["mozaikspay"]))
     plan: dict[str, Any] = {"capability_packs": [], "build_tasks": []}
     if source is not None:
         plan["capability_packs"].append({
@@ -590,6 +596,26 @@ def test_repair_rejects_reserved_surface_without_converting_or_synthesizing_it(
         _repair_plan(plan, context)
 
     assert plan == original_plan
+
+
+def test_unselected_managed_offering_does_not_reserve_a_free_app_homonym(tmp_path, monkeypatch):
+    from tests.test_factory_pack_selection import _enable_managed, _managed_offering
+
+    _enable_managed(tmp_path, monkeypatch)
+    surface = {
+        "surface_id": "subscription_management", "surface_kind": "module", "owner": "app",
+        "primary_entities": ["Subscription"], "owned_mutations": ["update_subscription"],
+    }
+    context = _Context({
+        "design_surface_map": {"surfaces": [surface]},
+        "capability_packs": [_managed_offering()],
+    })
+    plan = {"capability_packs": [{
+        **surface, "capability_pack_id": surface["surface_id"], "capability_source": "generated_module",
+    }], "build_tasks": []}
+    original = deepcopy(plan)
+    validate_plan_origins(plan, context)
+    assert plan == original
 
 
 def test_repair_preserves_selected_self_managed_subscription_owner() -> None:
@@ -609,6 +635,9 @@ def test_repair_preserves_selected_self_managed_subscription_owner() -> None:
         }]},
     })
     plan: dict[str, Any] = {"capability_packs": [], "build_tasks": []}
+
+    context.set("subscription_contract", subscription_contract("entitlement_dispatch"))
+    context = ContextVariablesBridge(reviewed_pack_fixture(context.snapshot(), ["entitlement_dispatch"]))
 
     _repair_plan(plan, context)
 

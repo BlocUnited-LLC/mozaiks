@@ -20,8 +20,10 @@ from mozaiksai.core.workflow.generator_support.design_access_policy import (
     resolve_design_access_policy,
 )
 from mozaiksai.core.workflow.generator_support.module_role_grants import (
+    PackAuthorization,
     compiled_role_grants,
     validate_access_policy,
+    verified_pack_authorization,
 )
 from mozaiksai.resources import resolve_factory_app_root
 
@@ -35,6 +37,7 @@ from .code_file_utils import (
 def materialize_auth_scaffold(
     files: dict[str, str], *, data_contract: Any = None,
     design_surface_map: Any = None, access_policy: Any = None, auth_mode: str | None = None,
+    pack_authorization: PackAuthorization | None = None,
 ) -> dict[str, str]:
     """Render the canonical auth file delta for a constructed app bundle."""
     generated = dict(files)
@@ -47,6 +50,7 @@ def materialize_auth_scaffold(
         raise AppAuthContractError("Auth scaffolding requires app.json to be an object")
     policy = validate_access_policy(
         access_policy, data_contract=data_contract, design_surface_map=design_surface_map,
+        pack_authorization=pack_authorization,
     ) if access_policy is not None else None
     if policy and policy["roles"]:
         manifest["authRequired"] = True
@@ -87,7 +91,18 @@ def materialize_auth_scaffold(
                     elif method.get("label") == "Sign in or create account":
                         method["label"] = "Sign in"
         if policy is not None:
-            config["authorization"] = {"roles": compiled_role_grants(policy)}
+            roles = compiled_role_grants(
+                policy, data_contract=data_contract, pack_authorization=pack_authorization,
+            )
+            if pack_authorization:
+                pack_permissions = {
+                    permission for actions in pack_authorization.actions.values()
+                    for action_permissions in actions.values() for permission in action_permissions
+                }
+                broad = pack_permissions.intersection((config.get("frontend") or {}).get("default_scopes") or [])
+                if broad:
+                    raise AppAuthContractError(f"Pack permissions cannot be granted as default scopes: {sorted(broad)}")
+            config["authorization"] = {"roles": roles}
         validate_app_auth_contract(config)
         encoded = yaml.safe_dump(config, sort_keys=False)
         if "config/auth.yaml" not in generated or policy is not None or auth_mode is not None:
@@ -120,6 +135,7 @@ async def save_auth_scaffold(
         design_surface_map=context.get("design_surface_map"),
         access_policy=resolve_design_access_policy(context),
         auth_mode=(context.get("app_build_plan") or {}).get("auth_mode"),
+        pack_authorization=verified_pack_authorization(context),
     )
     for path in overlay_pack_composed_roots(context_variables) & rendered.keys():
         rendered.pop(path)

@@ -708,6 +708,24 @@ async def test_in_progress_child_of_the_same_build_is_reused(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("source_model,child_model,should_reuse", [
+    (None, "openai", False), ("openai", "gemini", False), ("openai", "openai", True),
+])
+async def test_child_reuse_requires_the_same_selected_model(monkeypatch, source_model, child_model, should_reuse):
+    source = dict(_CURRENT_BINDING)
+    if source_model:
+        source["refinement_model"] = source_model
+    child = {**_CURRENT_BINDING, "refinement_model": child_model}
+    result = await _complete_value_engine(
+        monkeypatch, source_binding=source,
+        children=[_theme_child("theme_model", status=0, binding=child)],
+    )
+    assert result.errors == []
+    assert (result.switched_to == "theme_model") is should_reuse
+    assert result.persistence._coll_ref._docs[result.switched_to]["run_build_binding"] == source
+
+
+@pytest.mark.asyncio
 async def test_newest_in_progress_child_of_the_same_build_wins(monkeypatch):
     result = await _complete_value_engine(
         monkeypatch,
@@ -783,5 +801,6 @@ def test_next_chat_reuse_filter_pins_every_binding_field_and_in_progress_status(
         "run_build_binding.target_app_id": "tracker",
         "run_build_binding.build_id": "build_current",
         "run_build_binding.phase": "genesis",
+        "run_build_binding.refinement_model": {"$exists": False},
     }
     assert _journey_mod._next_chat_reuse_filter(None) == {"status": 0, "run_build_binding": {"$exists": False}}

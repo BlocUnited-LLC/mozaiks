@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -15,6 +16,7 @@ from mozaiksai.core.app_context.refresh import (
     BROWNFIELD_DISCOVERY_REFRESH_SEQUENCE,
     ContextRefreshPlan,
 )
+from mozaiksai.core.auth import UserPrincipal
 from mozaiksai.core.auth.adapters import registry as auth_registry
 from mozaiksai.core.auth.adapters.jwt_adapter import GenericJWTAdapter, JWTAdapterConfig
 from mozaiksai.core.auth.config import clear_auth_config_cache
@@ -289,3 +291,259 @@ def test_local_development_uses_the_single_developer_as_registry_owner(monkeypat
     finally:
         clear_auth_config_cache()
         auth_registry.reset_auth_adapter()
+
+
+def test_build_dashboard_link_validates_signed_identity_and_saved_target(studio_client, monkeypatch):
+    studio, client, headers, registry = studio_client
+    binding = {
+        "build_registry_id": "alice-registry", "target_app_id": "alice-app",
+        "build_id": "alice-build", "phase": "genesis",
+    }
+
+    async def owned_binding(*, app_id, owner_user_id, chat_id):
+        if (app_id, owner_user_id, chat_id) != ("factory", "alice", "alice-chat"):
+            return None
+        return binding
+
+    async def owned_record(*, build_registry_id, owner_user_id):
+        if (build_registry_id, owner_user_id) != ("alice-registry", "alice"):
+            return {"app": None}
+        return {"app": {"app_id": "alice-app", "chat_app_id": "factory"}}
+
+    monkeypatch.setattr(registry, "repo", SimpleNamespace(get_owned_chat_binding=owned_binding), raising=False)
+    monkeypatch.setattr(registry, "get_app_record", owned_record)
+    monkeypatch.setattr(studio, "resolve_app_root", lambda: Path(__file__).resolve().parents[1] / "factory_app/app")
+    path = "/api/studio/build/dashboard-link?chat_id=alice-chat&app_id=bob-app"
+    response = client.get(path, headers=headers("alice", "factory"))
+    assert response.status_code == 200
+    assert response.json() == {"path": "/apps/alice-app/overview"}
+    for user in ("joined-member", "bob"):
+        response = client.get(path, headers=headers(user, "factory"))
+        assert response.status_code == 404
+        assert "alice-app" not in response.text
+    assert client.get(path).status_code == 401
+    assert client.get(path, headers={"Authorization": "Bearer invalid"}).status_code == 401
+
+
+def test_host_bound_signed_builder_can_read_shared_dashboard_manifest(studio_client, monkeypatch):
+    studio, client, headers, registry = studio_client
+    monkeypatch.setattr(studio.app.state, "loaded_app_id", "factory", raising=False)
+    response = client.get("/api/studio/dashboard", headers=headers("builder", "factory"))
+    assert response.status_code == 200
+    assert registry.lookups == []
+    response = client.get("/api/studio/dashboard?app_id=alice-app", headers=headers("builder", "factory"))
+    assert response.status_code == 403
+
+
+def test_selected_dashboard_connectors_check_ownership_before_every_operation(studio_client, monkeypatch):
+    studio, client, headers, registry = studio_client
+    host = "studio-test"
+    monkeypatch.setattr(studio.app.state, "loaded_app_id", host, raising=False)
+    calls = {}
+
+    async def get_app(*, app_id, owner_user_id):
+        if app_id != f"{owner_user_id}-app":
+            return {"app": None}
+        return {"app": {
+            "app_id": app_id, "owner_user_id": owner_user_id, "chat_app_id": host,
+            "build_registry_id": f"reg-{owner_user_id}",
+        }}
+
+    monkeypatch.setattr(registry, "get_app_record", get_app)
+    for name in ("list_connectors", "patch_connector", "run_connector_health_check", "delete_connector"):
+        calls[name] = AsyncMock()
+        monkeypatch.setattr(studio, name, calls[name])
+
+    base = "/api/studio/integrations/connectors"
+    selection = {"dashboard_app_id": "alice-app"}
+    routes = [
+        ("GET", base, None), ("POST", base, {"service": "example"}),
+        ("PATCH", base + "/example", {"notes": "updated"}),
+        ("POST", base + "/example/health-check", None), ("DELETE", base + "/example", None),
+    ]
+    for method, path, data in routes:
+        foreign = client.request(method, path, params=selection, json=data, headers=headers("bob", host))
+        assert foreign.status_code == 404, (method, path, foreign.text)
+        anonymous = client.request(method, path, params=selection, json=data)
+        assert anonymous.status_code == 401
+        ambiguous = client.request(method, path, params={**selection, "app_id": host},
+                                   headers=headers("alice", host), json=data)
+        assert ambiguous.status_code == 400
+    for call in calls.values():
+        call.assert_not_awaited()
+
+    from factory_app.app.modules.workspace_integrations.backend.repo import (
+        IntegrationDeclarationsRepo,
+    )
+
+    declarations = AsyncMock(return_value=[
+        {"service": "example", "optional": True, "removable": True, "workspace_status": "configured",
+         "required_fields": [{"password": "sensitive-placeholder"}]},
+        {"service": "removed", "removed": True},
+    ])
+    monkeypatch.setattr(IntegrationDeclarationsRepo, "__init__", lambda self: None)
+    monkeypatch.setattr(IntegrationDeclarationsRepo, "get_for_app", declarations)
+    monkeypatch.setattr(studio, "get_connector_backend_summary", AsyncMock(return_value={
+        "configured": True, "vault_name": "sensitive-placeholder",
+    }))
+    calls["list_connectors"].return_value = [{
+        "service": "example", "ready": True, "secret_available": True,
+        "secret_name": "sensitive-placeholder", "public_config": {"key": "sensitive-placeholder"},
+    }]
+
+    selected = client.get(base, params=selection, headers=headers("alice", host))
+    assert selected.status_code == 200, selected.text
+    assert "sensitive-placeholder" not in selected.text and "workspace_status" not in selected.text
+    body = selected.json()
+    assert body["app_id"] == "alice-app"
+    assert body["connectors"] == [{"service": "example", "secret_available": True, "ready": True, "health": {}}]
+    assert body["credential_storage_available"] is True
+    assert len(body["declarations"]) == 1 and body["declarations"][0]["removable"] is False
+    assert body["declarations"][0]["service"] == "example"
+    assert all(set(entry) == {"id", "name", "category"} for entry in body["catalog"])
+    declarations.assert_awaited_once_with(app_id="alice-app")
+    calls["list_connectors"].assert_awaited_once_with(scope="app", scope_id="alice-app")
+
+    monkeypatch.setattr(studio, "save_connector", AsyncMock(return_value={
+        "success": False, "error": "sensitive-placeholder",
+    }))
+    for method, path in [("POST", base), ("PATCH", base + "/example")]:
+        monkeypatch.setattr(studio.ConnectorStore, "get", AsyncMock(return_value={"service": "example"}))
+        data = {"secret_value": "disposable-placeholder"}
+        if method == "POST":
+            data["service"] = "example"
+        failed = client.request(method, path, params=selection, headers=headers("alice", host), json=data)
+        assert failed.status_code == 503, failed.text
+        assert "sensitive-placeholder" not in failed.text and "disposable-placeholder" not in failed.text
+    calls["patch_connector"].assert_not_awaited()
+
+
+@pytest.mark.parametrize("service", ["", "   ", "."])
+def test_connector_creation_requires_an_addressable_service(studio_client, monkeypatch, service):
+    studio, client, headers, _ = studio_client
+    monkeypatch.setattr(studio.app.state, "loaded_app_id", "alice-app", raising=False)
+    patch = AsyncMock()
+    save = AsyncMock()
+    monkeypatch.setattr(studio, "patch_connector", patch)
+    monkeypatch.setattr(studio, "save_connector", save)
+    for selector in ("app_id", "dashboard_app_id"):
+        response = client.post(
+            "/api/studio/integrations/connectors",
+            params={selector: "alice-app"},
+            headers=headers("alice", "alice-app"),
+            json={"service": service, "secret_value": "disposable-placeholder"},
+        )
+        assert response.status_code == 400
+    patch.assert_not_awaited()
+    save.assert_not_awaited()
+
+
+@pytest.fixture
+def dashboard_portal(monkeypatch):
+    from mozaiksai.hosts import studio
+
+    state = {"user": "alice", "host": "studio"}
+    record = {"owner_user_id": "alice", "chat_app_id": "studio", "app_id": "notes",
+              "build_registry_id": "reg-notes", "name": "Notes"}
+    binding = {"dashboard_app_id": "hosted-notes", "target_app_id": "notes", "build_registry_id": "reg-notes"}
+
+    async def get_record(*, owner_user_id, app_id=None, build_registry_id=None):
+        owned = owner_user_id == record["owner_user_id"]
+        matches = (app_id == record["app_id"] or build_registry_id == record["build_registry_id"])
+        return {"app": record if owned and matches else None}
+
+    async def get_bindings(*, host_app_id, owner_user_id, dashboard_app_id=None, build_registry_ids=None):
+        selected = dashboard_app_id == "hosted-notes" or (build_registry_ids and "reg-notes" in build_registry_ids)
+        return [binding] if host_app_id == "studio" and owner_user_id == "alice" and selected else []
+
+    async def list_apps(*, owner_user_id):
+        if owner_user_id != "alice":
+            return {"apps": []}
+        return {"apps": [record, {**record, "app_id": "old-app", "build_registry_id": "old-reg"}]}
+
+    async def portfolio(apps, window):
+        return {"apps": apps}
+
+    def principal():
+        return UserPrincipal(user_id=state["user"], roles=["user"], app_id=state["host"],
+                             email=None, name=None, scopes=[], raw_claims={}, auth_provenance="token_validated")
+
+    registry = SimpleNamespace(get_app_record=get_record, list_apps=list_apps)
+    analytics = SimpleNamespace(app_analytics=AsyncMock(return_value={"metrics": {}}),
+                                metric_detail=AsyncMock(return_value={"value": {}}), portfolio=portfolio)
+    monkeypatch.setattr(studio, "_get_app_registry_service", lambda: registry)
+    monkeypatch.setattr(studio, "_get_owner_analytics_service", lambda: analytics)
+    monkeypatch.setattr(studio.app.state, "loaded_app_id", "studio", raising=False)
+    monkeypatch.setattr(studio.app.state, "list_studio_app_bindings", get_bindings, raising=False)
+    monkeypatch.setitem(studio.app.dependency_overrides, studio.require_studio_user, principal)
+    return SimpleNamespace(client=TestClient(studio.app), state=state, binding=binding, record=record,
+                           analytics=analytics, app=studio.app)
+
+
+@pytest.mark.parametrize("endpoint,method", [("", "app_analytics"), ("/metrics/mrr", "metric_detail")])
+def test_dashboard_and_native_analytics_read_the_same_owned_target(dashboard_portal, endpoint, method):
+    p = dashboard_portal
+    url = "/api/studio/analytics/apps/"
+    assert p.client.get(url + "hosted-notes" + endpoint, params={"reference": "dashboard"}).status_code == 200
+    assert p.client.get(url + "notes" + endpoint).status_code == 200
+    calls = getattr(p.analytics, method).await_args_list
+    assert [call.args[0]["app_id"] if method == "app_analytics" else call.kwargs["app"]["app_id"]
+            for call in calls] == ["notes", "notes"]
+    assert p.client.get(url + "notes" + endpoint, params={"reference": "dashboard"}).status_code == 404
+    p.state["user"] = "bob"
+    assert p.client.get(url + "hosted-notes" + endpoint, params={"reference": "dashboard"}).status_code == 404
+    assert p.client.get(url + "notes" + endpoint).status_code == 404
+    assert getattr(p.analytics, method).await_count == 2
+
+
+def test_portfolio_keeps_metrics_but_only_links_verified_host_bindings(dashboard_portal):
+    p = dashboard_portal
+    response = p.client.get("/api/studio/analytics/portfolio")
+    assert response.status_code == 200
+    assert [(r["app_id"], r["dashboard_app_id"]) for r in response.json()["apps"]] == [
+        ("notes", "hosted-notes"), ("old-app", None),
+    ]
+    p.state["user"] = "bob"
+    assert p.client.get("/api/studio/analytics/portfolio").json()["apps"] == []
+
+
+@pytest.mark.parametrize("field,value", [("build_registry_id", "wrong"), ("target_app_id", "wrong"),
+                                         ("dashboard_app_id", "other"), ("target_app_id", "../bad")])
+def test_disagreement_between_registries_fails_closed(dashboard_portal, field, value):
+    p = dashboard_portal
+    p.binding[field] = value
+    assert p.client.get("/api/studio/analytics/apps/hosted-notes?reference=dashboard").status_code == 404
+    p.analytics.app_analytics.assert_not_awaited()
+
+
+def test_foreign_host_is_denied_even_for_same_subject(dashboard_portal):
+    p = dashboard_portal
+    p.state["host"] = "foreign"
+    assert p.client.get("/api/studio/analytics/apps/hosted-notes?reference=dashboard").status_code == 403
+    p.state["host"] = "studio"
+    p.record["chat_app_id"] = "foreign"
+    assert p.client.get("/api/studio/analytics/apps/hosted-notes?reference=dashboard").status_code == 404
+    p.analytics.app_analytics.assert_not_awaited()
+
+
+def test_stock_saved_app_needs_no_host_projection(dashboard_portal, monkeypatch):
+    p = dashboard_portal
+    monkeypatch.delattr(p.app.state, "list_studio_app_bindings")
+    assert p.client.get("/api/studio/analytics/apps/notes?reference=dashboard").status_code == 200
+    assert p.client.get("/api/studio/analytics/portfolio").json()["apps"][0]["dashboard_app_id"] == "notes"
+
+
+def test_outbound_only_host_cannot_treat_a_route_as_a_factory_target(dashboard_portal, monkeypatch):
+    p = dashboard_portal
+    monkeypatch.delattr(p.app.state, "list_studio_app_bindings")
+    monkeypatch.setattr(p.app.state, "resolve_studio_dashboard_app_id", AsyncMock(), raising=False)
+    assert p.client.get("/api/studio/analytics/apps/notes?reference=dashboard").status_code == 404
+    assert p.client.get("/api/studio/analytics/portfolio").json()["apps"][0]["dashboard_app_id"] is None
+    assert p.client.get("/api/studio/analytics/apps/notes").status_code == 200
+
+
+def test_ambiguous_registration_withholds_the_link_and_denies_selection(dashboard_portal, monkeypatch):
+    p = dashboard_portal
+    monkeypatch.setattr(p.app.state, "list_studio_app_bindings", AsyncMock(return_value=[p.binding, p.binding]))
+    assert p.client.get("/api/studio/analytics/apps/hosted-notes?reference=dashboard").status_code == 404
+    assert p.client.get("/api/studio/analytics/portfolio").json()["apps"][0]["dashboard_app_id"] is None

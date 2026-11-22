@@ -84,6 +84,14 @@ class _BaselineStore:
         return []
 
 
+def _isolate_studio_model_policy(monkeypatch):
+    from mozaiksai.hosts import studio_model_policy
+
+    model_policies = SimpleNamespace(find_one=AsyncMock(return_value=None))
+    monkeypatch.setattr(studio_model_policy, "_collection", lambda: model_policies)
+    monkeypatch.setattr(studio_model_policy, "_configured_models", set)
+
+
 @pytest.fixture(autouse=True)
 def _owned_build_target(monkeypatch, tmp_path):
     from mozaiksai.core.session.router import SessionRouter
@@ -103,6 +111,7 @@ def _owned_build_target(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(studio, "_get_app_registry_service", lambda: service)
     monkeypatch.setattr(studio, "_resolve_studio_scope", lambda *args, **kwargs: ("factory", "demo-user"))
+    _isolate_studio_model_policy(monkeypatch)
     router = SessionRouter(persistence=_FakePersistence())
     monkeypatch.setattr(studio, "get_session_router", lambda: router)
     monkeypatch.setenv("MOZAIKS_WORKSPACES_PATH", str(tmp_path / "workspaces"))

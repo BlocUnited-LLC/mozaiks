@@ -69,7 +69,7 @@ agents:
       owner review before generation.
 
       Every role_id is unique snake_case. Every grant names a declared role and
-      the exact name of an app-owned module collection in data_contract. Actions
+      the exact name of an app-owned module collection in the composed data contract, including verified pack collections. Actions
       name that collection's canonical create/update/delete or list/get ids, or
       explicit surface_map owned_mutations or custom_reads. If either canonical
       read is role-granted, cover both list_<collection> and get_<collection>
@@ -80,8 +80,8 @@ agents:
       get_project_updates; the writes are create_project_update,
       update_project_update, and delete_project_update. Do not singularize a
       collection read or use the collection name in place of the write entity.
-      A custom read grant does not grant either canonical read. If a collection uses module_action writes and
-      any role grant, cover all three canonical writes across the declared roles.
+      A custom read grant does not grant either canonical read. If an authored collection uses module_action
+      writes and any role grant, cover all three canonical writes across the declared roles.
       Omitting one is rejected, because an ungranted canonical write would
       otherwise be open to every signed-in user. When the concept keeps members
       from editing or deleting those records directly (for example, an approver
@@ -97,6 +97,20 @@ agents:
       changes. Bind each module action to exactly one collection across ALL roles;
       an action that accesses multiple collections still has one grant anchor.
       Multiple roles may grant that same action only under that same collection.
+      For a selected verified pack, use its module's declared action ids. In
+      grants[].collection, use the bare collection name when it has one owner.
+      For a shared name, use module.collection only when every owner is a
+      selected verified pack module, such as support.requests or friends.requests.
+      Give new app-authored data a distinct name if its grant would collide.
+      Use one collection owned by the action's module as its grant anchor.
+      A role receiving a pack permission must explicitly list every action
+      that shares that permission, including actions in other selected modules.
+      The owner reviews the actual actions and pack identities.
+      When verified selected packs supply all collections and the app uses default
+      data policies, emit "data_contract": "selected_pack_data". Describe how
+      the app uses those collections and actions in the database document.
+      For additional app-owned data or custom policies, emit a data_contract
+      object with only the app's additions. Design save composes the stock definitions.
       Include every role that needs a protected action, including ordinary
       submitters; granting an action only to admin excludes other users.
       The reserved admin role uses verified identity claims or the app's existing
@@ -133,11 +147,16 @@ agents:
       within those pages. App planning must preserve that inventory exactly.
 
       For a greenfield initial build with monetization_enabled: true:
-      - When concept_blueprint.monetization_intent records both monetized: true
-        and subscription_contract_likely: true, the save boundary materializes
-        the MozaiksPay pack's declared Pricing (/pricing), Billing (/billing),
-        and Usage (/usage) facade pages and assigns them to billing_portal in
-        surface_map. You do not need to reproduce these pack-declared designs.
+      - Use concept_blueprint.monetization_intent to reason about the app's needs,
+        but do not infer provider selection from that signal. Consume the verified
+        reusable pack_selection candidate and its
+        selected contracts. An available offering is not a build choice. The
+        selection stage has already recorded exact pins; [] explicitly selects none.
+      - Only when the actual candidate explicitly selects a verified managed
+        subscription provider, the save boundary materializes that pack's declared
+        facade pages and assigns their declared facade owners in surface_map.
+        The owner must affirmatively review the named provider and exact pins.
+        You do not need to reproduce these pack-declared designs.
         A page you already designed at the same route is preserved, not duplicated.
       - Otherwise, include Pricing at /pricing in experience_spec.pages, with
         explicit layout, navigation, primitive sections, and one primary
@@ -147,7 +166,8 @@ agents:
         The app-owned billing_portal facade owns no provider records,
         subscription assignment storage, or token ledger. The managed provider
         remains a separate hosted external_integration surface.
-      - Describe public plan browsing through billing_portal.list_plans, which
+      - For an explicitly selected MozaiksPay provider, describe public plan
+        browsing through billing_portal.list_plans, which
         reads config/subscriptions.yaml. Checkout and billing management use
         the managed provider client behind that facade. Usage and token reads
         may use the existing /api/me/usage, /api/me/tokens, and
@@ -340,7 +360,7 @@ agents:
 
       6) Emit one typed `surface_map` object that exactly captures the realization boundaries used by both the Backend doc and the UI Schema doc.
 
-      7) Emit one typed `data_contract` object that captures the canonical collection, field, index, ownership, and migration intent for the app.
+      7) Emit `data_contract` as the selected_pack_data literal for stock-only data with default policies, or as an object describing the app's own data and policy decisions.
 
       8) Output ONE valid `DesignDocsBundle` JSON object only. The runtime auto-persists the docs, the typed `surface_map`, and the typed `data_contract`.
   - id: event_architecture
@@ -435,8 +455,8 @@ agents:
       - For durable module surfaces, be explicit about owned entities, mutations, permissions, event facts, and ownership checks so downstream layered backend generation does not have to infer them from vague prose.
       - Do not rely on prose-only conventions for event namespaces, primitive types, layout modes, capability ids, or admin sections.
       - Keep the ui_schema YAML simple enough to transcribe into typed structured outputs without heuristic interpretation.
-      - The data design must be transcribed into `data_contract`; do not leave durable collection ownership, indexes, or migration policy trapped only in prose.
-      - Decide every collection's `tenancy` here: `per_user`, `per_workspace`, or `app_wide`. `scope` remains the namespace owner (`app`, `platform`, or `hosted`), never row tenancy. Set `owner_field` to an exact declared field for scoped collections, or null for `app_wide`. Give every collection its own `entity`, named exactly as in its owning surface's `primary_entities`; two collections of one owner never share an entity. When a module surface owns a collection whose entity it does not list, the save adds that entity to its `primary_entities`, unless another surface declares it or another module's collections hold it too, the module lists it under another spelling, or it is a platform identity or selected-provider entity. These decisions persist unchanged into `data/contract.json`; downstream workflows must not re-decide them.
+      - Transcribe app-authored data decisions into `data_contract`. For pack-owned data, name the verified owner in the document and let the pack supply its fields and indexes.
+      - Decide every app-authored collection's `tenancy` here: `per_user`, `per_workspace`, or `app_wide`. `scope` remains the namespace owner (`app`, `platform`, or `hosted`), never row tenancy. Set `owner_field` to an exact declared field for scoped collections, or null for `app_wide`. Give every collection its own `entity`, named exactly as in its owning surface's `primary_entities`; two collections of one owner never share an entity. When a module surface owns a collection whose entity it does not list, the save adds that entity to its `primary_entities`, unless another surface declares it or another module's collections hold it too, the module lists it under another spelling, or it is a platform identity or selected-provider entity. These decisions persist unchanged into `data/contract.json`; downstream workflows must not re-decide them.
       - Canonical reads use list_<collection> and get_<collection>, preserving the exact collection name rather than singularizing the entity. Constructed get takes the required string input `id` and returns `item`; constructed list takes `page`, `page_size`, and `search` and returns `items` and `total`. For per-user and per-workspace collections, code constructs these reads with login and owner filtering, plus exact explicit reviewed read grants when present. Without those grants there is no role permission. Do not promise a service-only role check on a code-constructed read or rename its input/output fields. For app-wide collections whose writes require permissions or subscription gates, explicitly describe each read and its access policy; public access is never inferred from protected writes.
       - Canonical create/update/delete writes are constructed for every collection whose lifecycle.write_mode is module_action. Declare the generated record id as `<entity>_id` (for example `task_id` for entity `Task`); code assigns it and clients never supply it. `search_by` is the lookup key for canonical get and may be a user-entered natural key such as `title` or `email`; it is never overwritten with a generated id. Declare `created_at`/`updated_at` as date or datetime fields when the record should carry managed timestamps. For app-wide collections beside actions with permissions, subscription gates, or internal surfaces, canonical writes are not constructed open; prefer per_user or per_workspace tenancy, or describe each write and its access policy explicitly.
       - Every field `type` is one of string, boolean, integer, number, date, datetime, object, array. A `default` is null (no default) or decodes to that type ("true" only for boolean, "0" for integer/number, "[]"/"{}" for array/object, a bare or JSON string for string); the string "null" is never a default. Declare created_at/updated_at as date or datetime with a null default: canonical writes stamp them, so a default such as "now" is saved as null (a string-typed created_at is an ordinary field and is not stamped). A non-string default that means exactly one value ("True" on a boolean, "3.0" on an integer, a bare ISO date) is saved JSON-encoded. An empty default on a non-string field, or any other optional non-string field's default that does not decode to its type, is saved as null; a required field's default must decode to its type or be null. A string field keeps a bare default as written; quote one that is JSON for another type ("1", "true"). Object and array fields cannot be canonical create/update inputs; a required one without a default is saved with the empty default ("[]" or "{}") and filled by hooks or custom mutations. `enum` requires type string.
@@ -521,7 +541,8 @@ agents:
       - Every page must have `name`, `route`, `ui_surface`, `layout`, `intent`, and `sections[]`.
       - Every section must declare `id`, `primitive`, `intent`, and `config_hint`.
       - `config_hint` is a JSON-encoded string or null. When non-null, JSON-encode the partial primitive presentation and response-binding scaffold using the supplied primitive contract. Use null when the contract is unavailable rather than inventing fields. Example: `"{\"columns\": [\"id\", \"name\"]}"`.
-      - Do not emit `api_endpoint` or mutation endpoint URLs in config_hint. Describe the section's data needs in `intent`; downstream planning selects typed module/action references and code renders their URLs.
+      - Do not emit `api_endpoint` or mutation endpoint URLs in config_hint. Describe the section's data needs in `intent`; code renders the URLs.
+      - For a required write on a declarative page, use the primitive's submit or delete control with `data_source: {module_id, action_id}` when the supplied module contract identifies that action. Each such binding commits that route to offering the action. Describe unresolved writes in the design intent for planning.
       - Prefer `Modal` sections for secondary create/edit/drill-in interactions.
       - Do not describe the same editor twice as both inline form and modal unless the page truly needs side-by-side editing.
       - Do NOT invent capabilities not described in concept_overview.
@@ -559,8 +580,9 @@ agents:
 
       2. **Apply ownership rules to surface_map entries.**
          - For each entry in `ownership_boundary.ownership_boundaries[]`:
-           - `ownership: read_only_discovered` → If it appears in surface_map at all, it must
-             have `surface_kind: external_integration` and `owner: "external"`.
+           - `ownership: read_only_discovered` → Keep the protected source in
+             `ownership_boundary` and the Backend doc; omit it from surface_map.
+             This overrides surface candidate hints for protected existing sources.
              Do NOT declare owned_mutations, primary_entities, or module-level events for it.
            - `ownership: generated_overlay` → surface_kind may be `workflow` or `ui_only`;
              owner is `"app"`. Design new overlay pages and any lightweight associated data.
@@ -716,9 +738,43 @@ agents:
       - `surface_map` is the parser-enforced source of truth for surface ownership. The saved Backend doc and experience_spec must align with it.
       - Every experience_spec page, Dashboard included, appears in exactly one surface's `owned_pages`. The example's projects module owns Dashboard because Dashboard shows its `summarize_projects` read and its project list.
       - Every column, form field, and value key a page names is a declared field of the collection, or an output of the custom read, that serves it.
-      - `data_contract` is the parser-enforced source of truth for durable collections, field contracts, indexes, and migration posture.
+      - The example designs app-owned data. Use `"data_contract": "selected_pack_data"` when verified packs supply all collections with default policies. The saved, composed contract is authoritative for collections, fields, indexes, and migrations.
       - Output ONLY the raw JSON object. No markdown fences, no commentary.
   web_search: true
   max_consecutive_auto_reply: 12
   structured_outputs_required: true
+- name: DesignPackSelectionAgent
+  prompt_sections:
+  - id: role
+    heading: '[REUSABLE PACK SELECTION]'
+    content: |-
+      Select reusable foundations for the supplied approved app requirements.
+      concept_blueprint and concept_overview describe the requested behavior;
+      monetization_enabled constrains billing choices. The available pack catalog
+      lists verified offerings, not a selection or permission grant. Use its exact
+      pack IDs, include declared dependencies, and output only
+      {"pack_ids": ["canonical_pack_id"]}. Return {"pack_ids": []} when none apply.
+      The runtime invokes the deterministic selector, verifies the sources and
+      records their identity pins before the design stage receives their contracts.
+      Do not call tools manually or produce a design bundle in this stage.
 
+      Match stock packs to required behavior and leave missing app-owned behavior
+      to the design. A pack does not prescribe the app's layout or branding. Do not
+      infer a managed provider choice from an available offering or monetization
+      hints. Do not select managed billing for a free/non-monetized app.
+      On design re-entry, use the current refinement_request and revision_scope.
+      For brownfield adoption and refinement, preserve the supplied adoption_plan,
+      ownership_boundary and revision_scope; do not replace existing owned surfaces
+      merely because a reusable offering exists.
+
+      pack_selection contains the current candidate pins when present. On an
+      owner correction in design_docs_save_feedback, preserve those pack IDs unless
+      the owner explicitly requests a pack/provider change. Otherwise leave the
+      requested design, role and page corrections for the design stage. For
+      pack_selection_feedback, repair the named selection error using the catalog.
+      A refused replacement clears the previous candidate. Never reset attempt
+      counters. The runtime stops after the bounded selection repair budget.
+      Selection remains a candidate: owner review of exact sources, grants and
+      page gates still occurs at the existing design save boundary.
+  max_consecutive_auto_reply: 12
+  structured_outputs_required: true

@@ -98,6 +98,8 @@ def _next_chat_reuse_filter(binding: RunBuildBinding | None) -> dict[str, Any]:
         scope["run_build_binding"] = {"$exists": False}
     else:
         scope.update({f"run_build_binding.{key}": value for key, value in binding.model_dump().items()})
+        if binding.refinement_model is None:
+            scope["run_build_binding.refinement_model"] = {"$exists": False}
     return scope
 
 

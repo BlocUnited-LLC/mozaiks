@@ -39,8 +39,10 @@ from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
 from mozaiksai.resources import resolve_factory_app_root
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_app_plan_task_identity_repair import _live_plan
 from tests.test_continuous_deterministic_materialization import _load_models
+from tests.test_factory_pack_selection import _enable_managed
 
 ROOT = Path(__file__).resolve().parents[1]
 CORPUS = json.loads((Path(__file__).parent / "fixtures" / "pricing_design_corpus.json").read_text(encoding="utf-8"))
@@ -216,7 +218,9 @@ def test_57c78c5f_shared_actions_are_ungated_and_paid_update_is_gated() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ec56c080_labelled_concept_repair_saves_and_app_plan_accepts(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ec56c080_labelled_concept_repair_saves_and_app_plan_accepts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The new choice follows the concept's limited-free-task intent, unlike the recorded choice."""
     entry = next(item for item in CORPUS["fixtures"] if item["chat_id"] == "ec56c080-ccbb-4d2b-9dbb-9cccd6931bbd")
     assert entry["design_docs_chat_id"] == "fdbfe738-2c10-473a-8178-cd4544e79379"
@@ -265,6 +269,7 @@ async def test_ec56c080_labelled_concept_repair_saves_and_app_plan_accepts(monke
 
     # Build a task plan from the captured DesignDocs actions and saved contract.
     # AppGenerator's public review performs the real gate.
+    _enable_managed(tmp_path, monkeypatch)
     _load_models()
     plan, app_context = _live_plan(monetized=True, repeated_ids=False)
     task_surface = next(
@@ -295,6 +300,8 @@ async def test_ec56c080_labelled_concept_repair_saves_and_app_plan_accepts(monke
     app_context.set("experience_spec", experience)
     app_context.set("subscription_contract", saved)
     app_context.set("app_plan_attempts", 0)
+    # Bind the repaired, explicitly monetized design to its reviewed pack.
+    app_context = ContextVariablesBridge(reviewed_pack_fixture(app_context.snapshot(), ["mozaikspay"]))
     reviewed = review_app_build_plan(AppBuildPlan=plan, context_variables=app_context)
     assert reviewed["outcome"] == "ready", reviewed
     cached = detach(app_context.get("app_build_plan"))

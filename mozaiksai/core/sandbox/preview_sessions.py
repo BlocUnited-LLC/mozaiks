@@ -19,9 +19,24 @@ from pathlib import PurePosixPath
 from typing import Any, Protocol, cast, runtime_checkable
 from urllib.parse import urlsplit
 
+import yaml
+
 from logs.logging_config import get_core_logger
+from mozaiksai.core.auth.adapters.base import AuthError
+from mozaiksai.core.auth.adapters.keycloak import (
+    ACCESS_TOKEN_TYPE_CLAIM,
+    ACCESS_TOKEN_TYPE_VALUE,
+    keycloak_issuer,
+)
+from mozaiksai.core.auth.adapters.registry import resolve_auth_config
 from mozaiksai.core.ports.sandbox import SandboxPort
-from mozaiksai.core.runtime.app.paths import app_bundle_workspace_path
+from mozaiksai.core.runtime.app.auth_contract import validate_app_auth_contract
+from mozaiksai.core.runtime.app.paths import APP_AUTH_CONFIG_PATH, app_bundle_workspace_path
+from mozaiksai.core.sandbox.keycloak_registration import (
+    KeycloakPreviewRegistrationError,
+    keycloak_preview_registration_configured,
+    resolve_keycloak_preview_registrar,
+)
 from mozaiksai.core.sandbox.preview_store import (
     MongoPreviewStore,
     PreviewCapacityError,
@@ -41,6 +56,7 @@ _SEALED_ARCHIVE_MAX_BYTES = 80_000_000
 _SEALED_TOTAL_FILE_MAX_BYTES = 64_000_000
 _SEALED_ARCHIVE_MAX_FILES = 2_000
 _SEALED_FILE_MAX_BYTES = 8_000_000
+_KEYCLOAK_CLEANUP_GRACE_SECONDS = 120
 
 
 @runtime_checkable
@@ -126,11 +142,47 @@ def sandbox_resource_environment() -> dict[str, str]:
 
 def preview_resource_environment() -> dict[str, str]:
     # Interactive previews explicitly opt in to forwarded environment values.
-    return {
+    env = {
         **sandbox_resource_environment(),
         **{name[len(_ENV_PREFIX):]: value for name, value in os.environ.items() if name.startswith(_ENV_PREFIX)},
         "VITE_MOZAIKS_PREVIEW": "true",
     }
+    claim_setting = "AUTH_ACCESS_TOKEN_TYPE_CLAIM"
+    value_setting = "AUTH_ACCESS_TOKEN_TYPE_VALUE"
+    if claim_setting in env or value_setting in env:
+        return env
+
+    issuer = env.get("AUTH_ISSUER", "").strip()
+    audience = env.get("AUTH_AUDIENCE", "").strip()
+    client = env.get("VITE_OIDC_CLIENT_ID", "").strip()
+    if not issuer or issuer != env.get("VITE_OIDC_AUTHORITY", "").rstrip("/"):
+        return env
+    if not audience or not client or audience == client:
+        return env
+
+    try:
+        studio_auth = resolve_auth_config()
+        preview_auth = resolve_auth_config(environ=env)
+    except AuthError:
+        # Let each host report its own misconfiguration through its normal validation.
+        return env
+    if studio_auth.provider != "keycloak" or preview_auth.provider != "jwt":
+        return env
+    server = studio_auth.settings.get("KEYCLOAK_URL", "")
+    realm = studio_auth.settings.get("KEYCLOAK_REALM", "")
+    studio_audience = studio_auth.settings.get("KEYCLOAK_CLIENT_ID", "").strip()
+    # Keycloak signs the access-token marker in the payload. Bind this default
+    # to the Studio realm while keeping the preview's own API audience.
+    if (
+        server
+        and realm
+        and studio_audience
+        and issuer == keycloak_issuer(server, realm)
+        and audience != studio_audience
+    ):
+        env[claim_setting] = ACCESS_TOKEN_TYPE_CLAIM
+        env[value_setting] = ACCESS_TOKEN_TYPE_VALUE
+    return env
 
 
 def _safe_relpath(raw: str) -> str | None:
@@ -190,6 +242,9 @@ class PreviewSessionState:
     paths: list[str] = field(default_factory=list)
     has_requirements: bool = False
     health_checked_at: datetime | None = None
+    keycloak_issuer: str | None = None
+    keycloak_cleanup_grace: bool = False
+    preview_mode: str | None = None
 
     @classmethod
     def from_record(cls, record: dict[str, Any]) -> PreviewSessionState:
@@ -199,7 +254,7 @@ class PreviewSessionState:
         snapshot = asdict(self)
         return {name: snapshot[name] for name in (
             "session_id", "status", "preview_url", "last_error", "last_access_at",
-            "manifest", "paths", "has_requirements", "health_checked_at",
+            "manifest", "paths", "has_requirements", "health_checked_at", "keycloak_issuer", "keycloak_cleanup_grace",
         )}
 
 
@@ -310,14 +365,17 @@ class ArtifactPreviewSessionManager:
 
     async def create_or_reuse(
         self, artifact_id: str, *, app_id: str, user_id: str, target_app_id: str, build_registry_id: str,
+        document_only: bool = False,
     ) -> PreviewSessionState:
         if not all(is_valid_artifact_id(value) for value in (artifact_id, app_id, target_app_id, build_registry_id)) or not user_id:
             raise ValueError("Invalid preview identity")
-        provider, adapter = self._selected_provider()
+        provider, adapter = ("e2b", self._adapter("e2b")) if document_only else self._selected_provider()
         identity = dict(
             artifact_id=artifact_id, app_id=app_id, user_id=user_id,
             target_app_id=target_app_id, build_registry_id=build_registry_id, provider=provider,
         )
+        if document_only:
+            identity["preview_mode"] = "document"
         return await self._create(identity, adapter)
 
     async def create_sealed_candidate(
@@ -345,6 +403,10 @@ class ArtifactPreviewSessionManager:
         sealed_files: dict[str, bytes] | None = None,
     ) -> PreviewSessionState:
         await self.cleanup()
+        keycloak_cleanup_grace = (
+            sealed_files is None and identity["provider"] == "docker" and keycloak_preview_registration_configured()
+        )
+        provider_ttl = self._ttl_minutes * 60 + (_KEYCLOAK_CLEANUP_GRACE_SECONDS if keycloak_cleanup_grace else 0)
         reservation = await self._store.reserve(
             identity, max_sessions=self._max_sessions, max_owner_sessions=self._max_owner_sessions,
             max_pending=self._max_pending, queue_seconds=self._queue_seconds,
@@ -368,13 +430,16 @@ class ArtifactPreviewSessionManager:
                     try:
                         allocation = await self._store.try_allocate(
                             sandbox_id, max_parallel_creates=self._max_parallel_creates,
-                            provider_deadline=_utcnow() + timedelta(seconds=self._ttl_minutes * 60 + self._allocation_timeout_seconds),
+                            provider_deadline=_utcnow() + timedelta(seconds=provider_ttl + self._allocation_timeout_seconds),
                         )
                     except KeyError as exc:
                         await self._store.abandon_queued(sandbox_id)
                         raise PreviewCapacityError("Preview queue expired; try again") from exc
                 if allocation is not None:
-                    return await self._allocate(allocation, adapter, sealed_files=sealed_files)
+                    return await self._allocate(
+                        allocation, adapter, sealed_files=sealed_files,
+                        provider_ttl=provider_ttl, keycloak_cleanup_grace=keycloak_cleanup_grace,
+                    )
                 if time.monotonic() >= wait_deadline:
                     await self._store.abandon_queued(sandbox_id)
                     raise PreviewCapacityError("Preview capacity is busy; stop an existing preview or try again shortly")
@@ -386,7 +451,7 @@ class ArtifactPreviewSessionManager:
 
     async def _allocate(
         self, allocation: dict[str, Any], adapter: SandboxPort, *,
-        sealed_files: dict[str, bytes] | None = None,
+        sealed_files: dict[str, bytes] | None, provider_ttl: int, keycloak_cleanup_grace: bool,
     ) -> PreviewSessionState:
         sandbox_id = allocation["sandbox_id"]
         if sealed_files is not None and not isinstance(adapter, _SealedCandidateStager):
@@ -394,13 +459,18 @@ class ArtifactPreviewSessionManager:
         token = allocation["allocation_token"]
         started = time.monotonic()
         try:
+            document_only = allocation.get("preview_mode") == "document"
+            envs = {}
+            if sealed_files is None:
+                envs = sandbox_resource_environment() if document_only else preview_resource_environment()
             async with asyncio.timeout(self._allocation_timeout_seconds):
                 info = await adapter.create_session(
                     template=allocation["sealed_image_id"] if sealed_files is not None else self._template,
-                    timeout_seconds=self._ttl_minutes * 60,
-                    envs={} if sealed_files is not None else preview_resource_environment(),
+                    timeout_seconds=provider_ttl,
+                    envs=envs,
                     metadata={
                         "purpose": "sealed_candidate_preview" if sealed_files is not None else "artifact_preview",
+                        **({"preview_mode": "document"} if document_only else {}),
                         "manager_sandbox_id": sandbox_id,
                         **{name: allocation[name] for name in ("artifact_id", "app_id", "user_id", "target_app_id", "build_registry_id")},
                     },
@@ -412,6 +482,7 @@ class ArtifactPreviewSessionManager:
             raise
         state = PreviewSessionState.from_record({
             **allocation, "phase": "active", "session_id": info.session_id,
+            "keycloak_cleanup_grace": keycloak_cleanup_grace,
         })
         try:
             if sealed_files is not None:
@@ -468,7 +539,7 @@ class ArtifactPreviewSessionManager:
 
     async def require_owner(self, sandbox_id: str, *, app_id: str, user_id: str) -> PreviewSessionState:
         record = await self._store.get(sandbox_id)
-        if record is None or (record["app_id"], record["user_id"]) != (app_id, user_id):
+        if record is None or record.get("preview_mode") == "document" or (record["app_id"], record["user_id"]) != (app_id, user_id):
             raise KeyError("Sandbox not found")
         return await self._ensure_alive(sandbox_id)
 
@@ -489,6 +560,8 @@ class ArtifactPreviewSessionManager:
         # The admission ledger is bounded. Do not truncate to today's owner quota:
         # older reservations, pending allocations and failed cleanup still count.
         for record in await self._store.list():
+            if record.get("preview_mode") == "document":
+                continue
             if (record["app_id"], record["user_id"]) != (app_id, user_id):
                 continue
             state = PreviewSessionState.from_record(record)
@@ -595,6 +668,8 @@ class ArtifactPreviewSessionManager:
 
     async def sync(self, sandbox_id: str, files: list[dict[str, str | bytes]], deleted: list[str]) -> None:
         state = await self._ensure_alive(sandbox_id)
+        if state.preview_mode == "document":
+            raise ValueError("Private document previews have no app host")
         if state.sealed_archive_sha256:
             raise ValueError("Sealed candidate source cannot be synchronized")
         async with self._operation(sandbox_id, "sync") as (state, token):
@@ -629,7 +704,7 @@ class ArtifactPreviewSessionManager:
                 raise
 
     @staticmethod
-    def _validate_identity(state: PreviewSessionState, raw_manifest: str | None) -> None:
+    def _validate_identity(state: PreviewSessionState, raw_manifest: str | None) -> dict[str, Any]:
         try:
             manifest = json.loads(raw_manifest) if raw_manifest is not None else None
         except (ValueError, TypeError) as exc:
@@ -638,6 +713,7 @@ class ArtifactPreviewSessionManager:
             raise ValueError("Preview requires a canonical app.json")
         if not isinstance(manifest, dict) or manifest.get("appId") != state.target_app_id:
             raise ValueError("Preview appId does not match the owned build target")
+        return manifest
 
     @staticmethod
     def _session_id(state: PreviewSessionState) -> str:
@@ -645,20 +721,76 @@ class ArtifactPreviewSessionManager:
             raise RuntimeError("Sandbox provider session missing")
         return state.session_id
 
+    async def _remove_keycloak_client(self, state: PreviewSessionState, token: str) -> None:
+        if state.keycloak_issuer is None:
+            return
+        registrar = resolve_keycloak_preview_registrar()
+        if registrar is None or registrar.issuer != state.keycloak_issuer:
+            raise KeycloakPreviewRegistrationError("Restore the Studio Keycloak registrar configuration to clean up this preview")
+        await registrar.remove(sandbox_id=state.sandbox_id)
+        state.keycloak_issuer = None
+        await self._save(state, token)
+
+    async def _preview_auth_environment(
+        self, state: PreviewSessionState, token: str, *, adapter: SandboxPort, url: str, auth_required: object,
+    ) -> dict[str, str]:
+        if state.provider != "docker" or auth_required is False:
+            await self._remove_keycloak_client(state, token)
+            return {}
+        registrar = resolve_keycloak_preview_registrar()
+        if registrar is None:
+            if state.keycloak_issuer is not None:
+                raise KeycloakPreviewRegistrationError("Restore the Studio Keycloak registrar configuration for this preview")
+            return {}
+        if not state.keycloak_cleanup_grace:
+            raise KeycloakPreviewRegistrationError("Start a new preview after configuring Keycloak registration")
+        if auth_required is not True:
+            raise ValueError("app.json.authRequired must be a boolean")
+        if state.keycloak_issuer is not None and state.keycloak_issuer != registrar.issuer:
+            raise KeycloakPreviewRegistrationError("Restore the original Studio Keycloak realm to clean up this preview")
+
+        auth_path = app_bundle_workspace_path(APP_AUTH_CONFIG_PATH)
+        if not any(app_bundle_workspace_path(path) == auth_path for path in state.paths):
+            raise ValueError(f"app.json.authRequired=true requires {APP_AUTH_CONFIG_PATH}")
+        raw = await adapter.read_file(session_id=self._session_id(state), path=f"{self._workdir(state.provider)}/{auth_path}")
+        try:
+            contract = validate_app_auth_contract(yaml.safe_load(raw))
+        except (UnicodeError, yaml.YAMLError) as exc:
+            raise ValueError(f"Cannot read valid YAML from {APP_AUTH_CONFIG_PATH}") from exc
+        # Record the realm before the request so recovery can revoke a client
+        # even if the worker loses the response or its operation lease.
+        state.keycloak_issuer = registrar.issuer
+        await self._save(state, token)
+        return await registrar.register(
+            sandbox_id=state.sandbox_id, target_app_id=state.target_app_id,
+            preview_url=url, callback_path=contract.routes.callback,
+        )
+
+    async def _terminate_resources(self, state: PreviewSessionState, token: str) -> None:
+        # Revoke the exact loopback callback before releasing its port.
+        await self._remove_keycloak_client(state, token)
+        if state.session_id:
+            stopped = await self._adapter(state.provider).terminate_session(session_id=state.session_id)
+            if not stopped:
+                raise RuntimeError("Preview provider could not confirm the sandbox stopped")
+            state.session_id = None
+
     async def _fail(self, state: PreviewSessionState, message: str, token: str) -> PreviewSessionState:
         state.status, state.last_error, state.preview_url = "error", message, None
         # Publish failure before remote teardown; an outage must retain cleanup debt.
         await self._save(state, token)
-        if state.session_id:
-            try:
-                if await self._adapter(state.provider).terminate_session(session_id=state.session_id):
-                    state.session_id = None
-            except Exception as exc:
-                logger.warning("preview_cleanup_failed sandbox=%s exception=%s", state.sandbox_id, type(exc).__name__)
+        try:
+            await self._terminate_resources(state, token)
+        except PreviewLeaseLostError:
+            raise
+        except Exception as exc:
+            logger.warning("preview_cleanup_failed sandbox=%s exception=%s", state.sandbox_id, type(exc).__name__)
         return await self._save(state, token)
 
     async def start(self, sandbox_id: str) -> PreviewSessionState:
         state = await self._ensure_alive(sandbox_id)
+        if state.preview_mode == "document":
+            raise ValueError("Private document previews have no app host")
         if state.sealed_archive_sha256:
             raise ValueError("Sealed candidate runtime cannot be restarted through artifact preview")
         async with self._operation(sandbox_id, "start") as (state, token):
@@ -667,7 +799,7 @@ class ArtifactPreviewSessionManager:
             state.status, state.preview_url, state.last_error = "starting", None, None
             await self._save(state, token)
             try:
-                self._validate_identity(state, state.manifest)
+                manifest = self._validate_identity(state, state.manifest)
                 adapter = self._adapter(state.provider)
                 session_id = self._session_id(state)
                 stopped = await adapter.run_command(session_id=session_id, command=f"{_RUNTIME} stop", timeout_seconds=30)
@@ -685,29 +817,39 @@ class ArtifactPreviewSessionManager:
                 url = await adapter.get_preview_url(session_id=session_id, port=_PREVIEW_PORT)
                 if not url:
                     return await self._fail(state, "Preview provider did not publish the frontend port", token)
+                auth_env = await self._preview_auth_environment(
+                    state, token, adapter=adapter, url=url, auth_required=manifest.get("authRequired", True),
+                )
                 command = (
                     f"{_RUNTIME} start --app-root {shlex.quote(self._workdir(state.provider) + '/app')} "
                     f"--preview-url {shlex.quote(url)} > /tmp/mozaiks-preview-start.log 2>&1"
                 )
+                if state.keycloak_cleanup_grace:
+                    # Keep the published port during cleanup without extending
+                    # the canonical app runtime beyond the Studio deadline.
+                    remaining = int((state.expires_at - _utcnow()).total_seconds())
+                    if remaining <= 0:
+                        return await self._fail(state, "Preview expired during startup", token)
+                    command = f"timeout --kill-after=10s {remaining}s {command}"
                 result = await adapter.run_command(
                     session_id=session_id, command=command, background=True,
-                    envs={"__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS": urlsplit(url).hostname or ""},
+                    envs={**auth_env, "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS": urlsplit(url).hostname or ""},
                 )
                 if not result.success:
                     return await self._fail(state, "Preview runtime process failed to start", token)
-                return await self._finish_start(state, _PREVIEW_PORT, token)
+                return await self._finish_start(state, _PREVIEW_PORT, url, token)
             except PreviewLeaseLostError:
                 raise
             except asyncio.CancelledError:
                 await self._fail(state, "Preview startup cancelled", token)
                 raise
-            except ValueError as exc:
+            except (ValueError, KeycloakPreviewRegistrationError) as exc:
                 return await self._fail(state, str(exc), token)
             except Exception as exc:
                 logger.warning("preview_start_failed sandbox=%s exception=%s", sandbox_id, type(exc).__name__)
                 return await self._fail(state, "Preview startup failed; inspect the sandbox runtime logs", token)
 
-    async def _finish_start(self, state: PreviewSessionState, port: int, token: str) -> PreviewSessionState:
+    async def _finish_start(self, state: PreviewSessionState, port: int, url: str, token: str) -> PreviewSessionState:
         adapter = self._adapter(state.provider)
         deadline = time.monotonic() + self._startup_timeout_seconds
         while True:
@@ -721,9 +863,6 @@ class ArtifactPreviewSessionManager:
             if time.monotonic() >= deadline:
                 return await self._fail(state, "Preview backend or frontend did not become healthy", token)
             await asyncio.sleep(1)
-        url = await adapter.get_preview_url(session_id=self._session_id(state), port=port)
-        if not url:
-            return await self._fail(state, "Preview provider did not publish the frontend port", token)
         state.preview_url, state.status, state.last_error = url, "running", None
         state.health_checked_at = _utcnow()
         return await self._save(state, token)
@@ -772,10 +911,7 @@ class ArtifactPreviewSessionManager:
             async with self._operation(sandbox_id, "stop") as (state, token):
                 state.status, state.preview_url, state.last_error = "error", None, "Preview cleanup pending"
                 await self._save(state, token)
-                if state.session_id:
-                    stopped = await self._adapter(state.provider).terminate_session(session_id=state.session_id)
-                    if not stopped:
-                        raise RuntimeError("Preview provider could not confirm the sandbox stopped")
+                await self._terminate_resources(state, token)
                 await self._store.release(sandbox_id, operation_token=token, provider_absent=True)
         await self._broadcast(sandbox_id, {
             "type": "status", "status": "error", "lastError": "Preview stopped", "previewUrl": None,

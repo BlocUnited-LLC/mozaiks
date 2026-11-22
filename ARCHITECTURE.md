@@ -117,12 +117,13 @@ See [docs/architecture/foundations/distribution-and-workspace-model.md](docs/arc
 
 Customer-facing terminology follows a different layer:
 
-- `Studio` is an internal host/composition term
-- visible UX should prefer `Apps`, `Build`, `Operations`, `Integrations`, and
-  `Admin`
+- `Studio` is the signed-in builder's entry to workspace management;
+  `Studio host` refers to runtime composition
+- `My Apps` and `Performance` are workspace destinations inside Studio.
+  Generated apps use `Admin` for their own administration
 - app creation and evolution should use `Genesis Build` and `Refinement Run`;
   `refinement` remains the internal engine and contract term
-- `Hub`, `Studio` as a top-level product area, and `Adapters` should not be
+- `Hub` and `Adapters` should not be
   treated as long-term customer-facing IA
 
 **Working modes:**

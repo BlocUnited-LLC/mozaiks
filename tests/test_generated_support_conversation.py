@@ -202,3 +202,41 @@ def test_loader_binds_sibling_messages_to_each_workspace(tmp_path):
     assert Path(first_service.create_thread.__code__.co_filename).is_relative_to(first)
     assert Path(second_service.create_thread.__code__.co_filename).is_relative_to(second)
     assert type(first_service) is not type(second_service)
+
+
+@pytest.mark.asyncio
+async def test_profile_visibility_and_operator_queue_are_requester_scoped(tmp_path):
+    _materialize(tmp_path)
+    executor = _executor(tmp_path)
+    persistence = _Persistence()
+    submit = ["support.submit"]
+    before = await _dispatch(executor, persistence, "alice", submit, "support", "get_support_profile", {})
+    assert before.success and before.data["profile_visible"] is False
+    created = await _dispatch(executor, persistence, "alice", submit, "support", "create_support_request", {"message": "Help"})
+    assert created.success and created.data["success"]
+    after = await _dispatch(executor, persistence, "alice", submit, "support", "get_support_profile", {})
+    assert after.data["profile_visible"] is True
+    stranger = await _dispatch(executor, persistence, "bob", submit, "support", "get_support_profile", {})
+    assert stranger.data["requests"] == [] and stranger.data["profile_visible"] is False
+    denied = await _dispatch(executor, persistence, "bob", submit, "support", "list_support_requests", {"scope": "app"})
+    assert not denied.success and denied.error_code == "PERMISSION_DENIED"
+    operator = await _dispatch(executor, persistence, "operator", ["support.submit", "support.read"], "support", "list_support_requests", {"scope": "app", "status": "all"})
+    assert len(operator.data["requests"]) == 1
+    spoof = await _dispatch(executor, persistence, "alice", submit, "support", "create_support_request", {"message": "Help", "app_id": "another-app"})
+    assert not spoof.success and spoof.error_code == "PERMISSION_DENIED"
+
+
+@pytest.mark.asyncio
+async def test_admin_inbox_retains_legacy_default_subject_tickets(tmp_path):
+    _materialize(tmp_path)
+    executor = _executor(tmp_path)
+    persistence = _Persistence()
+    created = await _dispatch(executor, persistence, "alice", ["support.submit"], "support", "create_support_request", {"message": "Existing ticket"})
+    request_id = created.data["request"]["request_id"]
+    persistence.collection("support", "requests").rows[0]["subject_app_id"] = "default"
+    permissions = ["support.submit", "support.read", "support.manage"]
+    inbox = await _dispatch(executor, persistence, "operator", permissions, "support", "list_support_requests", {"scope": "app", "status": "all"})
+    assert [row["request_id"] for row in inbox.data["requests"]] == [request_id]
+    replied = await _dispatch(executor, persistence, "operator", permissions, "support", "reply_support_request", {"request_id": request_id, "body": "We received this"})
+    assert replied.success and replied.data["success"]
+    assert persistence.collection("support", "requests").rows[0]["subject_app_id"] == "default"

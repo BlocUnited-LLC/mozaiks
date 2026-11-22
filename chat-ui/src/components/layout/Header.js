@@ -15,6 +15,7 @@ import {
   resolveShellActions,
 } from "../../navigation/shellActions";
 import { useChatUI } from "../../context/ChatUIContext";
+import { safeReturnPath } from "../../auth/authAdapter.js";
 import { useAppEventBus } from "../../ui/hooks/useAppEventBus.js";
 import { clearNotifications, fetchNotificationCount } from "./notificationApi.js";
 import "./header-styles.css";
@@ -151,6 +152,7 @@ const Header = ({
   chatTheme = null,
   route = null,
   shellMode = null,
+  hasMobileBottomBar = false,
   onAction = () => {},
   onNotificationClick = null,
 }) => {
@@ -165,7 +167,8 @@ const Header = ({
     pages,
   } = useNavigation();
   const handleNavigationItem = useNavigationActions();
-  const { login, logout } = useChatUI();
+  const { login, logout, api } = useChatUI();
+  const dashboardLocation = useRef(null);
 
   const headerConfig = {
     ...DEFAULT_HEADER_CONFIG,
@@ -177,6 +180,7 @@ const Header = ({
   const brandConfig = { name: "MozaiksAI", ...(chatTheme?.branding || {}) };
 
   const currentUser = user || { id: "anonymous", firstName: "Guest", userPhoto: null };
+  dashboardLocation.current = JSON.stringify([location.pathname, location.search, currentUser.id, currentUser.user_id]);
   const userRoles = useMemo(() => getUserRoles(currentUser), [currentUser]);
   const shellActionContext = useMemo(
     () => deriveShellActionContext({ location, route, shellMode, user: currentUser, roles: userRoles }),
@@ -208,18 +212,23 @@ const Header = ({
     () => headerActions.find((item) => item?.variant === "gradient") || headerActions[0] || null,
     [headerActions]
   );
-  const profileMenu = useMemo(
-    () => filterPersonalAccountItems(
-      mergeProfileMenu([
-        ...(isSignInAvailable(shellAuth) ? pages || [] : []).filter((page) => page.path === landingSpot && isShellItemVisible(page, userRoles))
-          .map((page) => ({ id: 'app-home', label: page.label || 'Home', action: 'navigate', path: page.path })),
-        ...getDefaultProfileMenu(currentUser),
-      ], profileConfig.menu)
-        .filter((item) => isShellItemVisible(item, userRoles)),
+  const profileMenu = useMemo(() => {
+    const configured = Array.isArray(profileConfig.menu) ? profileConfig.menu : [];
+    const defaults = getDefaultProfileMenu(currentUser);
+    const landingPage = isSignInAvailable(shellAuth) && pages?.find(
+      (page) => page.path === landingSpot && isShellItemVisible(page, userRoles)
+    );
+    if (landingPage) {
+      // Studio resolves the owned build context when the portfolio is the landing page.
+      const studio = configured.find((item) => item?.id === 'app-dashboard' && item.path === landingPage.path);
+      defaults.unshift(studio || { id: 'app-home', label: landingPage.label || 'Home', action: 'navigate', path: landingPage.path });
+    }
+    return filterPersonalAccountItems(
+      mergeProfileMenu(defaults, configured).filter((item) => isShellItemVisible(item, userRoles)
+        && (item.id !== 'app-dashboard' || isAuthenticatedUser(currentUser))),
       shellAuth,
-    ),
-    [currentUser, profileConfig.menu, userRoles, shellAuth, pages, landingSpot]
-  );
+    );
+  }, [currentUser, profileConfig.menu, userRoles, shellAuth, pages, landingSpot]);
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -315,6 +324,22 @@ const Header = ({
     if (!action) return;
     const resolvedAction = resolveShellAction(action, shellActionContext);
 
+    if (resolvedAction.id === 'app-dashboard') {
+      const selectedLocation = dashboardLocation.current;
+      let path = '/apps';
+      const chatId = new URLSearchParams(location.search).get('chat_id');
+      if (shellActionContext.surface === 'workflow_session' && chatId) {
+        try {
+          const result = await api.get(`/api/studio/build/dashboard-link?chat_id=${encodeURIComponent(chatId)}`);
+          path = safeReturnPath(result?.path, '/apps');
+        } catch { /* An unavailable build context returns to this person's portfolio. */ }
+      }
+      if (selectedLocation !== dashboardLocation.current) return;
+      handleNavigationItem({ ...resolvedAction, path, href: undefined });
+      setIsProfileOpen(false);
+      return;
+    }
+
     if (resolvedAction.action === "signout" || resolvedAction.id === "signout") {
       await logout?.();
       setIsProfileOpen(false);
@@ -405,6 +430,7 @@ const Header = ({
   const dropdownPanelStyle = {
     borderRadius: "var(--shell-header-panel-radius, 1rem)",
   };
+  const useMobileHeaderNav = !hasMobileBottomBar && visibleHeaderPages.length > 0;
 
   const renderPrimaryActionIcon = (className = "h-5 w-5") => (
     primaryAction?.icon ? <ActionIcon icon={primaryAction.icon} className={className} /> : <DefaultPrimaryActionIcon className={className} />
@@ -416,16 +442,16 @@ const Header = ({
         {logoSrc && (
           <img
             src={logoSrc}
-            className="h-7 w-7 object-contain"
+            className="h-7 w-7 shrink-0 object-contain"
             alt={logoConfig.alt || brandName || "Logo"}
             onError={(event) => applyBrandImageFallback(event, logoFallback)}
           />
         )}
-        <span className="min-w-0">
+        <span className={`${useMobileHeaderNav ? "hidden md:block" : ""} min-w-0 max-w-[10.5rem] sm:max-w-[12rem]`}>
           {wordmarkSrc ? (
             <img
               src={wordmarkSrc}
-              className="h-6 max-w-[10.5rem] object-contain opacity-90 sm:h-7 sm:max-w-[12rem]"
+              className="h-6 max-w-full object-contain opacity-90 sm:h-7"
               alt={brandName || "Brand"}
             />
           ) : (
@@ -443,7 +469,7 @@ const Header = ({
           <button
             type="button"
             onClick={() => handleNavigationItem({ path: logoConfig.href })}
-            className="appearance-none border-0 bg-transparent p-0"
+            className="min-w-0 appearance-none border-0 bg-transparent p-0"
           >
             {content}
           </button>
@@ -465,13 +491,17 @@ const Header = ({
   };
 
   return (
-    <header className={`fixed top-0 left-0 right-0 z-50 bg-background text-foreground border-b border-border transition-shadow ${isScrolled ? "shadow-sm" : ""}`}>
+    <header className={`fixed top-0 left-0 right-0 z-50 bg-background text-foreground border-b border-border transition-shadow ${useMobileHeaderNav ? "shell-header-with-mobile-nav" : ""} ${isScrolled ? "shadow-sm" : ""}`}>
       <div className="relative flex w-full items-center justify-between" style={headerFrameStyle}>
         <div className="flex min-w-0 items-center" style={headerClusterStyle}>
           <LogoSection />
 
           {visibleHeaderPages.length > 0 && (
-            <nav className="hidden xl:flex items-center" style={headerNavStyle}>
+            <nav
+              aria-label="App navigation"
+              className={`${hasMobileBottomBar ? "hidden md:flex" : "flex"} min-w-0 items-center overflow-x-auto`}
+              style={headerNavStyle}
+            >
               {visibleHeaderPages.map((item) => {
                 const isActive = location.pathname === item.path;
                 return (
@@ -479,7 +509,8 @@ const Header = ({
                     key={item.id || item.path || item.label}
                     type="button"
                     onClick={() => handleNavigationItem(item)}
-                    className={`rounded-md border px-3 py-1.5 text-sm font-medium transition heading-font ${isActive
+                    aria-current={isActive ? "page" : undefined}
+                    className={`shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-sm font-medium transition heading-font ${isActive
                       ? "border-primary/40 bg-primary/10 text-foreground"
                       : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"}`}
                     style={navButtonStyle}
@@ -492,7 +523,7 @@ const Header = ({
           )}
         </div>
 
-        <div className="flex items-center" style={headerRightStyle}>
+        <div className="flex shrink-0 items-center" style={headerRightStyle}>
           {primaryAction && (
             <>
               <button
@@ -588,6 +619,7 @@ const Header = ({
                 onClick={() => setIsProfileOpen((open) => !open)}
                 className="flex items-center hover:bg-white/10 transition-colors"
                 title={profileLabel}
+                aria-expanded={isProfileOpen}
                 style={profileButtonStyle}
               >
                 <div className="relative">

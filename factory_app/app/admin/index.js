@@ -18,6 +18,7 @@ const AppsPage           = lazy(() => import('./pages/AppsPage.jsx'))
 const WorkspacePerformancePage   = lazy(() => import('./pages/WorkspacePerformancePage.jsx'))
 const WorkspaceUsagePage         = lazy(() => import('./pages/WorkspaceUsagePage.jsx'))
 const WorkspaceUsersPage         = lazy(() => import('./pages/WorkspaceUsersPage.jsx'))
+const WorkspaceAIModelsPage = lazy(() => import('./pages/WorkspaceAIModelsPage.jsx'))
 const WorkspaceIntegrationsPage  = lazy(() => import('./pages/WorkspaceIntegrationsPage.jsx'))
 const CreateAppRedirectPage = lazy(() => import('./pages/CreateAppRedirectPage.jsx'))
 const DashboardPortalPage = lazy(() => import('./pages/DashboardPortalPage.jsx'))
@@ -55,6 +56,10 @@ export function registerAdminComponents(registerComponent) {
 
   registerComponent('WorkspaceUsersPage', WorkspaceUsersPage, {
     description: 'Workspace users surface — total, active, and new user counts across all apps with per-app breakdown.',
+  })
+
+  registerComponent('WorkspaceAIModelsPage', WorkspaceAIModelsPage, {
+    description: 'Workspace AI model settings for Factory builds and refinements.',
   })
 
   registerComponent('WorkspaceIntegrationsPage', WorkspaceIntegrationsPage, {

@@ -61,7 +61,8 @@ def test_shell_header_and_widget_stay_mobile_tolerant() -> None:
 
     assert 'hidden md:flex items-center gap-2' in header_source
     assert 'md:hidden inline-flex items-center justify-center' not in header_source
-    assert 'h-6 max-w-[10.5rem] object-contain opacity-90 sm:h-7 sm:max-w-[12rem]' in header_source
+    assert 'min-w-0 max-w-[10.5rem] sm:max-w-[12rem]' in header_source
+    assert 'h-6 max-w-full object-contain opacity-90 sm:h-7' in header_source
 
     assert 'pb-24 md:pb-10 lg:pb-0' in layout_source
     assert "function WorkspaceMobileNavTrigger" in layout_source
@@ -120,8 +121,9 @@ def test_support_escalation_uses_profile_support_tab() -> None:
     assert "studioModuleAction('workspace_support'" in profile_panel_source
     assert "if (page?.error)" in profile_panel_source
     assert "supportError" in widget_source
-    assert "page_title:" not in widget_source
-    assert "page_url:" not in widget_source
+    assert "const requestPayload = supportModule === 'support'" in widget_source
+    assert "page_url: payload.page_url" in widget_source
+    assert "page_title: payload.page_title" in widget_source
     assert "subjectParams.set('username', username)" in profile_source
     assert "const subjectSuffix = subjectParams.toString() ? `?${subjectParams}` : '';" in profile_source
     assert "fetchWithAuth(`${backendUrl}/api/me/profile-pages${subjectSuffix}`, { signal }, auth)" in profile_source
@@ -242,6 +244,7 @@ def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
         "WorkspaceUsagePage": "workspace usage route stays responsive across desktop and mobile widths",
         "WorkspaceUsersPage": "workspace users route stays responsive across desktop and mobile widths",
         "WorkspaceIntegrationsPage": "workspace integrations route stays responsive across desktop and mobile widths",
+        "WorkspaceAIModelsPage": "workspace AI models route stays responsive across desktop and mobile widths",
         "UserSupportPage": "workspace support route stays responsive across desktop and mobile widths",
         "StudioPage": "app Studio root redirects to manifest default portal",
         "AppOverviewPage": "app overview route stays responsive across desktop and mobile widths",

@@ -18,6 +18,7 @@ from typing import Any
 
 import yaml
 
+from factory_app.workflows._shared.pack_selection import reviewed_pack_read_operation
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     admitted_module_file_map,
     extract_code_file_entries_from_payload,
@@ -37,6 +38,7 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     materialize_data_contract,
 )
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_authored_module_access_policy,
     resolve_design_access_policy,
 )
 from mozaiksai.core.workflow.generator_support.module_account_data import (
@@ -46,6 +48,11 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import pa
 from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
     materialize_module_read_implementations,
+)
+from mozaiksai.core.workflow.generator_support.module_revision import scoped_service_revision_paths
+from mozaiksai.core.workflow.generator_support.module_role_grants import (
+    validate_pack_permission_consumers,
+    verified_pack_authorization,
 )
 from mozaiksai.core.workflow.generator_support.module_write_actions import (
     assert_generated_action_permissions,
@@ -201,6 +208,7 @@ def _carried_contract_conflict(content: str, composed: dict[str, Any]) -> str | 
     return None
 
 
+@reviewed_pack_read_operation
 def _merge_code_files(
     feature_outputs: list[dict[str, Any]],
     *,
@@ -211,6 +219,7 @@ def _merge_code_files(
     subscription_contract: dict[str, Any] | None = None,
     context_variables: Any = None,
     carried_contracts: tuple[str, ...] = (),
+    revision_baseline: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
     """Merge code_files from feature outputs, deduping by filename.
 
@@ -263,6 +272,7 @@ def _merge_code_files(
         )
         if assignment_contract.get("aliases"):
             data_contract = assignment_contract
+    scoped_revision = scoped_service_revision_paths(context_variables, revision_baseline or {})
     owned_paths = list(file_map)
     if pack_data_contracts:
         owned_paths.append("data/contract.json")
@@ -272,21 +282,32 @@ def _merge_code_files(
         file_map, data_contract=data_contract, owned_paths=owned_paths,
         subscription_contract=subscription_contract, context_variables=context_variables,
     )
+    if scoped_revision and revision_baseline is not None:
+        data_path = "data/contract.json"
+        before, after = revision_baseline.get(data_path), file_map.get(data_path)
+        if before != after:
+            if before is None or after is None or json.loads(before) != json.loads(after):
+                raise ValueError("Implementation-only revision changed the carried data contract")
+            file_map[data_path] = before
     file_map = materialize_collection_auth(file_map, data_contract=data_contract)
     # Selected pack manifests come from registered templates, never model tasks.
     pack_paths = pack_owned_outputs(context_variables)
-    pack_manifests = frozenset(
+    verified_pack_inputs = frozenset(
         item["filename"] for pack in inventory for item in pack["files"]
         if item["filename"] in pack_paths
-        and item["filename"].startswith("modules/") and item["filename"].endswith("/module.yaml")
         and file_map.get(item["filename"]) == item["content"]
     )
+    pack_manifests = frozenset(
+        path for path in verified_pack_inputs if path.startswith("modules/") and path.endswith("/module.yaml")
+    )
     template_modules = verified_template_module_ids(file_map, inventory)
-    # A complete verified template backend owns its participant-aware policy and
-    # action implementations. All other modules retain canonical CRUD synthesis.
+    # Scoped revisions carry authored module contracts. Verified partial pack
+    # templates still need canonical compilation after assembly re-renders them.
     synthesis_files = {
         path: content for path, content in file_map.items()
-        if not (path.startswith("modules/") and path.split("/")[1] in template_modules)
+        if not path.startswith("modules/") or (
+            path.split("/")[1] not in template_modules and (not scoped_revision or path in verified_pack_inputs)
+        )
     }
     # Feature outputs may carry an auth edit alongside a module. Only the
     # pre-merge admitted bundle (or the canonical scaffold) can approve scopes.
@@ -302,7 +323,7 @@ def _merge_code_files(
         design_surface_map=design_surface_map,
         subscription_contract=subscription_contract,
         declared_auth_scopes=admitted_scopes,
-        access_policy=resolve_design_access_policy(context_variables),
+        access_policy=resolve_authored_module_access_policy(context_variables),
         pack_owned_manifest_paths=pack_manifests,
     ))
     synthesis_files.update(materialize_module_policies(synthesis_files, data_contract))
@@ -329,12 +350,17 @@ def _merge_code_files(
     synthesis_files.update(materialize_module_write_implementations(
         synthesis_files, app_build_plan=app_build_plan, data_contract=data_contract, owned_paths=service_paths,
         subscription_contract=subscription_contract,
-        access_policy=resolve_design_access_policy(context_variables),
+        access_policy=resolve_authored_module_access_policy(context_variables),
         design_surface_map=design_surface_map,
     ))
     file_map.update(synthesis_files)
     if "app.json" in file_map:
         approved_policy = resolve_design_access_policy(context_variables)
+        pack_authorization = verified_pack_authorization(context_variables) if approved_policy and approved_policy["grants"] else None
+        if pack_authorization and approved_policy is not None:
+            validate_pack_permission_consumers(
+                file_map, approved_policy, data_contract=data_contract, pack_authorization=pack_authorization,
+            )
         # Model outputs cannot set scopes or provider behavior while approved
         # roles are compiled. Render exclusively from the admitted auth source.
         candidate_auth = file_map.pop("config/auth.yaml", None)
@@ -344,6 +370,7 @@ def _merge_code_files(
         file_map.update(materialize_auth_scaffold(
             file_map, data_contract=data_contract, design_surface_map=design_surface_map,
             access_policy=approved_policy, auth_mode=(app_build_plan or {}).get("auth_mode"),
+            pack_authorization=pack_authorization,
         ))
         if candidate_auth is not None:
             allowed_auth = [yaml.safe_load(file_map.get("config/auth.yaml", "null"))]
@@ -353,7 +380,8 @@ def _merge_code_files(
                 raise ValueError("Generated assembly cannot author config/auth.yaml; only admitted auth and the approved scaffold may supply it")
         if app_build_plan is not None:
             final_grants = auth_contract_scopes(file_map, app_build_plan=app_build_plan, data_contract=data_contract)
-            for path, content in synthesis_files.items():
+            modules_to_check = file_map if scoped_revision else synthesis_files
+            for path, content in modules_to_check.items():
                 if path.startswith("modules/") and path.endswith("/module.yaml") and path not in pack_manifests:
                     assert_generated_action_permissions(path.split("/")[1], yaml.safe_load(content), app_build_plan, final_grants)
         file_map.setdefault("ui/lib/moduleApi.js", get_module_api_template())
@@ -371,10 +399,12 @@ def compiled_pack_module_templates(
     Integrity checks compare against this same compiler output; provenance or
     a candidate's own manifests cannot authorize a different implementation.
     """
+    from factory_app.workflows._shared.pack_selection import selected_pack_rows
+
     from .module_entitlement_gates import apply_entitlement_gates
 
     resolved = resolve_managed_capability_templates(
-        detach(context_variables.get("capability_packs")), context_variables=context_variables,
+        selected_pack_rows(context_variables), context_variables=context_variables,
     )
     templates = [
         file for file in resolved
@@ -403,6 +433,7 @@ async def assemble_features(
     subscription_contract: dict[str, Any] | None = None,
     context_variables: Any = None,
     carried_contracts: tuple[str, ...] = (),
+    revision_baseline: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """
     Merge feature outputs into a single workflow bundle.
@@ -430,6 +461,7 @@ async def assemble_features(
         subscription_contract=subscription_contract,
         context_variables=context_variables,
         carried_contracts=carried_contracts,
+        revision_baseline=revision_baseline,
     )
     logger.info(
         "Assembled %d feature outputs into %d files",

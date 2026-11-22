@@ -158,14 +158,17 @@ async def test_trusted_projection_survives_chat_persistence_replay_and_factory_b
         assert authority.model_visible is False
     assert context.get("screen") == "studio-create"
     assert context.get("concept_overview") is None  # data_reference remains non-replayable
-    validate_plan_origins({
+    plan = {
         "capability_packs": [{
             "capability_pack_id": "mozaikspay", "surface_id": "mozaikspay_managed",
             "surface_kind": "external_integration", "capability_source": "managed_capability",
             "pack_type": "billing_pack",
         }],
         "build_tasks": [],
-    }, context.snapshot())
+    }
+    # The real handoff preserves availability, never owner approval to use it.
+    with pytest.raises(ValueError, match="unapproved surface 'mozaikspay_managed'"):
+        validate_plan_origins(plan, context.snapshot())
 
 
 @pytest.mark.asyncio

@@ -30,6 +30,10 @@ from typing import Any
 import pytest
 import yaml
 
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
+from tests.test_factory_pack_selection import _enable_managed
+
 # ---------------------------------------------------------------------------
 # Repo paths
 # ---------------------------------------------------------------------------
@@ -105,70 +109,67 @@ class _FakeAgent:
 
 
 class TestManagedWalletContextInjection:
-    """Level A — Hook injects wallet context; OSS mode is a no-op."""
+    """Level A — Hook injects only owner-reviewed reusable pack context."""
 
-    def test_hook_injects_context_when_managed_wallet_in_capability_packs(self) -> None:
+    def test_hook_injects_context_when_wallet_pack_is_reviewed(
+        self, reviewed_wallet_context: dict[str, Any]
+    ) -> None:
         hook = _load_hook()
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [
-                {"id": "managed_wallet", "display_name": "Managed Wallet",
-                 "capability_source": "managed_capability"},
-            ],
-        })
+        agent = _FakeAgent("AppPlanAgent", context_variables=reviewed_wallet_context)
         hook.inject_managed_capabilities_context(agent, [])
         assert "[MANAGED CAPABILITIES CONTEXT]" in agent.system_message
-        assert "managed_wallet" in agent.system_message
+        assert 'Authorized reusable packs: [{"pack_id":"wallet"' in agent.system_message
 
-    def test_hook_injects_wallet_pack_capabilities(self) -> None:
+    def test_hook_injects_wallet_pack_capabilities(
+        self, reviewed_wallet_context: dict[str, Any]
+    ) -> None:
         hook = _load_hook()
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [
-                {
-                    "id": "wallet",
-                    "capability_source": "managed_capability",
-                    "status": "active",
-                    "capabilities": [
-                        {"capability_id": "wallet.view"},
-                        {"capability_id": "wallet.payout"},
-                        {"capability_id": "wallet.connect_provider"},
-                    ],
-                }
-            ],
-        })
+        agent = _FakeAgent("AppPlanAgent", context_variables=reviewed_wallet_context)
         hook.inject_managed_capabilities_context(agent, [])
         msg = agent.system_message
         assert "wallet" in msg
         assert "wallet.view" in msg
         assert "wallet.payout" in msg
 
-    def test_hook_injects_no_module_contract_planning_rule_for_managed_capability(self) -> None:
+    def test_hook_injects_no_module_contract_planning_rule_for_managed_capability(
+        self, reviewed_wallet_context: dict[str, Any]
+    ) -> None:
         hook = _load_hook()
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [{"id": "wallet", "capability_source": "managed_capability"}],
-        })
+        agent = _FakeAgent("AppPlanAgent", context_variables=reviewed_wallet_context)
         hook.inject_managed_capabilities_context(agent, [])
         msg = agent.system_message
         assert "module_contract" in msg
         assert "external_integration" in msg
 
-    def test_hook_supports_selected_active_pack_surfaces(self) -> None:
+    def test_hook_supports_selected_active_pack_surfaces(
+        self, reviewed_mozaikspay_context: dict[str, Any]
+    ) -> None:
         hook = _load_hook()
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [{"id": "mozaikspay", "capability_source": "managed_capability"}],
-        })
+        agent = _FakeAgent("AppPlanAgent", context_variables=reviewed_mozaikspay_context)
         hook.inject_managed_capabilities_context(agent, [])
         msg = agent.system_message
         assert "generate one" in msg
         assert "selected active" in msg
         assert "operator contract" in msg
 
-    def test_hook_no_op_in_oss_mode(self) -> None:
+    def test_hook_preserves_explicit_empty_reviewed_selection(self) -> None:
         hook = _load_hook()
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": None,
-        })
+        agent = _FakeAgent("AppPlanAgent", context_variables=reviewed_pack_fixture({}, []))
         hook.inject_managed_capabilities_context(agent, [])
-        assert agent.system_message == ""
+        assert "[REVIEWED PACK SELECTION]" in agent.system_message
+        assert "Authorized reusable packs: []" in agent.system_message
+        assert "[MANAGED CAPABILITIES CONTEXT]" not in agent.system_message
+
+    def test_hook_does_not_inject_unreviewed_registry_inventory(
+        self, registered_wallet_pack: list[dict[str, Any]]
+    ) -> None:
+        hook = _load_hook()
+        agent = _FakeAgent("AppPlanAgent", context_variables={"capability_packs": registered_wallet_pack})
+        hook.inject_managed_capabilities_context(agent, [])
+        assert "[REVIEWED PACK SELECTION]" in agent.system_message
+        assert "Authorized reusable packs: []" in agent.system_message
+        assert "[MANAGED CAPABILITIES CONTEXT]" not in agent.system_message
+        assert "wallet" not in agent.system_message
 
     def test_hook_oss_mode_does_not_mention_wallet_or_payment_provider(self) -> None:
         hook = _load_hook()
@@ -429,26 +430,14 @@ class TestCreatorDashboardBuildPlan:
         msg = _CREATOR_DASHBOARD_WALLET_ADAPTER_TASK["initial_message"]
         assert "PAYMENT_PROVIDER_SECRET_KEY" in msg
 
-    def test_build_plan_validates_with_app_build_plan_tool(self) -> None:
+    def test_build_plan_validates_with_app_build_plan_tool(
+        self, reviewed_wallet_context: dict[str, Any]
+    ) -> None:
         mod = _load_module(
             "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
             f"tests.app_build_plan_smoke.{id({})}",
         )
-
-        class _Ctx:
-            def __init__(self):
-                self.data: dict[str, Any] = {}
-
-            def get(self, key, default=None):
-                return self.data.get(key, default)
-
-            def set(self, key, value):
-                self.data[key] = value
-
-            def __setitem__(self, key, value):
-                self.data[key] = value
-
-        ctx = _Ctx()
+        ctx = ContextVariablesBridge(reviewed_wallet_context)
         result = mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
@@ -457,53 +446,23 @@ class TestCreatorDashboardBuildPlan:
             },
             context_variables=ctx,
         )
-        assert ctx.data.get("app_plan_ready") is True
-        cached = ctx.data["app_build_plan"]
+        assert ctx.get("app_plan_ready") is True
+        cached = ctx.get("app_build_plan")
         assert cached["capability_packs"][0]["capability_source"] == "managed_capability"
         assert "Build tasks: 5" in result
 
-    def test_build_plan_carries_managed_capability_required_integrations_from_context(self) -> None:
+    def test_build_plan_carries_managed_capability_required_integrations_from_context(
+        self, reviewed_mozaikspay_context: dict[str, Any]
+    ) -> None:
         mod = _load_module(
             "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
             f"tests.app_build_plan_smoke_integrations.{id({})}",
         )
-
-        class _Ctx:
-            def __init__(self):
-                self.data: dict[str, Any] = {
-                    "available_managed_capabilities": [
-                        {
-                            "id": "mozaikspay",
-                            "capability_source": "managed_capability",
-                            "required_integrations": [
-                                {
-                                    "service": "mozaikspay",
-                                    "provider": "mozaikspay",
-                                    "kind": "api_key",
-                                    "required_fields": [
-                                        {"name": "api_base", "type": "url", "frontend_safe": True},
-                                        {"name": "client_id", "type": "text", "frontend_safe": True},
-                                        {"name": "client_secret", "type": "secret", "frontend_safe": False},
-                                    ],
-                                }
-                            ],
-                        }
-                    ]
-                }
-
-            def get(self, key, default=None):
-                return self.data.get(key, default)
-
-            def set(self, key, value):
-                self.data[key] = value
-
-            def __setitem__(self, key, value):
-                self.data[key] = value
-
-        ctx = _Ctx()
+        ctx = ContextVariablesBridge(reviewed_mozaikspay_context)
         mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
+                "monetization_provider": "mozaiks_pay",
                 "capability_packs": [
                     {
                         "capability_pack_id": "mozaikspay",
@@ -522,30 +481,28 @@ class TestCreatorDashboardBuildPlan:
             context_variables=ctx,
         )
 
-        pack = ctx.data["app_build_plan"]["capability_packs"][0]
+        pack = ctx.get("app_build_plan")["capability_packs"][0]
         requirement = pack["required_integrations"][0]
         assert requirement["service"] == "mozaikspay"
-        assert {field["name"] for field in requirement["required_fields"]} == {
-            "api_base",
-            "client_id",
-            "client_secret",
+        assert requirement["provider"] == "mozaiks_pay"
+        assert requirement["kind"] == "api_key"
+        assert {field["name"]: field["frontend_safe"] for field in requirement["required_fields"]} == {
+            "api_base": True,
+            "api_key": False,
+        }
+        assert {field["name"]: field["frontend_safe"] for field in requirement["optional_fields"]} == {
+            "client_id": True,
+            "client_secret": False,
         }
 
-    def test_build_plan_rejects_if_wallet_module_contract_added(self) -> None:
+    def test_build_plan_rejects_if_wallet_module_contract_added(
+        self, reviewed_wallet_context: dict[str, Any]
+    ) -> None:
         mod = _load_module(
             "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
             f"tests.app_build_plan_smoke_guard.{id({})}",
         )
-
-        class _Ctx:
-            def __init__(self):
-                self.data: dict[str, Any] = {}
-
-            def get(self, key, default=None):
-                return self.data.get(key, default)
-
-            def __setitem__(self, key, value):
-                self.data[key] = value
+        ctx = ContextVariablesBridge(reviewed_wallet_context)
 
         drift_task = {
             "task_id": "drift_wallet_contract",
@@ -568,7 +525,7 @@ class TestCreatorDashboardBuildPlan:
                     "capability_packs": [_CREATOR_DASHBOARD_MANAGED_CAPABILITY],
                     "build_tasks": [drift_task],
                 },
-                context_variables=_Ctx(),
+                context_variables=ctx,
             )
 
     def test_dependency_order_is_consistent(self) -> None:
@@ -586,12 +543,19 @@ class TestCreatorDashboardBuildPlan:
 @pytest.fixture()
 def wallet_pack_root(tmp_path: Path) -> Path:
     """Minimal pack source with active wallet context and template tree."""
-    wallet_dir = tmp_path
+    wallet_dir = tmp_path / "pack-registry" / "wallet"
     tpl_dir = wallet_dir / "templates" / "services" / "integrations"
     tpl_dir.mkdir(parents=True)
 
     manifest = {
         "context_id": "wallet",
+        "applies_to_workflows": ["DesignDocs", "AppGenerator"],
+        "capabilities": [
+            {"capability_id": "wallet.view"},
+            {"capability_id": "wallet.payout"},
+            {"capability_id": "wallet.connect_provider"},
+        ],
+        "projections": {"context_variables": {"capability_packs": {"from": "capability_packs"}}},
         "assets": [
             {"path": "templates/", "kind": "templates"},
         ],
@@ -611,7 +575,7 @@ def wallet_pack_root(tmp_path: Path) -> Path:
         "    async def request_payout(self, *, amount=None): ...\n",
         encoding="utf-8",
     )
-    return tmp_path
+    return wallet_dir
 
 
 @pytest.fixture()
@@ -627,6 +591,25 @@ def pack_sources(wallet_pack_root: Path) -> list[dict[str, Any]]:
             "digest": metadata["digest"],
         }
     ]
+
+
+@pytest.fixture()
+def registered_wallet_pack(
+    monkeypatch: pytest.MonkeyPatch, wallet_pack_root: Path, pack_sources: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(wallet_pack_root.parent))
+    return pack_sources
+
+
+@pytest.fixture()
+def reviewed_wallet_context(registered_wallet_pack: list[dict[str, Any]]) -> dict[str, Any]:
+    return reviewed_pack_fixture({"capability_packs": registered_wallet_pack}, ["wallet"])
+
+
+@pytest.fixture()
+def reviewed_mozaikspay_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    _enable_managed(tmp_path, monkeypatch)
+    return reviewed_pack_fixture({"subscription_contract": {"contract_required": True}}, ["mozaikspay"])
 
 
 def _simulate_creator_dashboard_feature_outputs() -> list[dict[str, Any]]:

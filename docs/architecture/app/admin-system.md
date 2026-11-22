@@ -20,9 +20,9 @@ product app operations.
 Framework-owned admin composition remains internal and host-owned. Build,
 Usage, app access, and support are product surfaces; they are not admin
 sections. Deep diagnostic routes such as `/apps/:appId/health`,
-`/apps/:appId/activity`, and `/apps/:appId/integrations` may remain routable but
+and `/apps/:appId/activity` may remain routable but
 hidden from primary navigation when they are needed for support, build history,
-or setup detail. Hosted deployments may provide billing or hosting surfaces
+or setup detail. The app owner manages connections from Integrations in the selected app’s Studio navigation. Hosted deployments may provide billing or hosting surfaces
 through their own workspace routes or capability packs; the OSS factory Studio
 does not hardcode those hosted product routes.
 

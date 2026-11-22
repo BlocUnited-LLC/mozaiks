@@ -8,12 +8,16 @@ import pytest
 
 from factory_app.workflows.AppGenerator.tools.app_plan_review import review_app_build_plan
 from mozaiksai.core.workflow.context.frozen import detach
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_app_plan_managed_facade_repair import _plan_and_context, _task
 from tests.test_continuous_deterministic_materialization import _load_models
 
 
 @pytest.fixture(autouse=True)
-def _load_factory_contracts():
+def _load_factory_contracts(monkeypatch, tmp_path):
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
     _load_models()
 
 
@@ -58,7 +62,14 @@ def _with_second_app_module(plan, context, module_id="invoices"):
         "primary_entities": [], "owned_pages": [],
     })
     context.set("design_surface_map", design)
+    _review_fixture_design(context)
     return plan, context
+
+
+def _review_fixture_design(context):
+    """Explicitly review this identity fixture's revised, grant-free design."""
+    reviewed = reviewed_pack_fixture(context.snapshot(), ["mozaikspay"])
+    context.set("design_docs_artifact", reviewed["design_docs_artifact"])
 
 
 def _review(plan, context):
@@ -131,6 +142,7 @@ def test_page_dependencies_expand_all_owners_without_losing_explicit_foreign_edg
         "surface_id": "app_pages", "surface_kind": "ui_only", "owner": "app",
     })
     context.set("design_surface_map", design)
+    _review_fixture_design(context)
     billing_service = next(task for task in plan["build_tasks"] if task["task_type"] == "business_services" and task["capability_pack_id"] == "invoices")
     billing_service["task_id"] = "billing.services"
     task_service = next(task for task in plan["build_tasks"] if task["task_type"] == "business_services" and task["capability_pack_id"] == "task_management")
@@ -174,6 +186,7 @@ def test_qualified_name_collision_preserves_existing_task_and_scoped_dependencie
         "surface_id": "audit_service", "surface_kind": "external_integration", "owner": "app",
     })
     context.set("design_surface_map", design)
+    _review_fixture_design(context)
     plan["build_tasks"].append({
         **_task("task_management.module_contract", "service_foundation", "ConfigMiddlewareAgent", None, ["services/integrations/audit_client.py"]),
         "surface_id": "audit_service", "surface_kind": "external_integration",
@@ -195,6 +208,7 @@ def test_synthesized_coverage_task_cannot_reintroduce_an_existing_identity():
         "surface_id": "audit_service", "surface_kind": "external_integration", "owner": "app",
     })
     context.set("design_surface_map", design)
+    _review_fixture_design(context)
     plan["build_tasks"] = [task for task in plan["build_tasks"] if task["task_id"] != "7"]
     for task in plan["build_tasks"]:
         task["depends_on"] = [dependency for dependency in task["depends_on"] if dependency != "7"]

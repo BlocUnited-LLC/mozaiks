@@ -70,11 +70,11 @@ def test_non_yaml_content_is_unchanged(path):
     assert FileUpdate(path=path, content=_INVALID).content == _INVALID
 
 
-def _response(model, content):
+def _response(model, content, path=_PATH):
     result = {"summary": "Update the selected page", "rationale": "Preserve the selected scope",
-              "updated_files": [{"path": _PATH, "content": content}]}
+              "updated_files": [{"path": path, "content": content}]}
     if model is CodingWorkerPlan:
-        result.update(owned_paths=[_PATH], validation_strategy="docker", validation_commands=[],
+        result.update(owned_paths=[path], validation_strategy="docker", validation_commands=[],
                       start_preview=False, needs_human_review=False)
     return json.dumps(result)
 
@@ -92,8 +92,12 @@ def _message_texts(call):
 @pytest.mark.parametrize("model", [CodingWorkerPlan, SurfaceRegenerationResponse])
 @pytest.mark.parametrize("mode", ["native", "prompted"])
 @pytest.mark.parametrize("outcome,retries,expected_calls", [("corrected", 2, 2), ("exhausted", 2, 3), ("zero", 0, 1)])
-async def test_native_ag2_repairs_yaml_with_production_response_models(
-    monkeypatch, model, mode, outcome, retries, expected_calls,
+@pytest.mark.parametrize("path,invalid,valid,diagnostic", [
+    (_PATH, _INVALID, _VALID, f"{_PATH}: invalid YAML (ReaderError) at character 15"),
+    ("ui/pages/Calendar.jsx", "names.join(' \x00b7 ')", "names.join(' · ')", "raw NUL at character 13"),
+])
+async def test_native_ag2_repairs_generated_source_with_production_response_models(
+    monkeypatch, model, mode, outcome, retries, expected_calls, path, invalid, valid, diagnostic,
 ):
     """Actual ask/content and error feedback; scripted model transport, no provider."""
     def deny_network(*args, **kwargs):
@@ -101,19 +105,20 @@ async def test_native_ag2_repairs_yaml_with_production_response_models(
 
     monkeypatch.setattr(socket.socket, "connect", deny_network)
     monkeypatch.setattr(socket, "getaddrinfo", deny_network)
-    rejected = _response(model, _INVALID)
-    responses = [rejected, _response(model, _VALID)] if outcome == "corrected" else [rejected] * expected_calls
+    rejected = _response(model, invalid, path)
+    responses = [rejected, _response(model, valid, path)] if outcome == "corrected" else [rejected] * expected_calls
     tracking = TrackingConfig(ScriptedConfig(*responses))
-    scope_prompt = json.dumps({"selected_file_paths": [_PATH], "instruction": "Preserve existing roles and auth."})
-    agent = Agent("YamlContractRegression", prompt="Change only the explicitly selected file.", config=tracking)
+    scope_prompt = json.dumps({"selected_file_paths": [path], "instruction": "Preserve existing roles and auth."})
+    agent = Agent("FileUpdateRegression", prompt="Change only the explicitly selected file.", config=tracking)
     reply = await agent.ask(scope_prompt, response_schema=response_schema_to_ag2(model, {"structured_output_mode": mode}))
     if outcome == "corrected":
         result = await reply.content(retries=retries)
         assert isinstance(result, model)
-        assert result.updated_files == [FileUpdate(path=_PATH, content=_VALID)]
+        assert result.updated_files == [FileUpdate(path=path, content=valid)]
     else:
-        with pytest.raises(ValidationError, match="invalid YAML"):
+        with pytest.raises(ValidationError) as rejected_update:
             await reply.content(retries=retries)
+        assert diagnostic in rejected_update.value.errors(include_input=False)[0]["msg"]
     assert len(tracking.calls) == expected_calls
     for call in tracking.calls[1:]:
         messages = list(_message_texts(call))
@@ -121,7 +126,12 @@ async def test_native_ag2_repairs_yaml_with_production_response_models(
         assert rejected in messages
         feedback = [text for text in messages if "== Validation Error ==" in text]
         assert feedback
-        assert all(f"{_PATH}: invalid YAML (ReaderError) at character 15" in text for text in feedback)
+        assert all(diagnostic in text for text in feedback)
+
+
+def test_source_escape_sequences_and_unicode_remain_exact():
+    source = r"const separator = '\u0000'; // 星 · café – 🌱"
+    assert FileUpdate(path="page.jsx", content=source).content == source
 
 
 def test_syntax_validation_does_not_grant_file_scope():

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from types import MappingProxyType
+from unittest.mock import AsyncMock
 
 import pytest
 import yaml
 
+from factory_app.workflows._shared.pack_selection import pin_pack_choices
 from mozaiksai.core.session.build_context import (
     discover_pack_descriptors,
     load_contract_descriptors,
@@ -18,6 +20,17 @@ from tests import test_designdocs_monetization_inventory as inventory
 persistence = inventory.persistence
 
 
+@pytest.fixture(autouse=True)
+def pack_owner_review(monkeypatch, tmp_path):
+    """Ownership units supply a review; review/denial behavior has its own suite."""
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
+    async def approve(_tool, payload, **_kwargs):
+        return {"action": "approve", "approved": True, "review_id": payload["review_id"]}
+    monkeypatch.setattr(inventory.save_design_doc, "use_ui_tool", AsyncMock(side_effect=approve))
+
+
 def _context(*, managed: bool):
     context = inventory._context(monetized=managed, subscription=managed)
     if managed:
@@ -26,6 +39,7 @@ def _context(*, managed: bool):
         descriptor = discover_pack_descriptors(pack_root, config)[0]
         context.set("capability_packs", [descriptor])
         context.set("operator_capabilities", ["mozaikspay"])
+        context.set("pack_selection", pin_pack_choices(context, ["mozaikspay"]))
         assert isinstance(context.get("capability_packs")[0], MappingProxyType)
     return context
 
@@ -101,30 +115,24 @@ def test_subscription_state_module_normalized_before_storage(persistence):
     assert "update_subscription" not in facade["owned_mutations"]
 
 
-@pytest.mark.parametrize("selection", ["explicit_disabled_monetization", "subscription_default"])
-def test_managed_state_owner_follows_selected_or_default_pack(persistence, selection):
-    if selection == "explicit_disabled_monetization":
-        context = _context(managed=True)
-        context.set("monetization_enabled", False)
-    else:
-        context = inventory._context(monetized=True, subscription=True)
-        assert context.get("capability_packs") is None
-    bundle = inventory._bundle(pricing=False)
-    _add_surface(
-        bundle, surface_id="subscription_management", name="Subscription Management",
-        route="/subscription", entities=["Subscription"], actions=["update_subscription"],
-        collection="subscriptions",
-    )
-    submitted = deepcopy(bundle)
+def test_disabled_monetization_cannot_select_managed_billing(persistence):
+    context = _context(managed=True)
+    context.set("monetization_enabled", False)
+    result = inventory._save(context, inventory._bundle(pricing=False))
+    assert result["outcome"] == "revise", result
+    assert "explicit monetization intent" in result["error"]
+    persistence[1].assert_not_called()
 
+
+def test_subscription_intent_does_not_select_a_provider(persistence):
+    context = inventory._context(monetized=True, subscription=True)
+    bundle = inventory._bundle(pricing=True)
     result = inventory._save(context, bundle)
-
     assert result["outcome"] == "saved", result
-    assert not any(
-        collection["name"] == "subscriptions"
-        for surface in context.get("data_contract")["surfaces"] for collection in surface["collections"]
-    )
-    assert bundle == submitted, "Normalization must detach the submitted design before editing"
+    assert not any(surface["surface_id"] == "billing_portal"
+                   for surface in context.get("design_surface_map")["surfaces"])
+    summary = persistence[2].await_args.kwargs["summary_payload"]
+    assert summary["access_policy_review"]["pack_identities"] == []
 
 
 @pytest.mark.parametrize("surface_id,name,route,entity,action", [
@@ -393,6 +401,7 @@ def test_custom_pack_ownership_only_applies_when_selected(persistence, tmp_path,
     descriptor, contracts = _search_pack(tmp_path, monkeypatch)
     context.set("operator_contracts", contracts)
     context.set("capability_packs", [descriptor] if selected else [])
+    context.set("pack_selection", pin_pack_choices(context, ["managed_search"]) if selected else [])
     bundle = inventory._bundle(pricing=False)
     _add_surface(
         bundle, surface_id="index_management", name="Search Index Management", route="/search",
@@ -414,6 +423,7 @@ def test_custom_pack_facade_with_declared_action_saves_through_real_bridge(persi
     context = _context(managed=False)
     descriptor, _ = _search_pack(tmp_path, monkeypatch)
     context.set("capability_packs", [descriptor])
+    context.set("pack_selection", pin_pack_choices(context, ["managed_search"]))
     bundle = inventory._bundle(pricing=False)
     _add_surface(
         bundle, surface_id="search_portal", name="Search", route="/search",
@@ -433,6 +443,7 @@ def test_an_unverifiable_selected_managed_pack_refuses_the_design(persistence, t
     _, store_factory, _ = persistence
     context = _context(managed=False)
     descriptor, contracts = _search_pack(tmp_path, monkeypatch)
+    context.set("pack_selection", pin_pack_choices(context, ["managed_search"]))
     monkeypatch.delenv("MOZAIKS_BUILD_CONTEXT_PATH")
     context.set("operator_contracts", contracts)
     context.set("capability_packs", [descriptor])
@@ -440,8 +451,7 @@ def test_an_unverifiable_selected_managed_pack_refuses_the_design(persistence, t
     result = inventory._save(context, inventory._bundle(pricing=False))
 
     _assert_refused(context, result, store_factory, owner="managed_search")
-    assert "Selected managed pack 'managed_search' cannot be verified" in result["error"]
-    assert "not in a workspace build context" in result["error"]
+    assert "no longer available" in result["error"]
 
 
 def test_malformed_selected_ownership_contract_is_not_silently_ignored(persistence, tmp_path, monkeypatch):
@@ -452,8 +462,14 @@ def test_malformed_selected_ownership_contract_is_not_silently_ignored(persisten
     contract["surface_ownership"] = None
     (tmp_path / "managed_search/contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
     context.set("capability_packs", [descriptor])
+    from factory_app.workflows.DesignDocs.tools.select_capability_packs import (
+        select_capability_packs,
+    )
 
+    selection = select_capability_packs(["managed_search"], context_variables=context)
+    assert selection["status"] == "revise", selection
+    assert "surface_ownership must be a list" in selection["error"]
+    assert context.get("pack_selection") is None
     result = inventory._save(context, inventory._bundle(pricing=False))
-
-    _assert_refused(context, result, store_factory, owner="managed_search")
-    assert "surface_ownership must be a list" in result["error"]
+    assert result["outcome"] == "revise", result
+    store_factory.assert_not_called()

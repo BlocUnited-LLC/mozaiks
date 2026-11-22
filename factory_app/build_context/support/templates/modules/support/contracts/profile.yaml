@@ -1,0 +1,11 @@
+schema_version: mozaiks.profile.v2
+pages:
+  - id: support-tickets
+    label: Support
+    route: support-tickets
+    section: overview
+    order: 50
+    renderer: custom_component
+    component: SupportProfileTab
+    visibility: owner_only
+    action: get_support_profile

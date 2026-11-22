@@ -280,23 +280,24 @@ def test_messages_profile_tab_declared_for_dm_inbox() -> None:
     profile = _read_yaml(
         TEMPLATES / "modules" / "messages" / "contracts" / "profile.yaml"
     )
-    assert profile.get("schema_version") == "mozaiks.profile.v1"
-    tab_ids = {tab["id"] for tab in profile.get("tabs") or []}
+    assert profile.get("schema_version") == "mozaiks.profile.v2"
+    tab_ids = {tab["id"] for tab in profile.get("pages") or []}
     assert "messages" in tab_ids
+    assert profile["pages"][0]["visibility"] == "owner_only"
 
 
 # ---------------------------------------------------------------------------
 # UI contracts
 # ---------------------------------------------------------------------------
 
-def test_messaging_route_manifest_declares_messages_page() -> None:
-    manifest = json.loads(_read_text(TEMPLATES / "ui" / "route_manifest.json"))
-    page_ids = {p["id"] for p in manifest.get("pages") or []}
-    assert "messages" in page_ids
+def test_messaging_has_only_a_profile_workspace() -> None:
+    assert not (TEMPLATES / "ui" / "route_manifest.json").exists()
+    profile = _read_yaml(TEMPLATES / "modules/messages/contracts/profile.yaml")
+    assert profile["pages"][0]["component"] == "MessagingProfileTab"
 
 
 def test_messaging_ui_component_exists() -> None:
-    assert (TEMPLATES / "ui" / "pages" / "custom" / "Messages.jsx").exists()
+    assert not (TEMPLATES / "ui" / "pages" / "custom" / "Messages.jsx").exists()
     assert (TEMPLATES / "ui" / "components" / "MessagingProfileTab.jsx").exists()
     source = (TEMPLATES / "ui" / "components" / "MessagingProfileTab.jsx").read_text(encoding="utf-8")
     assert "get_thread" in source
@@ -305,7 +306,6 @@ def test_messaging_ui_component_exists() -> None:
 
 
 MESSAGING_UI_FILES = (
-    TEMPLATES / "ui" / "pages" / "custom" / "Messages.jsx",
     TEMPLATES / "ui" / "components" / "MessagingProfileTab.jsx",
 )
 
@@ -330,20 +330,13 @@ def test_messaging_ui_reads_only_theme_tokens_without_fallbacks() -> None:
         assert not [warning for warning in audit if "hardcodes" in warning], audit
 
 
-def test_messages_page_title_uses_the_page_title_role() -> None:
+def test_messaging_profile_owns_conversation_creation() -> None:
+    profile = _read_yaml(TEMPLATES / "modules/messages/contracts/profile.yaml")
+    assert [tab["action"] for tab in profile["pages"]] == ["list_threads"]
     source = _read_text(MESSAGING_UI_FILES[0])
-    assert 'import { PageHeader } from "@mozaiks/chat-ui/ui";' in source
-    assert re.search(r'<PageHeader\b[^>]*\btitle="Messages"', source)
-    assert "<h1" not in source
-
-
-def test_messaging_profile_tab_renders_only_its_list_threads_data() -> None:
-    profile = _read_yaml(TEMPLATES / "modules" / "messages" / "contracts" / "profile.yaml")
-    assert [tab["action"] for tab in profile["tabs"]] == ["list_threads"]
-    source = _read_text(MESSAGING_UI_FILES[1]).lower()
-    # list_threads returns only {threads, total}; the social pack owns the friends tab.
-    assert "friend" not in source
-    assert "create_thread" not in source
+    assert "create_thread" in source
+    assert "encodeURIComponent(username)" in source
+    assert 'href="/messages"' not in source
 
 
 # ---------------------------------------------------------------------------

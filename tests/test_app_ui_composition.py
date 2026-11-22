@@ -26,6 +26,7 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
 )
 from mozaiksai.core.workflow.generator_support.page_plan_utils import validate_planned_custom_routes
 from mozaiksai.core.workflow.generator_support.ui_registry_composition import compose_ui_registry
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_appgenerator_revision_baseline import baseline as revision_baseline  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,11 +79,11 @@ def test_actual_pack_custom_and_declarative_pages_preserve_bytes_and_metadata():
     files = {**app, **pack, **shared}
     registered, issues = resolve_registered_component_files(files, source_label="composed")
     assert not issues
-    assert set(registered) == {"Board", "Messages", "MessagingProfileTab"}
+    assert set(registered) == {"Board", "MessagingProfileTab"}
     routes = json.loads(shared["ui/route_manifest.json"])["pages"]
-    assert [route["path"] for route in routes] == ["/board", "/messages"]
+    assert [route["path"] for route in routes] == ["/board"]
     assert routes[0] == json.loads(app["ui/route_manifest.json"])["pages"][0]
-    assert routes[1] == json.loads(pack["ui/route_manifest.json"])["pages"][0]
+    assert "ui/route_manifest.json" not in pack
     assert files["ui/pages/projects.yaml"] == app["ui/pages/projects.yaml"]
     assert not audit_app_ui_bundle_integrity(contribution("all", files)["files"])
     assert app == original_app and pack == original_pack
@@ -104,12 +105,12 @@ def test_typed_route_bundle_survives_exclusive_pack_filter():
 
 
 def test_selected_pack_releases_only_exclusive_implementations_before_page_admission():
-    context = {"capability_packs": [{"id": "messaging", "pack_source_path": str(ROOT / "factory_app/build_context/messaging")}]}
+    context = reviewed_pack_fixture({}, ["messaging"])
     exclusive = pack_owned_output_paths(context)
     assert not exclusive & SHARED_PACK_OUTPUT_PATHS
-    assert {"modules/messages/module.yaml", "ui/pages/custom/Messages.jsx"} <= exclusive
+    assert {"modules/messages/module.yaml", "ui/components/MessagingProfileTab.jsx"} <= exclusive
     plan = {"build_tasks": [{"task_id": "pages", "owned_paths": [
-        "ui/pages/custom/Board.jsx", "ui/index.js", "ui/route_manifest.json", "ui/pages/custom/Messages.jsx",
+        "ui/pages/custom/Board.jsx", "ui/index.js", "ui/route_manifest.json", "ui/components/MessagingProfileTab.jsx",
     ]}, {"task_id": "data", "owned_paths": ["data/contract.json"]}]}
     release_pack_owned_paths(plan, context)
     assert plan["build_tasks"][0]["owned_paths"] == ["ui/pages/custom/Board.jsx", "ui/index.js", "ui/route_manifest.json"]
@@ -315,24 +316,29 @@ def test_current_accumulated_snapshot_cannot_hide_competing_active_owners(other_
 @pytest.mark.parametrize("other_owner", ["task", "pack"])
 async def test_actual_genesis_accumulated_copy_cannot_hide_competing_ui_owners(other_owner):
     from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
-    from tests.factory_context import factory_context
-    from tests.test_messaging_pack_persistence_composition import _assembled_files, _context
+    from tests.test_messaging_pack_persistence_composition import (
+        _assembled_files,
+        _reviewed_messaging_context,
+    )
 
     class Context(dict):
         def set(self, key, value):
             self[key] = value
 
-    files = component() if other_owner == "task" else _assembled_files()
+    files = component() if other_owner == "task" else {**_assembled_files(), **component("MessagingProfileTab", path="ui/pages/custom/Hijacked.jsx")}
     output = {"code_files": contribution("task:pages", files)["files"]}
-    context = Context(factory_context({
-        **_context(), "app_id": "genesis_collision", "code_files": output["code_files"],
+    context = Context(_reviewed_messaging_context({
+        "app_id": "genesis_collision", "code_files": output["code_files"],
         "data_contract": {"version": "1", "surfaces": [], "shared_collections": []},
         "app_task_batch_items": [{"task_id": "pages"}, *([{"task_id": "other"}] if other_owner == "task" else [])],
         "app_task_batch_results": {"pages": output, **({"other": output} if other_owner == "task" else {})},
     }))
     result = await assemble_app_tasks(context_variables=context)
     assert not result["success"]
-    assert "Competing owners for route" in result["error"]
+    if other_owner == "task":
+        assert "Competing owners for route" in result["error"]
+    else:
+        assert "component" in result["error"].lower()
 
 
 @pytest.mark.asyncio
@@ -340,7 +346,10 @@ async def test_actual_revision_assembly_updates_app_route_and_retains_verified_p
     from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
     from mozaiksai.core.workflow.context.adapter import create_context_container
     from tests.test_appgenerator_revision_baseline import _replace_archive
-    from tests.test_messaging_pack_persistence_composition import _assembled_files, _context
+    from tests.test_messaging_pack_persistence_composition import (
+        _assembled_files,
+        _reviewed_messaging_context,
+    )
 
     saved = request.getfixturevalue("revision_baseline")
     app = component(path="ui/pages/custom/board.jsx")
@@ -354,20 +363,21 @@ async def test_actual_revision_assembly_updates_app_route_and_retains_verified_p
     board["order"] = board["navigation"]["order"] = 90
     manifest["pages"].reverse()
     revised["ui/route_manifest.json"] = json.dumps(manifest)
-    selected = _context()
-    plan = {**selected["app_build_plan"], "pages": [{"name": "board", "route": "/board", "ui_surface": "custom_react_page"}],
-            "build_tasks": [{"task_id": "pages", "task_type": "page_bundle", "owned_paths": list(revised)}]}
-    context = create_context_container(initial={
-        **saved.context, **selected, "app_build_plan": plan,
+    plan = {
+        "pages": [{"name": "board", "route": "/board", "ui_surface": "custom_react_page"}],
+        "build_tasks": [{"task_id": "pages", "task_type": "page_bundle", "owned_paths": list(revised)}],
+    }
+    context = create_context_container(initial=_reviewed_messaging_context({
+        **saved.context, "app_build_plan": plan,
         "data_contract": {"version": "1", "surfaces": [], "shared_collections": []},
         "app_task_batch_results": {"pages": {"code_files": contribution("task:pages", revised)["files"]}},
-    })
+    }))
     result = await assemble_app_tasks(context_variables=context)
     assert result["success"], result
     files = {file["filename"]: file["content"] for file in result["code_files"]}
     assert json.loads(files["ui/route_manifest.json"])["pages"] == manifest["pages"]
-    assert files["ui/index.js"].count('registerComponent("Messages"') == 1
-    for path in ("modules/messages/backend/policy.py", "ui/pages/custom/Messages.jsx", "ui/pages/custom/board.jsx"):
+    assert files["ui/index.js"].count('registerComponent("MessagingProfileTab"') == 1
+    for path in ("modules/messages/backend/policy.py", "ui/components/MessagingProfileTab.jsx", "ui/pages/custom/board.jsx"):
         assert files[path] == saved.files[path]
     assert saved.content.get_bundle.await_count == 2
     saved.content.get_bundle.assert_awaited_with("immutable-archive")
@@ -384,7 +394,7 @@ async def test_actual_revision_assembly_updates_app_route_and_retains_verified_p
 def test_admitted_overlay_supersedes_saved_and_unchanged_task_routes_in_revision(repaired):
     board = component(path="ui/pages/custom/board.jsx")
     zeta = component("Zeta", path="ui/pages/custom/zeta.jsx", order=20)
-    pack = component("Messages", path="ui/pages/custom/Messages.jsx", order=50)
+    pack = component("Messages", path="ui/components/MessagingProfileTab.jsx", order=50)
     saved = {**board, **zeta, **pack, **compose(board, zeta, pack)}
     # The task re-emits board exactly as saved; the repair retitles one route.
     repair = {"ui/route_manifest.json": retitled(saved["ui/route_manifest.json"], repaired, "Repaired")}

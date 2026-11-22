@@ -25,7 +25,7 @@ _IDENTITY_FIELDS = ("app_id", "user_id", "artifact_id", "target_app_id", "build_
 _SEALED_IDENTITY_FIELDS = ("sealed_archive_sha256", "sealed_image_id")
 _STATE_FIELDS = {
     "session_id", "status", "preview_url", "last_error", "last_access_at",
-    "manifest", "paths", "has_requirements", "health_checked_at",
+    "manifest", "paths", "has_requirements", "health_checked_at", "keycloak_issuer", "keycloak_cleanup_grace",
 }
 _MAX_RESERVATIONS = 4096
 _T = TypeVar("_T")
@@ -121,10 +121,13 @@ class MongoPreviewStore:
         max_pending: int, queue_seconds: float, ttl_seconds: float,
     ) -> dict[str, Any]:
         fields = set(identity)
-        if fields not in (set(_IDENTITY_FIELDS), set(_IDENTITY_FIELDS) | set(_SEALED_IDENTITY_FIELDS)) or not all(
+        base_fields = set(_IDENTITY_FIELDS)
+        if fields not in (base_fields, base_fields | {"preview_mode"}, base_fields | set(_SEALED_IDENTITY_FIELDS)) or not all(
             isinstance(value, str) and value for value in identity.values()
         ):
             raise ValueError("Preview requires its complete immutable identity")
+        if "preview_mode" in fields and (identity["preview_mode"] != "document" or identity["provider"] != "e2b"):
+            raise ValueError("Invalid document preview identity")
         if fields & set(_SEALED_IDENTITY_FIELDS):
             if identity["provider"] != "docker" or any(
                 re.fullmatch(r"sha256:[0-9a-f]{64}", identity[name]) is None
@@ -145,7 +148,7 @@ class MongoPreviewStore:
             self._bind_limits(document, {"max_sessions": max_sessions, "max_owner_sessions": max_owner_sessions, "max_pending": max_pending})
             for current in document["entries"]:
                 if all(current[name] == identity[name] for name in ("app_id", "user_id", "artifact_id")):
-                    if any(current.get(name) != identity.get(name) for name in (*_IDENTITY_FIELDS, *_SEALED_IDENTITY_FIELDS)):
+                    if any(current.get(name) != identity.get(name) for name in (*_IDENTITY_FIELDS, *_SEALED_IDENTITY_FIELDS, "preview_mode")):
                         raise ValueError("Preview artifact identity changed")
                     return cast(dict[str, Any], current)
             if sum(item["phase"] == "queued" for item in document["entries"]) >= max_pending:
@@ -207,6 +210,11 @@ class MongoPreviewStore:
             raise ValueError("Preview paths must be a list of strings")
         if "has_requirements" in payload and not isinstance(payload["has_requirements"], bool):
             raise ValueError("Preview requirements marker must be boolean")
+        issuer = payload.get("keycloak_issuer")
+        if issuer is not None and (not isinstance(issuer, str) or not issuer):
+            raise ValueError("Preview Keycloak issuer must be nonempty text")
+        if "keycloak_cleanup_grace" in payload and not isinstance(payload["keycloak_cleanup_grace"], bool):
+            raise ValueError("Preview Keycloak cleanup grace marker must be boolean")
         if len(BSON.encode(payload)) > 1024 * 1024:
             raise ValueError("Preview metadata exceeds its storage limit")
         return deepcopy(payload)
@@ -369,6 +377,8 @@ class MongoPreviewStore:
                 raise PreviewLeaseLostError("Preview cleanup requires its current operation lease")
             if operation["kind"] not in {"stop", "recovery"}:
                 raise PreviewLeaseLostError("Only a cleanup operation can release a preview")
+            if session["state"].get("keycloak_issuer"):
+                raise PreviewRecoveryRequired("Keycloak preview client cleanup is not yet confirmed")
             closed = await self._sessions_collection().update_one(
                 {"_id": sandbox_id, "operation.token": operation_token, "operation.expires_at": {"$gt": self._now()}},
                 {"$set": {"closing": True}, "$inc": {"revision": 1}},

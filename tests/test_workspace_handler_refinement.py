@@ -72,7 +72,12 @@ from mozaiksai.core.workflow.context.adapter import create_context_container
 from tests.test_app_ui_composition import component, compose
 from tests.test_appgenerator_revision_baseline import _replace_archive
 from tests.test_appgenerator_revision_baseline import baseline as revision_baseline  # noqa: F401
-from tests.test_messaging_pack_persistence_composition import PACK, _assembled_files, _context
+from tests.test_messaging_pack_persistence_composition import (
+    PACK,
+    _assembled_files,
+    _context,
+    _reviewed_messaging_context,
+)
 
 HANDLER = "modules/messages/backend/handler.py"
 POLICY = "modules/messages/backend/policy.py"
@@ -561,9 +566,9 @@ async def test_later_ui_refinement_keeps_the_accepted_handler(tmp_path):
 
 
 def _revision_context(saved, files, **extra):
-    return create_context_container(initial={
-        **saved.context, **_context(), "data_contract": json.loads(files["data/contract.json"]), **extra,
-    })
+    return create_context_container(initial=_reviewed_messaging_context({
+        **saved.context, "data_contract": json.loads(files["data/contract.json"]), **extra,
+    }))
 
 
 @pytest.mark.asyncio
@@ -883,11 +888,16 @@ def _studio_flow(
     from mozaiksai.core.session.router import SessionRouter
     from mozaiksai.hosts import studio
     from tests.test_session_router import _FakePersistence
-    from tests.test_studio_workflow_trigger import _artifact_version, _async_classifier
+    from tests.test_studio_workflow_trigger import (
+        _artifact_version,
+        _async_classifier,
+        _isolate_studio_model_policy,
+    )
 
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
     reset_auth_adapter()
+    _isolate_studio_model_policy(monkeypatch)
     baseline = _baseline(app_id="app_1")
     archive = tmp_path / "parent.zip"
     with zipfile.ZipFile(archive, "w") as zipped:
@@ -4008,7 +4018,7 @@ async def test_admission_refuses_when_the_apps_current_build_cannot_be_read(tmp_
     assert store.created == []
 
 
-TEMPLATE_PAGE = "ui/pages/custom/Messages.jsx"
+TEMPLATE_PAGE = "ui/components/MessagingProfileTab.jsx"
 TEMPLATE_BASE_HANDLER = "modules/messages/backend/base_handler.py"
 
 

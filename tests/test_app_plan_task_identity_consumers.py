@@ -10,7 +10,10 @@ from tests.test_app_plan_task_identity_repair import _live_plan, _review, _with_
 from tests.test_continuous_deterministic_materialization import _load_models
 
 
-def test_repaired_module_tasks_receive_their_own_accepted_contract_outputs():
+def test_repaired_module_tasks_receive_their_own_accepted_contract_outputs(tmp_path, monkeypatch):
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
     _load_models()
     plan, context = _with_second_app_module(*_live_plan())
     assert isinstance(context, ContextVariablesBridge)

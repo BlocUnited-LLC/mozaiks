@@ -7,6 +7,7 @@ import pytest
 from factory_app.workflows.AppGenerator.tools.app_plan_review import review_app_build_plan
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_app_plan_task_identity_repair import _live_plan
 from tests.test_continuous_deterministic_materialization import _load_models
 
@@ -24,6 +25,8 @@ def test_approved_task_management_identity_and_actions_reach_workers(draft_modul
     design = detach(context.get("design_surface_map"))
     design["surfaces"][0]["owned_mutations"] = approved_actions
     context.set("design_surface_map", design)
+    reviewed = reviewed_pack_fixture(context.snapshot(), [])
+    context.set("design_docs_artifact", reviewed["design_docs_artifact"])
     module = plan["capability_packs"][0]
     module["capability_pack_id"] = draft_module_id
     module["operations"] = []

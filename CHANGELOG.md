@@ -15,16 +15,49 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Studio owners can open Revenue and manage connections for the app they select in My Apps, including in hosts with a separate dashboard app ID.
+- Factory distinguishes available pack offerings from the explicit, versioned
+  pack selection in the owner-reviewed DesignDocs artifact. Planning, template
+  composition and saved-bundle replay preserve that selection; changed sources
+  and late unreviewed billing providers require renewed review.
+- Approved-compilation validation preserves verified plan inputs and reports
+  revoked or changed pack sources as failed validation before runtime execution.
+- Explicitly selected Support packs expose their verified actions and support
+  surface boundaries to DesignDocs before generation, alongside Messaging.
+
+- Profile support tickets and app support inboxes keep reply fields usable on narrow mobile screens.
+
+- Signed-in Studio builders can open App Dashboard from their account menu and resolve the current build through its owner-scoped saved app binding.
+
+- Authenticated draft previews retain the customer login for inspection before
+  explicit sign-in, including when an app session already exists. Artifact
+  controls switch between login and app views without changing authorization.
+- ChatUI artifacts expose expand and return controls through existing workspace
+  view state, preserving the conversation and mounted preview.
+
+- Factory compiles selected-pack action permissions only from owner-reviewed
+  role grants and the exact verified pack identities and action requirements.
+- Generated messaging uses the profile workspace for conversation creation and replies. App-owned support connects the widget, requester profile, and authorized Admin inbox through module manifests.
+- Generated app requirements resolve BSON imports to PyMongo, preserving the MongoDB driver's bundled BSON implementation.
+- AppGenerator resolves explicitly selected managed packs without requiring an
+  operator-selected pack projection, preserving verified facade planning and
+  template assembly for paid builds while free builds keep their own surfaces.
+
 - Retried friendship acceptance replays its stored event identity and returns the accepting user’s view. Default notification storage keeps one alert per scoped source event across retries.
 
 - Social friendships derive from atomic request states, fencing competing accept, decline, withdrawal, and removal actions. Profile tabs expose friend requests and messaging, with nullable pagination cursors and failed message sends preserving drafts.
 
+- Local journey evidence deduplicates scoped usage receipts and can reconcile
+  them against a bounded OpenAI provider journal. An isolated Windows harness
+  stops the Studio, driver and gateway process trees on exit or timeout.
 - Generated task-based apps retain admin registries, app-owned assistant settings,
   brand identity and approved signup intent; app menus show one authorized Admin entry.
 - App role projection uses backend-authorized grants, and generated owner bootstrap
   uses trusted profile identity while preserving existing grants during refinement.
 - Standalone app administration uses the shared core renderer, authenticated configuration reads, and module panels on the overview.
 - App profile menus offer the declared app home, floating assistants follow app AI configuration, and chat surfaces use the app brand.
+- Existing-app design guidance avoids an unsupported surface owner for
+  protected discovered sources.
 
 
 ### Added
@@ -133,6 +166,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- Factory design agents receive verified selected-pack capabilities, actions and
+  ownership boundaries while retaining app-specific design intent. The shipped
+  catalog no longer selects unrequested packs. Social 0.1.18 and Messaging
+  0.1.17 support DesignDocs; older pinned identities require review and update.
 - Notification `source_event: reference` also stores `actor: null`, retaining
   the minimal origin reference without changing the original attributed event.
   Existing records are not rewritten; envelope-mode retention stays unchanged.
@@ -840,6 +877,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Generated app container images now serve as an unprivileged `mozaiks` user
+  (uid 10001) that owns `/app`, instead of as root, and write their logs under
+  `/app/logs`. The generated `docker-compose.yml` also drops the obsolete
+  `version` key that Compose v2 warns about.
+- The production Compose file (`infra/compose/docker-compose.prod.yml`)
+  publishes its bundled MongoDB, which has no authentication, on `127.0.0.1`
+  only instead of on every network interface.
 - Generated media ignores provider-supplied publication authority. Public reads
   require server-owned public visibility, and explicit promotion records that
   visibility. Private/backer-only visibility overrides old promotion metadata;
@@ -948,6 +992,10 @@ This project follows a practical pre-1.0 changelog format:
   with the same version, repair older empty secret contracts and missing app IDs,
   restore a missing refinement regeneration profile, and configure local-only
   Studio access.
+- `mozaiks serve` no longer tells first-run users to fill in `OPENAI_API_KEY`
+  when it creates `.env`: it points to the model provider key and `MONGO_URI`
+  that the file lists. The self-hosting guide states that the production
+  Compose file uses its bundled MongoDB and does not read `MONGO_URI`.
 
 
 ## 0.2.0 - 2026-10-17

@@ -63,7 +63,7 @@ class ArtifactScopeProposer:
         )
 
         config = self._load_config()
-        llm_config = config.resolve_capability_llm_config("scope")
+        llm_config = config.for_refinement_model(refinement_request.refinement_model).resolve_capability_llm_config("scope")
         control_plane_context = await self._load_control_plane_context(
             refinement_request=refinement_request,
             routing_decision=routing_decision,
@@ -190,6 +190,7 @@ class ArtifactScopeProposer:
             context=context,
             usage_context=refinement_request.usage_context,
             selected_paths=context.extra["selected_file_paths"],
+            refinement_model=refinement_request.refinement_model,
         )
         if graph_context is not None:
             results["dependency_graph"] = graph_context.model_dump(mode="json")

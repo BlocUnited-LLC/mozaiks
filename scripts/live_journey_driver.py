@@ -30,6 +30,13 @@ The pricing file uses the ``mozaiks.usage_pricing.v1`` catalog shape
 installed package). Usage from a model it cannot price stops the run, because
 the spend limit could not be enforced.
 
+The socket's usage delta intentionally omits model identity. The driver uses
+its operator credentials to match the event ID against ``/api/admin/usage``
+and checks the registered build target, user, chat and token counts. Missing,
+ambiguous or unpriceable receipts stop the driver. Usage is best effort and
+arrives after a response: this is an estimated limit, not a hard provider
+spending cap. Stopping the driver does not stop the server-side run.
+
 Prompt file (JSON, schema ``mozaiks.journey_script.v1``)::
 
     {
@@ -42,8 +49,8 @@ Prompt file (JSON, schema ``mozaiks.journey_script.v1``)::
       "replies": [{"workflow": "ThemeCapture", "agent": "ThemeInterviewAgent",
                    "text": "A calm blue brand for small teams."}],
       "ui_responses": [{"workflow": "ValueEngine", "component": "ConceptBlueprint",
-                        "response": {"status": "submitted", "action": "approve",
-                                     "approved": true}}]
+                        "response": {"action": "approve", "approved": true,
+                                     "review_id": {"$pending": "review_id"}}}]
     }
 
 - Name exactly one entry. ``entry_transition`` resolves the journey's first
@@ -89,6 +96,7 @@ import base64
 import contextlib
 import hashlib
 import json
+import math
 import os
 import sys
 import time
@@ -387,9 +395,9 @@ def _rate(value: Any) -> float | None:
         return None
     try:
         rate = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
-    return rate if rate >= 0 else None
+    return rate if math.isfinite(rate) and rate >= 0 else None
 
 
 def load_pricing(path: Path) -> dict[str, Rates]:
@@ -412,23 +420,19 @@ def load_pricing(path: Path) -> dict[str, Rates]:
         if input_rate is None or output_rate is None:
             continue
         cached_rate = _rate(row.get("cached_input_per_1m_usd"))
-        prices[str(name).strip().lower()] = Rates(
+        if "cached_input_per_1m_usd" in row and cached_rate is None:
+            continue
+        prices[str(name).strip().lower()] = rates = Rates(
             input_rate / 1_000_000,
             output_rate / 1_000_000,
             (input_rate if cached_rate is None else cached_rate) / 1_000_000,
         )
+        provider = row.get("provider")
+        if isinstance(provider, str) and provider.strip() and "/" not in name:
+            prices.setdefault(f"{provider.strip()}/{name}".lower(), rates)
     if not prices:
         raise InvalidInput("the pricing file has no model with input_per_1m_usd and output_per_1m_usd")
     return prices
-
-
-def _count(value: Any) -> int:
-    if isinstance(value, bool):
-        return 0
-    try:
-        return max(0, int(value))
-    except (TypeError, ValueError):
-        return 0
 
 
 class SpendMeter:
@@ -447,14 +451,18 @@ class SpendMeter:
         key = str(model or "").strip().lower()
         if not key:
             return None
-        return self.prices.get(key) or self.prices.get(key.rsplit("/", 1)[-1])
+        return self.prices.get(key)
 
     def add(self, delta: Mapping[str, Any]) -> float:
         """Record one usage delta and return its cost; unpriceable usage stops the run."""
         model = str(delta.get("model_name") or "").strip()
-        prompt = _count(delta.get("prompt_tokens"))
-        completion = _count(delta.get("completion_tokens"))
-        cached = min(_count(delta.get("cached_prompt_tokens")), prompt)
+        prompt = delta.get("prompt_tokens")
+        completion = delta.get("completion_tokens")
+        cached = delta.get("cached_prompt_tokens")
+        total = delta.get("total_tokens")
+        if (any(type(n) is not int or n < 0 for n in (prompt, completion, cached, total))
+                or cached > prompt or total != prompt + completion):
+            raise JourneyStop(EXIT_INVALID, "spend_unpriceable", "Usage receipt has inconsistent token counts.")
         self.prompt_tokens += prompt
         self.completion_tokens += completion
         self.cached_prompt_tokens += cached
@@ -473,10 +481,13 @@ class SpendMeter:
             + completion * rates.output_usd_per_token
         )
         self.usd += cost
-        row = self.by_model.setdefault(model, {"usd": 0.0, "prompt_tokens": 0, "completion_tokens": 0})
+        row = self.by_model.setdefault(model, {
+            "usd": 0.0, "prompt_tokens": 0, "completion_tokens": 0, "cached_prompt_tokens": 0,
+        })
         row["usd"] += cost
         row["prompt_tokens"] += prompt
         row["completion_tokens"] += completion
+        row["cached_prompt_tokens"] += cached
         return cost
 
     def over_limit(self) -> bool:
@@ -484,6 +495,8 @@ class SpendMeter:
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "basis": "observed_ledger_receipts",
+            "requires_provider_reconciliation": True,
             "usd": round(self.usd, 6),
             "limit_usd": self.limit_usd,
             "prompt_tokens": self.prompt_tokens,
@@ -660,6 +673,8 @@ class JourneyDriver:
         self.last_poll = 0.0
         self.completed_chats: set[str] = set()
         self.pause_agent: str | None = None
+        self.usage_target_app_id: str | None = None
+        self.usage_receipts: dict[str, dict[str, Any]] = {}
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -1027,7 +1042,7 @@ class JourneyDriver:
         elif frame_type in {"chat.text", "chat.stream_end", "chat.print"}:
             self._on_text(data)
         elif frame_type == "chat.usage_delta":
-            self._on_usage(data)
+            await self._on_usage(data)
         elif frame_type == "chat.tool_call":
             await self._on_tool_call(data)
         elif frame_type == "ack.tool_call_response":
@@ -1076,16 +1091,89 @@ class JourneyDriver:
         if isinstance(content, str) and content.strip():
             step.last_agent_message[agent] = content.strip()[:2000]
 
-    def _on_usage(self, data: Mapping[str, Any]) -> None:
-        cost = self.meter.add(data)
-        self._step_for(data.get("chat_id")).usage_usd += cost
+    async def _on_usage(self, data: Mapping[str, Any]) -> None:
+        receipt = await self._usage_receipt(data)
+        event_id = receipt["event_id"]
+        if event_id in self.usage_receipts:
+            if self.usage_receipts[event_id] != receipt:
+                raise JourneyStop(EXIT_INVALID, "spend_unpriceable", "Replayed usage receipt changed.")
+            return
+        cost = self.meter.add(receipt)
+        self.usage_receipts[event_id] = receipt
+        self._step_for(receipt["chat_id"]).usage_usd += cost
         if self.meter.over_limit():
             raise JourneyStop(
                 EXIT_LIMIT,
                 "spend_limit",
-                f"Estimated spend ${self.meter.usd:.4f} passed the ${self.config.max_usd:g} limit "
+                f"Estimated spend ${self.meter.usd:.8f} passed the ${self.config.max_usd:g} limit "
                 f"during {self.step.workflow}.",
             )
+
+    async def _usage_receipt(self, delta: Mapping[str, Any]) -> dict[str, Any]:
+        """Resolve a redacted socket event through the operator-only ledger."""
+        event_id = str(delta.get("event_id") or "").strip()
+        chat_id = str(delta.get("chat_id") or "").strip()
+        if not event_id or not chat_id or not any(step.chat_id == chat_id for step in self.steps):
+            raise JourneyStop(EXIT_INVALID, "spend_unpriceable", "Usage event lacks a known chat or receipt ID.")
+        if self.usage_target_app_id is None:
+            try:
+                response = await self.http.get("/api/studio/apps")
+                response.raise_for_status()
+                registry = response.json()
+            except (httpx.HTTPError, ValueError):
+                raise JourneyStop(EXIT_INVALID, "spend_unpriceable", "The build target registry is unavailable.") from None
+            apps = registry.get("apps") if isinstance(registry, dict) else None
+            targets = [
+                row for row in (apps if isinstance(apps, list) else [])
+                if isinstance(row, dict) and row.get("build_registry_id") == self.config.build_registry_id
+            ]
+            if len(targets) != 1 or targets[0].get("chat_app_id") != self.config.app_id or not targets[0].get("app_id"):
+                raise JourneyStop(EXIT_INVALID, "spend_unpriceable", "The build target cannot be resolved for usage accounting.")
+            self.usage_target_app_id = str(targets[0]["app_id"])
+        for attempt in range(5):
+            try:
+                response = await self.http.get(
+                    "/api/admin/usage",
+                    params={"app_id": self.config.app_id, "user_id": self.config.user_id, "limit": 1000},
+                )
+                response.raise_for_status()
+                payload = response.json()
+            except (httpx.HTTPError, ValueError):
+                raise JourneyStop(EXIT_INVALID, "spend_unpriceable", "The operator usage ledger is unavailable.") from None
+            events = payload.get("events") if isinstance(payload, dict) else None
+            matches = [
+                row for row in (events if isinstance(events, list) else [])
+                if isinstance(row, dict) and row.get("event_id") == event_id
+            ]
+            if matches:
+                if len(matches) != 1:
+                    break
+                receipt = matches[0]
+                if (
+                    receipt.get("app_id") != self.usage_target_app_id
+                    or receipt.get("user_id") != self.config.user_id
+                    or receipt.get("chat_id") != chat_id
+                    or ("model_name" in delta and delta["model_name"] != receipt.get("model_name"))
+                    or ("cached_prompt_tokens" in delta and (
+                        type(delta["cached_prompt_tokens"]) is not int
+                        or delta["cached_prompt_tokens"] != receipt.get("cached_prompt_tokens")
+                    ))
+                    or any(
+                        type(receipt.get(key)) is not int or receipt[key] < 0
+                        or type(delta.get(key)) is not int or delta[key] != receipt[key]
+                        for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+                    )
+                    or type(receipt.get("cached_prompt_tokens")) is not int
+                    or not 0 <= receipt["cached_prompt_tokens"] <= receipt["prompt_tokens"]
+                ):
+                    break
+                return {key: receipt.get(key) for key in (
+                    "event_id", "app_id", "user_id", "chat_id", "model_name",
+                    "prompt_tokens", "completion_tokens", "cached_prompt_tokens", "total_tokens",
+                )}
+            if attempt < 4:
+                await asyncio.sleep(0.2)
+        raise JourneyStop(EXIT_INVALID, "spend_unpriceable", "Usage receipt is missing or does not match the current run.")
 
     def _human_assist(self, kind: str, detail: str, **extra: Any) -> JourneyStop:
         step = self.steps[-1] if self.steps else None
@@ -1169,6 +1257,11 @@ class JourneyDriver:
                 )
             scripted = queue.popleft()
             response = resolve_env_references(scripted)
+            if scripted.get("review_id") == {"$pending": "review_id"}:
+                review_id = payload.get("review_id")
+                if not isinstance(review_id, str) or not review_id.strip():
+                    raise self._human_assist("missing_review_id", "The pending review has no review ID.", component=component)
+                response["review_id"] = review_id
             logged = {"type": "tool_call_response", "tool_call_id": tool_call_id, "response": scripted}
             entry["answered_with"] = "ui_response"
         await self._send({"type": "tool_call_response", "tool_call_id": tool_call_id, "response": response}, logged=logged)
@@ -1463,6 +1556,7 @@ def _exit_report(
         "session_state": driver.session_state if driver else None,
         "terminal_event": driver.terminal_event if driver else None,
         "spend": driver.meter.as_dict() if driver else None,
+        "usage_receipts": list(driver.usage_receipts.values()) if driver else [],
         "unused_script": script.unused() if script else None,
         "evidence": outcome.evidence,
     }
@@ -1480,14 +1574,14 @@ def _exit_report(
 
 def _positive(value: str) -> float:
     number = float(value)
-    if number <= 0:
+    if not math.isfinite(number) or number <= 0:
         raise argparse.ArgumentTypeError("must be greater than zero")
     return number
 
 
 def _non_negative(value: str) -> float:
     number = float(value)
-    if number < 0:
+    if not math.isfinite(number) or number < 0:
         raise argparse.ArgumentTypeError("must not be negative")
     return number
 

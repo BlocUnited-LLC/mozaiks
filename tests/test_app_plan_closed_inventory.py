@@ -15,13 +15,17 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_owned_output_paths,
 )
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_app_plan_managed_facade_repair import _capability, _task
 from tests.test_app_plan_task_identity_repair import _live_plan
 from tests.test_continuous_deterministic_materialization import _load_models
 
 
 @pytest.fixture(autouse=True)
-def _load_factory_contracts():
+def _load_factory_contracts(monkeypatch, tmp_path):
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
     _load_models()
 
 
@@ -39,6 +43,9 @@ def _approved_plan(*, monetized=True):
     if monetized:
         provider = next(task for task in plan["build_tasks"] if task["task_type"] == "api_surface")
         provider["surface_id"] = "mozaikspay_managed"
+    context = ContextVariablesBridge(reviewed_pack_fixture(
+        context.snapshot(), ["mozaikspay"] if monetized else [],
+    ))
     return plan, context
 
 
@@ -147,6 +154,7 @@ def test_selected_provider_and_facade_surfaces_pass_unchanged(provider_surface):
     design = detach(context.get("design_surface_map"))
     design["surfaces"] = [surface for surface in design["surfaces"] if surface["surface_id"] != "billing_portal"]
     context.set("design_surface_map", design)
+    context = ContextVariablesBridge(reviewed_pack_fixture(context.snapshot(), ["mozaikspay"]))
     original = deepcopy(plan)
 
     validate_plan_origins(plan, context)
@@ -245,7 +253,7 @@ def test_a_provider_without_an_approved_contract_is_feedback():
     result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
 
     assert result["outcome"] == "needs_revision", result
-    assert "only valid when the approved subscription contract" in result["error"]
+    assert "require an approved contract with contract_required=true" in result["error"]
 
 
 @pytest.mark.parametrize("unapproved_use", ["capability", "task"])

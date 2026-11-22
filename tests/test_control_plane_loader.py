@@ -589,3 +589,23 @@ def test_control_plane_routes_reject_duplicated_impact_fields(tmp_path: Path) ->
 
     with pytest.raises(ControlPlanePackLoadError, match="affected_workflows"):
         load_refinement_harness(app_root=app_root, factory_root=pack_root)
+
+
+@pytest.mark.parametrize(
+    ("override", "api_type", "model"),
+    [(None, "google", "gemini-3.8-flash"), ("gemini", "google", "gemini-3.8-flash"),
+     ("openai", "openai", "gpt-5-nano")],
+)
+def test_workspace_model_override_applies_to_refinement_profiles(override, api_type, model):
+    from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config_yaml
+
+    app_root = Path(__file__).resolve().parents[1] / "factory_app" / "app"
+    raw = load_control_plane_config_yaml(app_root)
+    raw["model_override"] = override
+    policy = ControlPlaneConfig.model_validate(raw)
+    configs = [
+        policy.resolve_capability_llm_config(capability)
+        for capability in ("classifier", "dependency_graph", "coding", "contract_surface")
+    ]
+    configs.append(policy.resolve_contract_surface_regeneration_llm_config())
+    assert all((config.get("api_type"), config["model"]) == (api_type, model) for config in configs)

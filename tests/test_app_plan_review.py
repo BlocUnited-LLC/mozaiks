@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
 
@@ -16,13 +17,18 @@ from factory_app.workflows.AppGenerator.tools.app_plan_review import (
 from mozaiksai.core.session.build_context_schema import VALID_CAPABILITY_SOURCES
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
+from tests.appgenerator_subscription_fixture import subscription_contract
+from tests.reviewed_pack_fixture import registered_pack_fixture, reviewed_pack_fixture
 from tests.test_continuous_deterministic_materialization import _load_models, _plan_payload
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(autouse=True)
-def _load_factory_contracts():
+def _load_factory_contracts(monkeypatch, tmp_path):
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
     _load_models()
 
 
@@ -55,6 +61,10 @@ def _context(ui_surface="declarative_page"):
             }],
         }]},
     })
+
+
+def _reviewed(context, pack_ids):
+    return ContextVariablesBridge(reviewed_pack_fixture(context.snapshot(), pack_ids))
 
 
 def test_capability_source_uses_canonical_finite_vocabulary():
@@ -155,6 +165,37 @@ def test_revision_page_output_contract_preserves_page_only_scope_and_is_idempote
     assert result["outcome"] == "ready", result
     accepted = next(item for item in detach(context.get("app_task_batch_items")) if item["task_id"] == task["task_id"])
     assert accepted == first
+
+
+@pytest.mark.parametrize("replacement", [[], [{"module_id": "reports", "action_id": "erase_all"}]])
+def test_rereview_binds_writes_from_design_and_rejects_other_unknown_page_fields(replacement):
+    context = _context()
+    experience = detach(context.get("experience_spec"))
+    source = {"module_id": "reports", "action_id": "create_report"}
+    surfaces = detach(context.get("design_surface_map"))
+    surfaces["surfaces"][0]["owned_mutations"] = [source["action_id"]]
+    context.set("design_surface_map", surfaces)
+    experience["pages"][0]["sections"] = [{
+        "primitive": "Form",
+        "config_hint": json.dumps({"submit_action": {"action_type": "submit", "data_source": source}}),
+    }]
+    context.set("experience_spec", experience)
+    context = _reviewed(context, [])
+    result = review_app_build_plan(AppBuildPlan=_plan(), context_variables=context)
+    assert result["outcome"] == "ready", result
+    cached = detach(context.get("app_build_plan"))
+    assert cached["pages"][0]["required_write_actions"] == [source]
+    cached["pages"][0]["required_write_actions"] = replacement
+
+    result = review_app_build_plan(AppBuildPlan=cached, context_variables=context)
+
+    assert result["outcome"] == "ready", result
+    assert detach(context.get("app_build_plan"))["pages"][0]["required_write_actions"] == [source]
+    assert cached["pages"][0]["required_write_actions"] == replacement
+    cached["pages"][0]["unreviewed_field"] = True
+    result = review_app_build_plan(AppBuildPlan=cached, context_variables=context)
+    assert "pages.0.unreviewed_field" in result["error"]
+    assert not context.get("app_plan_ready")
 
 
 @pytest.mark.parametrize(("approved", "proposed"), [
@@ -437,6 +478,7 @@ def test_mozaikspay_is_the_canonical_managed_subscription_identity():
         "id": "mozaikspay",
         "capability_source": "managed_capability",
     }])
+    context = _reviewed(context, ["mozaikspay"])
 
     validate_plan_origins(plan, context)
 
@@ -505,6 +547,9 @@ def test_review_rejects_approved_modules_owned_elsewhere_before_queuing_workers(
         "id": "mozaikspay", "capability_source": "managed_capability",
         "pack_source_path": str(ROOT / "factory_app/build_context/mozaikspay"),
     }] if expected_owner == "MozaiksPay" else [])
+    if expected_owner == "MozaiksPay":
+        context.set("subscription_contract", subscription_contract("reports"))
+        context = _reviewed(context, ["mozaikspay"])
     original_plan = deepcopy(plan)
 
     result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
@@ -539,53 +584,74 @@ def test_invalid_provider_blocks_after_budget_and_never_queues_a_batch():
     assert not context.get("app_task_batch_items")
 
 
-def test_registered_pack_origin_is_read_from_frozen_context():
+def test_unreviewed_frozen_inventory_cannot_relabel_an_app_owned_module():
     context = _context()
     context.set("capability_packs", [{"id": "reports", "capability_source": "framework_pack"}])
-    with pytest.raises(ValueError, match="must match the registered pack"):
-        validate_plan_origins(_plan(), context)
+    plan = _plan()
+    original = deepcopy(plan)
+    validate_plan_origins(plan, context)
+    assert plan == original
+    assert plan["capability_packs"][0]["capability_source"] == "generated_module"
 
 
-def test_registered_operator_pack_survives_typed_plan_and_template_materialization(tmp_path):
+def test_reviewed_operator_pack_survives_typed_plan_and_template_materialization(tmp_path, monkeypatch):
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        PackIntegrityError,
         resolve_managed_capability_templates,
+        verify_pack_integrity,
     )
 
     root = tmp_path / "reports"
     template = root / "templates/config/reports.yaml.j2"
     template.parent.mkdir(parents=True)
-    template.write_text("label: {{ report_label }}\n", encoding="utf-8")
+    template.write_text("label: {{ report_label }}\nversion: {{ app_build_plan.capability_packs[0].version }}\n",
+                        encoding="utf-8")
     (root / "context.yaml").write_text(yaml.safe_dump({
         "context_id": "reports", "applies_to_workflows": ["AppGenerator"],
         "assets": [{"path": "templates/", "kind": "templates"}],
         "pack": {"id": "reports", "version": "0.1.0", "status": "active", "capability_source": "operator_pack"},
+        "projections": {"context_variables": {"capability_packs": {"from": "capability_packs"}}},
     }), encoding="utf-8")
-    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
-        verify_pack_integrity,
-    )
-
     # A registered pack outside the factory catalog is an external source: it is selected with its pins.
     metadata = verify_pack_integrity(root, "reports")
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(tmp_path))
+    monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
     context = _context()
     context.set("capability_packs", [{
         "id": "reports", "capability_source": "operator_pack", "pack_source_path": str(root),
         "version": metadata["version"], "digest": metadata["digest"],
     }])
+    context = _reviewed(context, ["reports"])
     plan = _plan()
     plan["capability_packs"][0]["capability_source"] = "operator_pack"
     result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
     assert result["outcome"] == "ready", result
     from mozaiksai.core.workflow.context.frozen import detach
 
-    packs = detach(context.get("app_build_plan"))["capability_packs"]
+    cached_plan = detach(context.get("app_build_plan"))
+    packs = cached_plan["capability_packs"]
     assert packs[0]["capability_source"] == "operator_pack"
-    # The source's pins travel with its path into the plan row.
-    assert (packs[0]["pack_source_path"], packs[0]["version"], packs[0]["digest"]) == (
-        str(root), metadata["version"], metadata["digest"],
-    )
-    rendered = resolve_managed_capability_templates(packs, context_variables={"report_label": "Reports"})
+    assert "pack_source_path" not in packs[0]
+    assert (packs[0]["version"], packs[0]["digest"]) == (metadata["version"], metadata["digest"])
+    template_context = {
+        "app_build_plan": cached_plan, "report_label": "Reports", "build_timestamp": "2026-01-01T00:00:00Z",
+    }
+    rendered = resolve_managed_capability_templates(packs, context_variables=template_context)
     files = {item["filename"]: item["content"] for item in rendered}
-    assert files["config/reports.yaml"] == "label: Reports"
+    assert files["config/reports.yaml"] == "label: Reports\nversion: 0.1.0"
+
+    moved_registry = tmp_path / "moved"
+    moved_registry.mkdir()
+    root.rename(moved_registry / root.name)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(moved_registry))
+    after_move = resolve_managed_capability_templates(packs, context_variables=template_context)
+    assert {item["filename"]: item["content"] for item in after_move} == files
+
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(tmp_path))
+    with pytest.raises(PackIntegrityError, match="cannot be resolved to a verified source"):
+        resolve_managed_capability_templates(packs, context_variables={
+            **template_context, "build_context_root": str(moved_registry),
+        })
 
 
 def test_unregistered_operator_pack_is_not_a_generated_module():
@@ -693,7 +759,7 @@ def test_persistence_serializer_clears_an_unbound_capability_label(label):
 
 
 @pytest.mark.parametrize("association", ["declared", "selected", "available"])
-def test_persistence_serializer_does_not_erase_a_real_capability_association(association):
+def test_persistence_serializer_distinguishes_declared_association_from_inventory(association):
     plan, task = _mislabelled_persistence_plan()
     task.update(surface_id="persistence_contract", capability_pack_id="persistence_contract")
     context = _context()
@@ -704,6 +770,24 @@ def test_persistence_serializer_does_not_erase_a_real_capability_association(ass
         context.set("capability_packs", [capability])
     else:
         context.set("available_managed_capabilities", [capability])
+    original = deepcopy(plan)
+    repairs = _label_persistence_tasks(plan, context)
+    if association == "declared":
+        assert repairs == []
+        assert plan == original
+    else:
+        assert repairs
+        assert task["capability_pack_id"] is None
+        assert task["surface_id"] == "data_contract"
+
+
+def test_persistence_serializer_preserves_a_reviewed_pack_association(tmp_path, monkeypatch):
+    plan, task = _mislabelled_persistence_plan()
+    task.update(surface_id="persistence_contract", capability_pack_id="persistence_contract")
+    descriptor = registered_pack_fixture(tmp_path, monkeypatch, "persistence_contract", "operator_pack")
+    context = _context()
+    context.set("capability_packs", [descriptor])
+    context = _reviewed(context, ["persistence_contract"])
     original = deepcopy(plan)
     assert _label_persistence_tasks(plan, context) == []
     assert plan == original

@@ -1,10 +1,16 @@
 prompt_middleware:
+- agent: DesignPackSelectionAgent
+  filename: tools/hook_selected_pack_design_context.py
+  function: inject_pack_selection_context
 - agent: DesignDocsAgent
   filename: tools/hook_save_feedback_directive.py
   function: inject_save_feedback_directive
 - agent: DesignDocsAgent
   filename: tools/hook_ai_pack_surface_context.py
   function: inject_ai_pack_surface_context
+- agent: DesignDocsAgent
+  filename: tools/hook_selected_pack_design_context.py
+  function: inject_selected_pack_design_context
 - agent: DesignDocsAgent
   filename: ../_shared/brownfield_adoption_context.py
   function: inject_brownfield_adoption_context

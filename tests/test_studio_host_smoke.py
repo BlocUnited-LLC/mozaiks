@@ -51,7 +51,7 @@ async def test_studio_shell_config_injects_studio_routes(monkeypatch):
     assert "/me" not in header_paths
 
     studio_pages = {page.get("path"): page for page in shell_config.get("pages", [])}
-    assert studio_pages["/apps"]["meta"]["requiresRole"] == "admin"
+    assert "requiresRole" not in studio_pages["/apps"]["meta"]
 
 
 def test_platform_health_endpoint_returns_200_when_healthy():

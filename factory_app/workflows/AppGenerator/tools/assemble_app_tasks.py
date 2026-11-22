@@ -7,6 +7,10 @@ from typing import Annotated, Any
 import yaml
 from pydantic import Field
 
+from factory_app.workflows._shared.pack_selection import (
+    PhysicalPackContext,
+    reviewed_pack_read_operation,
+)
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     discard_pack_owned_outputs,
@@ -20,7 +24,15 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
 )
-from mozaiksai.core.workflow.generator_support.page_action_bindings import generated_workflow_names
+from mozaiksai.core.workflow.generator_support.module_revision import (
+    scoped_service_revision_paths,
+    validate_scoped_service_repositories,
+)
+from mozaiksai.core.workflow.generator_support.page_action_bindings import (
+    generated_workflow_names,
+    planned_page_writes,
+    validate_required_page_writes,
+)
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_stem_from_path,
     _page_stems,
@@ -126,6 +138,7 @@ def _apply_planned_page_contracts(
     if not pages or not tasks:
         return [{"filename": str(f["filename"]), "content": str(f["content"])} for f in code_files]
 
+    required_writes = planned_page_writes(pages, context_variables)
     planned_by_stem: dict[str, dict[str, Any]] = {}
     for page in pages:
         for stem in _page_stems(page):
@@ -195,6 +208,9 @@ def _apply_planned_page_contracts(
                 validate_planned_page(file_map[path], planned_by_stem[stem], path)
             except ValueError as exc:
                 raise ValueError(f"{path}: {exc}") from exc
+            validate_required_page_writes(
+                file_map[path], planned_by_stem[stem]["route"], required_writes, path, identity_validated=True,
+            )
     template_errors: list[str] = []
     for path, owned in sorted(pack_outputs.items()):
         template_stem = _page_stem_from_path(path)
@@ -284,15 +300,18 @@ def _apply_module_handler_method_alignment(
     return [{"filename": path, "content": content} for path, content in sorted(file_map.items())]
 
 
-def _selected_capability_packs(app_build_plan: Any, context_variables: Any) -> list[dict[str, Any]] | None:
+def _selected_capability_packs(app_build_plan: Any, context_variables: Any) -> list[dict[str, Any]]:
+    from factory_app.workflows._shared.pack_selection import (
+        selected_pack_rows,
+        validate_reviewed_pack_choices,
+        validate_subscription_write_path,
+    )
+
     if not isinstance(app_build_plan, dict):
-        return None
-    capability_packs = None
-    if context_variables and hasattr(context_variables, "get"):
-        capability_packs = detach(context_variables.get("capability_packs"))
-    if not capability_packs:
-        capability_packs = app_build_plan.get("capability_packs")
-    return capability_packs if isinstance(capability_packs, list) else None
+        return []
+    validate_reviewed_pack_choices(context_variables, app_build_plan.get("capability_packs") or [])
+    validate_subscription_write_path(context_variables, resolve_subscription_contract(context_variables))
+    return selected_pack_rows(context_variables)
 
 
 async def _verified_revision_source(app_build_plan: Any, context_variables: Any) -> dict[str, str] | None:
@@ -320,6 +339,7 @@ async def _verified_revision_source(app_build_plan: Any, context_variables: Any)
     return {path: content for path, content in saved.items() if isinstance(content, str)}
 
 
+@reviewed_pack_read_operation
 def _workspace_paths(app_build_plan: Any, context_variables: Any) -> frozenset[str]:
     capability_packs = _selected_capability_packs(app_build_plan, context_variables)
     if not capability_packs:
@@ -327,6 +347,7 @@ def _workspace_paths(app_build_plan: Any, context_variables: Any) -> frozenset[s
     return resolve_declared_pack_output_paths(capability_packs, context_variables=context_variables, owner="workspace")
 
 
+@reviewed_pack_read_operation
 def _apply_managed_capability_templates(
     code_files: list[dict[str, str]],
     *,
@@ -338,7 +359,7 @@ def _apply_managed_capability_templates(
     overlay_files: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
     capability_packs = _selected_capability_packs(app_build_plan, context_variables)
-    if capability_packs is None:
+    if not capability_packs:
         return code_files
 
     template_files = resolve_managed_capability_templates(
@@ -600,7 +621,7 @@ async def _assemble_app_tasks(
         verified_source=verified_source, overlay_files=overlay_files,
     )
     # App-owned pack code is never deleted by a tombstone either.
-    workspace_paths = _workspace_paths(app_build_plan, context_variables) if template_files else frozenset()
+    workspace_paths = _workspace_paths(app_build_plan, context_variables=context_variables) if template_files else frozenset()
     ignored_tombstones = sorted(workspace_paths & set(_context_deleted_files(context_variables)))
     if ignored_tombstones:
         logger.warning(
@@ -661,9 +682,10 @@ async def _assemble_app_tasks(
             if context_variables and hasattr(context_variables, "get") else None
         ),
         subscription_contract=resolve_subscription_contract(context_variables),
-        context_variables=context_variables,
+        context_variables=PhysicalPackContext(context_variables),
         # The bound revision source's contract is carried even when a later
         # copy replaced it in generated_files or the outputs.
+        revision_baseline=verified_source,
         carried_contracts=tuple(
             content for content in [(verified_source or {}).get("data/contract.json")]
             if isinstance(content, str) and revision_baseline_required(context_variables)
@@ -689,7 +711,9 @@ async def _assemble_app_tasks(
         pack_outputs=pack_outputs,
         verified_pack_routes=verified_pack_routes,
     )
-    code_files = _apply_module_handler_method_alignment(code_files)
+    revision_paths = scoped_service_revision_paths(context_variables, verified_source or {})
+    if not revision_paths:
+        code_files = _apply_module_handler_method_alignment(code_files)
     code_files = _apply_deleted_files(
         code_files, [path for path in _context_deleted_files(context_variables) if path not in kept_paths],
     )
@@ -706,6 +730,17 @@ async def _assemble_app_tasks(
         context_variables=context_variables,
         baseline_files=verified_source,
     )
+
+    if revision_paths and verified_source is not None:
+        assembled = {item["filename"]: item["content"] for item in code_files}
+        changed_contracts = sorted(
+            path for path in assembled.keys() | verified_source.keys()
+            if path.startswith("modules/") and path not in revision_paths and path not in pack_outputs
+            and assembled.get(path) != verified_source.get(path)
+        )
+        if changed_contracts:
+            raise ValueError(f"Implementation-only revision changed carried module files: {changed_contracts}")
+        validate_scoped_service_repositories(assembled, revision_paths)
 
     # Write the assembled flat file map to context so the carry-forward
     # preservation resolver (which runs after AssemblyAgent's turn) can read

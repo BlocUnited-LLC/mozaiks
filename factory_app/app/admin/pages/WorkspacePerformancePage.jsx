@@ -80,14 +80,16 @@ function MetricCell({ definition, envelope, comparisonLabel }) {
 }
 
 function AppPerformanceMobileItem({ row, registry, comparisonLabel, onOpen }) {
+  const linked = Boolean(row.dashboard_app_id)
   return (
     <article
-      className="cursor-pointer rounded-[1.15rem] border border-border/45 bg-card/34 p-4 shadow-sm shadow-black/5 transition-colors hover:bg-card/50"
-      onClick={() => onOpen(row)}
+      className={`rounded-[1.15rem] border border-border/45 bg-card/34 p-4 shadow-sm shadow-black/5 ${linked ? 'cursor-pointer transition-colors hover:bg-card/50' : ''}`}
+      onClick={linked ? () => onOpen(row) : undefined}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="truncate font-semibold text-foreground">{row.name}</div>
+          {!linked && <div className="mt-1 text-xs text-muted-foreground">Dashboard unavailable</div>}
           {row.lifecycle_state ? (
             <div className="mt-1 text-xs capitalize text-muted-foreground">{String(row.lifecycle_state).replace(/_/g, ' ')}</div>
           ) : null}
@@ -244,6 +246,7 @@ export default function WorkspacePerformancePage() {
       render: (row) => (
         <div className="min-w-0">
           <div className="truncate font-semibold text-foreground">{row.name}</div>
+          {!row.dashboard_app_id && <div className="mt-1 text-xs text-muted-foreground">Dashboard unavailable</div>}
           {row.lifecycle_state ? (
             <div className="mt-1 text-xs capitalize text-muted-foreground">
               {String(row.lifecycle_state).replace(/_/g, ' ')}
@@ -266,8 +269,7 @@ export default function WorkspacePerformancePage() {
   ]
 
   const openApp = (row) => {
-    if (!row?.app_id) return
-    navigate(`/apps/${encodeURIComponent(row.app_id)}/overview`)
+    if (row.dashboard_app_id) navigate(`/apps/${encodeURIComponent(row.dashboard_app_id)}/overview`)
   }
 
   const noApps = appRows.length === 0
@@ -352,6 +354,7 @@ export default function WorkspacePerformancePage() {
                 columns={columns}
                 getItemId={(row) => row.app_id}
                 onRowClick={openApp}
+                isRowClickable={(row) => Boolean(row.dashboard_app_id)}
                 renderMobileItem={(row) => (
                   <AppPerformanceMobileItem
                     row={row}
@@ -377,6 +380,7 @@ export default function WorkspacePerformancePage() {
       <MetricDetailPanel
         open={Boolean(detailTarget)}
         appId={detailTarget?.appId}
+        reference="target"
         appName={detailTarget?.appName}
         metricId={detailTarget?.metricId}
         period={period}

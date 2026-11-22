@@ -211,3 +211,13 @@ test('profile photo and banner uploads send real files and preserve errors', asy
   await page.locator('img').waitFor({state:'attached'});
   assert.ok((await page.locator('img').getAttribute('src')).startsWith('blob:'));
 });
+
+
+for (const visible of [false, true]) {
+  test(`support profile navigation follows hydrated request visibility ${visible}`, async t => {
+    const page = await harness(t);
+    await load(page, 0, 'Alice', [{id:'support-tickets',label:'Support',component:'SupportProfileTab',visibility:'owner_only',data:{profile_visible:visible,requests:visible?[{request_id:'ticket'}]:[]}}]);
+    await page.getByRole('heading',{name:'Alice',exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'Support',exact:true}).count(),visible?1:0);
+  });
+}

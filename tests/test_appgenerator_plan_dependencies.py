@@ -67,15 +67,18 @@ def test_an_empty_plan_is_not_an_error_here() -> None:
 
 def test_review_runs_the_check_before_the_plan_is_cached() -> None:
     """A plan that fails this must never reach app_build_plan()."""
+    import ast
     import inspect
 
     from factory_app.workflows.AppGenerator.tools import app_plan_review
 
     source = inspect.getsource(app_plan_review.review_app_build_plan)
-    # Skip the `def review_app_build_plan(` line: it contains "app_build_plan("
-    # itself, which would make this comparison pass no matter what the body does.
-    body = source[source.index(chr(10)) + 1 :]
-    assert body.index("validate_plan_dependencies") < body.index("app_build_plan("), (
+    function = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef))
+    calls = {name: min(node.lineno for node in ast.walk(function)
+                       if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                       and node.func.id == name)
+             for name in ("validate_plan_dependencies", "app_build_plan")}
+    assert calls["validate_plan_dependencies"] < calls["app_build_plan"], (
         "the dependency check must run before the plan is cached, or the batch "
         "still builds from a plan with unresolved edges"
     )

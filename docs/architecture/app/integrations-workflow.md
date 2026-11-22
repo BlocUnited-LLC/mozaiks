@@ -204,17 +204,7 @@ The workspace `/integrations` route is the provider-management surface. It owns
 the integration catalog, credential-presence status, setup guidance, and
 operator notes. Apps do not duplicate global provider setup.
 
-Each app may also expose a deep detail route for the services its latest build
-declared:
-
-```text
-/apps/{appId}/integrations
-```
-
-That route is for app-specific requirements and setup gaps. It is linked from
-the app Overview "Connected services" panel and hidden from the primary app
-sidebar. Connector readiness is evaluated against an app build/workflow context,
-but shared provider status is overlaid from the workspace catalog.
+Owners open **Studio → My Apps**, choose an app and select **Integrations** at `/apps/{appId}/integrations`. The page lists that app’s connections and declared build requirements. Owners can configure a service from either list and can store or rotate a write-only credential when a credential store is configured.
 
 `admin/admin_registry.yaml` may include app-level navigation metadata for the
 integrations page, but it is not a custom route registry. Full-page React route
@@ -228,15 +218,12 @@ operators without revealing secrets. Each provider should show its display name,
 category, setup status, required secret names, setup guidance, and operator
 note. Secret presence is returned as booleans only.
 
-The app Overview renders a compact "Connected services" summary for the
-services that specific app declared. `/apps/{appId}/integrations` renders the
-same declarations in detail, cross-referenced with live workspace status.
+The selected page uses `/api/studio/integrations/connectors?dashboard_app_id={appId}`. Studio resolves the selected dashboard ID to the authenticated owner’s Factory app record before listing or changing connections. The response exposes app connection metadata, requirements and public catalog entries. Workspace operator credentials stay under the workspace route.
 
-When a connector health payload includes `health_check_supported: true`, the UI
-may show a manual "Check now" button. Clicking it calls:
+For services with `health_check_supported: true`, **Check status** sends an explicit request.
 
 ```http
-POST /api/studio/integrations/connectors/{service}/health-check?app_id={appId}
+POST /api/studio/integrations/connectors/{service}/health-check?dashboard_app_id={appId}
 ```
 
 The button must not appear for connectors without a registered health plugin,

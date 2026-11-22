@@ -14,11 +14,11 @@ def _read(relative_path: str) -> str:
     return (_workspace() / relative_path).read_text(encoding="utf-8")
 
 
-def test_studio_support_queue_routes_are_operator_only() -> None:
+def test_studio_workspace_queue_keeps_operator_guard_and_app_queue_uses_resource_authority() -> None:
     manifest = json.loads(_read("factory_app/app/ui/route_manifest.json"))
     routes = {route["path"]: route for route in manifest["pages"]}
-    for path in ("/support", "/apps/:appId/support"):
-        assert routes[path]["meta"]["requiresRole"] == "admin"
+    assert routes["/support"]["meta"]["requiresRole"] == "admin"
+    assert "requiresRole" not in routes["/apps/:appId/support"]["meta"]
 
 
 def test_admin_portal_is_the_only_registered_admin_page() -> None:

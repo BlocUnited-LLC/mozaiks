@@ -1685,10 +1685,9 @@ def _template_owned_paths(context_variables: Any) -> frozenset[str]:
     if context_variables is None:
         return frozenset()
     paths = set(pack_owned_output_paths(context_variables))
-    packs = detach(context_variables.get("capability_packs")) or []
-    if not packs:
-        plan = detach(context_variables.get("app_build_plan")) or {}
-        packs = plan.get("capability_packs") or [] if isinstance(plan, dict) else []
+    from factory_app.workflows._shared.pack_selection import selected_pack_rows
+
+    packs = selected_pack_rows(context_variables)
     try:
         paths |= resolve_declared_pack_output_paths(
             [pack for pack in packs if isinstance(pack, dict)], context_variables=context_variables,
@@ -1990,12 +1989,19 @@ async def run_app_bundle_acceptance_gate(
         required_bundle_errors.append("Generated app bundles must include app.json.")
 
     resolved_capability_packs: list[dict[str, str]] = []
+    from factory_app.workflows._shared.pack_selection import (
+        PhysicalPackContext,
+        validate_reviewed_pack_choices,
+    )
+
+    if context_variables is not None and context_variables.get("run_build_binding"):
+        validate_reviewed_pack_choices(context_variables, selected_capability_packs)
     scanner_errors = scan_generated_bundle(
         generated_files,
         capability_packs=selected_capability_packs,
         planned_data_contract=_context_get(context_variables, "data_contract"),
         subscription_contract=resolve_subscription_contract(context_variables),
-        context_variables=context_variables,
+        context_variables=PhysicalPackContext(context_variables) if context_variables is not None else None,
         require_deployment_artifacts=_requires_deployment_artifacts(
             generated_files,
             context_variables,

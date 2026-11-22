@@ -24,6 +24,7 @@ import pytest
 import yaml
 
 from factory_app.workflows._shared import surface_ownership
+from factory_app.workflows._shared.pack_selection import pin_pack_choices
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
 from tests import test_designdocs_corpus_replay as corpus
@@ -39,6 +40,7 @@ RECORD = {
 }
 MARKER = "DESIGN_OWNERSHIP_NORMALIZED surface=tasks owner=platform removed=[] removed_pages=[Authentication@/login]"
 persistence = inventory.persistence
+registered_offering_and_review = inventory.registered_offering_and_review
 
 
 def _entry() -> dict:
@@ -48,6 +50,9 @@ def _entry() -> dict:
 def _save() -> tuple[ContextVariablesBridge, dict]:
     entry = _entry()
     context = ContextVariablesBridge({**deepcopy(entry["context"]), **corpus._SAVE_SEED})
+    # This current provider-selected scenario is distinct from archived corpus replay.
+    context.set("workflow_name", "DesignDocs")
+    context.set("pack_selection", pin_pack_choices(context, ["mozaikspay"]))
     bundle = {
         "agent_message": "Recorded DesignDocs output.", **corpus._MARKDOWN,
         "surface_map": deepcopy(entry["surface_map"]), "data_contract": deepcopy(entry["data_contract"]),

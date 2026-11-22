@@ -160,6 +160,7 @@ def compile_module_entitlement_gates(
     approved_actions: Mapping[str, list[str]],
     ungated_actions: Mapping[str, list[str]],
     existing_files: Mapping[str, str] | None = None,
+    manifest_actions: Mapping[str, list[str]] | None = None,
 ) -> dict[str, str]:
     """Apply the single approved gate map and remove every unapproved model gate."""
     file_map = dict(files)
@@ -205,7 +206,8 @@ def compile_module_entitlement_gates(
                     "module manifest; existing entitlement gates cannot be removed without that authority."
                 )
         action_ids = [str(action.get("id") or "") for action in actions if isinstance(action, dict)]
-        if diagnostic := unapproved_module_actions_error(module_id, action_ids, approved_actions):
+        inventory = approved_actions if manifest_actions is None else manifest_actions
+        if diagnostic := unapproved_module_actions_error(module_id, action_ids, inventory):
             raise ValueError(diagnostic)
         missing = sorted(set(gates) - set(action_ids))
         duplicates = sorted({action_id for action_id in gates if action_ids.count(action_id) > 1})

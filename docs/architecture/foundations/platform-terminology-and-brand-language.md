@@ -67,7 +67,8 @@ These are the preferred visible terms.
 | `Mozaiks Studio` | browser product for creating and managing a workspace or portfolio of apps | canonical visible product term |
 | `Workspace` | the tenant/org context | brandable home base for a portfolio of apps, not a person profile |
 | `Profile` | the signed-in person | personal identity and preferences only |
-| `Apps` | the multi-app directory and default landing area | canonical workspace landing area |
+| `Studio` | signed-in builder’s management shortcut in the account menu | opens the owned build context or workspace portfolio |
+| `My Apps` | the builder’s app portfolio in Studio | canonical workspace landing area |
 | `App Studio` | the single-app management context | prose and IA term, not necessarily a literal heading on every screen |
 | `Build` | app creation and revision surface | canonical creation and revision surface |
 | `Deploy` | hosting, rollout, environments, release state | separate from build |

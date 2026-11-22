@@ -178,6 +178,13 @@ owned template files. Several selected packs may declare the same shared root
 (`data/contract.json`, `ui/index.js`, `ui/route_manifest.json`); any other
 declared output path belongs to exactly one selected pack.
 
+When verified packs supply all collections and default data policies suffice,
+the DesignDocs agent emits `"data_contract": "selected_pack_data"`. The save
+tool resolves the selected pins and composes their full collection contracts
+before access-policy review. The saved design and downstream workflows receive
+the ordinary data contract object. Apps with additional collections or custom
+policies use the object form to declare those decisions.
+
 A composed route may target one of the shell's routable core pages
 (`SchemaPage`, `ChatPage`, `ProfilePage`) without a `ui/index.js`
 registration, and a route may omit its `id`: composition then matches it by

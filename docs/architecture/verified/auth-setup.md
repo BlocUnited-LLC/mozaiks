@@ -79,6 +79,52 @@ messaging module excludes the sender from `recipient_ids`.
 
 ## Provider Setup
 
+### Inspect a generated app's login
+
+Authenticated draft previews initially show the running app's customer login.
+The artifact's App screen and Login screen controls switch the preview surface.
+The ChatUI Results control opens the workflow artifact beside its conversation.
+Expand artifact uses the existing view mode, and Return to chat restores the
+prior conversation layout and mounted artifact.
+The shared shell resolves `/?inspect=login` through the running
+`app/config/auth.yaml` login route. The login keeps its normal branding from
+`app/brand/theme_config.json`, copy and sign-in button, including when an app
+session already exists. Sign-in starts only after that button is clicked.
+Custom login components must preserve the exact `inspect=login` query while
+displaying their normal customer design and suppressing their signed-in redirect.
+
+The query changes presentation only. It grants no roles, owner membership or
+Admin access. The explicit Open as owner action in artifact chrome uses the
+existing owner flow, which verifies `/api/admin/config` before offering Open
+Admin. The configured provider may reuse its browser session through OIDC and
+PKCE. Provider passwords stay at the provider. Self-hosters configure their own
+provider through the existing auth contract and environment settings.
+
+Browser tests with mocked identity responses establish UI and request behavior.
+A real provider session and backend authorization require separate local or
+hosted acceptance evidence.
+
+Embedded web shells use the existing authorization transport seam to open the
+provider in a popup after an explicit sign-in click. Ordinary top-level login
+keeps its redirect behavior. The popup returns through the configured same-origin
+callback route. Its transport-owned, expiring transaction marker binds the
+callback to its state. The receiving window checks the exact popup source,
+origin and callback before the shared adapter validates PKCE, state and nonce
+and exchanges the code. Only the callback URL crosses between these windows.
+Provider passwords stay in the provider window.
+
+Custom callback pages can call `relayBrowserAuthorization(callbackPath)` before
+their ordinary callback handler. It returns true only for the matching owned
+popup transaction, including repeated effect execution. An unrelated opener
+does not select this path. Custom auth adapters receive the optional
+`authorizationTransport` through shell bootstrap and must explicitly support it
+when used inside an embedded shell. Browser transports declare `kind: browser`.
+Existing native transports retain their native callback validation.
+
+A blocked or closed popup leaves sign-in retryable. Providers that sever the
+popup relationship require separate qualification. Artifact sandbox permissions
+remain unchanged. This transport grants no application roles or Admin authority.
+
 ### Supabase
 
 ```bash

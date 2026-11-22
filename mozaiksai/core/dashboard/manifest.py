@@ -352,13 +352,13 @@ def _default_manifest_dict() -> dict[str, Any]:
             "portals": [
                 {
                     "id": "portfolio",
-                    "label": "Apps",
+                    "label": "My Apps",
                     "route": "/apps",
                     "description": "Portfolio-level list of apps in the workspace.",
                     "icon": "apps",
                     "order": 0,
                     "panels": [
-                        {"id": "portfolio", "type": "app_portfolio_table", "title": "Apps"},
+                        {"id": "portfolio", "type": "app_portfolio_table", "title": "My Apps"},
                     ],
                 },
                 {

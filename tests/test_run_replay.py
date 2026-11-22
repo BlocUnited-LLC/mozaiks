@@ -201,7 +201,8 @@ async def test_handle_resume_request_uses_app_scope_for_pending_input_lookup(mon
 
 
 @pytest.mark.asyncio
-async def test_handle_resume_request_re_emits_awaiting_reply_for_generic_feedback_pending_input(monkeypatch):
+@pytest.mark.parametrize("cursor", [-1, 0])
+async def test_handle_resume_request_re_emits_awaiting_reply_for_generic_feedback_pending_input(monkeypatch, cursor):
     replayer = WorkflowRunReplayer()
     emitted = []
 
@@ -249,7 +250,7 @@ async def test_handle_resume_request_re_emits_awaiting_reply_for_generic_feedbac
     await replayer.handle_resume_request(
         chat_id="chat_1",
         app_id="app_1",
-        last_client_index=-1,
+        last_client_index=cursor,
         send_event=_fake_send,
     )
 

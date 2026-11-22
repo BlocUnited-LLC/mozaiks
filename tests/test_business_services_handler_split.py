@@ -27,14 +27,12 @@ import yaml
 
 from factory_app.workflows.AppGenerator.tools import app_plan_review
 from factory_app.workflows.AppGenerator.tools.app_plan_review import review_app_build_plan
-from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
-    verify_pack_integrity,
-)
 from mozaiksai.core.adapters.ag2_task_batch_runner import AG2TaskBatchRunnerResult
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow import task_batches
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge, _compose_prompt_sections
 from mozaiksai.core.workflow.context.frozen import detach
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_continuous_deterministic_materialization import _load_models
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -121,13 +119,13 @@ def test_plan_review_keeps_a_handler_class_the_plan_already_names():
 def _review(owns_base_handler: bool) -> dict:
     fixture = json.loads(REVIEW_FIXTURE.read_text(encoding="utf-8"))
     variables = deepcopy(fixture["context_variables"])
-    for pack in variables.get("capability_packs") or []:
-        # Project the current source and its verified pins, retaining the raw fixture.
-        source = ROOT / pack["pack_source_path"]
-        metadata = verify_pack_integrity(source, pack["id"])
-        pack.update(pack_source_path=str(source), version=metadata["version"], digest=metadata["digest"])
-    context = ContextVariablesBridge(variables)
+    # Exercise handler splitting for the approved free app. The archived
+    # provider claim is unchanged on disk and is not authorized in this scenario.
+    variables["capability_packs"] = []
+    context = ContextVariablesBridge(reviewed_pack_fixture(variables, []))
     plan = deepcopy(fixture["AppBuildPlan"])
+    plan["capability_packs"] = [pack for pack in plan["capability_packs"]
+                                if pack["capability_source"] != "managed_capability"]
     services = _task(plan, "business_services")
     if owns_base_handler:
         services["owned_paths"].insert(1, "modules/customer_registry/backend/base_handler.py")

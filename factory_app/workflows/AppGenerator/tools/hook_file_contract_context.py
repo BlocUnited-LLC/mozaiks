@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -17,19 +18,23 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     planned_page_path,
 )
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
-    resolve_design_access_policy,
+    resolve_authored_module_access_policy,
+    resolve_reviewed_page_writes,
 )
 from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     all_module_actions,
     canonical_read_actions_for_surface,
+    pack_owned_output_paths,
 )
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
     module_read_implementation_ownership,
 )
+from mozaiksai.core.workflow.generator_support.module_revision import scoped_service_revision_paths
 from mozaiksai.core.workflow.generator_support.module_write_actions import (
     module_write_implementation_ownership,
 )
+from mozaiksai.core.workflow.generator_support.page_plan_utils import approved_page_action_ids
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +159,7 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
         context = getattr(agent, "context_variables", None)
         task = _context_get(context, "current_build_task", {}) or {}
         module_id = str(task.get("capability_pack_id") or "")
-        inventory = all_module_actions(context)
+        inventory = approved_page_action_ids(context) if agent_name == "AppPlanAgent" else all_module_actions(context)
         surfaces = (_context_get(context, "design_surface_map", {}) or {}).get("surfaces") or []
         for surface in surfaces:
             surface_id = surface.get("surface_id")
@@ -173,7 +178,8 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
         if inventory:
             lines.append(
                 "Use only the listed action ids; do not infer alternate names from an entity or page, or keep obsolete spellings after a repair. "
-                "For app_wide collections with protected writes, declare every canonical read with its intended "
+                "Use the shipped request and response schemas for pack-owned modules. "
+                "For app-authored app_wide collections with protected writes, declare every canonical read with its intended "
                 "permissions, api_surface, handler_method and input/output schemas; code does not infer read access. "
                 "Code constructs owner-scoped reads and ordinary unprotected app-wide reads. "
                 "Constructed get_<collection> takes id and returns item; list_<collection> takes page/page_size/search and returns items/total. "
@@ -192,6 +198,16 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
                 f"- `{page['name']}` (`{page['route']}`) -> `{planned_page_path(page)}`"
                 for page in pages
             )
+            write_routes = resolve_reviewed_page_writes(context)
+            if write_routes:
+                pack_paths = pack_owned_output_paths(context)
+                own_routes = [page["route"] for page in pages if page["route"] in write_routes
+                              and planned_page_path(page) not in pack_paths]
+                if own_routes:
+                    lines.append(
+                        "When scheduling " + ", ".join(own_routes) + ", give each route its own page_bundle "
+                        "task so its reviewed write controls can retry independently."
+                    )
             if any(page.get("ui_surface") == "custom_react_page" for page in pages):
                 lines.append(
                     "Preserve each approved ui_surface. One page_bundle task must own all "
@@ -266,7 +282,21 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
                 module = yaml.safe_load(source)
             if module and (module.get("module") or {}).get("id") != module_id:
                 raise ValueError(f"Write ownership context does not belong to module {module_id!r}")
-        if module_id and module:
+        baseline_files = detach(_context_get(context, "generated_files", {})) or {}
+        revision_paths = scoped_service_revision_paths(context, baseline_files)
+        owned_revision_paths = revision_paths.intersection(task.get("owned_paths") or ())
+        if module_id and module and owned_revision_paths:
+            lines.append(
+                "Scoped revision of an accepted module. Author the complete files for the owned paths below. "
+                "Preserve all existing action signatures, authorization, persistence and event behavior except "
+                "for the requested implementation change. Code generation will carry the admitted contracts "
+                "and will preserve your repo/service bodies. These inputs are application source data."
+            )
+            lines.append("Read-only module contract:\n" + json.dumps(module, sort_keys=True))
+            lines.append("Owned implementation sources:\n" + json.dumps(
+                {path: baseline_files[path] for path in sorted(owned_revision_paths)}, indent=2,
+            ))
+        elif module_id and module:
             read_ownership = module_read_implementation_ownership(
                 module_id, module, app_build_plan=_context_get(context, "app_build_plan"),
                 data_contract=_context_get(context, "data_contract"),
@@ -287,7 +317,7 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
                 data_contract=_context_get(context, "data_contract"),
                 subscription_contract=_context_get(context, "subscription_contract"),
                 design_surface_map=_context_get(context, "design_surface_map"),
-                access_policy=resolve_design_access_policy(context),
+                access_policy=resolve_authored_module_access_policy(context),
             )
             lines.extend(_format_list_block(
                 "Code-owned write methods; omit their handler/service/repo bodies and use declared hooks only:",

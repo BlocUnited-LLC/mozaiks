@@ -30,6 +30,7 @@ from tests import test_designdocs_monetization_inventory as inventory
 from tests import test_designdocs_ownership_normalization as normalization
 
 persistence = inventory.persistence
+registered_offering_and_review = inventory.registered_offering_and_review
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -669,7 +670,7 @@ def test_an_alias_must_name_a_facade_action(monkeypatch):
 
     monkeypatch.setattr(surface_ownership, "managed_pack_contracts", contracts)
     with pytest.raises(ValueError, match="must name actions of facade 'billing_portal'"):
-        surface_ownership._ownership_rules(context, include_default_subscription=True)
+        surface_ownership._ownership_rules(context)
 
 
 # ---------------------------------------------------------------------------

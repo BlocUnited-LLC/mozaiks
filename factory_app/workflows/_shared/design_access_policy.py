@@ -8,8 +8,8 @@ from typing import Any
 from factory_app.workflows._shared.hook_utils import update_agent_section
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
     resolve_design_access_policy,
+    resolve_design_role_projection,
 )
-from mozaiksai.core.workflow.generator_support.module_role_grants import compiled_role_grants
 
 
 async def hydrate_design_access_policy(context_variables: Any = None) -> dict[str, Any]:
@@ -19,7 +19,7 @@ async def hydrate_design_access_policy(context_variables: Any = None) -> dict[st
 
 
 def inject_design_access_policy(agent: Any, messages: list[dict[str, Any]]) -> None:
-    policy = resolve_design_access_policy(agent.context_variables)
+    policy, roles = resolve_design_role_projection(agent.context_variables)
     update_agent_section(
         agent, "[APP ROLE ACCESS]",
         "The reviewed DesignDocs access_policy below is the only source of generated role grants. "
@@ -27,5 +27,5 @@ def inject_design_access_policy(agent: Any, messages: list[dict[str, Any]]) -> N
         "do not invent grants, broaden them, or write auth.yaml. Record ownership still applies.\n"
         + json.dumps(policy, ensure_ascii=False, sort_keys=True)
         + "\nCode-derived authorization.roles (reference only; do not edit grants):\n"
-        + json.dumps(compiled_role_grants(policy) if policy else [], ensure_ascii=False, sort_keys=True),
+        + json.dumps(roles, ensure_ascii=False, sort_keys=True),
     )

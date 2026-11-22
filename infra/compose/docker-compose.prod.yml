@@ -89,8 +89,12 @@ services:
   mongo:
     image: mongo:7
     container_name: mozaiksai-mongo
+    # This database starts without authentication, so it is published on this
+    # machine's loopback interface only. The runtime reaches it over the
+    # Compose network. On Linux, use Docker Engine 28.0 or later: older
+    # engines can expose a container's address despite a 127.0.0.1 publish.
     ports:
-      - "27017:27017"
+      - "127.0.0.1:27017:27017"
     volumes:
       - MozaiksAI_mongo_data:/data/db
     restart: unless-stopped
@@ -114,7 +118,8 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # MongoDB connection (uses compose network)
+      # Always the bundled MongoDB, over the Compose network. A MONGO_URI in the
+      # Compose --env-file is not read here: this value takes precedence.
       MONGO_URI: "mongodb://mongo:27017/mozaiksai"
       # The imported browser client adds the distinct mozaiks-api audience.
       # Set AUTH_AUDIENCE in the Compose --env-file to that API audience.

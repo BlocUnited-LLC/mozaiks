@@ -77,6 +77,7 @@ class WorkflowRunReplayer:
             await self._replay_pending_tool_calls(
                 chat_id=chat_id, app_id=app_id, send_event=send_event, chat_status=status,
             )
+            await self._replay_pending_input(chat_id=chat_id, app_id=app_id, send_event=send_event, chat_status=status)
             return None
 
         replay_result = await self._replay_messages(
@@ -151,6 +152,7 @@ class WorkflowRunReplayer:
             await self._replay_pending_tool_calls(
                 chat_id=chat_id, app_id=app_id, send_event=send_event, chat_status=status,
             )
+            await self._replay_pending_input(chat_id=chat_id, app_id=app_id, send_event=send_event, chat_status=status)
             return summary
 
         replay_result = await self._replay_messages(
@@ -311,8 +313,15 @@ class WorkflowRunReplayer:
             },
         )
 
-        # Re-emit pending input request if one exists
-        # This ensures the UI knows input is still needed after resume
+        await self._replay_pending_input(chat_id=chat_id, app_id=app_id, send_event=send_event, chat_status=chat_status)
+        return {"last_index": last_index, "replayed_messages": len(replayed_messages)}
+
+    async def _replay_pending_input(
+        self, *, chat_id: str, app_id: str | None, send_event: SendEventFunc, chat_status: Any,
+    ) -> None:
+        """Restore the active composer even when the client already has the complete transcript."""
+        if not app_id or str(chat_status).lower() not in {"0", "in_progress"}:
+            return
         try:
             pm = self._get_persistence_manager()
             if pm:
@@ -357,8 +366,6 @@ class WorkflowRunReplayer:
                         )
         except Exception as e:
             self.logger.debug("[RUN_REPLAY] Failed to check pending input request: %s", e)
-
-        return {"last_index": last_index, "replayed_messages": len(replayed_messages)}
 
     async def _replay_pending_tool_calls(
         self, *, chat_id: str, app_id: str | None, send_event: SendEventFunc,

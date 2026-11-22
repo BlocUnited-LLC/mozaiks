@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from factory_app.workflows._shared import surface_ownership
 from factory_app.workflows._shared.hook_utils import workflow_context_path
+from factory_app.workflows._shared.pack_selection import pin_pack_choices
 from factory_app.workflows._shared.surface_ownership import (
     SurfaceOwnershipRule,
     UserAdministration,
@@ -33,6 +34,7 @@ from tests import test_designdocs_capability_ownership as ownership
 from tests import test_designdocs_monetization_inventory as inventory
 
 persistence = inventory.persistence
+registered_offering_and_review = inventory.registered_offering_and_review
 
 
 def _auth_bundle() -> dict:
@@ -302,14 +304,15 @@ def test_competing_canonical_owners_are_rejected(persistence, tmp_path, monkeypa
         }]
         context.set("concept_blueprint", blueprint)
     else:
-        descriptor, contracts = ownership._search_pack(tmp_path, monkeypatch)
+        descriptor, contracts = ownership._search_pack(tmp_path / "registered-context", monkeypatch)
         contract = {key: value for key, value in contracts[0].items() if key != "source_path"}
         contract["surface_ownership"][0].update(
             surface_ids=["subscription_management"], entity_names=["Subscription"],
             collection_names=["subscriptions"], state_field_names=["status"],
         )
-        (tmp_path / "managed_search/contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
+        (tmp_path / "registered-context/managed_search/contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
         context.set("capability_packs", [*detach(context.get("capability_packs")), descriptor])
+        context.set("pack_selection", pin_pack_choices(context, ["mozaikspay", "managed_search"]))
     bundle = inventory._bundle(pricing=False)
     ownership._add_surface(
         bundle, surface_id="subscription_management", name="Subscription", route="/subscription",
@@ -401,6 +404,7 @@ def test_managed_ownership_without_facade_is_rejected(persistence, tmp_path, mon
     del contract["surface_ownership"][0]["facade_module"]
     (tmp_path / "managed_search/contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
     context.set("capability_packs", [descriptor])
+    context.set("pack_selection", pin_pack_choices(context, ["managed_search"]))
 
     result = inventory._save(context, inventory._bundle(pricing=False))
 
