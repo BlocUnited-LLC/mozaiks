@@ -1211,11 +1211,14 @@ def _render_dockerfile(spec: dict[str, Any]) -> str:
             "COPY requirements.txt ./",
             "RUN pip install --no-cache-dir -r requirements.txt",
             # Serve as an unprivileged user that owns the app directory: the host
-            # writes its .env, agent guidance and logs there on start.
+            # writes its .env, agent guidance and logs there on start. The log
+            # directory exists in the image so a volume mounted on it starts
+            # with this owner instead of root.
             f"RUN groupadd --gid {GENERATED_APP_USER_UID} {GENERATED_APP_USER}"
             f" && useradd --create-home --uid {GENERATED_APP_USER_UID}"
             f" --gid {GENERATED_APP_USER_UID} {GENERATED_APP_USER}"
-            f" && chown {app_owner} /app",
+            f" && mkdir -p {GENERATED_APP_LOGS_DIR}"
+            f" && chown {app_owner} /app {GENERATED_APP_LOGS_DIR}",
             f"COPY --chown={app_owner} . .",
             # The default log directory is inside the installed package, which
             # this user cannot write.

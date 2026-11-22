@@ -369,7 +369,7 @@ class TestRenderDockerfile:
         lines = _render_dockerfile({}).splitlines()
         create_user = (
             "RUN groupadd --gid 10001 mozaiks && useradd --create-home --uid 10001 --gid 10001 mozaiks"
-            " && chown 10001:10001 /app"
+            " && mkdir -p /app/logs && chown 10001:10001 /app /app/logs"
         )
         cmd_index = next(i for i, line in enumerate(lines) if line.startswith("CMD "))
 
@@ -383,7 +383,11 @@ class TestRenderDockerfile:
     def test_logs_go_to_a_directory_the_app_user_can_write(self):
         # The default log directory is inside the installed package. The real
         # boot is proven by tests/test_generated_app_container_smoke.py.
-        assert "ENV LOGS_BASE_DIR=/app/logs" in _render_dockerfile({}).splitlines()
+        lines = _render_dockerfile({}).splitlines()
+        assert "ENV LOGS_BASE_DIR=/app/logs" in lines
+        # Created in the image with the app user as owner, so a volume mounted
+        # there does not start root-owned.
+        assert any("mkdir -p /app/logs" in line and "chown 10001:10001 /app /app/logs" in line for line in lines)
 
 
 # ---------------------------------------------------------------------------
