@@ -281,6 +281,12 @@ The coding worker still edits only explicit scoped files. Graph context informs
 what should be included in scope; it does not grant permission to mutate
 additional files.
 
+The built-in coding provider sends the user request, pinned build record,
+editable file contents, validation hints, and checkpoint tool results to the
+model. Routing seeds and request metadata stay in the runtime for preparation,
+tool execution, and resumption. Checkpoint tools can project task-specific
+evidence from that state into the prompt.
+
 Checkpoint context is intentionally staged:
 
 | Checkpoint or workflow | Context provided | Purpose | What is not provided |
