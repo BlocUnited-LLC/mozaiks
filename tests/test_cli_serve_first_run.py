@@ -76,6 +76,25 @@ def test_serve_starts_the_host_on_loopback_when_mongo_answers(monkeypatch, tmp_p
     assert captured["port"] == 8123
 
 
+def test_first_run_points_at_the_created_env_without_naming_one_provider(monkeypatch, tmp_path, capsys) -> None:
+    workspace = _workspace(tmp_path, secrets=_VALID_CONTRACT)
+    # A variable-free example, so loading the copied .env changes no environment.
+    (workspace / ".env.example").write_text("# local settings\n", encoding="utf-8")
+    monkeypatch.setenv("MONGO_URI", "mongodb://127.0.0.1:27017/serve")
+    monkeypatch.setattr(mongo_preflight, "ping_mongo_uri", lambda uri, *, timeout_ms: None)
+
+    _serve(monkeypatch, workspace)
+
+    out = capsys.readouterr().out
+    assert (workspace / ".env").read_text(encoding="utf-8") == "# local settings\n"
+    assert f"Created {workspace / '.env'} from .env.example" in out
+    # Scaffolded workspaces and generated apps list different provider keys in
+    # their .env.example, so the message names none of them.
+    assert "fill in the model provider key and MONGO_URI it lists" in out
+    for provider_key in ("OPENAI_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY"):
+        assert provider_key not in out
+
+
 def test_serve_stops_fast_and_names_mongo_uri_when_mongo_is_unreachable(monkeypatch, tmp_path, capsys) -> None:
     workspace = _workspace(tmp_path, secrets=_VALID_CONTRACT)
     monkeypatch.setenv("MONGO_URI", "mongodb://user:secret@127.0.0.1:27099/serve")
