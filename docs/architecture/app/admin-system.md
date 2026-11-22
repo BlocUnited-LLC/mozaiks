@@ -178,9 +178,11 @@ Feature-owned admin UI lives in `modules/{module}/contracts/admin.yaml`.
 
 Each panel names the admin page it appears on with `page`: a page id declared
 in the app's `admin/admin_registry.yaml`, normally one of the standard pages
-above. A panel whose page is not declared has nowhere to render, and
-AppGenerator's module contract gate rejects it. Panels on one page are shown
-in ascending `order`.
+above. A panel whose page is not declared has nowhere to render, and the
+generated-bundle scanner rejects the bundle
+(`factory_app/workflows/AppGenerator/tools/generated_bundle_scanner.py`,
+"missing enabled admin page"). Panels on one page are shown in ascending
+`order`.
 
 The canonical module admin schema is `mozaiks.admin.v2`.
 

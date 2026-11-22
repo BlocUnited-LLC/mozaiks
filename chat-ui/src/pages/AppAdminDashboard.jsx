@@ -124,11 +124,12 @@ function prefixPanelApiEndpoints(panel, backendUrl) {
  *
  * Returns `{ backendUrl, auth, panels, loading, error }`. With no backend
  * configured, or a backend that has no admin config route, `panels` is empty
- * and `error` is null.
+ * and `error` is null. Pass `enabled: false` to make no request at all (the
+ * shell does this for a visitor who is not an admin).
  */
-export function useAppBackendAdminPanels() {
+export function useAppBackendAdminPanels({ enabled = true } = {}) {
   const { config, auth } = useChatUI();
-  const backendUrl = getAppBackendUrl(config);
+  const backendUrl = enabled ? getAppBackendUrl(config) : null;
   const [state, setState] = useState({ raw: null, loading: Boolean(backendUrl), error: null });
 
   useEffect(() => {

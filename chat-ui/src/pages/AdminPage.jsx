@@ -96,11 +96,11 @@ function pagePanels(panels, pageId) {
 export default function AdminPage({ route } = {}) {
   const { user } = useChatUI()
   const location = useLocation()
-  const { data: config, loading: configLoading, error: configError } = useAdminFetch('/api/admin/config')
-  const appBackend = useAppBackendAdminPanels()
-
   // Client-side role guard (backend enforces independently on all API routes)
   const isAdmin = user?.roles?.includes('admin') ?? true // true fallback = no-auth dev mode
+  const { data: config, loading: configLoading, error: configError } = useAdminFetch('/api/admin/config')
+  const appBackend = useAppBackendAdminPanels({ enabled: isAdmin })
+
   if (!isAdmin) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
