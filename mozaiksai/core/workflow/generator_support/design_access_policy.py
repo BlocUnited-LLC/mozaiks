@@ -276,6 +276,14 @@ def _page_role_meta(page: dict[str, Any], *, declarative: bool) -> dict[str, Any
     return meta
 
 
+def _require_legacy_sign_in(target: dict[str, Any], route: str) -> None:
+    gate = target.get("requiresAuth")
+    if gate is not None and type(gate) is not bool:
+        raise ValueError(f"Page {route!r} requiresAuth must be a boolean")
+    if gate is False:
+        raise ValueError(f"Page {route!r} needs a new DesignDocs sign-in review before authoring a public route")
+
+
 def validate_page_role_preservation(
     pages: list[dict[str, Any]], context: Any, *,
     custom_routes: list[dict[str, Any]] | None = None, require_complete: bool = False,
@@ -284,6 +292,12 @@ def validate_page_role_preservation(
     """Check runtime access, optionally projecting omitted fields during authoring."""
     policy, summary, _ = _resolve_reviewed_design(context)
     if policy is None or summary is None or summary.get("experience_spec") is None:
+        if fill_missing and context is not None and (context.get("design_docs_build_artifact") or context.get("design_docs_artifact")):
+            # Summaries predating access_policy have no sign-in authority either.
+            for page in pages:
+                _require_legacy_sign_in(page if planned else _page_role_meta(page, declarative=True), page.get("route"))
+            for entry in custom_routes or []:
+                _require_legacy_sign_in({**_page_role_meta(entry, declarative=False), **entry}, entry.get("path"))
         return None  # Standalone authored apps do not claim Factory design approval.
     approved = validate_design_page_roles(summary["experience_spec"], policy)
     sign_in = validate_design_page_sign_in(summary["experience_spec"], policy)
@@ -291,6 +305,8 @@ def validate_page_role_preservation(
 
     def preserve_login(target: dict[str, Any], route: str) -> None:
         if route not in sign_in:
+            if fill_missing:
+                _require_legacy_sign_in(target, route)
             return
         expected = sign_in[route]
         if fill_missing and target.get("requiresAuth") is None:
@@ -308,15 +324,14 @@ def validate_page_role_preservation(
         if route not in approved:
             raise ValueError(f"Page {route!r} has no reviewed page in ExperienceSpec")
         seen.add(route)
-        if route in sign_in:
-            if (not planned and "requiresAuth" in page) or (planned and "requiresAuth" in meta):
-                raise ValueError(f"Page {route!r} has requiresAuth outside its canonical location")
-            preserve_login(page if planned else meta, route)
-            if fill_missing:
-                if not planned:
-                    page["meta"] = meta
-                if roles is None and approved[route] is not None:
-                    page["roles"] = roles = approved[route]
+        if (route in sign_in or fill_missing) and "requiresAuth" in (meta if planned else page):
+            raise ValueError(f"Page {route!r} has requiresAuth outside its canonical location")
+        preserve_login(page if planned else meta, route)
+        if fill_missing and route in sign_in:
+            if not planned:
+                page["meta"] = meta
+            if roles is None and approved[route] is not None:
+                page["roles"] = roles = approved[route]
         candidate = sorted(roles) if isinstance(roles, list) and all(isinstance(role, str) for role in roles) else roles
         if candidate != approved[route]:
             raise ValueError(f"Page {route!r} must preserve reviewed roles {approved[route]!r}; received {roles!r}")
@@ -335,13 +350,12 @@ def validate_page_role_preservation(
         if roles and len(set(roles)) > 1:
             raise ValueError(f"Custom page {route!r} cannot project multiple roles through requiresRole")
         expected = roles[0] if roles else None
-        if route in sign_in:
-            if "requiresAuth" in meta:
-                raise ValueError(f"Custom page {route!r} must declare requiresAuth on the route entry")
-            preserve_login(entry, route)
-            if fill_missing and role is None and expected:
-                meta["requiresRole"] = role = expected
-                entry["meta"] = meta
+        if (route in sign_in or fill_missing) and "requiresAuth" in meta:
+            raise ValueError(f"Custom page {route!r} must declare requiresAuth on the route entry")
+        preserve_login(entry, route)
+        if fill_missing and route in sign_in and role is None and expected:
+            meta["requiresRole"] = role = expected
+            entry["meta"] = meta
         if role != expected:
             raise ValueError(f"Custom page {route!r} must preserve reviewed requiresRole {expected!r}; received {role!r}")
     if require_complete and set(approved) - seen:

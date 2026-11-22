@@ -177,8 +177,12 @@ publish its index and detail pages to visitors while reserving its editor for
 an approved role. New designs declare a boolean `requiresAuth` on every
 ExperienceSpec page. AppGenerator projects the reviewed choice to
 `meta.requiresAuth` on a declarative page or `requiresAuth` on a custom
-route. Earlier approvals retain their existing behavior until a fresh review.
+route. Earlier approvals still verify archived pages. Authoring a public route
+from a design that recorded only roles requires a fresh sign-in review.
 The Content module independently checks writes against the granted permissions.
+For packs that ship their own pages, the reviewed sign-in choice must match
+the template's runtime behavior. Content leaves all three example pages to
+the app.
 
 Each page worker receives its owned paths. A custom detail worker returns its
 React bundle with an empty declarative page list. If a response also emits an

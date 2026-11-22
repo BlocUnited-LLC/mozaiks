@@ -82,8 +82,8 @@ async def _review_access_policy(
         "target_app_id": binding.target_app_id, "build_id": binding.build_id,
         "pack_identities": identities,
     }
-    empty_scope = not identities and not policy["grants"] and not page_sign_in
-    if empty_scope and not context_variables.get("design_docs_review_requested_changes"):
+    empty_permissions = not identities and not policy["grants"] and not any(page_roles.values())
+    if empty_permissions and not page_sign_in and not context_variables.get("design_docs_review_requested_changes"):
         return receipt
     user_id, chat_id = _cv_get(context_variables, "user_id"), _cv_get(context_variables, "chat_id")
     if not user_id or not chat_id:
@@ -91,7 +91,7 @@ async def _review_access_policy(
     review_id = uuid4().hex
     labels = {role["role_id"]: role["label"] for role in policy["roles"]}
     checkpoints = [f"{role['label']} ({role['role_id']}): {role['description']}" for role in policy["roles"]]
-    if empty_scope:
+    if empty_permissions and context_variables.get("design_docs_review_requested_changes"):
         checkpoints.append("The revised design selects no reusable packs, grants no role permissions and has no role-gated pages.")
     checkpoints.extend(
         f"{labels[grant['role_id']]} may {', '.join(grant['actions'])} on {grant['collection']}."

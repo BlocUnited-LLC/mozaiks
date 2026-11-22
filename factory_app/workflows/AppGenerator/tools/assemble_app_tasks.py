@@ -14,7 +14,11 @@ from factory_app.workflows._shared.pack_selection import (
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     discard_pack_owned_outputs,
+    planned_page_path,
     safe_relpath,
+)
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    project_reviewed_page_access,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     SHARED_UI_OUTPUT_PATHS,
@@ -159,12 +163,19 @@ def _apply_planned_page_contracts(
             continue
         task_id = str(task.get("task_id") or "").strip()
         if task_id not in failed_tasks:
+            owned = {
+                path for raw_path in task.get("owned_paths") or []
+                if (path := safe_relpath(str(raw_path or ""))) and path not in pack_outputs
+            }
+            custom_routes = {
+                page["route"] for page in pages
+                if page.get("ui_surface") == "custom_react_page" and planned_page_path(page) in owned
+            }
+            file_map = project_reviewed_page_access(
+                file_map, context_variables, owned_paths=owned, owned_routes=custom_routes,
+            )
             validate_planned_custom_routes(
-                file_map, pages=pages,
-                owned_paths={
-                    path for raw_path in task.get("owned_paths") or []
-                    if (path := safe_relpath(str(raw_path or ""))) and path not in pack_outputs
-                },
+                file_map, pages=pages, owned_paths=owned,
                 baseline_files=(
                     detach(context_variables.get("generated_files"))
                     if revision_baseline_required(context_variables) else None
