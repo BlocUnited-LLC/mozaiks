@@ -307,18 +307,29 @@ def test_a_check_that_reports_no_error_clears_the_code_an_earlier_check_left(mon
     def stored() -> dict[str, Any]:
         return asyncio.run(store.get(scope=ConnectorStore.SCOPE_APP, scope_id="app_1", service="analytics_provider"))
 
+    from mozaiksai.hosts import studio
+
+    def listed_health(selected: bool) -> dict[str, Any]:
+        rows = asyncio.run(list_connectors(scope=ConnectorStore.SCOPE_APP, scope_id="app_1", store=store))
+        row = next(row for row in rows if row["service"] == "analytics_provider")
+        # The app Integrations page reads the selected shape; the Health page the full one.
+        return studio._selected_connector_record(row)["health"] if selected else row["health"]
+
     first = asyncio.run(run_connector_health_check(app_id="app_1", service="analytics_provider", store=store))
     assert first["error_code"] == "missing_credentials"
     assert stored()["health_error_code"] == "missing_credentials"
+    # Both connection lists carry the code, so both pages give the same verdict.
+    assert listed_health(selected=False)["error_code"] == "missing_credentials"
+    assert listed_health(selected=True)["error_code"] == "missing_credentials"
 
     second = asyncio.run(run_connector_health_check(app_id="app_1", service="analytics_provider", store=store))
     assert second["error_code"] is None
     assert stored()["health_error_code"] is None
-    # What the Integrations page reads for this connector carries no failure.
-    listed = asyncio.run(list_connectors(scope=ConnectorStore.SCOPE_APP, scope_id="app_1", store=store))
-    health = next(row for row in listed if row["service"] == "analytics_provider")["health"]
-    assert health["error_code"] is None
-    assert health["status"] != "unhealthy"
+    # What both Integrations pages read for this connector carries no failure.
+    for selected in (False, True):
+        health = listed_health(selected=selected)
+        assert health["error_code"] is None
+        assert health["status"] != "unhealthy"
 
 
 def test_plugin_exception_returns_sanitized_unhealthy_result() -> None:

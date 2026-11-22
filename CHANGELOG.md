@@ -34,7 +34,9 @@ This project follows a practical pre-1.0 changelog format:
   waits for that check and, if it fails, keeps the setup panel open with the
   provider's reason. Once the values are corrected the service reads Connected
   again: a connector's stored health no longer keeps the error code of an
-  earlier check after a check that reports none.
+  earlier check after a check that reports none. An app's Integrations page
+  gives the same verdict as its Health page, and "Check status" says what the
+  check found.
 - Studio's AI models page is in the workspace menu, and says why it cannot be
   changed when sign-in is off.
 - Studio's app Health page lists specific problems (latest build validation,

@@ -186,7 +186,11 @@ def test_controller_example_validates_against_its_own_output_schema() -> None:
     A review round replaced this example with a schema panel carrying
     ``config.api_endpoint``. The controller's structured-output model forbids
     that field, so an agent following the example would have been refused.
+    The example is checked against that compiled model and against the
+    codegen contract that renders the files.
     """
+    from mozaiksai.core.workflow.outputs.structured import build_models_from_config
+
     controller = _agent_sections(_read("factory_app/workflows/AppGenerator/agents.yaml"))["ControllerAgent"]
     example = re.search(r'"panels": (\[\{.*\}\])\s*$', controller, flags=re.MULTILINE)
     assert example, "ControllerAgent must show an app-backend admin panel example"
@@ -197,13 +201,15 @@ def test_controller_example_validates_against_its_own_output_schema() -> None:
     schema = yaml.safe_load(_read("factory_app/workflows/AppGenerator/structured_outputs.yaml"))
     assert set(panel) <= set(schema["models"]["AppBackendAdminPanel"]["fields"])
     assert "api_endpoint" not in example.group(1)
-    # With real values in place of the placeholders it is a valid config.
-    AppBackendAdminConfig.model_validate(
-        {
-            "schema_version": "mozaiks.admin.app_backend.v1",
-            "panels": [{**panel, "section": "overview", "builtin_panel": "stats"}],
-        }
-    )
+    # With real values in place of the placeholders it is a valid config, to the
+    # structured-output model the agent answers in and to the codegen contract.
+    config = {
+        "schema_version": "mozaiks.admin.app_backend.v1",
+        "panels": [{**panel, "section": "overview", "builtin_panel": "stats"}],
+    }
+    models = build_models_from_config(schema["models"], exact_model_ids=frozenset(schema["models"]))
+    models["AppBackendAdminConfig"].model_validate(config)
+    AppBackendAdminConfig.model_validate(config)
 
 
 def test_registry_icon_hints_resolve_in_the_portal() -> None:

@@ -1145,8 +1145,19 @@ async function mockStudioApis(page) {
         { service: 'custom_search', display_name: 'Search connection', ready: false,
           health: { status: 'unknown', health_check_supported: false } },
         // Its values are stored (ready), and the provider refused them.
-        { service: 'refused_mail', display_name: 'Refused connection', ready: true,
+        { service: 'refused_mail', display_name: 'Refused connection', ready: true, secret_available: true,
+          lifecycle_status: 'active',
           health: { status: 'unhealthy', message: 'Credential is invalid.', error_code: 'auth_failed', health_check_supported: true } },
+        // Saved with one of the values it needs. The server keeps it ready and
+        // reports the missing values only through error_code.
+        { service: 'partial_sms', display_name: 'Partial connection', ready: true, secret_available: true,
+          lifecycle_status: 'active',
+          health: {
+            status: 'pending_validation',
+            message: 'Connector has required configuration; run its provider health check before use.',
+            error_code: 'missing_credentials',
+            health_check_supported: true,
+          } },
       ],
       declarations: buildAppIntegrationDeclarationsPayload(appId).declarations,
       catalog: [{ id: 'postmark', name: 'Postmark', category: 'email' }],
@@ -2099,10 +2110,25 @@ test('app integrations route stays responsive across desktop and mobile widths',
   const connections = main.getByRole('listitem');
   await expect(connections.filter({ hasText: 'Payments connection' }).getByRole('button', { name: 'Check status' })).toBeVisible();
   await expect(connections.filter({ hasText: 'Search connection' }).getByRole('button', { name: 'Check status' })).toHaveCount(0);
-  // A connector the provider refused is not shown as ready.
-  const refused = connections.filter({ hasText: 'Refused connection' });
-  await expect(refused.getByText('Check failed', { exact: true })).toBeVisible();
-  await expect(refused.getByText('Ready', { exact: true })).toHaveCount(0);
+  // A connector the provider refused, or whose check found values missing,
+  // is not shown as ready: the same verdict the app Health page gives.
+  for (const name of ['Refused connection', 'Partial connection']) {
+    const row = connections.filter({ hasText: name });
+    await expect(row.getByText('Check failed', { exact: true })).toBeVisible();
+    await expect(row.getByText('Ready', { exact: true })).toHaveCount(0);
+  }
+  await expect(connections.filter({ hasText: 'Partial connection' }).getByText('Health · failed', { exact: true })).toBeVisible();
+
+  // Check status says what the check found.
+  await page.route('**/api/studio/integrations/connectors/refused_mail/health-check**', async (route) => {
+    await route.fulfill({ json: {
+      app_id: APP_ID,
+      service: 'refused_mail',
+      health: { status: 'unhealthy', message: 'Credential is invalid.', error_code: 'auth_failed', health_check_supported: true },
+    } });
+  });
+  await connections.filter({ hasText: 'Refused connection' }).getByRole('button', { name: 'Check status' }).click();
+  await expect(main.getByRole('alert')).toHaveText('The check with Refused connection failed: Credential is invalid.');
   await expect(main.getByText(SECRET_SENTINEL)).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
   expect(providerUrlRequests).toHaveLength(0);

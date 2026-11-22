@@ -1316,15 +1316,18 @@ async def _connector_scope(
 
 
 def _selected_connector_record(record: dict[str, Any]) -> dict[str, Any]:
+    # The app Health page reads these same connectors from /api/studio/integrations,
+    # which sends lifecycle_status and the last check's error_code. Without them
+    # this list called a connector "Ready" that Health reported as not working.
     fields = (
-        "service", "display_name", "notes", "status", "secret_available", "ready",
+        "service", "display_name", "notes", "status", "lifecycle_status", "secret_available", "ready",
         "expires_at", "updated_at",
     )
     result = {key: record[key] for key in fields if key in record}
     health = record.get("health") or {}
     result["health"] = {
         key: health[key]
-        for key in ("status", "message", "last_checked_at", "missing_fields", "health_check_supported")
+        for key in ("status", "message", "last_checked_at", "missing_fields", "error_code", "health_check_supported")
         if key in health
     }
     return result

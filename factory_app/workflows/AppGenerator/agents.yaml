@@ -2912,7 +2912,7 @@ agents:
         "mode": "app_backend_admin_surface",
         "app_backend_admin_config": {
           "schema_version": "mozaiks.admin.app_backend.v1",
-          "panels": [{ "id": "...", "label": "...", "section": "...", "order": 10, "renderer": "builtin", "builtin_panel": "...", "permissions": ["..."] }]
+          "panels": [{ "id": "...", "label": "...", "section": "...", "order": 10, "renderer": "builtin", "builtin_panel": "...", "sections": [], "permissions": ["..."] }]
         },
         "code_files": [
           { "filename": "backend/admin_config.py", "content": "..." },
