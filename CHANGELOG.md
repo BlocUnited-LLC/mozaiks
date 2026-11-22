@@ -34,26 +34,6 @@ This project follows a practical pre-1.0 changelog format:
   figures that could not change.
 - The Studio menu and the dashboard manifest declare the same pages; a test now
   runs the route validator on the real files.
-
-### Changed
-
-- One catalog of standard admin pages
-  (`overview | access | usage | billing | activity | operations | settings | integrations | support`)
-  lives in `mozaiksai.core.admin.contract`. App-backend admin panels may name
-  `activity`. AppGenerator declares an admin page only when something renders
-  on it, and no longer plans built-in app-backend panels, which no generated
-  backend can serve.
-- `GET /api/admin/stats` returns `failed_chats`. `GET /api/admin/runs` and
-  `/api/admin/sessions` give a failed session its end time.
-
-### Removed
-
-- Studio's workspace Users page and app Access page. Neither had a data source,
-  so both could only show zeros. User counts remain on Performance and on each
-  app's Users page.
-
-### Fixed
-
 - Studio owners can open Revenue and manage connections for the app they select in My Apps, including in hosts with a separate dashboard app ID.
 - Factory distinguishes available pack offerings from the explicit, versioned
   pack selection in the owner-reviewed DesignDocs artifact. Planning, template
@@ -184,6 +164,14 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- One catalog of standard admin pages
+  (`overview | access | usage | billing | activity | operations | settings | integrations | support`)
+  lives in `mozaiksai.core.admin.contract`. App-backend admin panels may name
+  `activity`. AppGenerator declares an admin page only when something renders
+  on it, and no longer plans built-in app-backend panels, which no generated
+  backend can serve.
+- `GET /api/admin/stats` returns `failed_chats`. `GET /api/admin/runs` and
+  `/api/admin/sessions` give a failed session its end time.
 - Factory design agents receive verified selected-pack capabilities, actions and
   ownership boundaries while retaining app-specific design intent. The shipped
   catalog no longer selects unrequested packs. Social 0.1.18 and Messaging
@@ -846,6 +834,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Removed
 
+- Studio's workspace Users page and app Access page. Neither had a data source,
+  so both could only show zeros. User counts remain on Performance and on each
+  app's Users page.
 - Acceptance without an authorized transition: AppGenerator no longer saves
   an app's first build as current, and the staged-refinement acceptance no
   longer credits the acceptance to the staged review record's reviewer.
