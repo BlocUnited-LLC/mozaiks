@@ -525,8 +525,8 @@ agents:
         - The unified admin shell at `/admin` is provided automatically by the framework — DO NOT plan a separate admin page, app-admin route, admin dashboard page schema, or admin React UI.
         - The generated app's admin responsibility is limited to two contracts:
           1. `app.json` `admins` (bundle-relative; physical workspace path `app/app.json`) owns bootstrap/access for the framework admin shell.
-          2. Module-owned `modules/{pack_name}/admin.yaml` files declaring feature panels that render inside user-facing sections of the unified `/admin` shell.
-        - If the app uses a split app backend and needs app-business admin panels, that backend must expose `GET {app_backend_url}/api/admin/config` returning `schema_version: mozaiks.admin.app_backend.v1` with `panels[]`. Those panels must use the explicit renderer contract:
+          2. Module-owned `modules/{pack_name}/contracts/admin.yaml` files declaring feature panels that render on the pages of the unified `/admin` shell.
+        - If the app uses a split app backend and needs app-business admin panels, that backend must expose `GET {app_backend_url}/api/admin/config` returning `schema_version: mozaiks.admin.app_backend.v1` with `panels[]`. Each panel sets `section` to the standard admin page it appears on (`overview | access | usage | billing | activity | operations | settings | integrations | support`) and uses the explicit renderer contract:
           - `renderer: builtin` with `builtin_panel: stats | users | subscriptions`
           - `renderer: schema` with `layout` + `sections[]`
           - `renderer: custom_component` with `component`
@@ -577,7 +577,7 @@ agents:
         - When declared actions require existing records, lifecycle prerequisites, or input values that cannot be generated from their schemas alone, reserve optional `modules/{module_id}/contracts/fixtures.yaml` in the same module_contract task. It supplies typed smoke inputs, never acceptance or authorization policy. For setup calls into another module, include that module's contract task in `depends_on` so its actual action/input/output contracts are available; do not invent foreign actions or create dependency cycles.
         - `owned_paths` must not include `backend/*.py`. Backend Python belongs to the sibling `data_models` and `business_services` tasks.
         - `initial_message` must pass the pack's entities, actions, capability ids, events, subscriptions/reactions, notifications, settings, required stubs, `app_backend_url`, and any `generated_workflow_*` metadata needed downstream.
-        - **admin panels are derived from module actions**: include admin panel requirements in `initial_message` for every `module_contract` task. Derive the operator panel spec from the module's declared actions using this mapping: list/query actions (`list_*`, `search_*`) → primary `DataTable` or `ResourceTable` panel; stats/summary actions (`*_stats`, `*_summary`, `*_metrics`) → `SummaryStrip` panel alongside the record table; approval/write/status-change actions (`approve_*`, `reject_*`, `publish_*`, `update_*`) → row-level or toolbar actions inside the primary panel (not separate panels). Section placement from module domain: billing/subscription/payment/invoice entities → `section: billing`; user/account/member/profile entities → `section: access`; request/queue/approval/job entities → `section: operations`; usage/quota/limit/metric entities → `section: usage`; setting/preference/config entities → `section: settings`; all others → `section: overview`. Include this derived spec in `initial_message` so module contract generation emits non-empty `panels[]`. For any stats/summary action, state that values must be repo-backed and trend/change fields must be omitted or null unless the module has a real historical source. Exception: do NOT derive admin panels for `surface_kind` values of `app_policy`, `refinement`, `ui_only`, or `external_integration` — those surfaces are not durable entity modules.
+        - **admin panels are derived from module actions**: include admin panel requirements in `initial_message` for every `module_contract` task. Derive the operator panel spec from the module's declared actions using this mapping: list/query actions (`list_*`, `search_*`) → primary `DataTable` or `ResourceTable` panel; stats/summary actions (`*_stats`, `*_summary`, `*_metrics`) → `SummaryStrip` panel alongside the record table; approval/write/status-change actions (`approve_*`, `reject_*`, `publish_*`, `update_*`) → row-level or toolbar actions inside the primary panel (not separate panels). Page placement from module domain (the `page` field of each panel, a page id declared in `admin/admin_registry.yaml`): billing/subscription/payment/invoice entities → `page: billing`; user/account/member/profile entities → `page: access`; request/queue/approval/job entities → `page: operations`; usage/quota/limit/metric entities → `page: usage`; setting/preference/config entities → `page: settings`; audit/event-log/history/timeline entities → `page: activity`; connector/webhook/OAuth/integration entities → `page: integrations`; ticket/helpdesk/support entities → `page: support`; all others → `page: overview`. Include this derived spec in `initial_message` so module contract generation emits non-empty `panels[]`. For any stats/summary action, state that values must be repo-backed and trend/change fields must be omitted or null unless the module has a real historical source. Exception: do NOT derive admin panels for `surface_kind` values of `app_policy`, `refinement`, `ui_only`, or `external_integration` — those surfaces are not durable entity modules.
         - Set `initial_agent: ConfigMiddlewareAgent` for this task.
         - For durable modules, the module contract must declare `python_stubs` for the canonical backend set (`backend/base_handler.py` and `backend/handler.py`, both kind `handler`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, `backend/schemas.py`) even though this task only emits YAML. The sibling `data_models` and `business_services` tasks implement model-owned stubs; code renders policy.py from data_contract.
         - For generated durable modules, set every `actions[].handler_method` equal to the action `id` unless a non-generated carry-forward contract already requires a different method. This keeps generated module.yaml, handler.py, and page endpoints deterministic.
@@ -2912,7 +2912,7 @@ agents:
         "mode": "app_backend_admin_surface",
         "app_backend_admin_config": {
           "schema_version": "mozaiks.admin.app_backend.v1",
-          "panels": [{ "id": "...", "label": "...", "section": "...", "order": 10, "renderer": "builtin", "builtin_panel": "...", "permissions": ["..."] }]
+          "panels": [{ "id": "...", "label": "...", "section": "...", "order": 10, "renderer": "builtin", "builtin_panel": "...", "sections": [], "permissions": ["..."] }]
         },
         "code_files": [
           { "filename": "backend/admin_config.py", "content": "..." },
@@ -2955,39 +2955,73 @@ agents:
     heading: '[OBJECTIVE]'
     content: |-
       Read `app_build_plan` and produce a complete `admin/admin_registry.yaml` that:
-      1. Declares the standard app-scope AdminPortal pages appropriate for this app's capability set.
+      1. Declares the pages this app's AdminPortal has: the pages the framework fills
+         itself, and every page a panel renders on.
       2. Omits workspace-scope pages for standard generated apps (include only when the app
          explicitly targets a hosted operator/platform context).
-      3. Covers all entity domains that module contract generation will assign module panels to,
-         so every `page` reference in every `admin.yaml` resolves to a declared page id.
+      3. Leaves no panel without a page: every `page` a module `contracts/admin.yaml`
+         panel names, and every `section` an app-backend admin panel names, resolves to
+         a declared page id.
   - id: context
     heading: '[CONTEXT]'
     content: |-
       **Inputs**:
-      - `app_build_plan`: full app build plan. Read `capability_packs`, `pages`,
-        `auth_strategy`, and `build_tasks` to infer which admin pages are relevant.
+      - `app_build_plan`: full app build plan. `auth_strategy` says whether the app has
+        sign-in (`public` means none, null means not declared). `capability_packs` lists
+        the capabilities selected for this app; each entry's `capability_pack_id` names
+        the pack or module that realizes it.
       - `capability_packs`: operator or framework capability pack descriptors available
         for this build. Null or empty in OSS contexts without workspace build context.
         Use this to include provider-backed/operator pages that are not part of the
         standard framework admin surface.
         - `app_task_batch_results`, `generated_files`, and `code_files`: current typed task
-          outputs and retained app artifacts. Read module `contracts/admin.yaml` panel
-          page references from these inputs and include their declared page ids.
+          outputs and retained app artifacts. Panel references are in two places: a
+          module contract's `admin_yaml.panels[].page` (the module's
+          `contracts/admin.yaml`), and an app-backend admin config's
+          `app_backend_admin_config.panels[].section`. Include every page id they name.
           Preserve retained registry pages unless the approved change removes them.
       - If bundle_repair_request is supplied, repair only its declared registry
         path using bundle_repair_errors and the supplied panel references. Keep
         unrelated registry entries and module/pack files unchanged.
 
-      **Standard app-scope page inclusion rules** (apply per capability set):
-      - `overview` — always include; path `/admin`; icon `dashboard`; order 0
-      - `access` — include when auth_strategy is neither `public` nor null, or any pack manages user/account/member entities; path `/admin/access`; icon `access`; order 10
-      - `usage` — include when any pack has quota, metering, analytics, or reporting entities; path `/admin/usage`; icon `chart`; order 20
-      - `billing` — include when any pack manages billing, subscription, payment, or invoice entities; path `/admin/billing`; icon `billing`; order 30
-      - `activity` — include when any pack has audit trail, event log, history, or timeline entities; path `/admin/activity`; icon `history`; order 40
-      - `operations` — include when any pack manages queue, job, request, approval, or workflow entities; path `/admin/operations`; icon `server`; order 50
-      - `settings` — always include; path `/admin/settings`; icon `settings`; order 60
-      - `integrations` — include when any pack has third-party connector, webhook, or OAuth entities; path `/admin/integrations`; icon `plug`; order 70
-      - `support` — include when any pack has ticket, helpdesk, or support entities; path `/admin/support`; icon `support`; order 80
+      **Standard app-scope pages** (the id, label, path, icon, and order of each are fixed):
+      - `overview` — label `Overview`; path `/admin`; icon `dashboard`; order 0
+      - `access` — label `Access`; path `/admin/access`; icon `access`; order 10
+      - `usage` — label `Usage`; path `/admin/usage`; icon `chart`; order 20
+      - `billing` — label `Billing`; path `/admin/billing`; icon `billing`; order 30
+      - `activity` — label `Activity`; path `/admin/activity`; icon `history`; order 40
+      - `operations` — label `Operations`; path `/admin/operations`; icon `server`; order 50
+      - `settings` — label `Settings`; path `/admin/settings`; icon `settings`; order 60
+      - `integrations` — label `Integrations`; path `/admin/integrations`; icon `plug`; order 70
+      - `support` — label `Support`; path `/admin/support`; icon `support`; order 80
+
+      **Inclusion rules** — a page with nothing to show is a broken page, so include a
+      standard page only when it has content, or (for `access`) a stated purpose:
+      - `overview`, `usage`, `operations`, and `settings` — always include. The
+        framework fills these itself: headline numbers on `overview`, AI usage and
+        recent runs on `usage`, recent sessions on `operations`, and the app's details
+        on `settings`. Every generated app has an assistant, so every app has usage
+        and sessions to show.
+      - `access` — include when the app has sign-in (`app_build_plan.auth_strategy`
+        is neither `public` nor null), or when a panel references it. User
+        administration belongs here; until a panel provides it, the page tells the
+        admin that accounts are managed by the app's sign-in provider.
+      - `billing`, `activity`, `integrations`, and `support` — the framework shows
+        nothing of its own on these. Include one only when a panel references it:
+        a module `contracts/admin.yaml` panel (`page`), an app-backend admin panel
+        (`section`), or a selected capability pack's panel (below).
+
+      **Capability pack panels** — a selected capability pack copies its own
+      `contracts/admin.yaml` into the bundle when the bundle is assembled. That
+      happens after you run, so those panels are not in your inputs. Declare their
+      pages from the plan: for each `app_build_plan.capability_packs` entry, match
+      `capability_pack_id` against this list.
+      - `commerce` pack: page `commerce`
+      - `mozaikspay` pack: page `usage`
+      - `support` pack: page `support`
+      A page id in this list that is not a standard page is the pack's own page:
+      declare it under `/admin/<id>` with a label from the pack's name (for example
+      id `commerce`, label `Commerce`, path `/admin/commerce`).
 
       Standard generated-app admin registry paths must stay in the `/admin`
       route family. Do not use `/apps/:appId/...` here; that route family is
@@ -3000,13 +3034,22 @@ agents:
       **Page id conventions**:
       - Use stable lowercase kebab-case ids matching the names above.
       - Module contracts/admin.yaml panels must reference only page ids declared in this registry.
-      - Do not invent custom page ids beyond the standard set above unless the build plan
-        explicitly calls for a unique operator surface with no standard analog.
+      - Do not invent custom page ids beyond the standard set above. The exceptions are
+        a page id a panel or a selected capability pack already names, and a unique
+        operator surface the build plan explicitly calls for.
 
-      **Coverage requirement**: Module contracts/admin.yaml derives panel page placement from entity
-      domain (billing/subscription → `billing`; user/member → `access`; job/queue → `operations`;
-      usage/metric → `usage`; setting/preference → `settings`; all others → `overview`). Ensure
-      every domain your modules cover has a matching page id in this registry.
+      **Coverage requirement**: module contract generation places each panel by entity domain:
+      - billing, subscription, payment, invoice entities → `page: billing`
+      - user, account, member, profile entities → `page: access`
+      - request, queue, approval, job entities → `page: operations`
+      - usage, quota, limit, metric entities → `page: usage`
+      - setting, preference, config entities → `page: settings`
+      - audit, event-log, history, timeline entities → `page: activity`
+      - connector, webhook, OAuth, integration entities → `page: integrations`
+      - ticket, helpdesk, support entities → `page: support`
+      - all others → `page: overview`
+      Every page id a panel references must be declared in this registry, so each panel
+      has a page to render on.
 
       **Two-tier admin UI model**:
       Admin surfaces split into two tiers with different file contracts and rendering contexts.
@@ -3025,12 +3068,15 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. Read `app_build_plan.capability_packs` — map each pack's entity domains to the
-         standard page inclusion rules above.
-      2. Read `app_build_plan.auth_strategy` — if `public` or null, skip `access` unless a pack
-         explicitly manages member entities.
-      3. Always include `overview` and `settings`.
-      4. Apply the remaining standard inclusion rules to produce the base page list.
+      1. Always include `overview`, `usage`, `operations`, and `settings`.
+      2. Read `app_build_plan.auth_strategy` — include `access` when it is neither
+         `public` nor null.
+      3. Read every module contract's `admin_yaml.panels[].page` and every
+         `app_backend_admin_config.panels[].section` in the supplied outputs. Include each
+         referenced page: a standard id uses the fixed label, path, icon, and order above;
+         any other id is declared as its own page under `/admin/<id>`.
+      4. Read `app_build_plan.capability_packs` — for each `capability_pack_id` in the
+         capability pack panels list, include that pack's page.
       5. Read `capability_packs` — if non-empty, apply the operator page inclusion
          rules. If null or empty, skip all operator-only pages entirely.
       6. Set `schema_version: mozaiks.admin.registry.v1`.
@@ -3053,7 +3099,8 @@ agents:
           "schema_version": "mozaiks.admin.registry.v1",
           "pages": [
             { "id": "overview", "label": "Overview", "path": "/admin", "icon": "dashboard", "order": 0, "enabled": true, "scope": "app" },
-            { "id": "access", "label": "Access", "path": "/admin/access", "icon": "access", "order": 10, "enabled": true, "scope": "app" },
+            { "id": "usage", "label": "Usage", "path": "/admin/usage", "icon": "chart", "order": 20, "enabled": true, "scope": "app" },
+            { "id": "operations", "label": "Operations", "path": "/admin/operations", "icon": "server", "order": 50, "enabled": true, "scope": "app" },
             { "id": "settings", "label": "Settings", "path": "/admin/settings", "icon": "settings", "order": 60, "enabled": true, "scope": "app" }
           ]
         },
@@ -3063,7 +3110,7 @@ agents:
             "content": "schema_version: mozaiks.admin.registry.v1\npages:\n  - id: overview\n    label: Overview\n    path: /admin\n    icon: dashboard\n    order: 0\n    enabled: true\n    scope: app\n"
           }
         ],
-        "agent_message": "Generated admin registry with 3 app-scope pages."
+        "agent_message": "Generated admin registry with 4 app-scope pages."
       }
       ```
 

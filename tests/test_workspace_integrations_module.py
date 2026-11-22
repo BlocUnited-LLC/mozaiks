@@ -259,6 +259,29 @@ def test_build_integration_response_includes_setup_lanes() -> None:
     assert response["managed_default"] == {"provider": "mozaikspay", "mode": "hosted"}
 
 
+def test_build_integration_response_separates_the_provider_page_from_the_studio_path() -> None:
+    """``provider_setup_url`` is where the key is created; ``setup_url`` is a Studio path.
+
+    The page once rendered ``setup_url`` as "Get API key", which sent the owner
+    to a Studio path that is not a route.
+    """
+    spec = CATALOG_BY_ID["anthropic"]
+    assert spec["setup_url"].startswith("https://")
+    missing = build_integration_response(spec, status="missing", missing_secrets=["ANTHROPIC_API_KEY"])
+    assert missing["provider_setup_url"] == spec["setup_url"]
+    assert missing["setup_url"] == "/integrations/anthropic"
+    configured = build_integration_response(spec, status="configured", missing_secrets=[])
+    assert configured["provider_setup_url"] == spec["setup_url"]
+    assert "setup_url" not in configured
+
+    # Only an https link is passed through as a provider page.
+    for not_a_provider_page in ("/integrations/anthropic", "javascript:alert(1)", "http://example.test", "", None):
+        response = build_integration_response({**spec, "setup_url": not_a_provider_page}, status="missing", missing_secrets=[])
+        assert "provider_setup_url" not in response
+    without_link = {key: value for key, value in spec.items() if key != "setup_url"}
+    assert "provider_setup_url" not in build_integration_response(without_link, status="missing", missing_secrets=[])
+
+
 def test_build_integration_response_missing_has_setup_url() -> None:
     spec = CATALOG_BY_ID["resend"]
     response = build_integration_response(spec, status="missing", missing_secrets=["RESEND_API_KEY"])

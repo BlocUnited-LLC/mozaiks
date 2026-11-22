@@ -1,62 +1,81 @@
-import { useState, useCallback } from 'react'
 import {
   StatCard,
-  SectionFrame,
   SectionHeading,
   Badge,
   ErrorBox,
   Spinner,
-  AdminExtensionPanels,
   useAdminFetch,
 } from '../components/AdminPrimitives.jsx'
+import {
+  USAGE_ENDPOINT,
+  formatCost,
+  formatCount,
+  formatDuration,
+  sessionStatus,
+  summarizeUsage,
+  usageByChatId,
+} from '../adminUsage.js'
 
 // ---------------------------------------------------------------------------
-// Built-in runtime panels
+// Framework panels for the Usage page
 // ---------------------------------------------------------------------------
 
-function StatsPanel() {
-  const { data, loading, error } = useAdminFetch('/api/admin/stats', 15000)
+/** Token and cost totals from the runtime usage ledger. */
+export function StatsPanel({ usageState }) {
+  const { data, loading, error } = usageState
 
-  if (loading) return <Spinner />
-  if (error) return <ErrorBox message={`Stats unavailable: ${error}`} />
+  if (!data && loading) return <Spinner />
+  if (!data && error) return <ErrorBox message={`AI usage unavailable: ${error}`} />
 
-  const totalTokens = (data.total_prompt_tokens ?? 0) + (data.total_completion_tokens ?? 0)
+  const summary = summarizeUsage(data)
+  if (!summary) return <ErrorBox message="AI usage unavailable: the server sent no totals." />
+  // Below the limit the first card already says "All recorded model calls".
+  const cappedNote = summary.capped ? summary.windowNote : undefined
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <StatCard label="Active Chats"      value={data.active_chats}     accent />
-      <StatCard label="Total Runs"        value={data.tracked_chats} />
-      <StatCard label="Agent Turns"       value={data.total_agent_turns} />
-      <StatCard label="Errors"            value={data.total_errors}
-        sub={data.total_errors > 0 ? 'check operations panel' : 'clean'} />
-      <StatCard label="Prompt Tokens"     value={data.total_prompt_tokens?.toLocaleString()} />
-      <StatCard label="Completion Tokens" value={data.total_completion_tokens?.toLocaleString()} />
-      <StatCard label="Total Tokens"      value={totalTokens.toLocaleString()} />
-      <StatCard label="Est. Cost"         value={`$${(data.total_cost ?? 0).toFixed(4)}`} />
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+      <StatCard label="Total tokens" value={formatCount(summary.totalTokens)} sub={summary.windowNote} accent />
+      <StatCard label="Input tokens" value={formatCount(summary.promptTokens)} sub={cappedNote} />
+      <StatCard label="Output tokens" value={formatCount(summary.completionTokens)} sub={cappedNote} />
+      <StatCard label="Model calls" value={formatCount(summary.modelCalls)} sub={cappedNote} />
+      <StatCard label="Estimated cost" value={formatCost(summary.cost)} sub={summary.costNote} />
     </div>
   )
 }
 
-function RunsPanel() {
-  const { data, loading, error, refresh } = useAdminFetch('/api/admin/runs', 10000)
+/** Recent runs, each joined to its token and cost row from the usage ledger. */
+export function RunsPanel({ usageState }) {
+  const runsState = useAdminFetch('/api/admin/runs', 10000)
 
-  if (loading) return <Spinner />
-  if (error) return <ErrorBox message={`Runs unavailable: ${error}`} />
+  if (!runsState.data && runsState.loading) return <Spinner />
+  if (!runsState.data && runsState.error) return <ErrorBox message={`Runs unavailable: ${runsState.error}`} />
 
-  const runs = data?.runs ?? []
+  const runs = runsState.data?.runs ?? []
+  const usageByRun = usageByChatId(usageState.data)
+  const usageWindow = summarizeUsage(usageState.data)
 
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
         <span className="text-sm text-muted-foreground">
-          {runs.length} tracked run{runs.length !== 1 ? 's' : ''}
+          {runs.length} recent run{runs.length !== 1 ? 's' : ''}
         </span>
-        <button onClick={refresh} className="text-xs text-primary hover:text-primary/80 transition-colors">
+        <button
+          type="button"
+          onClick={() => { runsState.refresh(); usageState.refresh() }}
+          className="text-xs text-primary hover:text-primary/80 transition-colors"
+        >
           Refresh
         </button>
       </div>
+      {usageWindow?.capped ? (
+        <p className="mb-3 text-xs text-muted-foreground">
+          Tokens and cost are counted from the {usageWindow.windowNote.toLowerCase()}. An older run
+          shows —, and a run that began before them shows only part of its total.
+        </p>
+      ) : null}
       {runs.length === 0 ? (
-        <p className="text-sm text-muted-foreground italic">No recent runs found.</p>
+        <p className="text-sm text-muted-foreground italic">No runs recorded yet.</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full text-sm">
@@ -69,24 +88,25 @@ function RunsPanel() {
             </thead>
             <tbody>
               {runs.map((run) => {
-                const active = !run.ended_at
-                const tokens = (run.prompt_tokens ?? 0) + (run.completion_tokens ?? 0)
+                const status = sessionStatus(run.status)
+                // A run with no ledger row either made no model call or falls
+                // outside the calls the usage endpoint totals; show no number.
+                // A run whose models have no price shows no dollar figure.
+                const usage = usageByRun.get(run.chat_id)
                 return (
                   <tr key={run.chat_id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
                     <td className="px-3 py-2 font-medium text-foreground">{run.workflow_name}</td>
                     <td className="px-3 py-2 text-muted-foreground">{run.app_id}</td>
                     <td className="px-3 py-2 text-muted-foreground truncate max-w-[120px]">{run.user_id}</td>
                     <td className="px-3 py-2">
-                      <Badge variant={active ? 'primary' : 'success'}>
-                        {active ? 'running' : 'done'}
-                      </Badge>
+                      <Badge variant={status.variant}>{status.label}</Badge>
                     </td>
-                    <td className="px-3 py-2 text-muted-foreground">{run.agent_turns}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{tokens.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-muted-foreground">${(run.cost ?? 0).toFixed(4)}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{formatCount(run.agent_turns)}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{formatCount(usage?.total_tokens)}</td>
                     <td className="px-3 py-2 text-muted-foreground">
-                      {run.runtime_sec != null ? `${run.runtime_sec.toFixed(1)}s` : '—'}
+                      {formatCost(usage?.priced ? usage.estimated_cost_usd : null)}
                     </td>
+                    <td className="px-3 py-2 text-muted-foreground">{formatDuration(run.runtime_sec)}</td>
                   </tr>
                 )
               })}
@@ -99,35 +119,35 @@ function RunsPanel() {
 }
 
 // ---------------------------------------------------------------------------
-// Built-in panel registry for this section
+// Panel registry for this page — ids match DEFAULT_RUNTIME_PANELS on the server
 // ---------------------------------------------------------------------------
 
 const USAGE_PANELS = {
-  stats: { label: 'System Stats',  component: StatsPanel },
-  runs:  { label: 'Active Runs',   component: RunsPanel },
+  stats: { label: 'AI Usage',    component: StatsPanel },
+  runs:  { label: 'Recent Runs', component: RunsPanel },
 }
 
 // ---------------------------------------------------------------------------
 // Section
 // ---------------------------------------------------------------------------
 
-export function UsageSection({ runtimePanels, extensionPanels }) {
+export function UsageSection({ runtimePanels = [] }) {
+  // One usage request feeds both panels.
+  const usageState = useAdminFetch(USAGE_ENDPOINT, 60000)
+
   return (
-    <SectionFrame title="Usage" description="Workflow runs, cost, errors, and app runtime health.">
+    <section>
       {runtimePanels.map((panelConfig) => {
-        const id = typeof panelConfig === 'string' ? panelConfig : panelConfig?.id
-        const built = USAGE_PANELS[id]
+        const built = USAGE_PANELS[panelConfig?.id]
         if (!built) return null
-        const label = typeof panelConfig === 'object' && panelConfig?.label ? panelConfig.label : built.label
         const Panel = built.component
         return (
-          <div key={id}>
-            <SectionHeading>{label}</SectionHeading>
-            <Panel />
+          <div key={panelConfig.id}>
+            <SectionHeading>{panelConfig.label || built.label}</SectionHeading>
+            <Panel usageState={usageState} />
           </div>
         )
       })}
-      <AdminExtensionPanels panels={extensionPanels} />
-    </SectionFrame>
+    </section>
   )
 }

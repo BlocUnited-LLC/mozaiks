@@ -1,9 +1,13 @@
 /**
  * AdminPage — unified admin shell.
  *
- * Owns: role guard, config fetch, page routing, panel rendering.
- * Each built-in page delegates to its own component in src/admin/pages/.
- * Extension pages (declared only in admin_registry.yaml) render AdminExtensionPanels.
+ * Owns: role guard, config fetch, page routing, and one layout for every page:
+ *
+ *   page title and description
+ *   framework content        (only the pages in FRAMEWORK_PAGES)
+ *   app-backend panels       (panels whose `section` is this page)
+ *   module panels            (panels whose `page` is this page)
+ *   empty state              (when the page has none of the above)
  *
  * Access is gated by the "admin" role (client-side guard; backend enforces
  * independently on all /api/admin/* routes).
@@ -11,19 +15,26 @@
  * Config comes from GET /api/admin/config:
  *   { "pages": [...], "runtime_panels": [...], "module_panels": [...] }
  *
- * Pages are declared in app/admin/admin_registry.yaml.
- * Module panels reference a page id via the `page` field in admin.yaml.
+ * Pages are declared in app/admin/admin_registry.yaml. The standard page ids
+ * and their wording live in admin/contracts/adminPages.js.
  */
 
 import { useLocation } from 'react-router-dom'
 import { useChatUI } from '../context/ChatUIContext'
-import { AdminExtensionPanels, useAdminFetch } from '../admin/components/AdminPrimitives.jsx'
+import {
+  AdminExtensionPanels,
+  EmptyState,
+  ErrorBox,
+  Spinner,
+  useAdminFetch,
+} from '../admin/components/AdminPrimitives.jsx'
 import { AdminWorkspaceLayout } from '../admin/components/AdminWorkspaceLayout.jsx'
-import { OverviewSection as AdminOverviewPanel } from '../admin/pages/OverviewSection.jsx'
-import { UsersSection }        from '../admin/pages/UsersSection.jsx'
-import { UsageSection }        from '../admin/pages/UsageSection.jsx'
-import { OperationsSection }   from '../admin/pages/ActivitySection.jsx'
-import { SettingsSection }     from '../admin/pages/SettingsSection.jsx'
+import { getStandardAdminPage } from '../admin/contracts/adminPages.js'
+import { OverviewSection }   from '../admin/pages/OverviewSection.jsx'
+import { UsageSection }      from '../admin/pages/UsageSection.jsx'
+import { OperationsSection } from '../admin/pages/OperationsSection.jsx'
+import { SettingsSection }   from '../admin/pages/SettingsSection.jsx'
+import { AppAdminPanels, useAppBackendAdminPanels } from './AppAdminDashboard.jsx'
 
 // ---------------------------------------------------------------------------
 // Page routing — extract active page id from the URL suffix
@@ -36,37 +47,42 @@ function AdminSectionRoute(pathname) {
 }
 
 // ---------------------------------------------------------------------------
-// Built-in page components — pages with dedicated section implementations
+// Framework content — pages the framework itself has something to show on.
+// Every other page is filled only by app-backend and module panels.
 // ---------------------------------------------------------------------------
 
-const BUILTIN_PAGES = {
-  access:     (props) => <UsersSection {...props} />,
-  usage:      (props) => <UsageSection title="Usage" {...props} />,
-  operations: (props) => <OperationsSection {...props} />,
-  settings:   (props) => <SettingsSection {...props} />,
+const FRAMEWORK_PAGES = {
+  overview:   OverviewSection,
+  usage:      UsageSection,
+  operations: OperationsSection,
+  settings:   SettingsSection,
 }
 
 // ---------------------------------------------------------------------------
 // Panel utilities
 // ---------------------------------------------------------------------------
 
+// Mirrors DEFAULT_RUNTIME_PANELS in mozaiksai/core/admin/contract.py; used only
+// until /api/admin/config answers.
+const DEFAULT_RUNTIME_PANELS = [
+  { id: 'stats', page: 'usage' },
+  { id: 'runs', page: 'usage' },
+  { id: 'sessions', page: 'operations' },
+]
+
 function normalizeRuntimePanels(runtimePanels) {
-  const panels = Array.isArray(runtimePanels) ? runtimePanels : [
-    { id: 'stats', page: 'usage' },
-    { id: 'runs', page: 'usage' },
-    { id: 'sessions', page: 'operations' },
-  ]
-  return panels.map((p) => ({
-    ...p,
-    id: typeof p === 'string' ? p : p?.id,
-    page: typeof p === 'string' ? (p === 'sessions' ? 'operations' : 'usage') : (p?.page || 'usage'),
-    source: 'runtime',
-  })).filter((p) => p.id)
+  const panels = Array.isArray(runtimePanels) ? runtimePanels : DEFAULT_RUNTIME_PANELS
+  return panels
+    .filter((p) => p && typeof p === 'object' && p.id && p.page)
+    .map((p) => ({ ...p, source: 'runtime' }))
 }
 
 function normalizeModulePanels(modulePanels) {
   if (!Array.isArray(modulePanels)) return []
-  return modulePanels.map((p) => ({ ...p, page: p?.page || 'overview' }))
+  return modulePanels
+    .filter((p) => p && typeof p === 'object' && p.id && p.page)
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 }
 
 function pagePanels(panels, pageId) {
@@ -80,10 +96,11 @@ function pagePanels(panels, pageId) {
 export default function AdminPage({ route } = {}) {
   const { user } = useChatUI()
   const location = useLocation()
-  const { data: config } = useAdminFetch('/api/admin/config')
-
   // Client-side role guard (backend enforces independently on all API routes)
   const isAdmin = user?.roles?.includes('admin') ?? true // true fallback = no-auth dev mode
+  const { data: config, loading: configLoading, error: configError } = useAdminFetch('/api/admin/config')
+  const appBackend = useAppBackendAdminPanels({ enabled: isAdmin })
+
   if (!isAdmin) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -95,41 +112,50 @@ export default function AdminPage({ route } = {}) {
     )
   }
 
-  const activePage        = route?.meta?.adminPage || AdminSectionRoute(location.pathname)
-  const allPages          = config?.pages ?? []
-  const allRuntimePanels  = normalizeRuntimePanels(config?.runtime_panels)
-  const allModulePanels   = normalizeModulePanels(config?.module_panels)
-  const runtimePanels     = pagePanels(allRuntimePanels, activePage)
-  const extensionPanels   = pagePanels(allModulePanels, activePage)
+  const activePage    = route?.meta?.adminPage || AdminSectionRoute(location.pathname)
+  const allPages      = config?.pages ?? []
+  const declaredPage  = allPages.find((p) => p.id === activePage) || null
+  const standardPage  = getStandardAdminPage(activePage)
+  const title         = declaredPage?.label || standardPage?.label || activePage
+  const description   = standardPage?.description || null
 
-  let content
-  const BuiltinPage = BUILTIN_PAGES[activePage]
-  if (activePage === 'overview') {
-    content = (
-      <>
-        <AdminOverviewPanel
-          runtimePanels={allRuntimePanels}
-          extensionPanels={allModulePanels}
-        />
-        <AdminExtensionPanels panels={extensionPanels} />
-      </>
-    )
-  } else if (BuiltinPage) {
-    content = <BuiltinPage runtimePanels={runtimePanels} extensionPanels={extensionPanels} />
-  } else {
-    // Extension-only page — declared in admin_registry.yaml, panels from admin.yaml
-    const pageLabel = allPages.find((p) => p.id === activePage)?.label || activePage
-    content = (
-      <div className="space-y-4">
-        <h1 className="text-lg font-semibold text-foreground capitalize">{pageLabel}</h1>
-        <AdminExtensionPanels panels={extensionPanels} />
-      </div>
-    )
-  }
+  const runtimePanels = pagePanels(normalizeRuntimePanels(config?.runtime_panels), activePage)
+  const modulePanels  = pagePanels(normalizeModulePanels(config?.module_panels), activePage)
+  const backendPanels = appBackend.panels
+    .filter((p) => p.section === activePage)
+    .sort((a, b) => a.order - b.order)
+
+  const FrameworkContent = FRAMEWORK_PAGES[activePage] || null
+  const stillLoading = (configLoading && !config) || appBackend.loading
+  const isEmpty = !FrameworkContent && modulePanels.length === 0 && backendPanels.length === 0
 
   return (
     <AdminWorkspaceLayout adminPages={allPages}>
-      <div className="space-y-6">{content}</div>
+      <div className="space-y-6">
+        <header>
+          <h1 className="text-2xl font-bold text-foreground">{title}</h1>
+          {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
+        </header>
+
+        {configError && !config ? (
+          <ErrorBox message={`Admin configuration unavailable: ${configError}`} />
+        ) : null}
+        {appBackend.error ? (
+          <ErrorBox message={`Panels from the connected backend could not be loaded: ${appBackend.error}`} />
+        ) : null}
+
+        {FrameworkContent ? <FrameworkContent runtimePanels={runtimePanels} /> : null}
+        <AppAdminPanels panels={backendPanels} backendUrl={appBackend.backendUrl} auth={appBackend.auth} />
+        <AdminExtensionPanels panels={modulePanels} />
+
+        {isEmpty && stillLoading ? <Spinner /> : null}
+        {isEmpty && !stillLoading && !configError ? (
+          <EmptyState>
+            Nothing has been added to {title} yet. Features installed in this app show their admin
+            tools here.{standardPage?.emptyHint ? ` ${standardPage.emptyHint}` : ''}
+          </EmptyState>
+        ) : null}
+      </div>
     </AdminWorkspaceLayout>
   )
 }

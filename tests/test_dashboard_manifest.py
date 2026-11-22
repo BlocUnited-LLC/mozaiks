@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -274,3 +275,52 @@ def test_generator_file_contract_keeps_dashboard_separate_from_workflow_routing(
     assert "Workspace/App Dashboard portal structure belongs in dashboard/dashboard.yaml" in contract
     assert "workflows/extended_orchestration/extension_registry.json" in contract
     assert "The dashboard manifest may reference workflow sequences, but it does not define" in architecture_doc
+
+
+def test_first_party_studio_dashboard_matches_its_route_manifest() -> None:
+    """Run the route validator on the real Studio files, not a synthetic pair.
+
+    The validator existed but was only ever given hand-built manifests, so the
+    real pair drifted: enabled portals with no page, and pages in the Studio
+    menu with no portal. This is the check that keeps the two lists one list.
+    """
+    app_root = Path(__file__).resolve().parents[1] / "factory_app" / "app"
+    raw = yaml.safe_load((app_root / "dashboard" / "dashboard.yaml").read_text(encoding="utf-8"))
+    # Validate directly: load_dashboard_manifest falls back to the default on an
+    # invalid file, which would hide a broken manifest behind a passing test.
+    manifest = DashboardManifest.model_validate(merge_dashboard_manifest_overlay(raw))
+    route_pages = json.loads((app_root / "ui" / "route_manifest.json").read_text(encoding="utf-8"))["pages"]
+
+    result = validate_dashboard_manifest_routes(manifest, route_pages)
+
+    assert [(issue.code, issue.route) for issue in result.issues] == []
+    # The file itself takes a position on every default portal: mounted or
+    # switched off. (The merged manifest always contains the defaults, so this
+    # reads the raw file.)
+    default = build_default_dashboard_manifest()
+    for scope in ("workspace", "app"):
+        in_file = {portal["id"] for portal in raw[scope]["portals"]}
+        assert {portal.id for portal in getattr(default, scope).portals} <= in_file, scope
+
+
+def test_first_party_studio_menu_icons_resolve() -> None:
+    """A route's icon hint must be one the Studio menu can draw.
+
+    An unknown hint falls back to the dashboard icon, so Support, Building, and
+    AI models all rendered with the Overview icon.
+    """
+    import re
+
+    repo_root = Path(__file__).resolve().parents[1]
+    layout = (repo_root / "chat-ui/src/workspace/WorkspaceLayout.jsx").read_text(encoding="utf-8")
+    icon_map = layout[layout.index("const ICON_MAP = {"):]
+    known = set(re.findall(r"^\s*([a-z]+):\s+Ri", icon_map[: icon_map.index("}")], flags=re.MULTILINE))
+    pages = json.loads((repo_root / "factory_app/app/ui/route_manifest.json").read_text(encoding="utf-8"))["pages"]
+
+    declared = {
+        navigation["icon"]
+        for page in pages
+        if isinstance(navigation := (page.get("meta") or {}).get("navigation"), dict) and navigation.get("icon")
+    }
+
+    assert declared and declared <= known, f"icon hints with no icon: {sorted(declared - known)}"

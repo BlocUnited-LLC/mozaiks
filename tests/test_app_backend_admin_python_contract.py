@@ -6,8 +6,10 @@ import pytest
 import yaml
 
 from factory_app.workflows.AppGenerator.tools.app_backend_admin_contract import (
+    APP_BACKEND_ADMIN_SECTION_IDS,
     validate_app_backend_admin_config,
 )
+from mozaiksai.core.admin.contract import STANDARD_ADMIN_PAGE_IDS
 
 
 def _workspace() -> Path:
@@ -92,16 +94,10 @@ def test_appgenerator_structured_output_contract_matches_runtime_schema_version_
     assert models["AppBackendAdminConfig"]["fields"]["schema_version"]["values"] == [
         "mozaiks.admin.app_backend.v1"
     ]
-    assert models["AppBackendAdminPanel"]["fields"]["section"]["values"] == [
-        "overview",
-        "access",
-        "billing",
-        "usage",
-        "operations",
-        "settings",
-        "integrations",
-        "support",
-    ]
+    # The section vocabulary is the standard admin page catalog, not a list of
+    # its own; tests/test_admin_page_catalog.py checks every other copy.
+    assert models["AppBackendAdminPanel"]["fields"]["section"]["values"] == list(APP_BACKEND_ADMIN_SECTION_IDS)
+    assert APP_BACKEND_ADMIN_SECTION_IDS == STANDARD_ADMIN_PAGE_IDS
     assert models["AppBackendAdminPanel"]["fields"]["renderer"]["values"] == [
         "builtin",
         "schema",

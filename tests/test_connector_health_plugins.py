@@ -264,6 +264,79 @@ def test_manual_health_check_with_fake_provider_updates_safe_health(monkeypatch)
     assert SECRET_VALUE not in repr(result)
     assert SECRET_VALUE not in repr(connector)
 
+class _ScriptedHealthProvider:
+    """Answers each check with the next scripted result."""
+
+    provider_id = "scripted_health_provider"
+    supported_integration_ids = ["analytics_provider"]
+
+    def __init__(self, results: list[ConnectorHealthResult]) -> None:
+        self.results = list(results)
+
+    async def check(self, **kwargs):
+        del kwargs
+        return self.results.pop(0)
+
+
+def test_a_check_that_reports_no_error_clears_the_code_an_earlier_check_left(monkeypatch) -> None:
+    """The stored health record describes the latest check, not a mix of two.
+
+    A service that needs two values and has one answers ``not_configured`` with
+    ``missing_credentials``. Once the owner supplies both, a provider that can
+    only confirm the shape answers ``configured`` with no code. The old code
+    stayed on the record, so the connector read as failing for good.
+    """
+    store = _store()
+    vault = _FakeVaultBackend()
+    _seed_configured_connector(store)
+    vault.secrets[("app", "app_1", "analytics_provider")] = SECRET_VALUE
+    monkeypatch.setattr(connector_health, "get_connector_vault_backend", lambda: vault)
+    register_connector_health_provider(
+        _ScriptedHealthProvider(
+            [
+                ConnectorHealthResult(
+                    status="not_configured",
+                    message="Needs both the client id and the client secret.",
+                    error_code="missing_credentials",
+                ),
+                ConnectorHealthResult(status="configured", message="Credentials are present and correctly formatted."),
+            ]
+        )
+    )
+
+    def stored() -> dict[str, Any]:
+        return asyncio.run(store.get(scope=ConnectorStore.SCOPE_APP, scope_id="app_1", service="analytics_provider"))
+
+    from mozaiksai.hosts import studio
+
+    def listed_health(selected: bool) -> dict[str, Any]:
+        rows = asyncio.run(list_connectors(scope=ConnectorStore.SCOPE_APP, scope_id="app_1", store=store))
+        row = next(row for row in rows if row["service"] == "analytics_provider")
+        # The app Integrations page reads the selected shape; the Health page the full one.
+        return studio._selected_connector_record(row)["health"] if selected else row["health"]
+
+    first = asyncio.run(run_connector_health_check(app_id="app_1", service="analytics_provider", store=store))
+    assert first["error_code"] == "missing_credentials"
+    assert stored()["health_error_code"] == "missing_credentials"
+    # Both connection lists carry the code, so both pages give the same verdict.
+    assert listed_health(selected=False)["error_code"] == "missing_credentials"
+    assert listed_health(selected=True)["error_code"] == "missing_credentials"
+    # And the lifecycle (expired, revoked, ...) the verdict also reads.
+    rows = asyncio.run(list_connectors(scope=ConnectorStore.SCOPE_APP, scope_id="app_1", store=store))
+    row = next(row for row in rows if row["service"] == "analytics_provider")
+    assert row["lifecycle_status"]
+    assert studio._selected_connector_record(row)["lifecycle_status"] == row["lifecycle_status"]
+
+    second = asyncio.run(run_connector_health_check(app_id="app_1", service="analytics_provider", store=store))
+    assert second["error_code"] is None
+    assert stored()["health_error_code"] is None
+    # What both Integrations pages read for this connector carries no failure.
+    for selected in (False, True):
+        health = listed_health(selected=selected)
+        assert health["error_code"] is None
+        assert health["status"] != "unhealthy"
+
+
 def test_plugin_exception_returns_sanitized_unhealthy_result() -> None:
     store = _store()
     _seed_configured_connector(store, service="reporting_provider")

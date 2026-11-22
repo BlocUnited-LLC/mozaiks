@@ -3,25 +3,33 @@
 Studio is the browser management surface for a Mozaiks workspace. It is not the
 CLI with a UI, and it is not a generic admin portal. Studio helps an operator
 create apps, continue builds, see what needs attention, and manage app-level
-access, usage, and integration readiness without exposing internal runtime
+usage, health, and integration readiness without exposing internal runtime
 machinery.
 
 ## Surface Model
 
-Studio has two scopes:
+Studio has two scopes. Every page in a menu is declared twice, as a route in
+`ui/route_manifest.json` and as a portal in `dashboard/dashboard.yaml`, and a
+test keeps the two lists equal.
 
-| Scope | Routes | Purpose |
+| Scope | Menu | Purpose |
 | --- | --- | --- |
-| Workspace Dashboard | `/apps`, `/usage`, `/integrations` | Manage the portfolio: app records, workspace-wide usage, and shared provider setup. |
-| App Dashboard | `/apps/:appId/overview`, `/apps/:appId/...` | Manage one app through portals such as Overview, Building, Branding, Launch, Growth, Users, Usage, Support, and Settings. |
+| Workspace Dashboard | My Apps `/apps`, Performance `/performance`, Token Usage `/usage`, Integrations `/integrations`, Support `/support`, AI models `/settings/ai-models` | Manage the portfolio: app records, cross-app performance and usage, shared provider setup, support activity, and the AI models builds may use. |
+| App Dashboard | Overview, Revenue, Users, Building, Token Usage, Health, Integrations, Support, each under `/apps/:appId/...` | Manage one app. |
 
-Hidden detail routes can exist when a task needs deeper diagnostics:
+Token Usage, Integrations, Support, and AI models are for workspace
+administrators. AI models also needs sign-in to be on: the setting is stored per
+signed-in workspace, so with sign-in off the page says it cannot be changed.
+
+One detail route is linked from other pages and is not in a menu:
 
 | Route | Use |
 | --- | --- |
-| `/apps/:appId/health` | Deep operational diagnostics linked from Overview only when needed. |
-| `/apps/:appId/integrations` | App-specific integration setup details linked from Overview or workspace Integrations. |
-| `/apps/:appId/activity` | Build history and artifact preservation audit linked from Overview or Support when needed. |
+| `/apps/:appId/activity` | Build review: a saved build's files, preview, validation result, and artifact history, linked from Overview and Building. |
+
+A page appears in a menu only when it has data behind it. The first-party
+Studio has no account directory, so it has no Users-by-account or Access page;
+user counts are on Performance and on each app's Users page.
 
 `/create` and `/apps/new` are workflow entrypoints, not persistent Studio
 navigation. Create always starts a new app journey. Continue-build belongs on
@@ -49,11 +57,13 @@ Every Studio page should answer a concrete operator question:
 | Page | Question |
 | --- | --- |
 | Apps | What apps exist, what state are they in, and which one needs action? |
+| Performance | How are revenue and users trending across my apps, and which app needs attention? |
 | Usage | Where are tokens and cost coming from across the workspace? |
 | Integrations | Which shared services are connected, which app-used services need setup, and what is available later? |
+| AI models | Which AI models may builds use, and which one is the default? |
 | Overview | What is happening with this app, and what should I do next? |
-| Access | Who can use this app, what can they do, and who is blocked? |
 | App Usage | Which chats and workflows are driving this app's tokens and cost? |
+| Health | Is anything wrong with this app's latest build, its runs, or its integrations? |
 | Support | Which support chats need a reply, which are being handled, and which are resolved? |
 
 If information does not help answer that page's question, it should move to a

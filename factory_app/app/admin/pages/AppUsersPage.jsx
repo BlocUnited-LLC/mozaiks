@@ -4,7 +4,6 @@ import { useParams } from 'react-router-dom'
 import { MetricSummaryStrip, StageFunnel, UsageTrendPanel } from '@mozaiks/chat-ui/ui'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
-  LinkButton,
   Panel,
   SegmentedControl,
   StatusPill,
@@ -129,12 +128,6 @@ export default function AppUsersPage() {
                 />
               )}
             </Panel>
-
-            <div className="px-1">
-              <LinkButton to={`/apps/${encodeURIComponent(appId)}/access`} variant="ghost" size="sm">
-                Manage accounts and access →
-              </LinkButton>
-            </div>
           </>
         )}
       </div>

@@ -102,7 +102,8 @@ def test_app_shell_uses_same_origin_api_base_when_vite_api_url_is_unset() -> Non
     settings_source = _read("chat-ui/src/admin/pages/SettingsSection.jsx")
     assert "'http://localhost:8000'" not in admin_source
     assert "'http://localhost:8000'" not in settings_source
-    assert "same-origin" in settings_source
+    # With no API URL configured the page says so in plain words, not a default host.
+    assert 'emptyLabel="Same address as this site"' in settings_source
 
 
 def test_app_overview_page_fetches_summary_endpoint() -> None:
