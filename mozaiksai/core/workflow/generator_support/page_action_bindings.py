@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterator
+from pathlib import PurePosixPath
 from typing import Any
 
 import yaml
@@ -272,13 +273,43 @@ def validate_required_page_writes(
         from .page_plan_utils import validate_planned_page
 
         validate_planned_page(content, {"route": route}, path)
-    missing = expected - reachable_page_action_keys([yaml.safe_load(content)], include_reads=False)
+    feedback = _missing_write_feedback(yaml.safe_load(content), route, expected, path)
+    if feedback:
+        raise ValueError(feedback)
+
+
+def _missing_write_feedback(page: dict[str, Any], route: str, expected: set[str], path: str) -> str | None:
+    missing = expected - reachable_page_action_keys([page], include_reads=False)
     if missing:
-        raise ValueError(
+        return (
             f"{path}: route {route!r} is missing reachable write controls for {', '.join(sorted(missing))}. "
             "Add a reachable submit or delete control on this page with the matching "
             "data_source {module_id, action_id} for each missing action."
         )
+    return None
+
+
+def rejected_page_write_feedback(
+    content: str, planned: dict[str, Any], expected_by_route: dict[str, set[str]], path: str,
+) -> str | None:
+    """Supplement an existing schema rejection only for this identified, binding-compiled page."""
+    from .code_files import planned_page_path
+
+    route = planned["route"]
+    expected = expected_by_route.get(route)
+    if not expected or planned_page_path(planned) != path:
+        return None
+    # Reachability consumes the compiled module endpoints. A malformed shape can
+    # make its controls indeterminate; it still gets its original schema error.
+    try:
+        document = yaml.safe_load(content)
+        if not isinstance(document, dict) or document.get("route") != route:
+            return None
+        if document.get("name") != PurePosixPath(path).stem or not isinstance(document.get("sections"), list):
+            return None
+        return _missing_write_feedback(document, route, expected, path)
+    except (yaml.YAMLError, TypeError, ValueError):
+        return None
 
 
 def page_refresh_binding_errors(document: Any) -> list[str]:

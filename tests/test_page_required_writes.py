@@ -13,6 +13,7 @@ from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import (
 from mozaiksai.core.workflow.generator_support import design_access_policy
 from mozaiksai.core.workflow.generator_support.page_action_bindings import (
     planned_page_writes,
+    rejected_page_write_feedback,
     validate_required_page_writes,
 )
 from mozaiksai.core.workflow.task_batches import execute_task_batches_for_trigger
@@ -265,3 +266,75 @@ async def test_detached_worker_cannot_erase_writes_from_its_parent_plan():
         )
     assert context["app_task_batch_status"] == "failed"
     assert "editor" not in context["app_task_batch_results"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unresolved", [False, True])
+async def test_rejected_owned_form_reports_only_proven_missing_writes(unresolved):
+    page = _editor()
+    table, modal = page["sections"]
+    config = table["config"]
+    del config["api_endpoint"]
+    config["data_source"] = {"module_id": "content", "action_id": "unknown" if unresolved else "list_entries"}
+    config["data_key"] = "entries"
+    archive = config["actions"][0]
+    del archive["href"]
+    archive["data_source"] = {"module_id": "content", "action_id": "archive_entry"}
+    config["actions"] = [archive]
+    submit = modal["config"]["children"][0]["config"]["submit_action"]
+    del submit["href"]
+    submit["data_source"] = {"module_id": "content", "action_id": "update_entry"}
+    modal["id"] = "edit"
+    page["sections"].append({"id": "create", "primitive": "Form", "config": {"children": []}})
+    other = {**deepcopy(page), "name": "other", "route": "/other"}
+    output = {"manifest": None, "pages": [page, other]}
+    task = _task("editor")
+    writes = ["archive_entry", "create_entry", "update_entry"]
+    read_action = {"id": "list_entries", "output_schema": {"type": "object", "properties": {
+        "entries": {"type": "array", "items": {"type": "object", "properties": {"title": {"type": "string"}}}},
+    }}}
+    context = {
+        "app_task_batch_items": [task],
+        "app_build_plan": {"pages": [_plan(page, *writes), _plan(other, "foreign_action")]},
+        "generated_files": {"modules/content/module.yaml": yaml.safe_dump({
+            "module": {"id": "content"}, "actions": [read_action] + [{"id": action} for action in writes],
+        })},
+    }
+
+    class Worker:
+        async def ask(self, message, **kwargs):
+            return SimpleNamespace(body=json.dumps(output))
+
+    with pytest.raises(RuntimeError):
+        await execute_task_batches_for_trigger(
+            workflow_name="AppGenerator", trigger_agent="AppPlanAgent", batches_config=_batch_config(),
+            agents={"WorkerAgent": Worker()}, context_variables=context, fresh_agents_per_task=False,
+        )
+    result = context["app_task_batch_results"]
+    assert context["app_task_batch_status"] == "failed" and "editor" not in result
+    rejection = result["_failed"]["editor"]
+    assert rejection["rejected_output"] == output
+    reason = rejection["error"]
+    assert "ui/pages/other.yaml" in reason and "Remove these files" in reason
+    assert "field 'children' is not part of this contract" in reason
+    assert "required field 'fields' is missing" in reason
+    assert "foreign_action" not in reason
+    if unresolved:
+        assert "unknown module/action 'content/unknown'" in reason
+        assert "missing reachable write controls" not in reason
+    else:
+        assert "route '/editor' is missing reachable write controls for content/create_entry, content/update_entry." in reason
+        assert "content/archive_entry" not in reason
+
+
+@pytest.mark.parametrize(("path", "content"), [
+    ("ui/pages/editor.yaml", "name: editor\nroute: /other\nsections: []"),
+    ("ui/pages/other.yaml", "name: other\nroute: /editor\nsections: []"),
+    ("ui/pages/editor.yaml", "name: other\nroute: /editor\nsections: []"),
+    ("ui/pages/editor.yaml", "name: editor\nroute: /editor\nsections: {bad: shape}"),
+    ("ui/pages/editor.yaml", "name: editor\nroute: /editor\nsections: [{primitive: PageHeader, config: {actions: 1}}]"),
+    ("ui/pages/editor.yaml", "[invalid YAML"),
+])
+def test_rejected_page_with_uncertain_identity_or_controls_gets_no_write_feedback(path, content):
+    plan = _plan(_editor(), "create_entry")
+    assert rejected_page_write_feedback(content, plan, planned_page_writes([plan]), path) is None

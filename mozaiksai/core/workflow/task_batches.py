@@ -70,6 +70,7 @@ from .generator_support.module_write_actions import (
 )
 from .generator_support.page_action_bindings import (
     planned_page_writes,
+    rejected_page_write_feedback,
     validate_required_page_writes,
 )
 from .generator_support.page_plan_utils import (
@@ -1659,7 +1660,14 @@ def _normalize_owned_page_files_from_plan(
                     file_map[path], path=path, modules=modules, reject_api_endpoints=reject_api_endpoints,
                     workflow_names=workflows, data_contract=data_contract, design_surface_map=surface_map,
                 )
-            validate_planned_page(file_map[path], planned, path)
+            try:
+                validate_planned_page(file_map[path], planned, path)
+            except ValueError as exc:
+                if path not in (skip_paths or set()):
+                    feedback = rejected_page_write_feedback(file_map[path], planned, required_writes, path)
+                    if feedback:
+                        raise ValueError(f"{exc}\n{feedback}") from exc
+                raise
             validate_required_page_writes(file_map[path], planned["route"], required_writes, path, identity_validated=True)
         except ValueError as exc:
             message = str(exc)
