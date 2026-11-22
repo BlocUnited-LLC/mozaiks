@@ -1,122 +1,125 @@
-import { getRuntimeReadinessLabel, normalizeAppStatus } from './appStudioModel.js'
+/**
+ * App health from signals Studio actually has: the latest build's validation
+ * result, how many of the app's runs failed, and which connected services are
+ * not set up or not working.
+ *
+ * There is no numeric score. A score needs a baseline, and the only baseline
+ * available was a fixed number per lifecycle stage; that reads as a
+ * measurement and is not one. Uptime and hosting are absent for the same
+ * reason: this Studio has no source for them.
+ */
 
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max)
+function count(value) {
+  const number = Number(value)
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0
 }
 
-const STATUS_BASE_SCORE = {
-  draft: 54,
-  building: 60,
-  review: 68,
-  configuring: 72,
-  deploying: 76,
-  active: 88,
-  needs_revision: 42,
-  archived: 50,
+function plural(number, singular, pluralForm = `${singular}s`) {
+  return `${number} ${number === 1 ? singular : pluralForm}`
 }
 
-export function formatPercentValue(value, fallback = 'Pending') {
-  if (value == null || Number.isNaN(Number(value))) return fallback
-  const numeric = Number(value)
-  return `${numeric >= 99 ? numeric.toFixed(2) : numeric.toFixed(1)}%`
+export function validationLabel(status) {
+  if (status === 'passed') return 'Passed'
+  if (status === 'failed') return 'Failed'
+  if (!status) return 'No build yet'
+  return 'Not passed yet'
 }
 
+export function validationTone(status) {
+  if (status === 'passed') return 'success'
+  if (status === 'failed') return 'destructive'
+  return 'warning'
+}
+
+// Session status as stored by the runtime: 1 completed, 2 failed (0 is in progress).
+const FINISHED_STATUSES = new Set([1, 2])
+
+/**
+ * Average duration of the runs that have ended, from `/api/admin/runs` rows.
+ *
+ * A run still in progress has no duration yet. Its `runtime_sec` is the time
+ * since it started, so one conversation nobody closed would dominate the
+ * average; it is left out.
+ *
+ * @returns {{ seconds: number|null, count: number }} `seconds` is null when no run has ended
+ */
+export function averageFinishedRunSeconds(runs) {
+  const durations = (Array.isArray(runs) ? runs : [])
+    .filter((run) => run && FINISHED_STATUSES.has(run.status))
+    // A missing duration is not zero seconds.
+    .filter((run) => run.runtime_sec !== null && run.runtime_sec !== undefined && run.runtime_sec !== '')
+    .map((run) => Number(run.runtime_sec))
+    .filter((seconds) => Number.isFinite(seconds) && seconds >= 0)
+  if (durations.length === 0) return { seconds: null, count: 0 }
+  const total = durations.reduce((sum, seconds) => sum + seconds, 0)
+  return { seconds: total / durations.length, count: durations.length }
+}
+
+export function formatRunDuration(seconds) {
+  if (seconds === null || seconds === undefined || !Number.isFinite(Number(seconds))) return null
+  const value = Number(seconds)
+  if (value < 9.95) return `${value.toFixed(1)}s`
+  // Round once, then split, so 119.7 s reads "2m 0s" and never "1m 60s".
+  const total = Math.round(value)
+  if (total < 60) return `${total}s`
+  const minutes = Math.floor(total / 60)
+  if (minutes < 60) return `${minutes}m ${total % 60}s`
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+}
+
+/**
+ * @param {object} signals
+ * @param {string|null} signals.latestValidationStatus  validation_status of the newest build, or null when none exists
+ * @param {number} signals.failedRuns     runs that ended with an error (`failed_chats` from /api/admin/stats)
+ * @param {number} signals.trackedRuns    all recorded runs (`tracked_chats`)
+ * @param {number} signals.integrationsNotSetUp  connected services with no saved credential or incomplete setup
+ * @param {number} signals.integrationsNotWorking  connected services whose last check failed or whose credential expired
+ */
 export function buildHealthState({
-  status,
-  totalErrors = 0,
-  runtimeReadiness = null,
   latestValidationStatus = null,
-  uptimePercent = null,
-  hasDeploymentFailure = false,
-  missingSecrets = 0,
-  integrationIssues = missingSecrets,
-}) {
-  const normalized = normalizeAppStatus(status)
-  let score = STATUS_BASE_SCORE[normalized] ?? 60
+  failedRuns = 0,
+  trackedRuns = 0,
+  integrationsNotSetUp = 0,
+  integrationsNotWorking = 0,
+} = {}) {
+  const failed = count(failedRuns)
+  const tracked = count(trackedRuns)
+  const notSetUp = count(integrationsNotSetUp)
+  const notWorking = count(integrationsNotWorking)
   const issues = []
-  const integrationIssueCount = Number(integrationIssues || 0)
-
-  if (runtimeReadiness && runtimeReadiness !== 'entry_point_configured') {
-    score -= 12
-    issues.push(getRuntimeReadinessLabel(runtimeReadiness))
-  }
-
-  if (hasDeploymentFailure) {
-    score -= 18
-    issues.push('Hosting reports a failed rollout signal')
-  }
+  let severe = false
 
   if (latestValidationStatus === 'failed') {
-    score -= 16
-    issues.push('Latest build validation failed')
+    severe = true
+    issues.push('The latest build failed validation.')
   } else if (latestValidationStatus && latestValidationStatus !== 'passed') {
-    score -= 6
-    issues.push('Latest build validation is still pending')
+    issues.push('The latest build has not passed validation yet.')
   }
 
-  if (Number(totalErrors || 0) > 0) {
-    score -= Math.min(Number(totalErrors || 0) * 3, 18)
-    issues.push(`${Number(totalErrors || 0)} recent workflow errors recorded`)
+  if (failed > 0) {
+    severe = true
+    issues.push(
+      tracked > 0
+        ? `${failed} of ${plural(tracked, 'run')} ended with an error.`
+        : `${plural(failed, 'run')} ended with an error.`,
+    )
   }
 
-  if (integrationIssueCount > 0) {
-    score -= Math.min(integrationIssueCount * 4, 12)
-    issues.push(`${integrationIssueCount} integration setup item${integrationIssueCount === 1 ? '' : 's'} need attention`)
+  if (notWorking > 0) {
+    // A connection that fails its check or has expired does not work now,
+    // whatever is saved.
+    severe = true
+    issues.push(`${plural(notWorking, 'integration')} ${notWorking === 1 ? 'is' : 'are'} not working.`)
   }
 
-  if (typeof uptimePercent === 'number') {
-    if (uptimePercent < 99) {
-      score -= 12
-      issues.push(`Uptime is ${formatPercentValue(uptimePercent)}`)
-    } else if (uptimePercent < 99.9) {
-      score -= 6
-      issues.push(`Uptime is ${formatPercentValue(uptimePercent)}`)
-    }
+  if (notSetUp > 0) {
+    issues.push(`${plural(notSetUp, 'integration')} ${notSetUp === 1 ? 'is' : 'are'} not set up yet.`)
   }
 
-  score = clamp(Math.round(score), 0, 100)
-
-  if (score >= 85) {
-    return {
-      score,
-      label: 'Healthy',
-      tone: 'success',
-      issues: issues.slice(0, 3),
-      runtimeLabel: getRuntimeReadinessLabel(runtimeReadiness),
-      uptimeLabel: formatPercentValue(uptimePercent),
-    }
-  }
-
-  if (score >= 70) {
-    return {
-      score,
-      label: 'Stable',
-      tone: 'primary',
-      issues: issues.slice(0, 3),
-      runtimeLabel: getRuntimeReadinessLabel(runtimeReadiness),
-      uptimeLabel: formatPercentValue(uptimePercent),
-    }
-  }
-
-  if (score >= 55) {
-    return {
-      score,
-      label: 'Needs Attention',
-      tone: 'warning',
-      issues: issues.slice(0, 3),
-      runtimeLabel: getRuntimeReadinessLabel(runtimeReadiness),
-      uptimeLabel: formatPercentValue(uptimePercent),
-    }
-  }
-
-  return {
-    score,
-    label: 'At Risk',
-    tone: 'destructive',
-    issues: issues.slice(0, 3),
-    runtimeLabel: getRuntimeReadinessLabel(runtimeReadiness),
-    uptimeLabel: formatPercentValue(uptimePercent),
-  }
+  if (issues.length === 0) return { label: 'No issues found', tone: 'success', issues }
+  return severe
+    ? { label: 'Problems found', tone: 'destructive', issues }
+    : { label: 'Needs attention', tone: 'warning', issues }
 }
 
 export default buildHealthState

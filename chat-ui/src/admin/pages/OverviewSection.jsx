@@ -1,64 +1,68 @@
-import { StatCard, Badge, useAdminFetch } from '../components/AdminPrimitives.jsx'
+import { StatCard, ErrorBox, useAdminFetch } from '../components/AdminPrimitives.jsx'
+import { USAGE_ENDPOINT, formatCost, formatCount, summarizeUsage } from '../adminUsage.js'
 
-export function OverviewSection({ runtimePanels, extensionPanels }) {
-  const { data, loading } = useAdminFetch('/api/admin/stats', 15000)
-  const totalTokens = data
-    ? (data.total_prompt_tokens ?? 0) + (data.total_completion_tokens ?? 0)
-    : null
+/**
+ * Overview — the app's headline numbers.
+ *
+ * Conversation counts come from /api/admin/stats; token and cost totals come
+ * from /api/admin/usage. Nothing here is derived on the client beyond the
+ * token and cost wording.
+ */
+export function OverviewSection() {
+  const stats = useAdminFetch('/api/admin/stats', 15000)
+  const usage = useAdminFetch(USAGE_ENDPOINT, 60000)
+  const counts = stats.data
+  const summary = summarizeUsage(usage.data)
+  const failed = counts?.failed_chats ?? 0
+
+  // '…' while the first response is on its way, '—' when it carried no value.
+  const count = (value) => (counts ? formatCount(value) : '…')
+  const usageValue = (read) => (summary ? read(summary) : usage.data ? '—' : '…')
+  const usageNote = (read) => (summary ? read(summary) : undefined)
 
   return (
-    <section className="scroll-mt-28">
-      <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-end">
-        <h1 className="text-2xl font-bold text-foreground">Overview</h1>
-        <Badge variant="primary">admin</Badge>
-      </div>
+    <section className="space-y-3">
+      {stats.error && !counts ? (
+        <ErrorBox message={`Conversation counts unavailable: ${stats.error}`} />
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard
+            label="Running now"
+            value={count(counts?.active_chats)}
+            sub="Conversations in progress"
+            accent
+          />
+          <StatCard label="Conversations" value={count(counts?.tracked_chats)} sub="All recorded" />
+          <StatCard label="Completed" value={count(counts?.completed_chats)} sub="Finished normally" />
+          <StatCard
+            label="Failed"
+            value={count(counts?.failed_chats)}
+            sub={failed > 0 ? 'Ended with an error' : 'None'}
+          />
+        </div>
+      )}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="Active Chats"
-          value={loading ? '…' : data?.active_chats ?? 0}
-          sub="Current workflow conversations"
-          accent
-        />
-        <StatCard
-          label="Tracked Runs"
-          value={loading ? '…' : data?.tracked_chats ?? 0}
-          sub="Persisted runtime operations"
-        />
-        <StatCard
-          label="Admin Extensions"
-          value={extensionPanels.length}
-          sub="Extra app controls from installed features"
-        />
-        <StatCard
-          label="Token Usage"
-          value={loading || totalTokens == null ? '…' : totalTokens.toLocaleString()}
-          sub="Prompt + completion tokens"
-        />
-      </div>
-
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="Runtime Panels"
-          value={runtimePanels.length}
-          sub="Enabled observability surfaces"
-        />
-        <StatCard
-          label="Errors"
-          value={loading ? '…' : data?.total_errors ?? 0}
-          sub="Runtime error count"
-        />
-        <StatCard
-          label="Agent Turns"
-          value={loading ? '…' : data?.total_agent_turns ?? 0}
-          sub="Total orchestrated turns"
-        />
-        <StatCard
-          label="Estimated Cost"
-          value={loading ? '…' : `$${(data?.total_cost ?? 0).toFixed(4)}`}
-          sub="Runtime usage estimate"
-        />
-      </div>
+      {usage.error && !usage.data ? (
+        <ErrorBox message={`AI usage unavailable: ${usage.error}`} />
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-3">
+          <StatCard
+            label="Tokens used"
+            value={usageValue((s) => formatCount(s.totalTokens))}
+            sub={usageNote((s) => s.windowNote)}
+          />
+          <StatCard
+            label="Model calls"
+            value={usageValue((s) => formatCount(s.modelCalls))}
+            sub={usageNote((s) => s.windowNote)}
+          />
+          <StatCard
+            label="Estimated cost"
+            value={usageValue((s) => formatCost(s.cost))}
+            sub={usageNote((s) => s.costNote)}
+          />
+        </div>
+      )}
     </section>
   )
 }

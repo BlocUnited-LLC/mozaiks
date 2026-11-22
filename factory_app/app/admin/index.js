@@ -17,7 +17,6 @@ const StudioPage        = lazy(() => import('./pages/StudioPage.jsx'))
 const AppsPage           = lazy(() => import('./pages/AppsPage.jsx'))
 const WorkspacePerformancePage   = lazy(() => import('./pages/WorkspacePerformancePage.jsx'))
 const WorkspaceUsagePage         = lazy(() => import('./pages/WorkspaceUsagePage.jsx'))
-const WorkspaceUsersPage         = lazy(() => import('./pages/WorkspaceUsersPage.jsx'))
 const WorkspaceAIModelsPage = lazy(() => import('./pages/WorkspaceAIModelsPage.jsx'))
 const WorkspaceIntegrationsPage  = lazy(() => import('./pages/WorkspaceIntegrationsPage.jsx'))
 const CreateAppRedirectPage = lazy(() => import('./pages/CreateAppRedirectPage.jsx'))
@@ -26,7 +25,6 @@ const AppOverviewPage    = lazy(() => import('./pages/AppOverviewPage.jsx'))
 const AppRevenuePage     = lazy(() => import('./pages/AppRevenuePage.jsx'))
 const AppUsersPage       = lazy(() => import('./pages/AppUsersPage.jsx'))
 const AppHealthPage      = lazy(() => import('./pages/AppHealthPage.jsx'))
-const AppAccessPage      = lazy(() => import('./pages/AppAccessPage.jsx'))
 const AppUsagePage       = lazy(() => import('./pages/AppUsagePage.jsx'))
 const AppBuildReviewPage = lazy(() => import('./pages/AppBuildReviewPage.jsx'))
 const AppIntegrationsPage = lazy(() => import('./pages/AppIntegrationsPage.jsx'))
@@ -52,10 +50,6 @@ export function registerAdminComponents(registerComponent) {
 
   registerComponent('WorkspaceUsagePage', WorkspaceUsagePage, {
     description: 'Workspace usage surface — portfolio-level usage, capacity, and value trends across all apps.',
-  })
-
-  registerComponent('WorkspaceUsersPage', WorkspaceUsersPage, {
-    description: 'Workspace users surface — total, active, and new user counts across all apps with per-app breakdown.',
   })
 
   registerComponent('WorkspaceAIModelsPage', WorkspaceAIModelsPage, {
@@ -88,12 +82,8 @@ export function registerAdminComponents(registerComponent) {
   })
 
   registerComponent('AppHealthPage', AppHealthPage, {
-    description: 'App health surface — overall app health across workflows, hosting, integrations, and runtime posture.',
+    description: 'App health surface — what needs attention: latest build validation, failed runs, and integration credentials.',
     override: true,
-  })
-
-  registerComponent('AppAccessPage', AppAccessPage, {
-    description: 'App access surface — account access, roles, permissions, plan assignment context, and support-access posture.',
   })
 
   registerComponent('AppUsagePage', AppUsagePage, {
@@ -109,7 +99,7 @@ export function registerAdminComponents(registerComponent) {
   })
 
   registerComponent('UserSupportPage', UserSupportPage, {
-    description: 'User-facing support surface — file help requests and track operator conversations.',
+    description: 'Workspace support index — apps with support chats, each linking to that app\'s support inbox.',
   })
 
   registerComponent('UserSupportPanel', UserSupportPanel, {

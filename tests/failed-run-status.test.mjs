@@ -6,8 +6,6 @@ import vm from 'node:vm';
 
 const require = createRequire(new URL('../web_shell/package.json', import.meta.url));
 const { transformSync } = require('esbuild');
-const React = require('react');
-const { renderToStaticMarkup } = require('react-dom/server');
 
 function load(file, namedExports, imports = {}) {
   const source = readFileSync(new URL(file, import.meta.url), 'utf8');
@@ -35,17 +33,5 @@ for (const [status, label, tone] of [[0, 'Running', 'primary'], [1, 'Completed',
   });
 }
 
-test('activity renders failed distinctly from completed and in progress', () => {
-  const components = {
-    useAdminFetch: () => ({ data: { sessions: [0, 1, 2].map((status) => ({ id: String(status), status })) } }),
-    Badge: ({ children, variant }) => React.createElement('span', { 'data-variant': variant }, children),
-    SectionHeading: ({ children }) => React.createElement('h2', null, children),
-  };
-  const { SessionsPanel } = load('../chat-ui/src/admin/pages/ActivitySection.jsx', ['SessionsPanel'], {
-    '../components/AdminPrimitives.jsx': components,
-  });
-  const html = renderToStaticMarkup(React.createElement(SessionsPanel));
-  assert.match(html, /data-variant="warning">in progress/);
-  assert.match(html, /data-variant="success">complete/);
-  assert.match(html, /data-variant="error">failed/);
-});
+// The admin portal's session and run lists are covered where CI runs them:
+// web_shell/tests/adminPortalPanels.test.js.

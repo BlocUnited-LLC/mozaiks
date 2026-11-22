@@ -15,6 +15,36 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- A generated app's admin portal shows real numbers. Overview, Usage, and
+  Operations read token and cost totals from the usage ledger instead of fields
+  no endpoint returned (they showed 0 and `$0.0000`), a failed run is listed as
+  failed instead of running, and a page with nothing on it says so instead of
+  rendering blank. A run whose models have no price shows no dollar figure
+  instead of `$0.00`.
+- Admin panels that a connected app backend declares appear on the admin page
+  they name. Before, only panels for Access were shown. Module and backend
+  panels are shown in their declared `order`.
+- Studio's workspace Integrations page sends the signed-in session with every
+  request; it failed with 401 whenever sign-in was on. It also reports a save
+  or delete the server refused, and links "Get API key" to the provider's page
+  instead of a Studio path that does not exist.
+- A saved integration key that fails its check with the provider is listed
+  under Needs attention as "Check failed", not under Connected, and so is a
+  service saved with only some of the values it needs. After a save the page
+  waits for that check and, if it fails, keeps the setup panel open with the
+  provider's reason. Once the values are corrected the service reads Connected
+  again: a connector's stored health no longer keeps the error code of an
+  earlier check after a check that reports none. An app's Integrations page
+  gives the same verdict as its Health page, and "Check status" says what the
+  check found.
+- Studio's AI models page is in the workspace menu, and says why it cannot be
+  changed when sign-in is off.
+- Studio's app Health page lists specific problems (latest build validation,
+  failed runs, integrations missing a credential or failing their check)
+  instead of a fixed score and figures that could not change. Its average run
+  time counts only runs that have ended.
+- The Studio menu and the dashboard manifest declare the same pages; a test now
+  runs the route validator on the real files.
 - Studio owners can open Revenue and manage connections for the app they select in My Apps, including in hosts with a separate dashboard app ID.
 - Factory distinguishes available pack offerings from the explicit, versioned
   pack selection in the owner-reviewed DesignDocs artifact. Planning, template
@@ -145,6 +175,15 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- One catalog of standard admin pages
+  (`overview | access | usage | billing | activity | operations | settings | integrations | support`)
+  lives in `mozaiksai.core.admin.contract`. App-backend admin panels may name
+  `activity`. AppGenerator declares Overview, Usage, Operations, and Settings
+  for every app, Access for an app with sign-in, and any other admin page only
+  when a panel renders on it.
+- `GET /api/admin/stats` returns `failed_chats`. `GET /api/admin/runs` and
+  `/api/admin/sessions` give a failed session its end time, and their
+  timestamps carry a UTC offset (they were read as local time in the browser).
 - Factory design agents receive verified selected-pack capabilities, actions and
   ownership boundaries while retaining app-specific design intent. The shipped
   catalog no longer selects unrequested packs. Social 0.1.18 and Messaging
@@ -807,6 +846,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Removed
 
+- Studio's workspace Users page and app Access page. Neither had a data source,
+  so both could only show zeros. User counts remain on Performance and on each
+  app's Users page.
 - Acceptance without an authorized transition: AppGenerator no longer saves
   an app's first build as current, and the staged-refinement acceptance no
   longer credits the acceptance to the staged review record's reviewer.
@@ -856,6 +898,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Generated app container images now serve as an unprivileged `mozaiks` user
+  (uid 10001) that owns `/app`, instead of as root, and write their logs under
+  `/app/logs`. The generated `docker-compose.yml` also drops the obsolete
+  `version` key that Compose v2 warns about.
+- The production Compose file (`infra/compose/docker-compose.prod.yml`)
+  publishes its bundled MongoDB, which has no authentication, on `127.0.0.1`
+  only instead of on every network interface.
 - Generated media ignores provider-supplied publication authority. Public reads
   require server-owned public visibility, and explicit promotion records that
   visibility. Private/backer-only visibility overrides old promotion metadata;
@@ -964,6 +1013,10 @@ This project follows a practical pre-1.0 changelog format:
   with the same version, repair older empty secret contracts and missing app IDs,
   restore a missing refinement regeneration profile, and configure local-only
   Studio access.
+- `mozaiks serve` no longer tells first-run users to fill in `OPENAI_API_KEY`
+  when it creates `.env`: it points to the model provider key and `MONGO_URI`
+  that the file lists. The self-hosting guide states that the production
+  Compose file uses its bundled MongoDB and does not read `MONGO_URI`.
 
 
 ## 0.2.0 - 2026-10-17

@@ -1,46 +1,33 @@
 /**
- * AppAdminDashboard — app-owner admin panel group.
+ * AppAdminDashboard — panels a connected app backend contributes to the
+ * framework-owned admin shell.
  *
- * The production console does not expose standalone app-admin routes today.
- * This module remains the app-owner panel group embedded inside the
- * framework-owned admin shell when internal/admin compositions mount it.
+ * This is a panel group, not a route. The admin shell (AdminPage) calls
+ * `useAppBackendAdminPanels()` once and renders each panel on the admin page
+ * named by its `section`.
  *
- * ## How panels work
+ * ## Contract
  *
- * The connected app backend is authoritative for which app-business panels are active.
  * `GET {app_backend_url}/api/admin/config` returns:
  *   { "schema_version": "mozaiks.admin.app_backend.v1", "panels": [...] }
  *
- * The preferred path is the same declarative contract used by module admin panels:
- * - `renderer: "schema"` with `layout + sections[]`
- * - `renderer: "custom_component"` with a registered component key
- *
- * Built-in panel IDs remain available for generic app-backend surfaces like
- * app-user management or subscription metrics.
- *
- * ## Adding a custom panel
- *
- * Backend/module: declare in modules/{module}/contracts/admin.yaml
- *   panels:
- *     - id: my_module.stats
- *       label: My Module Stats
- *       section: usage
- *       order: 20
- *
- * Frontend: register in the active app root ui/index.js extension barrel
- *   import { registerComponent } from '@mozaiks/chat-ui/registry';
- *   import MyModuleStatsPanel from './MyModuleStatsPanel';
- *   registerComponent('my_plugin_stats', MyModuleStatsPanel);
- *
- * Custom panels receive: { backendUrl, auth } props.
- *
- * ## Built-in panels
- *   stats         — user/activity overview stats
- *   users         — paginated user table with suspend/unsuspend
- *   subscriptions — tier breakdown (shown when monetization is enabled)
+ * A backend with no such route (404) contributes no panels; that is not an
+ * error. Each panel declares one renderer:
+ * - `renderer: "schema"` — `layout + sections[]`, the same primitive sections
+ *   as module admin panels. Relative `config.api_endpoint` values are served by
+ *   the app backend.
+ * - `renderer: "custom_component"` — a component key registered in the active
+ *   app root `ui/index.js`. Receives `{ backendUrl, auth, panel }`.
+ * - `renderer: "builtin"` — one of the shipped panels below. Each one reads
+ *   its data from the app backend, so the backend must serve these routes:
+ *     stats          GET  /api/admin/stats
+ *     users          GET  /api/admin/users, POST /api/admin/users/action
+ *     subscriptions  GET  /api/admin/stats
+ *   A backend that declares a built-in panel without serving its routes gets
+ *   an "unavailable" message in place of the panel.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useChatUI } from '../context/ChatUIContext';
 import { getComponent } from '../registry/componentRegistry';
 import {
@@ -49,6 +36,7 @@ import {
   Badge as AdminBadge,
   ErrorBox as AdminErrorBox,
   Spinner as AdminSpinner,
+  MissingPanelComponent,
 } from '../admin/components/AdminPrimitives.jsx';
 import AdminSchemaPanel from '../admin/components/AdminSchemaPanel.jsx';
 import { parseAppBackendAdminConfig } from '../admin/contracts/appAdminContract.js';
@@ -127,9 +115,63 @@ function prefixPanelApiEndpoints(panel, backendUrl) {
   };
 }
 
-// AdminStatCard, AdminSectionHeading, AdminBadge, AdminErrorBox, AdminSpinner
-// are re-exported from AdminPrimitives — imported above.
-export { AdminStatCard, AdminSectionHeading, AdminBadge, AdminErrorBox, AdminSpinner };
+// ---------------------------------------------------------------------------
+// Panel source — the connected app backend's admin config
+// ---------------------------------------------------------------------------
+
+/**
+ * Load the app backend's admin panels once for the whole admin shell.
+ *
+ * Returns `{ backendUrl, auth, panels, loading, error }`. With no backend
+ * configured, or a backend that has no admin config route, `panels` is empty
+ * and `error` is null. Pass `enabled: false` to make no request at all (the
+ * shell does this for a visitor who is not an admin).
+ */
+export function useAppBackendAdminPanels({ enabled = true } = {}) {
+  const { config, auth } = useChatUI();
+  const backendUrl = enabled ? getAppBackendUrl(config) : null;
+  const [state, setState] = useState({ raw: null, loading: Boolean(backendUrl), error: null });
+
+  useEffect(() => {
+    if (!backendUrl) {
+      setState({ raw: null, loading: false, error: null });
+      return undefined;
+    }
+    let current = true;
+    setState({ raw: null, loading: true, error: null });
+    (async () => {
+      try {
+        const res = await fetchWithAuth(`${backendUrl}/api/admin/config`, {}, auth);
+        if (res.status === 404) {
+          if (current) setState({ raw: null, loading: false, error: null });
+          return;
+        }
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        const raw = await res.json();
+        if (current) setState({ raw, loading: false, error: null });
+      } catch (e) {
+        if (current) setState({ raw: null, loading: false, error: e.message });
+      }
+    })();
+    return () => { current = false; };
+  }, [backendUrl, auth]);
+
+  const parsed = useMemo(
+    () => (state.raw === null ? { panels: [], issues: [] } : parseAppBackendAdminConfig(state.raw)),
+    [state.raw],
+  );
+
+  useEffect(() => {
+    if (parsed.issues.length > 0 && process.env.NODE_ENV === 'development') {
+      console.warn('⚠️ [AppAdminDashboard] Invalid app backend admin config', parsed.issues);
+    }
+  }, [parsed]);
+
+  const error = state.error
+    || (parsed.issues.length > 0 && parsed.panels.length === 0 ? parsed.issues[0] : null);
+
+  return { backendUrl, auth, panels: parsed.panels, loading: state.loading, error };
+}
 
 // ---------------------------------------------------------------------------
 // Built-in panel: Stats
@@ -304,7 +346,7 @@ function UsersPanel({ backendUrl, auth }) {
 }
 
 // ---------------------------------------------------------------------------
-// Built-in panel: Subscriptions (shown when MONETIZATION=1)
+// Built-in panel: Subscriptions
 // ---------------------------------------------------------------------------
 
 function SubscriptionsPanel({ backendUrl, auth }) {
@@ -358,7 +400,7 @@ function SubscriptionsPanel({ backendUrl, auth }) {
 }
 
 // ---------------------------------------------------------------------------
-// Panel registry — add new built-in panels here
+// Panel registry — the shipped built-in panels
 // ---------------------------------------------------------------------------
 
 const BUILT_IN_PANELS = {
@@ -368,137 +410,44 @@ const BUILT_IN_PANELS = {
 };
 
 // ---------------------------------------------------------------------------
-// Root
+// Panel group
 // ---------------------------------------------------------------------------
 
-export function AppAdminPanels({
-  embedded = false,
-  section = null,
-  emptyState = null,
-  showNoBackend = true,
-} = {}) {
-  const { user, config, auth } = useChatUI();
-  const backendUrl = getAppBackendUrl(config);
+/**
+ * Render app-backend panels for one admin page. `panels` is the subset whose
+ * `section` is that page (from `useAppBackendAdminPanels().panels`).
+ */
+export function AppAdminPanels({ panels = [], backendUrl = null, auth = null }) {
+  if (!panels.length) return null;
 
-  // Fetch panel config from backend — authoritative source of which panels are active
-  const { data: adminConfig, loading: adminConfigLoading } = useAdminData(
-    backendUrl, '/api/admin/config', auth
-  );
-  const parsedAdminConfig = parseAppBackendAdminConfig(adminConfig);
-
-  if (!adminConfigLoading && adminConfig !== null && parsedAdminConfig.issues.length > 0 && process.env.NODE_ENV === 'development') {
-    console.warn('⚠️ [AppAdminDashboard] Invalid app backend admin config', parsedAdminConfig.issues);
-  }
-
-  // Client-side role guard (backend enforces independently)
-  const isAdmin = user?.roles?.includes('admin') ?? true; // fallback = no-auth dev mode
-  if (!isAdmin) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-8 text-center max-w-sm">
-          <h1 className="text-lg font-bold text-destructive mb-2">Access Denied</h1>
-          <p className="text-sm text-muted-foreground">Admin role required.</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!backendUrl) {
-    if (!showNoBackend) {
-      return emptyState || null;
-    }
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="rounded-xl border border-border bg-card p-8 text-center max-w-sm">
-          <h1 className="text-lg font-semibold text-foreground mb-2">No Backend Connected</h1>
-          <p className="text-sm text-muted-foreground">
-            Connect an app backend and set{' '}
-            <code className="text-xs bg-muted px-1 rounded">appBackendUrl</code>{' '}
-            in your ChatUI config to enable app administration.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  const activePanels = parsedAdminConfig.panels
-    .filter((panel) => !section || panel.section === section);
-
-  const content = (
+  return (
     <>
-      {!embedded && (
-        <div className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">App Admin</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Manage users and monitor your app
-            </p>
-          </div>
-          <AdminBadge variant="warning">admin</AdminBadge>
-        </div>
-      )}
-
-      {activePanels.length === 0 ? emptyState : activePanels.map((panelConfig) => {
+      {panels.map((panelConfig) => {
         const id = panelConfig.id;
         const label = panelConfig.label || id;
         const resolvedPanel = prefixPanelApiEndpoints(panelConfig, backendUrl);
 
+        let body = null;
         if (panelConfig.renderer === 'schema') {
-          return (
-            <div key={id}>
-              <AdminSectionHeading>{label}</AdminSectionHeading>
-              <AdminSchemaPanel panel={resolvedPanel} />
-            </div>
-          );
+          body = <AdminSchemaPanel panel={resolvedPanel} />;
+        } else if (panelConfig.renderer === 'builtin') {
+          // parseAppBackendAdminConfig admits only shipped builtin_panel ids.
+          const Panel = BUILT_IN_PANELS[panelConfig.builtin_panel].component;
+          body = <Panel backendUrl={backendUrl} auth={auth} />;
+        } else {
+          const Custom = getComponent(panelConfig.component);
+          body = Custom
+            ? <Custom backendUrl={backendUrl} auth={auth} panel={resolvedPanel} />
+            : <MissingPanelComponent componentName={panelConfig.component} />;
         }
 
-        if (panelConfig.renderer === 'builtin') {
-          const built = BUILT_IN_PANELS[panelConfig.builtin_panel];
-          if (!built) {
-            return null;
-          }
-          const Panel = built.component;
-          return (
-            <div key={id}>
-              <AdminSectionHeading>{label}</AdminSectionHeading>
-              <Panel backendUrl={backendUrl} auth={auth} />
-            </div>
-          );
-        }
-
-        // 1. Custom panel — resolved from componentRegistry
-        //    Register via: registerComponent('my_panel_id', MyPanelComponent)
-        const Custom = getComponent(panelConfig.component);
-        if (Custom) {
-          return (
-            <div key={id}>
-              <AdminSectionHeading>{label}</AdminSectionHeading>
-              <Custom backendUrl={backendUrl} auth={auth} panel={resolvedPanel} />
-            </div>
-          );
-        }
-
-        if (process.env.NODE_ENV === 'development') {
-          console.warn(`⚠️ [AppAdminDashboard] Unknown custom admin component "${panelConfig.component}" for panel "${id}".`);
-        }
-        return null;
+        return (
+          <div key={id}>
+            <AdminSectionHeading>{label}</AdminSectionHeading>
+            {body}
+          </div>
+        );
       })}
     </>
   );
-
-  if (embedded) {
-    return <div>{content}</div>;
-  }
-
-  return (
-    <div className="min-h-screen bg-background px-4 py-8 sm:px-8">
-      <div className="mx-auto max-w-6xl">
-        {content}
-      </div>
-    </div>
-  );
-}
-
-export default function AppAdminDashboard() {
-  return <AppAdminPanels />;
 }

@@ -288,9 +288,11 @@ class ConnectorStore:
             "last_checked_at": last_checked_at or datetime.now(UTC).isoformat(),
             "checked_by": str(checked_by or "manual"),
             "health_details": _redact_public_config(health_details or {}) or {},
+            # Every field here describes this check. A check that reports no
+            # error clears the code an earlier check left, or the record would
+            # pair a new status with an old failure.
+            "health_error_code": str(error_code) if error_code else None,
         }
-        if error_code:
-            update_fields["health_error_code"] = str(error_code)
 
         filter_doc = {"scope": str(scope), "scope_id": str(scope_id), "service": normalized_service}
         await coll.update_one(filter_doc, {"$set": update_fields}, upsert=False)

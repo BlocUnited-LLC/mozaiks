@@ -71,9 +71,10 @@ async def test_build_persisted_admin_stats_reads_chat_session_lifecycle(monkeypa
     collection = _FakeChatSessionsCollection(
         aggregate_docs=[
             {
-                "tracked_chats": 3,
+                "tracked_chats": 4,
                 "active_chats": 1,
                 "completed_chats": 2,
+                "failed_chats": 1,
             }
         ]
     )
@@ -83,14 +84,96 @@ async def test_build_persisted_admin_stats_reads_chat_session_lifecycle(monkeypa
 
     assert stats == {
         "active_chats": 1,
-        "tracked_chats": 3,
+        "tracked_chats": 4,
         "completed_chats": 2,
+        "failed_chats": 1,
         "telemetry_source": "ag2_opentelemetry",
     }
     assert len(collection.aggregate_calls) == 1
     project_stage = collection.aggregate_calls[0][0]["$project"]
     assert "usage_" + "prompt_tokens_final" not in project_stage
     assert "tool_calls" + "_final" not in project_stage
+    # Each lifecycle count is its own status match, so a session with an
+    # unknown status is counted as tracked and as nothing else.
+    group_stage = collection.aggregate_calls[0][1]["$group"]
+    assert {
+        name: group_stage[name]["$sum"]["$cond"][0]["$eq"][1]
+        for name in ("active_chats", "completed_chats", "failed_chats")
+    } == {"active_chats": 0, "completed_chats": 1, "failed_chats": 2}
+
+
+@pytest.mark.asyncio
+async def test_failed_session_has_an_end_time_in_runs_and_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed session records ``failed_at``, never ``completed_at``.
+
+    Reading only ``completed_at`` left every failed run with no end time, so
+    the portal listed it as still running.
+
+    The stored datetimes are naive, as the Mongo client returns them (they are
+    UTC). Sent without an offset, a browser would read them as local time.
+    """
+    now = datetime(2026, 5, 8, 12, 0, tzinfo=UTC)
+    stored_now = now.replace(tzinfo=None)
+    failed_at = stored_now - timedelta(minutes=4)
+    collection = _FakeChatSessionsCollection(
+        find_docs=[
+            {
+                "_id": "chat-failed",
+                "app_id": "app-1",
+                "workflow_name": "PlanBuilder",
+                "user_id": "user-1",
+                "status": 2,
+                "created_at": stored_now - timedelta(minutes=5),
+                "failed_at": failed_at,
+                # No stored duration: the runtime can only come from failed_at.
+                "messages": [{"role": "assistant", "content": "Draft"}],
+            },
+            {
+                "_id": "chat-running",
+                "app_id": "app-1",
+                "workflow_name": "PlanBuilder",
+                "user_id": "user-2",
+                "status": 0,
+                "created_at": stored_now - timedelta(minutes=1),
+                "duration_sec": 0.0,
+                "messages": [],
+            },
+        ]
+    )
+    monkeypatch.setattr(admin_router, "_get_chat_sessions_collection", lambda: collection)
+    monkeypatch.setattr(admin_router, "_utc_now", lambda: now)
+
+    runs = (await admin_router._build_persisted_admin_runs(app_id="app-1", active_only=False, limit=10))["runs"]
+
+    by_id = {run["chat_id"]: run for run in runs}
+    assert by_id["chat-failed"]["status"] == 2
+    assert by_id["chat-failed"]["started_at"] == "2026-05-08T11:55:00+00:00"
+    assert by_id["chat-failed"]["ended_at"] == "2026-05-08T11:56:00+00:00"
+    # One minute from start to failure, not the five minutes since it started.
+    assert by_id["chat-failed"]["runtime_sec"] == 60.0
+    assert by_id["chat-running"]["ended_at"] is None
+    assert by_id["chat-running"]["runtime_sec"] == 60.0
+    assert collection.find_calls[0][1]["failed_at"] == 1
+
+    class _Client(dict):
+        pass
+
+    client = _Client(mozaiksai={"ChatSessions": collection})
+    monkeypatch.setattr("mozaiksai.core.core_config.get_mongo_client", lambda: client)
+    principal = type("Principal", (), {"user_id": "admin"})()
+
+    response = await admin_router.get_admin_sessions(app_id="app-1", workflow=None, limit=10, user=principal)
+
+    sessions = {session["id"]: session for session in response["sessions"]}
+    assert sessions["chat-failed"]["ended_at"] == "2026-05-08T11:56:00+00:00"
+    assert sessions["chat-failed"]["failed_at"] == "2026-05-08T11:56:00+00:00"
+    assert sessions["chat-failed"]["created_at"] == "2026-05-08T11:55:00+00:00"
+    assert sessions["chat-running"]["ended_at"] is None
+    assert sessions["chat-running"]["created_at"] == "2026-05-08T11:59:00+00:00"
+    # The projection asks for the fields a session really stores.
+    projection = collection.find_calls[-1][1]
+    assert projection.get("completed_at") == 1 and projection.get("failed_at") == 1
+    assert "ended_at" not in projection
 
 
 @pytest.mark.asyncio

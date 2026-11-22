@@ -206,6 +206,11 @@ stack but hardened for a real server:
 - You must set `KC_HOSTNAME` to your actual domain
 - Keycloak requires a separate operator-owned realm import with HTTPS browser
   callbacks and origins. The included local realm cannot pass the production check.
+- The bundled MongoDB has no authentication, so it is published on `127.0.0.1`
+  only, which keeps other machines out. The runtime reaches it over the Compose
+  network. On Linux, use Docker Engine 28.0 or later: older engines can let a
+  machine on the same network reach a container's address directly despite a
+  `127.0.0.1` publish.
 
 Copy `factory_app/app/brand/realm-export.json` to a file **outside this repository**.
 In that copy, replace the `mozaiks-studio` client's local `redirectUris` and
@@ -229,13 +234,17 @@ Required environment variables for production (set these in `.env`):
 | Variable | What it's for |
 | --- | --- |
 | `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` | LLM provider key |
-| `MONGO_URI` | MongoDB connection string |
 | `KC_ADMIN_USER` | Keycloak admin username |
 | `KC_ADMIN_PASSWORD` | Keycloak admin password |
 | `KC_DB_PASSWORD` | Password for Keycloak's internal Postgres database |
 | `KC_HOSTNAME` | Your public domain (e.g. `mozaiks.yourdomain.com`) |
 | `MOZAIKS_PROD_REALM_IMPORT_PATH` | Absolute path to the operator-owned Keycloak realm JSON, outside this repository. |
 | `AUTH_AUDIENCE` | `mozaiks-api` for the included realm, or your dedicated API audience. Compose requires this value and the runtime verifies it on every token. |
+
+This compose file always connects the runtime to its bundled MongoDB
+(`mongodb://mongo:27017/mozaiksai`). A `MONGO_URI` in `.env` is not read by
+it. To use your own MongoDB, run the image directly (Option 1) or with Helm
+(Option 4), where `MONGO_URI` is honored.
 
 Keycloak's `--import-realm` applies the file only when the realm does not already
 exist in its database. On an existing deployment, inspect and update the live

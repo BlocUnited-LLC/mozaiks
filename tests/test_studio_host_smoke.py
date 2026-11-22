@@ -33,7 +33,7 @@ async def test_studio_shell_config_injects_studio_routes(monkeypatch):
     assert "/apps/:appId/billing" not in page_paths
     assert "/apps/:appId/hosting" not in page_paths
     assert "/apps/:appId/integrations" in page_paths
-    assert "/apps/:appId/access" in page_paths
+    assert "/apps/:appId/access" not in page_paths
     assert "/apps/:appId/users" not in page_paths
     assert "/apps/:appId/usage" in page_paths
     assert "/apps/:appId/activity" in page_paths

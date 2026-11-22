@@ -82,24 +82,6 @@
       }
     },
     {
-      "path": "/users",
-      "component": "WorkspaceUsersPage",
-      "label": "Users",
-      "order": 7,
-      "meta": {
-        "surfaces": ["studio"],
-        "requiresRole": "admin",
-        "title": "Users",
-        "appShell": true,
-        "ai_context": "The user is on the Workspace Users page. It shows total, active, and new user counts across all apps with a per-app breakdown. Clicking an app row navigates to the app access page for the full user list.",
-        "navigation": {
-          "group": "workspace-studio",
-          "scope": "local",
-          "icon": "users"
-        }
-      }
-    },
-    {
       "path": "/integrations",
       "component": "WorkspaceIntegrationsPage",
       "label": "Integrations",
@@ -126,6 +108,8 @@
         "surfaces": ["studio"],
         "requiresRole": "admin",
         "title": "AI models",
+        "appShell": true,
+        "ai_context": "The user is on the workspace AI models page. It sets which AI model Factory builds and refinements use by default, and which models may be chosen.",
         "navigation": {
           "group": "workspace-studio",
           "scope": "local",
@@ -244,23 +228,6 @@
       }
     },
     {
-      "path": "/apps/:appId/access",
-      "component": "AppAccessPage",
-      "label": "Access",
-      "order": 24,
-      "meta": {
-        "surfaces": ["studio"],
-        "title": "App Access",
-        "appShell": true,
-        "ai_context": "The user is on the App Access page. It shows accounts, access status, subscription plan assignment, and last-activity for this app's users.",
-        "navigation": {
-          "group": "app-studio",
-          "scope": "local",
-          "icon": "users"
-        }
-      }
-    },
-    {
       "path": "/apps/:appId/usage",
       "component": "AppUsagePage",
       "label": "Token Usage",
@@ -286,7 +253,7 @@
         "surfaces": ["studio"],
         "title": "App Health",
         "appShell": true,
-        "ai_context": "The user is on the App Health page. It shows runtime signals, connector status, and any warnings or errors for this app.",
+        "ai_context": "The user is on the App Health page. It lists what needs attention for this app: the latest build's validation result, runs that failed, and integrations still missing a credential.",
         "navigation": {
           "group": "app-studio",
           "scope": "local",
