@@ -86,7 +86,7 @@ app:
           title: Users
 
     - id: building
-      label: Building
+      label: Project
       route: /apps/:appId/building
       icon: hammer
       order: 10

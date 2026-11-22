@@ -212,7 +212,7 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert "workspace hosting route stays responsive across desktop and mobile widths" not in smoke_source
     assert "app Studio root redirects to manifest default portal" in smoke_source
     assert "app overview route stays responsive across desktop and mobile widths" in smoke_source
-    assert "app building route stays responsive across desktop and mobile widths" in smoke_source
+    assert "app project route stays responsive across desktop and mobile widths" in smoke_source
     assert "app health route stays responsive across desktop and mobile widths" in smoke_source
     assert "app integrations route stays responsive across desktop and mobile widths" in smoke_source
     assert "app usage route stays responsive across desktop and mobile widths" in smoke_source
@@ -247,7 +247,7 @@ def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
         "AppOverviewPage": "app overview route stays responsive across desktop and mobile widths",
         "AppRevenuePage": "app revenue route stays responsive across desktop and mobile widths",
         "AppUsersPage": "app users analytics route stays responsive across desktop and mobile widths",
-        "DashboardPortalPage": "app building route stays responsive across desktop and mobile widths",
+        "DashboardPortalPage": "app project route stays responsive across desktop and mobile widths",
         "AppHealthPage": "app health route stays responsive across desktop and mobile widths",
         "AppUsagePage": "app usage route stays responsive across desktop and mobile widths",
         "AppIntegrationsPage": "app integrations route stays responsive across desktop and mobile widths",
@@ -284,7 +284,12 @@ def test_factory_app_surface_routes_are_all_covered_by_smoke() -> None:
         "CarryForwardReportPanel",
         "PricingHealthPanel",
         "MetricDetailPanel",
-            "GenesisImportReview",
+        "GenesisImportReview",
+        # Project page parts (DashboardPortalPage) and My Apps' builds in progress (AppsPage)
+        "AppProjectPanel",
+        "ProjectBuildButton",
+        "ReadableDocument",
+        "BuildsInProgress",
     }
 
 
@@ -320,6 +325,11 @@ def test_factory_app_react_files_are_classified() -> None:
         # Universal metric drill-down drawer, opened from analytics surfaces
         "factory_app/app/admin/pages/MetricDetailPanel.jsx",
         "factory_app/app/admin/pages/GenesisImportReview.jsx",
+        # Project page parts and My Apps' builds in progress
+        "factory_app/app/admin/pages/AppProjectPanel.jsx",
+        "factory_app/app/admin/pages/ProjectBuildButton.jsx",
+        "factory_app/app/admin/pages/ReadableDocument.jsx",
+        "factory_app/app/admin/pages/BuildsInProgress.jsx",
         "factory_app/app/ui/components/StudioShared.jsx",
         "factory_app/app/ui/components/HarnessDecisionCard.jsx",
         "factory_app/app/ui/components/OnboardingTour.jsx",

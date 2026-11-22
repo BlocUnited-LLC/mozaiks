@@ -49,13 +49,15 @@ async function fixture(t) {
     },
     define: { 'process.env.NODE_ENV': '"test"' },
     plugins: [{ name: 'host-boundaries', setup(builder) {
-      builder.onResolve({ filter: /^(?:@mozaiks\/chat-ui\/workspace)$|(?:studioApi|useWorkspaceApps)\.js$/ }, args => ({ path: args.path, namespace: 'host-boundary' }));
+      builder.onResolve({ filter: /^(?:@mozaiks\/chat-ui\/workspace)$|(?:studioApi|useWorkspaceApps|useWorkflowStart)\.js$/ }, args => ({ path: args.path, namespace: 'host-boundary' }));
       builder.onLoad({ filter: /.*/, namespace: 'host-boundary' }, args => ({
         contents: args.path.endsWith('studioApi.js')
           ? 'export const studioFetch=async()=>({app:{portals:[]}});'
           : args.path.endsWith('useWorkspaceApps.js')
             ? 'export const useWorkspaceApps=()=>({apps:[]});'
-            : 'export const WorkspaceLayout=({children})=>children;',
+            : args.path.endsWith('useWorkflowStart.js')
+              ? 'export const useWorkflowStart=()=>({startWorkflow:async()=>null,starting:false,error:null});'
+              : 'export const WorkspaceLayout=({children})=>children;',
       }));
     } }],
   });

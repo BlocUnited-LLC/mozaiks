@@ -166,17 +166,23 @@ def test_app_overview_does_not_link_to_removed_routes() -> None:
     assert 'to={`/apps/${appId}/settings`}' not in source
 
 
-def test_dashboard_portal_page_renders_manifest_build_panels() -> None:
+def test_dashboard_portal_page_renders_the_project_and_host_panels() -> None:
     source = _read("factory_app/app/admin/pages/DashboardPortalPage.jsx")
+    project_source = _read("factory_app/app/admin/pages/AppProjectPanel.jsx")
     manifest_source = _read("factory_app/app/ui/route_manifest.json")
 
     assert "fetchDashboardConfig({ scope, signal:" in source
     assert "routePatternMatches(item.route, pathname)" in source
-    assert "case 'build_requests':" in source
-    assert "case 'artifact_timeline':" in source
-    assert "case 'approval_queue':" in source
-    assert "case 'workflow_launcher':" in source
+    assert "case 'build_project':" in source
+    assert "case 'custom_component':" in source
+    assert "componentRegistry.getComponent(panel.component)" in source
     assert "GenericPanelFallback" in source
+    # The old Building panels read a build-state record nothing writes (#1103).
+    for removed in ("build_requests", "artifact_timeline", "approval_queue", "workflow_launcher", "buildState"):
+        assert removed not in source
+    # Saved document versions come from build history, one family per request.
+    assert "fetchProjectVersions(buildRegistryId" in project_source
+    assert "/api/studio/build/history" in _read("factory_app/app/admin/pages/projectRoomApi.js")
     assert '"/apps/:appId/building"' in manifest_source
     assert '"component": "DashboardPortalPage"' in manifest_source
 

@@ -107,21 +107,14 @@ workspace:
 app:
   portals:
     - id: building
-      label: Building
+      label: Project
       route: /apps/:appId/building
       icon: hammer
       order: 10
-      capabilities: [build_requests, artifact_versions, approval_queue]
       panels:
-        - id: requests
-          type: build_requests
-          title: Build state
-        - id: artifacts
-          type: artifact_timeline
-          title: Build versions
-        - id: approvals
-          type: approval_queue
-          title: Approvals
+        - id: project
+          type: build_project
+          title: Project
 ```
 
 ## Canonical App Portals
@@ -131,7 +124,7 @@ The default App Dashboard lanes are:
 | Portal | Purpose |
 | --- | --- |
 | `overview` | App identity, lifecycle, KPIs, next step, and top-level alerts. |
-| `building` | Build state, build versions, and approval queue. |
+| `building` | The app's Project: where the build stands, its saved build documents, and every version. |
 | `branding` | Brand kit, logos, themes, generated media, and promoted brand assets. |
 | `launch` | Landing page status, hosting, domains, deployment readiness, and launch workflows. |
 | `growth` | Landing-page improvement, marketing campaigns, campaign assets, and growth workflow launch actions. |
@@ -177,11 +170,62 @@ remain valid while the Dashboard Portal renderer is adopted.
 `DashboardPortalPage` reads the active `mozaiks.dashboard.v1` manifest through
 `/api/studio/dashboard`, matches the current route to an enabled portal, then
 renders known panel types against Studio data. The generic renderer currently
-covers summary, next step, portal links, build requests, artifact timelines,
-approval queues, and explicitly declared workflow launch panels. Apps should mount it by
+covers summary, next step, portal links, the `build_project` Project panel, and
+`custom_component` panels. Apps should mount it by
 declaring a normal route-manifest entry with `component: DashboardPortalPage`;
 they should not copy the factory page into their workspace to activate a
 default portal.
+
+### The Project Panel
+
+`build_project` renders an app's Project from records the server already keeps,
+read-only:
+
+- the saved build documents, read from `GET /api/studio/build/history` with one
+  `build_family` filter per document (history sorts by version number across
+  families, so one unfiltered page can hide a document behind internal
+  records). Each document shows its latest `current` version, or its newest
+  version when none is current. Internal families (`app_context_version`,
+  `app_intelligence_snapshot`, `app_context_graph`, `source_context_bundle`,
+  `brownfield_registration`) are not shown;
+- a document's text, which is its saved `commit_metadata.metadata.summary_payload`
+  (the content of its single JSON file), rendered as headings, paragraphs, and
+  lists. The App document links to the build review page instead;
+- the build steps in the `build` workflow sequence order (Idea, Look & feel,
+  Design, Plans & pricing, AI workflows, App). A step is done when a current
+  version of its document exists;
+- one status sentence and one button. The button opens the app's recorded build
+  conversation (`/chat?workflow=…&chat_id=…&app_id=<chat_app_id>`), the build
+  review page, or asks `POST /api/workflows/trigger` to start `ValueEngine` (a
+  draft with no conversation) or `AppReview` (a built app) bound to the app's
+  `build_registry_id`. When the server records no entry the page can open, it
+  says so.
+
+My Apps lists up to five in-build apps under "Builds in progress" with the same
+sentence and button, using one history request per listed app.
+
+### Host Sections
+
+A `custom_component` panel renders the component registered under its
+`component` name in the shell component registry, with props `panel`, `appId`,
+`app` (the app's Factory registry entry), and `buildRegistryId`. A host adds a
+section to the Project page by overlaying the `building` portal by id; panels
+merge by id, so the Project panel stays and the host panel is appended:
+
+```yaml
+app:
+  portals:
+    - id: building
+      panels:
+        - id: host_section
+          type: custom_component
+          source: custom
+          component: HostProjectSection
+          order: 10
+```
+
+The OSS Project page has no voting, discussion, or governance; a host product
+that offers those renders them in its own registered component.
 
 ### App-owned Management Composition
 

@@ -637,7 +637,7 @@ export default function AppOverviewPage() {
     : isBuilding
     ? primaryAction?.kind === 'build'
       ? 'Open the build conversation to follow progress, review results, and respond when needed.'
-      : 'Open Building to review saved progress. A build conversation link is not available.'
+      : 'Open Project to see saved progress. A build conversation link is not available.'
     : getLifecycleGuidance(lifecycle)
   const dashboardMetrics = buildDashboardMetrics(snapshot, totalCost, totalRuns)
 
@@ -736,7 +736,7 @@ export default function AppOverviewPage() {
         {isDraft ? (
           <StudioInlineEmptyState
             title="Build details are not available"
-            description="Open Building to review this app's build history."
+            description="Open Project to see this app's build documents and versions."
           />
         ) : (
           <div className={isBuilding ? '' : 'grid gap-5 xl:grid-cols-3'}>

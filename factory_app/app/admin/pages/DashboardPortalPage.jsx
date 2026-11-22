@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 
+import { componentRegistry } from '@mozaiks/chat-ui'
 import { SummaryStrip } from '@mozaiks/chat-ui/ui'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
@@ -15,16 +16,14 @@ import AppStudioHero, {
   formatCompactNumber,
   formatDateTimeLabel,
 } from './AppStudioChrome.jsx'
+import AppProjectPanel from './AppProjectPanel.jsx'
 import { getAppStudioSnapshot, toArray } from './appStudioDataHelpers.js'
 import {
-  getApprovalStateLabel,
   getAppPrimaryAction,
   getLifecycleGuidance,
-  getPlanStateLabel,
   normalizeAppStatus,
 } from './appStudioModel.js'
-import CarryForwardReportSummary from './CarryForwardReportSummary.jsx'
-import { buildDashboardWorkflowHref, fetchDashboardConfig, getDashboardSurface } from './dashboardRoutes.js'
+import { fetchDashboardConfig, getDashboardSurface } from './dashboardRoutes.js'
 import { useAppStudioData } from './useAppStudioData.js'
 
 function decodePathSegment(value) {
@@ -79,40 +78,6 @@ function formatRelativeTime(value) {
   }
 }
 
-function validationTone(status) {
-  if (status === 'passed') return 'success'
-  if (status === 'failed') return 'destructive'
-  return 'warning'
-}
-
-function lifecycleTone(status) {
-  if (status === 'current' || status === 'deployed') return 'success'
-  if (status === 'draft') return 'default'
-  if (status === 'rejected' || status === 'failed') return 'destructive'
-  return 'warning'
-}
-
-function approvalTone(state) {
-  if (state === 'approved') return 'success'
-  if (state === 'rejected') return 'destructive'
-  if (state === 'pending') return 'warning'
-  return 'default'
-}
-
-function runTone(status) {
-  if (status === 1 || status === 'completed' || status === 'success') return 'success'
-  if (status === 2 || status === 'failed' || status === 'error') return 'destructive'
-  if (status === 0 || status === 'in_progress' || status === 'running') return 'primary'
-  return 'default'
-}
-
-function runLabel(status) {
-  if (status === 2) return 'Failed'
-  if (status === 1) return 'Completed'
-  if (status === 0) return 'Running'
-  return String(status || 'Unknown').replace(/_/g, ' ')
-}
-
 function appStatusLabel(status) {
   const normalized = normalizeAppStatus(status)
   return normalized === 'draft' ? 'Draft' : normalized.replace(/_/g, ' ')
@@ -162,9 +127,8 @@ function useDashboardPortal(scope, appId, pathname) {
   return state
 }
 
-function buildHeroSummaryItems(portal, snapshot, data) {
-  const build = data?.buildState?.build || {}
-  const latestArtifact = snapshot.buildHistory[0] || null
+function buildSummaryItems(portal, snapshot) {
+  const latestVersion = snapshot.buildHistory[0] || null
   return [
     {
       id: 'status',
@@ -173,10 +137,10 @@ function buildHeroSummaryItems(portal, snapshot, data) {
       detail: portal?.label || 'Dashboard',
     },
     {
-      id: 'artifacts',
-      label: 'Artifacts',
+      id: 'versions',
+      label: 'App versions',
       value: formatCompactNumber(snapshot.buildHistory.length, '0'),
-      detail: latestArtifact ? `Latest v${latestArtifact.version_number}` : 'No saved versions',
+      detail: latestVersion ? `Latest: version ${latestVersion.version_number}` : 'No saved versions',
     },
     {
       id: 'runs',
@@ -184,19 +148,13 @@ function buildHeroSummaryItems(portal, snapshot, data) {
       value: formatCompactNumber(snapshot.runs.length, '0'),
       detail: snapshot.runs[0] ? formatRelativeTime(snapshot.runs[0].started_at) : 'No runs yet',
     },
-    {
-      id: 'approval',
-      label: 'Approval',
-      value: getApprovalStateLabel(build.approval_state),
-      detail: getPlanStateLabel(build.plan_state),
-    },
   ]
 }
 
-function SummaryStripPanel({ panel, portal, snapshot, data }) {
+function SummaryStripPanel({ panel, portal, snapshot }) {
   return (
     <div>
-      <SummaryStrip items={buildHeroSummaryItems(portal, snapshot, data)} />
+      <SummaryStrip items={buildSummaryItems(portal, snapshot)} />
       {panel.description ? (
         <p className="mt-2 px-1 text-xs leading-5 text-muted-foreground">{panel.description}</p>
       ) : null}
@@ -258,215 +216,22 @@ function PortalLinkGridPanel({ panel, surface, currentPortal, appId }) {
   )
 }
 
-function BuildRequestsPanel({ panel, build, snapshot, appId }) {
-  const currentRequest = build.current_request || {}
-  const recentRequests = toArray(build.recent_requests)
-  const recentRuns = snapshot.runs.slice(0, 4)
-  const reviewHref = `/apps/${encodeURIComponent(appId || 'workspace-app')}/activity`
-
+/**
+ * Host extension point: a `custom_component` panel renders the component a
+ * host registered under `panel.component` (see app-dashboard-contract.md).
+ */
+function CustomComponentPanel({ panel, appId, data }) {
+  const Component = panel.component ? componentRegistry.getComponent(panel.component) : null
+  if (!Component) return <GenericPanelFallback panel={panel} />
   return (
-    <Panel title={titleForPanel(panel, 'Build state')} subtitle={panel.description || 'Current request, latest run, and review path.'}>
-      {currentRequest.text ? (
-        <div className="rounded-lg border border-primary/25 bg-primary/6 px-4 py-3">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-primary/65">Current request</div>
-          <p className="mt-1 text-sm leading-6 text-foreground">{currentRequest.text}</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {currentRequest.request_kind ? <StatusPill tone="default">{String(currentRequest.request_kind).replace(/_/g, ' ')}</StatusPill> : null}
-            {currentRequest.change_class ? <StatusPill tone="primary">{String(currentRequest.change_class).replace(/_/g, ' ')}</StatusPill> : null}
-            {currentRequest.updated_at ? <StatusPill tone="default">{formatRelativeTime(currentRequest.updated_at)}</StatusPill> : null}
-          </div>
-        </div>
-      ) : (
-        <StudioInlineEmptyState
-          title="No build request saved"
-          description="Start or continue a build workflow to attach the current request to this app."
-        />
-      )}
-
-      {recentRequests.length > 0 ? (
-        <div className="mt-4 space-y-2">
-          {recentRequests.slice(0, 3).map((request, index) => (
-            <div key={`${request.saved_at || index}:${request.text}`} className="rounded-lg border border-border/45 bg-card/35 px-3 py-2.5">
-              <div className="text-sm font-medium text-foreground">{request.text}</div>
-              <div className="mt-1 text-xs text-muted-foreground">{formatRelativeTime(request.saved_at)}</div>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {recentRuns.length > 0 ? (
-        <>
-          <div className="my-4 border-t border-border/35" />
-          <div className="space-y-2">
-            {recentRuns.map((run, index) => (
-              <div key={run.run_id || run.chat_id || index} className="flex items-center justify-between gap-3 rounded-lg border border-border/45 bg-background/30 px-3 py-2.5">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-foreground">{run.workflow_name || 'Workflow run'}</div>
-                  <div className="text-xs text-muted-foreground">{formatRelativeTime(run.started_at)}</div>
-                </div>
-                {run.status != null ? <StatusPill tone={runTone(run.status)}>{runLabel(run.status)}</StatusPill> : null}
-              </div>
-            ))}
-          </div>
-        </>
-      ) : null}
-
-      <div className="mt-4">
-        <LinkButton to={reviewHref} size="sm" variant="outline">Review build output</LinkButton>
-      </div>
-    </Panel>
-  )
-}
-
-function ArtifactTimelinePanel({ panel, snapshot }) {
-  const artifacts = snapshot.buildHistory
-
-  return (
-    <Panel title={titleForPanel(panel, 'Artifact timeline')} subtitle={panel.description || 'Saved app bundle versions and validation status.'}>
-      {artifacts.length === 0 ? (
-        <StudioInlineEmptyState
-          title="No artifacts yet"
-          description="Build versions appear after generation or refinement saves an app bundle."
-        />
-      ) : (
-        <div className="space-y-3">
-          {artifacts.slice(0, 6).map((artifact) => {
-            const cfReport = artifact?.commit_metadata?.metadata?.carry_forward_report || null
-            return (
-              <div key={artifact.id || artifact.version_number} className="rounded-lg border border-border/50 bg-card/35 px-4 py-3">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-foreground">Build v{artifact.version_number}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">{formatDateTimeLabel(artifact.created_at)}</div>
-                    {artifact.commit_metadata?.message ? (
-                      <div className="mt-1 truncate text-xs text-muted-foreground/75">{artifact.commit_metadata.message}</div>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <StatusPill tone={validationTone(artifact.validation_status)}>{artifact.validation_status || 'pending'}</StatusPill>
-                    <StatusPill tone={lifecycleTone(artifact.lifecycle_status)}>{artifact.lifecycle_status || 'draft'}</StatusPill>
-                  </div>
-                </div>
-                {cfReport ? <CarryForwardReportSummary report={cfReport} /> : null}
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </Panel>
-  )
-}
-
-function ApprovalPanel({ panel, build, latestArtifact }) {
-  const currentPlan = build.current_plan || {}
-  const approvals = toArray(currentPlan.approvals_required)
-  const acceptance = toArray(currentPlan.acceptance_criteria)
-  const validationStatus = latestArtifact?.validation_status || 'pending'
-
-  return (
-    <Panel title={titleForPanel(panel, 'Approvals')} subtitle={panel.description || 'Human review state, artifact validation, and acceptance notes.'}>
-      <div className="flex flex-wrap gap-2">
-        <StatusPill tone={approvalTone(build.approval_state)}>
-          {getApprovalStateLabel(build.approval_state)}
-        </StatusPill>
-        <StatusPill tone="default">{getPlanStateLabel(build.plan_state)}</StatusPill>
-        <StatusPill tone={validationTone(validationStatus)}>{validationStatus}</StatusPill>
-      </div>
-
-      {currentPlan.summary ? (
-        <p className="mt-4 text-sm leading-6 text-foreground">{currentPlan.summary}</p>
-      ) : null}
-
-      {approvals.length > 0 || acceptance.length > 0 ? (
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/65">Approvals</div>
-            <ul className="mt-2 space-y-2 text-sm text-muted-foreground">
-              {(approvals.length ? approvals : ['No approval blockers recorded.']).slice(0, 4).map((item) => (
-                <li key={item} className="rounded-lg border border-border/40 bg-background/28 px-3 py-2">{item}</li>
-              ))}
-            </ul>
-          </div>
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/65">Acceptance</div>
-            <ul className="mt-2 space-y-2 text-sm text-muted-foreground">
-              {(acceptance.length ? acceptance : ['Acceptance criteria will appear with the current plan.']).slice(0, 4).map((item) => (
-                <li key={item} className="rounded-lg border border-border/40 bg-background/28 px-3 py-2">{item}</li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      ) : (
-        <StudioInlineEmptyState
-          title="No review checklist yet"
-          description="Review tasks appear once a build plan or artifact version has been prepared."
-          className="mt-4"
-        />
-      )}
-    </Panel>
-  )
-}
-
-function WorkflowLauncherPanel({ panel, build, appId, registeredApp }) {
-  const actions = toArray(panel.actions)
-  const support = build.refinement_support || {}
-  const availableModes = Object.entries(support)
-    .filter(([, value]) => value?.available)
-    .map(([key, value]) => ({ key, workflowId: value.workflow_id }))
-
-  return (
-    <Panel title={titleForPanel(panel, 'Workflow launcher')} subtitle={panel.description || 'Open the workflow path declared for this portal.'}>
-      {actions.length > 0 ? (
-        <div className="flex flex-wrap gap-2">
-          {actions.map((action) => {
-            const href = buildDashboardWorkflowHref({ action, panel, build, appId, registeredApp })
-            const external = action.type === 'external_url'
-            if (external) {
-              return (
-                <a
-                  key={action.id}
-                  href={href}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-card px-3 text-sm font-semibold text-foreground transition hover:bg-muted"
-                >
-                  {action.label}
-                </a>
-              )
-            }
-            return (
-              <LinkButton
-                key={action.id}
-                to={href}
-                variant={action.variant === 'primary' ? 'primary' : 'outline'}
-                size="sm"
-              >
-                {action.label}
-              </LinkButton>
-            )
-          })}
-        </div>
-      ) : (
-        <StudioInlineEmptyState
-          title="No workflow action declared"
-          description="Add a dashboard action to this panel to expose a deterministic launch target."
-        />
-      )}
-
-      {availableModes.length > 0 ? (
-        <>
-          <div className="my-4 border-t border-border/35" />
-          <div className="grid gap-2 sm:grid-cols-2">
-            {availableModes.map((mode) => (
-              <div key={mode.key} className="rounded-lg border border-border/45 bg-background/30 px-3 py-2.5">
-                <div className="text-sm font-semibold capitalize text-foreground">{mode.key}</div>
-                <div className="mt-1 text-xs text-muted-foreground">{mode.workflowId}</div>
-              </div>
-            ))}
-          </div>
-        </>
-      ) : null}
-    </Panel>
+    <Suspense fallback={<StudioLoadingState label={`Loading ${titleForPanel(panel)}...`} />}>
+      <Component
+        panel={panel}
+        appId={appId}
+        app={data?.registeredApp || data?.summary?.app || null}
+        buildRegistryId={data?.buildRegistryId || null}
+      />
+    </Suspense>
   )
 }
 
@@ -481,33 +246,34 @@ function GenericPanelFallback({ panel }) {
   )
 }
 
-function DashboardPanelRenderer({ panel, portal, surface, snapshot, data, appId }) {
-  const build = data?.buildState?.build || {}
-  const latestArtifact = snapshot.buildHistory[0] || null
-
+function DashboardPanelRenderer({ panel, portal, surface, snapshot, data, dataMode, appId }) {
   switch (panel.type) {
     case 'summary_strip':
     case 'kpi_grid':
-      return <SummaryStripPanel panel={panel} portal={portal} snapshot={snapshot} data={data} />
+      return <SummaryStripPanel panel={panel} portal={portal} snapshot={snapshot} />
     case 'next_step':
       return <NextStepPanel panel={panel} snapshot={snapshot} />
     case 'portal_link_grid':
       return <PortalLinkGridPanel panel={panel} surface={surface} currentPortal={portal} appId={appId} />
-    case 'build_requests':
-      return <BuildRequestsPanel panel={panel} build={build} snapshot={snapshot} appId={appId} />
-    case 'artifact_timeline':
-      return <ArtifactTimelinePanel panel={panel} snapshot={snapshot} />
-    case 'approval_queue':
-      return <ApprovalPanel panel={panel} build={build} latestArtifact={latestArtifact} />
-    case 'workflow_launcher':
-      return <WorkflowLauncherPanel panel={panel} build={build} appId={appId} registeredApp={data?.registeredApp} />
+    case 'build_project':
+      return (
+        <AppProjectPanel
+          appId={appId}
+          app={data?.registeredApp || snapshot.app}
+          buildRegistryId={data?.buildRegistryId || null}
+          dataMode={dataMode}
+          demoVersions={snapshot.buildHistory}
+        />
+      )
+    case 'custom_component':
+      return <CustomComponentPanel panel={panel} appId={appId} data={data} />
     default:
       return <GenericPanelFallback panel={panel} />
   }
 }
 
 function isWidePanel(type) {
-  return ['summary_strip', 'kpi_grid', 'portal_link_grid', 'artifact_timeline'].includes(type)
+  return ['summary_strip', 'kpi_grid', 'portal_link_grid', 'build_project', 'custom_component'].includes(type)
 }
 
 export default function DashboardPortalPage({ targetAppId, buildRegistryId } = {}) {
@@ -546,7 +312,6 @@ export default function DashboardPortalPage({ targetAppId, buildRegistryId } = {
           dataMode={dataMode}
           title={portal.label}
           subtitle={portal.description || `${portal.label} portal for this app.`}
-          summaryItems={buildHeroSummaryItems(portal, snapshot, data)}
           actions={[{ id: 'refresh', label: 'Refresh', variant: 'outline' }]}
           onAction={(id) => id === 'refresh' && refresh()}
         />
@@ -576,6 +341,7 @@ export default function DashboardPortalPage({ targetAppId, buildRegistryId } = {
                   surface={manifest.surface}
                   snapshot={snapshot}
                   data={data}
+                  dataMode={dataMode}
                   appId={appId}
                 />
               </div>
