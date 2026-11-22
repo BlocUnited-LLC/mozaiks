@@ -139,7 +139,7 @@ App-level routes:
 - `/apps/:appId/audience` -> user analytics and the lifecycle funnel
 - `/apps/:appId/building` -> manifest-backed Building portal for build requests, artifacts, approvals, and workflow launch
 - `/apps/:appId/usage` -> app usage
-- `/apps/:appId/health` -> what needs attention: latest build validation, failed runs, integrations missing a credential
+- `/apps/:appId/health` -> what needs attention: latest build validation, failed runs, integrations missing a credential or failing their check
 - `/apps/:appId/integrations` -> owner-managed connections and integration requirements for the selected app
 - `/apps/:appId/support` -> app support follow-up, help desk notes, and stalled run triage
 - `/apps/:appId/activity` -> app build review, artifact versions, validation state, review actions, and carry-forward audit detail, hidden from primary navigation
@@ -169,7 +169,7 @@ product billing routes.
 | `/apps` | My Apps | Primary Studio workspace home and app portfolio |
 | `/performance` | Performance | Portfolio revenue and user metrics, trend, and per-app comparison |
 | `/usage` | Workspace Usage | Cross-app workflow input/output tokens, totals, and averages |
-| `/integrations` | Workspace Integrations | Workspace provider setup, catalog coverage, and safe credential-presence status |
+| `/integrations` | Workspace Integrations | Workspace provider setup, catalog coverage, safe credential-presence status, and the result of each saved connector's last check |
 | `/support` | Workspace Support | Apps with support chats, each linking to that app's support inbox |
 | `/settings/ai-models` | AI models | Default and allowed AI models for Factory builds and refinements |
 | `/create` | Workflow entrypoint | Workflow-owned fresh create path; not part of the persistent Studio nav and never an implicit resume surface |
@@ -178,7 +178,7 @@ product billing routes.
 | `/apps/:appId/revenue` | App Revenue | Recurring-revenue metrics, trend, and the MRR movement bridge |
 | `/apps/:appId/audience` | App Users | Acquisition, engagement, conversion, and the app's lifecycle funnel |
 | `/apps/:appId/building` | Building | Generic dashboard portal rendered from `dashboard/dashboard.yaml`; build requests, artifacts, approvals, and workflow launch |
-| `/apps/:appId/health` | App Health | Specific things to fix, from the latest build's validation result, failed runs, and integrations missing a credential |
+| `/apps/:appId/health` | App Health | Specific things to fix, from the latest build's validation result, failed runs, and integrations missing a credential or failing their check |
 | `/apps/:appId/usage` | App Usage | App-scoped input/output token usage, cost signals, totals, and averages |
 | `/apps/:appId/integrations` | Integrations | Owner-scoped connection setup, write-only credentials, manual health checks for supported services, and build requirements |
 | `/apps/:appId/support` | App Support | App-scoped help desk, escalations, stalled runs, and support diagnostics |

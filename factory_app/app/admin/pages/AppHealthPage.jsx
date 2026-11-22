@@ -10,8 +10,15 @@ import {
   StatusPill,
 } from '../../ui/components/StudioShared.jsx'
 import AppStudioHero, { formatCompactNumber, formatDateTimeLabel } from './AppStudioChrome.jsx'
-import { getAppStudioSnapshot, sumBy } from './appStudioDataHelpers.js'
-import { buildHealthState, validationLabel, validationTone } from './studioHealthModel.js'
+import { getAppStudioSnapshot } from './appStudioDataHelpers.js'
+import { connectorCredentialState } from './connectorStatusModel.js'
+import {
+  averageFinishedRunSeconds,
+  buildHealthState,
+  formatRunDuration,
+  validationLabel,
+  validationTone,
+} from './studioHealthModel.js'
 import { useAppStudioData } from './useAppStudioData.js'
 
 
@@ -57,6 +64,17 @@ function Tile({ label, value, detail = null }) {
   )
 }
 
+// Wording for one connector's credential, by `connectorCredentialState`.
+function credentialCopy(connector) {
+  const state = connectorCredentialState(connector)
+  if (state === 'missing') return { detail: 'Credential still needs to be saved.', pill: 'Needs secret', tone: 'warning' }
+  if (state === 'check_failed') {
+    const reason = String(connector?.health?.message || '').trim()
+    return { detail: reason || 'The last check of this connection failed.', pill: 'Check failed', tone: 'destructive' }
+  }
+  return { detail: 'Credential is configured.', pill: 'Ready', tone: 'success' }
+}
+
 export default function AppHealthPage() {
   const { appId = 'workspace-app' } = useParams()
   const { data, loading, error, dataMode } = useAppStudioData(appId)
@@ -70,23 +88,34 @@ export default function AppHealthPage() {
   // build from /api/studio/build/history, connectors from /api/studio/integrations.
   const latestArtifact = snapshot.buildHistory[0] || null
   const latestValidationStatus = latestArtifact ? latestArtifact.validation_status || 'pending' : null
-  const recentRuns = snapshot.runs
   const trackedRuns = Number(snapshot.stats.tracked_chats || 0)
   const failedRuns = Number(snapshot.stats.failed_chats || 0)
-  const averageRunSeconds = recentRuns.length > 0
-    ? Math.round(sumBy(recentRuns, (run) => run.runtime_sec || 0) / recentRuns.length)
+  // Finished runs only: a run still in progress has no duration yet.
+  const averageRun = averageFinishedRunSeconds(snapshot.runs)
+  // A saved credential is not a working one: a connector whose last check
+  // failed is counted separately from one with nothing saved.
+  const credentialStates = snapshot.appConnectors.map(connectorCredentialState)
+  const integrationIssues = credentialStates.filter((state) => state === 'missing').length
+  const integrationCheckFailures = credentialStates.filter((state) => state === 'check_failed').length
+  const health = buildHealthState({
+    latestValidationStatus, failedRuns, trackedRuns, integrationIssues, integrationCheckFailures,
+  })
+  const averageRunLabel = formatRunDuration(averageRun.seconds) || 'No finished runs yet'
+  const recentRunsDetail = averageRun.count > 0
+    ? `Across the ${averageRun.count} most recent finished ${averageRun.count === 1 ? 'run' : 'runs'}`
     : null
-  const integrationIssues = snapshot.appConnectors.filter((connector) => !connector.secret_available).length
-  const health = buildHealthState({ latestValidationStatus, failedRuns, trackedRuns, integrationIssues })
-  const averageRunLabel = averageRunSeconds != null ? `${averageRunSeconds}s` : 'No runs yet'
-  const recentRunsDetail = recentRuns.length > 0 ? `Across the ${recentRuns.length} most recent` : null
 
   const summaryItems = [
     { id: 'status', label: 'Status', value: health.label, detail: health.issues.length > 0 ? `${health.issues.length} to look at` : 'Nothing to look at' },
     { id: 'build', label: 'Latest build', value: validationLabel(latestValidationStatus), detail: 'Validation result' },
     { id: 'failed', label: 'Failed runs', value: formatCompactNumber(failedRuns, '0'), detail: `Of ${formatCompactNumber(trackedRuns, '0')} recorded` },
     { id: 'runtime', label: 'Avg run time', value: averageRunLabel, detail: recentRunsDetail || 'Recent runs' },
-    { id: 'integrations', label: 'Integration gaps', value: formatCompactNumber(integrationIssues, '0'), detail: 'Missing a credential' },
+    {
+      id: 'integrations',
+      label: 'Integration gaps',
+      value: formatCompactNumber(integrationIssues + integrationCheckFailures, '0'),
+      detail: 'Missing a credential or failing a check',
+    },
   ]
 
   return (
@@ -149,15 +178,18 @@ export default function AppHealthPage() {
           <Panel eyebrow="Integrations" title="Integration posture" subtitle="Missing credentials or incomplete connectors should surface here as health blockers.">
             {snapshot.appConnectors.length > 0 ? (
               <div className="space-y-3">
-                {snapshot.appConnectors.map((connector) => (
-                  <div key={connector.service} className="flex items-center justify-between rounded-2xl border border-border bg-card/70 px-4 py-3">
-                    <div>
-                      <div className="font-semibold text-foreground">{connector.display_name || connector.service}</div>
-                      <div className="mt-1 text-sm text-muted-foreground">{connector.secret_available ? 'Credential is configured.' : 'Credential still needs to be saved.'}</div>
+                {snapshot.appConnectors.map((connector) => {
+                  const credential = credentialCopy(connector)
+                  return (
+                    <div key={connector.service} className="flex items-center justify-between rounded-2xl border border-border bg-card/70 px-4 py-3">
+                      <div>
+                        <div className="font-semibold text-foreground">{connector.display_name || connector.service}</div>
+                        <div className="mt-1 text-sm text-muted-foreground">{credential.detail}</div>
+                      </div>
+                      <StatusPill tone={credential.tone}>{credential.pill}</StatusPill>
                     </div>
-                    <StatusPill tone={connector.secret_available ? 'success' : 'warning'}>{connector.secret_available ? 'Ready' : 'Needs secret'}</StatusPill>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             ) : (
               <StudioInlineEmptyState

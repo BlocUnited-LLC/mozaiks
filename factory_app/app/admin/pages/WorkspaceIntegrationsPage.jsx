@@ -10,56 +10,25 @@ import {
   StudioLoadingState,
   StudioSlideOver,
 } from '../../ui/components/StudioShared.jsx'
+import {
+  displayTone,
+  effectiveStatus,
+  failedCheckMessage,
+  hasFailedCheck,
+  integrationGroup,
+  isExpired,
+  isExpiring,
+  isRejected,
+  needsAttention,
+  statusLabel,
+  statusTone,
+  withConnectorOverlay,
+} from './connectorStatusModel.js'
 import { studioFetch } from './studioApi.js'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
-
-function statusTone(status) {
-  if (status === 'configured' || status === 'healthy') return 'success'
-  if (status === 'partial' || status === 'pending_validation' || status === 'expiring') return 'warning'
-  if (status === 'missing' || status === 'unhealthy' || status === 'not_configured' || status === 'expired') return 'destructive'
-  return 'default'
-}
-
-function statusLabel(status, item = null) {
-  const resolvedStatus = item?.display_status || status
-  if (resolvedStatus === 'configured') return 'Connected'
-  if (resolvedStatus === 'partial') return 'Needs setup'
-  if (resolvedStatus === 'missing' && Number(item?.app_usage_count || 0) > 0) return 'Needs setup'
-  return 'Available'
-}
-
-function displayTone(item) {
-  const resolvedStatus = item?.display_status || item?.status
-  if (resolvedStatus === 'missing' && Number(item?.app_usage_count || 0) === 0) return 'default'
-  return statusTone(resolvedStatus)
-}
-
-function withConnectorOverlay(item, connector) {
-  const lifecycle = connectorLifecycle(connector)
-  if (connector?.ready) {
-    return {
-      ...item,
-      display_status: lifecycle === 'expiring' ? 'expiring' : 'configured',
-      workspace_connector_status: lifecycle === 'expiring' ? 'expiring' : 'ready',
-      connector_lifecycle: lifecycle,
-      connector_days_until_expiry: connector?.days_until_expiry ?? null,
-    }
-  }
-  if (connector) {
-    return {
-      ...item,
-      workspace_connector_status: lifecycle === 'expired' ? 'expired' : 'partial',
-      connector_lifecycle: lifecycle,
-      connector_days_until_expiry: connector?.days_until_expiry ?? null,
-    }
-  }
-  return item
-}
-
-function effectiveStatus(item) {
-  return item?.display_status || item?.status
-}
+// How a service is classified (connected, needs attention, available) lives in
+// connectorStatusModel.js. The helpers here only choose wording.
 
 function humanize(key) {
   if (String(key || '').toLowerCase() === 'llms') return 'LLMs'
@@ -73,30 +42,9 @@ function appUsageLabel(item) {
   return null
 }
 
-function connectorLifecycle(connector) {
-  return connector?.lifecycle_status || (connector?.ready ? 'active' : null)
-}
-
-function isExpired(connector) {
-  return connectorLifecycle(connector) === 'expired'
-}
-
-function isExpiring(connector) {
-  return connectorLifecycle(connector) === 'expiring'
-}
-
-function needsAttention(item, connector) {
-  const usedByApps = Number(item?.app_usage_count || 0) > 0
-  if (isExpired(connector)) return true
-  if (isExpiring(connector)) return true
-  // When connector is not passed, fall back to merged fields from withConnectorOverlay
-  const lifecycle = item?.connector_lifecycle
-  if (lifecycle === 'expired' || lifecycle === 'expiring') return true
-  return effectiveStatus(item) === 'partial' || (effectiveStatus(item) === 'missing' && usedByApps)
-}
-
 function connectorLabel(connector, item) {
   if (isExpired(connector)) return 'Workspace connector (expired)'
+  if (hasFailedCheck(connector)) return 'Workspace connector (check failed)'
   if (isExpiring(connector)) {
     const days = connector?.days_until_expiry
     return `Workspace connector (expires in ${days != null ? `${days}d` : 'soon'})`
@@ -110,6 +58,12 @@ function connectorLabel(connector, item) {
 function connectorDescription(connector, item) {
   if (isExpired(connector)) {
     return 'This connector has expired. Update the key to reconnect and restore app access to this service.'
+  }
+  if (hasFailedCheck(connector)) {
+    // The server's message says whether the provider refused the key or the
+    // check could not reach it.
+    const reason = String(connector?.health?.message || '').trim()
+    return `A key is saved, but the last check of this connection failed${reason ? `: ${reason}` : '.'}`
   }
   if (isExpiring(connector)) {
     const days = connector?.days_until_expiry
@@ -132,6 +86,7 @@ function connectorDescription(connector, item) {
 
 function actionLabel(item, connector) {
   if (isExpired(connector)) return 'Renew key'
+  if (isRejected(connector)) return 'Replace key'
   if (isExpiring(connector)) return 'Renew key'
   if (needsAttention(item, connector)) return 'Review setup'
   if (connector || effectiveStatus(item) === 'configured') return 'Manage'
@@ -699,13 +654,21 @@ export default function WorkspaceIntegrationsPage() {
     setActionError(null)
     try {
       const saveResult = await saveConnectorKey(service, keyValue.trim(), displayName)
-      setActiveItem(null)
-      // Auto-validate immediately when a provider health check is available.
-      // Fire-and-forget: the health result updates the store; the reload picks it up.
+      // Ask the provider about the key before reporting it as connected. The
+      // check is awaited so the reload below carries its result; a check that
+      // cannot run is not a rejection.
+      let health = null
       if (saveResult?.health_check_supported) {
-        checkWorkspaceConnector(service).catch(() => {})
+        health = await checkWorkspaceConnector(service).catch(() => null)
       }
       await load(true)
+      const failure = failedCheckMessage(health, displayName)
+      if (failure) {
+        // Keep the panel open so the owner can enter a working key.
+        setActionError(failure)
+      } else {
+        setActiveItem(null)
+      }
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Key could not be saved.')
     } finally {
@@ -778,10 +741,11 @@ export default function WorkspaceIntegrationsPage() {
   )
   const activeConnector = activeItem ? connectorsByService.get(activeItem.id) : null
 
+  const inGroup = (group) => (item) => integrationGroup(item) === group
   const sorted = [
-    ...integrations.filter(needsAttention),
-    ...integrations.filter((i) => effectiveStatus(i) === 'configured' && !needsAttention(i)),
-    ...integrations.filter((i) => !needsAttention(i) && effectiveStatus(i) !== 'configured'),
+    ...integrations.filter(inGroup('attention')),
+    ...integrations.filter(inGroup('connected')),
+    ...integrations.filter(inGroup('available')),
   ]
 
   const categories = [...new Set(sorted.map((i) => String(i.category || '').toLowerCase()).filter(Boolean))]
@@ -793,29 +757,27 @@ export default function WorkspaceIntegrationsPage() {
     {
       id: 'attention',
       title: 'Needs attention',
-      items: filtered.filter(needsAttention),
+      items: filtered.filter(inGroup('attention')),
     },
     {
       id: 'connected',
       title: 'Connected',
-      items: filtered.filter((i) => effectiveStatus(i) === 'configured' && !needsAttention(i)),
+      items: filtered.filter(inGroup('connected')),
     },
     {
       id: 'available',
       title: 'Available',
-      items: filtered.filter((i) => !needsAttention(i) && effectiveStatus(i) !== 'configured'),
+      items: filtered.filter(inGroup('available')),
     },
   ]
 
-  const attentionCount = integrations.filter(needsAttention).length
-  const connectedCount = integrations.filter(
-    (i) => effectiveStatus(i) === 'configured' && !needsAttention(i),
-  ).length
+  const attentionCount = integrations.filter(inGroup('attention')).length
+  const connectedCount = integrations.filter(inGroup('connected')).length
   const usedCount = integrations.filter((i) => Number(i.app_usage_count || 0) > 0).length
 
   const summaryItems = [
     { id: 'connected', label: 'Connected', value: connectedCount, detail: 'Ready for apps' },
-    { id: 'attention', label: 'Needs setup', value: attentionCount, detail: attentionCount > 0 ? 'Used by apps' : 'No blockers' },
+    { id: 'attention', label: 'Needs attention', value: attentionCount, detail: attentionCount > 0 ? 'Listed first below' : 'No blockers' },
     { id: 'used', label: 'Used by apps', value: summary.used ?? usedCount, detail: 'Declared by builds' },
   ]
 

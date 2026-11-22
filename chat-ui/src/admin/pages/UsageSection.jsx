@@ -11,7 +11,6 @@ import {
   formatCost,
   formatCount,
   formatDuration,
-  isUsagePriced,
   sessionStatus,
   summarizeUsage,
   usageByChatId,
@@ -51,7 +50,6 @@ export function RunsPanel({ usageState }) {
 
   const runs = runsState.data?.runs ?? []
   const usageByRun = usageByChatId(usageState.data)
-  const priced = isUsagePriced(usageState.data)
 
   return (
     <div>
@@ -84,6 +82,7 @@ export function RunsPanel({ usageState }) {
                 const status = sessionStatus(run.status)
                 // A run with no ledger row either made no model call or falls
                 // outside the calls the usage endpoint totals; show no number.
+                // A run whose models have no price shows no dollar figure.
                 const usage = usageByRun.get(run.chat_id)
                 return (
                   <tr key={run.chat_id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
@@ -96,7 +95,7 @@ export function RunsPanel({ usageState }) {
                     <td className="px-3 py-2 text-muted-foreground">{formatCount(run.agent_turns)}</td>
                     <td className="px-3 py-2 text-muted-foreground">{formatCount(usage?.total_tokens)}</td>
                     <td className="px-3 py-2 text-muted-foreground">
-                      {formatCost(usage && priced ? usage.estimated_cost_usd : null)}
+                      {formatCost(usage?.priced ? usage.estimated_cost_usd : null)}
                     </td>
                     <td className="px-3 py-2 text-muted-foreground">{formatDuration(run.runtime_sec)}</td>
                   </tr>

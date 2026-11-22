@@ -55,13 +55,28 @@ export function sessionStatus(status) {
   return { label: 'in progress', variant: 'warning' };
 }
 
+// `cost_source` of a model call (or of a whole response) when no price is known.
+const UNPRICED = 'not_configured';
+
 /**
  * Whether the usage response carries a real cost. `cost_source` is
  * `not_configured` when no model in it has a price, so its cost of 0 is not a
  * measurement and must not be shown as "$0.00".
  */
 export function isUsagePriced(usage) {
-  return Boolean(usage) && typeof usage.cost_source === 'string' && usage.cost_source !== 'not_configured';
+  return Boolean(usage) && typeof usage.cost_source === 'string' && usage.cost_source !== UNPRICED;
+}
+
+function usageEvents(usage) {
+  return usage && Array.isArray(usage.events) ? usage.events : null;
+}
+
+/** How many of the totalled model calls have no price. */
+function unpricedCallCount(usage) {
+  const reported = finiteNumber(usage?.pricing_health?.unpriced_event_count);
+  if (reported !== null) return reported;
+  const events = usageEvents(usage) ?? [];
+  return events.filter((event) => event && event.cost_source === UNPRICED).length;
 }
 
 /**
@@ -80,7 +95,7 @@ export function summarizeUsage(usage) {
 
   let costNote = 'Estimated from model prices';
   if (!priced) costNote = modelCalls > 0 ? 'No price is set for the models used' : 'No model calls yet';
-  else if (usage.cost_source === 'mixed') costNote = 'Some models have no price set';
+  else if (unpricedCallCount(usage) > 0) costNote = 'Some models have no price set';
 
   return {
     modelCalls,
@@ -96,12 +111,29 @@ export function summarizeUsage(usage) {
   };
 }
 
-/** Per-run usage rows keyed by chat id, for joining onto the runs list. */
+/**
+ * Per-run usage rows keyed by chat id, for joining onto the runs list.
+ *
+ * Each row gains `priced`: whether at least one of that run's model calls has
+ * a price. A run that used only unpriced models has a cost of 0 that is not a
+ * measurement, so its cost must not be shown as "$0.00". The per-call
+ * `cost_source` comes from `events`, which cover the same calls as `by_run`.
+ */
 export function usageByChatId(usage) {
   const rows = usage && Array.isArray(usage.by_run) ? usage.by_run : [];
+  const events = usageEvents(usage);
+  const pricedChats = new Set();
+  (events ?? []).forEach((event) => {
+    if (event && typeof event.chat_id === 'string' && typeof event.cost_source === 'string' && event.cost_source !== UNPRICED) {
+      pricedChats.add(event.chat_id);
+    }
+  });
+  // Without per-call detail, fall back to what the whole response says.
+  const responsePriced = isUsagePriced(usage);
   const byChat = new Map();
   rows.forEach((row) => {
-    if (row && typeof row.chat_id === 'string' && row.chat_id) byChat.set(row.chat_id, row);
+    if (!row || typeof row.chat_id !== 'string' || !row.chat_id) return;
+    byChat.set(row.chat_id, { ...row, priced: events ? pricedChats.has(row.chat_id) : responsePriced });
   });
   return byChat;
 }

@@ -37,7 +37,7 @@ in the app's Studio menu:
 | Users | `/apps/:appId/audience` | Acquisition, engagement, conversion, and the app's lifecycle funnel. |
 | Building | `/apps/:appId/building` | Build requests, artifact versions, approval queue, and build workflow launches. |
 | Token Usage | `/apps/:appId/usage` | App chats, workflows, tokens, and cost. |
-| Health | `/apps/:appId/health` | What needs attention: the latest build's validation result, failed runs, and integrations missing a credential. |
+| Health | `/apps/:appId/health` | What needs attention: the latest build's validation result, failed runs, and integrations that are missing a credential or failing their check. |
 | Integrations | `/apps/:appId/integrations` | The app's connections, credentials, and build requirements. |
 | Support | `/apps/:appId/support` | App-scoped support threads and follow-up. |
 

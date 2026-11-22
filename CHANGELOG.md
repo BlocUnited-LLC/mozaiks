@@ -19,7 +19,8 @@ This project follows a practical pre-1.0 changelog format:
   Operations read token and cost totals from the usage ledger instead of fields
   no endpoint returned (they showed 0 and `$0.0000`), a failed run is listed as
   failed instead of running, and a page with nothing on it says so instead of
-  rendering blank.
+  rendering blank. A run whose models have no price shows no dollar figure
+  instead of `$0.00`.
 - Admin panels that a connected app backend declares appear on the admin page
   they name. Before, only panels for Access were shown. Module and backend
   panels are shown in their declared `order`.
@@ -27,11 +28,16 @@ This project follows a practical pre-1.0 changelog format:
   request; it failed with 401 whenever sign-in was on. It also reports a save
   or delete the server refused, and links "Get API key" to the provider's page
   instead of a Studio path that does not exist.
+- A saved integration key that fails its check with the provider is listed
+  under Needs attention as "Check failed", not under Connected. After a save
+  the page waits for that check and, if it fails, keeps the setup panel open
+  with the provider's reason.
 - Studio's AI models page is in the workspace menu, and says why it cannot be
   changed when sign-in is off.
 - Studio's app Health page lists specific problems (latest build validation,
-  failed runs, integrations missing a credential) instead of a fixed score and
-  figures that could not change.
+  failed runs, integrations missing a credential or failing their check)
+  instead of a fixed score and figures that could not change. Its average run
+  time counts only runs that have ended.
 - The Studio menu and the dashboard manifest declare the same pages; a test now
   runs the route validator on the real files.
 - Studio owners can open Revenue and manage connections for the app they select in My Apps, including in hosts with a separate dashboard app ID.

@@ -5,7 +5,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const pages = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../factory_app/app/admin/pages");
-const { buildHealthState, validationLabel, validationTone } = await import(
+const { averageFinishedRunSeconds, buildHealthState, formatRunDuration, validationLabel, validationTone } = await import(
   pathToFileURL(path.join(pages, "studioHealthModel.js")).href
 );
 
@@ -52,12 +52,24 @@ test("integrations missing a credential need attention", () => {
   assert.deepEqual(buildHealthState({ integrationIssues: 3 }).issues, ["3 integrations still need a credential."]);
 });
 
+test("an integration that fails its check is a problem, even though a credential is saved", () => {
+  assert.deepEqual(buildHealthState({ latestValidationStatus: "passed", integrationCheckFailures: 1 }), {
+    label: "Problems found",
+    tone: "destructive",
+    issues: ["1 integration failed its last check."],
+  });
+  assert.deepEqual(buildHealthState({ integrationCheckFailures: 2 }).issues, ["2 integrations failed their last check."]);
+});
+
 test("every finding is listed, most serious state wins", () => {
-  const health = buildHealthState({ latestValidationStatus: "failed", failedRuns: 4, trackedRuns: 9, integrationIssues: 2 });
+  const health = buildHealthState({
+    latestValidationStatus: "failed", failedRuns: 4, trackedRuns: 9, integrationIssues: 2, integrationCheckFailures: 1,
+  });
   assert.equal(health.label, "Problems found");
   assert.deepEqual(health.issues, [
     "The latest build failed validation.",
     "4 of 9 runs ended with an error.",
+    "1 integration failed its last check.",
     "2 integrations still need a credential.",
   ]);
 });
@@ -72,4 +84,34 @@ test("validation wording", () => {
     ["passed", "failed", "pending", null].map((status) => [validationLabel(status), validationTone(status)]),
     [["Passed", "success"], ["Failed", "destructive"], ["Not passed yet", "warning"], ["No build yet", "warning"]],
   );
+});
+
+test("average run time counts only runs that have ended", () => {
+  // The rows /api/admin/runs returns: status 0 in progress, 1 completed, 2 failed.
+  const runs = [
+    { chat_id: "open", status: 0, runtime_sec: 86400 }, // nobody closed this conversation yesterday
+    { chat_id: "done", status: 1, runtime_sec: 4 },
+    { chat_id: "failed", status: 2, runtime_sec: 2 },
+  ];
+  assert.deepEqual(averageFinishedRunSeconds(runs), { seconds: 3, count: 2 });
+
+  // Nothing has ended yet: there is no average, not a zero.
+  assert.deepEqual(averageFinishedRunSeconds([{ chat_id: "open", status: 0, runtime_sec: 50 }]), { seconds: null, count: 0 });
+  assert.deepEqual(averageFinishedRunSeconds([]), { seconds: null, count: 0 });
+  assert.deepEqual(averageFinishedRunSeconds(undefined), { seconds: null, count: 0 });
+  // A finished run with no usable duration is not counted as zero seconds.
+  assert.deepEqual(
+    averageFinishedRunSeconds([{ status: 1, runtime_sec: "n/a" }, { status: 2, runtime_sec: null }, { status: 1, runtime_sec: 6 }]),
+    { seconds: 6, count: 1 },
+  );
+});
+
+test("run durations read as time, and a missing one is not shown as 0s", () => {
+  assert.deepEqual(
+    [1.24, 9.96, 42.4, 125, 3725].map(formatRunDuration),
+    ["1.2s", "10.0s", "42s", "2m 5s", "1h 2m"],
+  );
+  assert.equal(formatRunDuration(null), null);
+  assert.equal(formatRunDuration(undefined), null);
+  assert.equal(formatRunDuration(0), "0.0s");
 });

@@ -93,6 +93,12 @@ const stat = (html, label) => {
   return { value: match[1], sub: match[2] || null };
 };
 
+// Body rows of the runs or sessions table, as the text of each cell.
+const tableRows = (html) =>
+  [...html.matchAll(/<tr class="border-b border-border\/50[^>]*>(.*?)<\/tr>/g)].map((m) =>
+    [...m[1].matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((cell) => cell[1].replace(/<[^>]+>/g, "")),
+  );
+
 const STATS = { active_chats: 2, tracked_chats: 10, completed_chats: 7, failed_chats: 1 };
 const usage = (overrides = {}) => ({
   totals: {
@@ -130,7 +136,21 @@ test("usage summary says which calls the totals cover and whether cost is priced
   const capped = summarizeUsage(usage({ totals: { ...usage().totals, llm_calls: USAGE_EVENT_LIMIT } }));
   assert.equal(capped.windowNote, `Latest ${USAGE_EVENT_LIMIT.toLocaleString()} model calls`);
 
-  assert.equal(summarizeUsage(usage({ cost_source: "mixed" })).costNote, "Some models have no price set");
+  // "mixed" only says the calls were priced from more than one source. The note
+  // must come from whether any call has no price at all.
+  assert.equal(summarizeUsage(usage({ cost_source: "mixed" })).costNote, "Estimated from model prices");
+  assert.equal(
+    summarizeUsage(usage({ cost_source: "mixed", pricing_health: { unpriced_event_count: 0 } })).costNote,
+    "Estimated from model prices",
+  );
+  assert.equal(
+    summarizeUsage(usage({ cost_source: "mixed", pricing_health: { unpriced_event_count: 1 } })).costNote,
+    "Some models have no price set",
+  );
+  assert.equal(
+    summarizeUsage(usage({ cost_source: "mixed", events: [{ cost_source: "catalog" }, { cost_source: "not_configured" }] })).costNote,
+    "Some models have no price set",
+  );
 });
 
 test("formatters never turn a missing number into a zero", () => {
@@ -207,15 +227,48 @@ test("usage page joins each run to its ledger row and marks failed runs failed",
   assert.equal(stat(html, "Output tokens").value, "234");
   assert.equal(stat(html, "Model calls").value, "12");
 
-  const rows = [...html.matchAll(/<tr class="border-b border-border\/50[^>]*>(.*?)<\/tr>/g)].map((m) =>
-    [...m[1].matchAll(/<td[^>]*>(.*?)<\/td>/g)].map((cell) => cell[1].replace(/<[^>]+>/g, "")),
-  );
-  assert.deepEqual(rows, [
+  assert.deepEqual(tableRows(html), [
     ["Plan", "a", "u1", "in progress", "3", "—", "—", "12.0s"],
     ["Build", "a", "u2", "complete", "9", "5,000", "$0.2500", "1m 15s"],
     ["Ship", "a", "u3", "failed", "4", "—", "—", "30.0s"],
   ]);
   assert.match(html, /data-variant="error">failed/);
+});
+
+test("a run whose models have no price shows no dollar figure, even when other runs are priced", () => {
+  const run = (chat_id, workflow_name) => ({ chat_id, workflow_name, app_id: "a", user_id: "u", status: 1, agent_turns: 1, runtime_sec: 5 });
+  const runs = { runs: [run("c-priced", "Priced"), run("c-unpriced", "Unpriced"), run("c-part", "Part")] };
+  // The shape /api/admin/usage returns: per-run totals in by_run, and the
+  // price source of each model call in events.
+  const ledger = usage({
+    cost_source: "mixed",
+    by_run: [
+      { chat_id: "c-priced", total_tokens: 3040, estimated_cost_usd: 0.000699 },
+      { chat_id: "c-unpriced", total_tokens: 810, estimated_cost_usd: 0 },
+      { chat_id: "c-part", total_tokens: 500, estimated_cost_usd: 0.0002 },
+    ],
+    events: [
+      { chat_id: "c-priced", cost_source: "catalog" },
+      { chat_id: "c-unpriced", cost_source: "not_configured" },
+      { chat_id: "c-part", cost_source: "not_configured" },
+      { chat_id: "c-part", cost_source: "catalog" },
+    ],
+    pricing_health: { unpriced_event_count: 2 },
+  });
+  const html = withFixtures(
+    { "/api/admin/runs": runs, [USAGE_ENDPOINT]: ledger },
+    null,
+    () => render("UsageSection", { runtimePanels: [{ id: "stats", page: "usage" }, { id: "runs", page: "usage" }] }),
+  );
+
+  assert.deepEqual(tableRows(html), [
+    ["Priced", "a", "u", "complete", "1", "3,040", "$0.0007", "5.0s"],
+    // A cost of 0 for unpriced models is not a measurement.
+    ["Unpriced", "a", "u", "complete", "1", "810", "—", "5.0s"],
+    // Partly priced: the priced calls are shown, and the total says some are not.
+    ["Part", "a", "u", "complete", "1", "500", "$0.0002", "5.0s"],
+  ]);
+  assert.deepEqual(stat(html, "Estimated cost"), { value: "$0.0123", sub: "Some models have no price set" });
 });
 
 test("usage page renders only the panels the config names", () => {
