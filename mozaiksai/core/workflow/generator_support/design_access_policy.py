@@ -276,7 +276,7 @@ def _page_role_meta(page: dict[str, Any], *, declarative: bool) -> dict[str, Any
     return meta
 
 
-def _require_legacy_sign_in(target: dict[str, Any], route: str) -> None:
+def _require_legacy_sign_in(target: dict[str, Any], route: str | None) -> None:
     gate = target.get("requiresAuth")
     if gate is not None and type(gate) is not bool:
         raise ValueError(f"Page {route!r} requiresAuth must be a boolean")
@@ -379,9 +379,9 @@ def project_reviewed_page_access(
             if not isinstance(routes, list) or any(not isinstance(entry, dict) for entry in routes):
                 raise ValueError(f"{path}: pages must be a list of route objects")
             editable = [entry for entry in routes if entry.get("path") in (owned_routes or set())]
-            original = deepcopy(editable)
+            original_routes = deepcopy(editable)
             validate_page_role_preservation([], context, custom_routes=editable, fill_missing=True)
-            if editable != original:
+            if editable != original_routes:
                 projected[path] = json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
         elif path.startswith("ui/pages/") and path.endswith(".yaml") and path.count("/") == 2:
             try:
@@ -390,8 +390,8 @@ def project_reviewed_page_access(
                 raise ValueError(f"{path}: invalid YAML") from exc
             if not isinstance(page, dict):
                 raise ValueError(f"{path}: page must be an object")
-            original = deepcopy(page)
+            original_page = deepcopy(page)
             validate_page_role_preservation([page], context, fill_missing=True)
-            if page != original:
+            if page != original_page:
                 projected[path] = yaml.safe_dump(page, sort_keys=False, allow_unicode=True)
     return projected

@@ -163,19 +163,19 @@ def _apply_planned_page_contracts(
             continue
         task_id = str(task.get("task_id") or "").strip()
         if task_id not in failed_tasks:
-            owned = {
+            owned_paths = {
                 path for raw_path in task.get("owned_paths") or []
                 if (path := safe_relpath(str(raw_path or ""))) and path not in pack_outputs
             }
             custom_routes = {
                 page["route"] for page in pages
-                if page.get("ui_surface") == "custom_react_page" and planned_page_path(page) in owned
+                if page.get("ui_surface") == "custom_react_page" and planned_page_path(page) in owned_paths
             }
             file_map = project_reviewed_page_access(
-                file_map, context_variables, owned_paths=owned, owned_routes=custom_routes,
+                file_map, context_variables, owned_paths=owned_paths, owned_routes=custom_routes,
             )
             validate_planned_custom_routes(
-                file_map, pages=pages, owned_paths=owned,
+                file_map, pages=pages, owned_paths=owned_paths,
                 baseline_files=(
                     detach(context_variables.get("generated_files"))
                     if revision_baseline_required(context_variables) else None
