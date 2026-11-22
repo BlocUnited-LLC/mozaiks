@@ -254,13 +254,14 @@ def test_owner_changes_then_structural_refusal_still_requires_empty_policy_revie
     assert summary["access_policy_review"]["pack_identities"] == []
 
 
-def test_initial_empty_policy_still_needs_no_owner_review(monkeypatch, persistence):
+def test_initial_page_only_proposal_waits_for_owner_review(monkeypatch, persistence):
     context = ownership._context(managed=False)
-    ui = AsyncMock(side_effect=AssertionError("Initial empty policy should not require review"))
+    ui = AsyncMock(return_value={"action": "cancel", "status": "cancelled"})
     monkeypatch.setattr(save_design_doc, "use_ui_tool", ui)
-    assert inventory._save(context, inventory._bundle(pricing=False))["outcome"] == "saved"
-    ui.assert_not_awaited()
-    assert persistence[2].await_args.kwargs["summary_payload"]["access_policy_review"]["status"] == "not_required"
+    assert inventory._save(context, inventory._bundle(pricing=False))["outcome"] == "blocked"
+    ui.assert_awaited_once()
+    assert "Page /reports: sign-in required." in ui.await_args.args[1]["checkpoints"]
+    persistence[2].assert_not_awaited()
 
 
 def test_owner_removing_content_pack_must_review_the_empty_replacement(selector, monkeypatch, persistence):

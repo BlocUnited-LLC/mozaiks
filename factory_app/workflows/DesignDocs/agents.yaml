@@ -492,6 +492,7 @@ agents:
           {
             "name": "Dashboard",
             "route": "/dashboard",
+            "requiresAuth": true,
             "roles": null,
             "ui_surface": "declarative_page",
             "layout": "grid",
@@ -514,6 +515,7 @@ agents:
           {
             "name": "Projects",
             "route": "/projects",
+            "requiresAuth": true,
             "roles": null,
             "ui_surface": "declarative_page",
             "layout": "full-width",
@@ -631,6 +633,7 @@ agents:
             {
               "name": "Dashboard",
               "route": "/dashboard",
+              "requiresAuth": true,
               "ui_surface": "declarative_page",
               "layout": "grid",
               "intent": "Landing page showing the most useful app summary and recent activity",
@@ -652,6 +655,7 @@ agents:
             {
               "name": "Projects",
               "route": "/projects",
+              "requiresAuth": true,
               "ui_surface": "declarative_page",
               "layout": "full-width",
               "intent": "Project management: list, create, edit, archive",
