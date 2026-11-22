@@ -2,12 +2,16 @@ import { useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   RiAppsFill,
+  RiCustomerServiceFill,
   RiDashboardFill,
   RiFileList3Fill,
+  RiHammerFill,
+  RiHistoryFill,
   RiMoneyDollarCircleFill,
   RiPlugLine,
   RiPulseLine,
   RiServerFill,
+  RiSettings3Fill,
   RiUser3Fill,
 } from 'react-icons/ri'
 import { useNavigation } from '../providers/NavigationProvider.jsx'
@@ -15,14 +19,20 @@ import { useChatUI } from '../context/ChatUIContext.jsx'
 import { getUserRoles, isShellItemVisible } from '../navigation/shellActions.js'
 import { groupItemsIntoSections, resolveSectionLabel } from '../navigation/navSections.js'
 
+// Every icon hint a Studio route declares has an entry here; an unknown hint
+// falls back to the dashboard icon, which made unrelated menu items look alike.
 const ICON_MAP = {
   apps: RiAppsFill,
   dashboard: RiDashboardFill,
   chart: RiFileList3Fill,
   billing: RiMoneyDollarCircleFill,
+  hammer: RiHammerFill,
+  history: RiHistoryFill,
   plug: RiPlugLine,
   pulse: RiPulseLine,
   server: RiServerFill,
+  settings: RiSettings3Fill,
+  support: RiCustomerServiceFill,
   users: RiUser3Fill,
 }
 

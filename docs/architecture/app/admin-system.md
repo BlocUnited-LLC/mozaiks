@@ -8,30 +8,34 @@ App Studio keeps these pages visible instead:
 
 ```text
 /apps/:appId/overview
-/apps/:appId/access
 /apps/:appId/usage
+/apps/:appId/health
 /apps/:appId/support
 ```
+
+The full Studio menus are listed in
+[Studio Product Model](../builder/studio-product-model.md).
 
 Generated app AdminPortal routes use `/admin` and `/admin/<page>` paths. The
 `/apps/:appId/...` route family is reserved for first-party Studio and hosted
 product app operations.
 
 Framework-owned admin composition remains internal and host-owned. Build,
-Usage, app access, and support are product surfaces; they are not admin
-sections. Deep diagnostic routes such as `/apps/:appId/health`,
-and `/apps/:appId/activity` may remain routable but
-hidden from primary navigation when they are needed for support, build history,
-or setup detail. The app owner manages connections from Integrations in the selected app’s Studio navigation. Hosted deployments may provide billing or hosting surfaces
-through their own workspace routes or capability packs; the OSS factory Studio
-does not hardcode those hosted product routes.
+Usage, health, and support are product surfaces; they are not admin
+sections. `/apps/:appId/activity` (build review) remains routable but hidden
+from primary navigation; other pages link to it. The app owner manages
+connections from Integrations in the selected app’s Studio navigation. Hosted
+deployments may provide billing, hosting, or account-access surfaces through
+their own workspace routes or capability packs; the OSS factory Studio does not
+hardcode those hosted product routes, and it mounts no page it has no data
+for.
 
 Terminology note:
 
-- use `Operational health` inside Overview for runtime posture, workflow
-  reliability, validation, hosting, and integration setup signals
-- keep `operations` as an internal admin taxonomy when framework-owned admin
-  panels need a bounded section for incidents, logs, or runtime state
+- `operations` is the admin page for runtime state: what is running and how
+  recent sessions ended
+- `activity` is the admin page for a feature's own history, such as an audit
+  trail
 
 ## Ownership
 
@@ -47,19 +51,20 @@ framework-owned admin shell.
 
 ## Canonical Model
 
-The admin system has four distinct layers. Keep them separate:
+The admin system has five distinct layers. Keep them separate:
 
 1. `app/app.json` `admins` is the admin bootstrap/access allowlist for the app.
   It matches verified emails only.
-2. The built-in admin section registry is framework-owned and defines the
-  semantic section ids, default labels, route paths, and default ordering for
-  the app admin route family.
-3. `modules/{module}/contracts/admin.yaml` contributes feature-owned panels into those
-  semantic sections.
-4. An optional connected app backend may contribute app-business panels through
+2. The standard admin page catalog is framework-owned. It defines the page ids,
+  labels, route paths, icons, and ordering for the app admin route family.
+3. `app/admin/admin_registry.yaml` declares which pages this app's portal has.
+  A page that is not declared has no route and no navigation entry.
+4. `modules/{module}/contracts/admin.yaml` contributes feature-owned panels to
+  those pages.
+5. An optional connected app backend may contribute app-business panels through
   `GET {app_backend_url}/api/admin/config`.
 
-AdminPortal should resolve section rendering from those contracts. Studio
+AdminPortal resolves page rendering from those contracts. Studio
 workspace/app navigation is a separate `WorkspaceLayout` concern and must not
 be mutated by module admin panels.
 
@@ -106,31 +111,70 @@ Generated app hosts may still mount framework-owned admin panels through
 `AdminPortal`, but generators must not create a separate app-admin page, route
 family, page schema, or admin React shell for Studio.
 
-## Built-In Section Registry
+## Standard Admin Pages
 
-The built-in admin sections are framework-owned. They provide the semantic
-taxonomy for:
+The standard admin pages are framework-owned. They are the one vocabulary for:
 
-- internal admin shell route injection
+- the pages an `admin/admin_registry.yaml` normally declares
 - sidebar and drawer navigation
-- section-level rendering inside `AdminPortal`
 - placement of runtime, module, and app-backend panels
 
-The canonical built-in ids are:
+The standard page ids are:
 
 ```text
-overview | access | usage | operations | settings
+overview | access | usage | billing | activity | operations | settings | integrations | support
 ```
 
-The taxonomy is fixed by the framework today. If a future product genuinely
-needs bounded app-level section overrides, add a new explicit contract rather
-than reintroducing `app/config/admin.json`.
+The catalog lives in `mozaiksai/core/admin/contract.py`
+(`STANDARD_ADMIN_PAGES`), with each page's label, `/admin` path, icon, and
+order. `tests/test_admin_page_catalog.py` keeps the generator contract, the
+generator prompts, the frontend copy (`chat-ui/src/admin/contracts/adminPages.js`),
+and these docs equal to it.
+
+What each page shows:
+
+| Page | Framework content | Filled by panels |
+|---|---|---|
+| `overview` | conversation counts, token and cost totals | yes |
+| `usage` | AI usage totals, recent runs with tokens and cost | yes |
+| `operations` | recent sessions and how each ended | yes |
+| `settings` | the app's name, id, and connection details | yes |
+| `access`, `billing`, `activity`, `integrations`, `support` | none | only |
+
+A page with no framework content and no panel shows an empty state, so a
+registry should declare `billing`, `activity`, `integrations`, or `support`
+only when a panel references it. AppGenerator's registry step declares:
+
+- `overview`, `usage`, `operations`, and `settings` for every app. The
+  framework fills them, and every generated app has an assistant whose usage
+  and sessions they show.
+- `access` when the app has sign-in. Until a panel provides user
+  administration, the page says that accounts are managed by the app's
+  sign-in provider.
+- every page a module panel or an app-backend panel names.
+- the page each selected capability pack's own panels use. A pack's
+  `contracts/admin.yaml` is copied into the bundle at assembly, after the
+  registry step, so that step takes those pages from a list in its prompt.
+  `tests/test_admin_page_catalog.py` keeps that list equal to the pack
+  templates.
+
+A registry may also declare its own page id (a capability pack's `commerce`
+page, for example). It renders the panels that reference it under the registry
+label.
+
+The framework panels are declared in the same file (`DEFAULT_RUNTIME_PANELS`):
+`stats` and `runs` on `usage`, `sessions` on `operations`. Token and cost
+numbers come only from `GET /api/admin/usage`; `GET /api/admin/stats`,
+`/api/admin/runs`, and `/api/admin/sessions` describe conversation lifecycle.
+
+If a future product genuinely needs bounded app-level page overrides, add a
+new explicit contract rather than reintroducing `app/config/admin.json`.
 
 Implementation rule:
 
-- runtime/platform code owns the canonical section metadata
-- frontend admin rendering must derive section routing from that canonical
-  metadata or from a payload resolved from it
+- runtime/platform code owns the standard page metadata
+- frontend admin rendering resolves the active page from the route the
+  registry declared, and its wording from the standard page catalog
 - Studio navigation stays deterministic and product-scoped; admin panels do
   not add, rename, or reorder Studio nav items
 
@@ -144,11 +188,13 @@ admin registries normally omit `surfaces` and are mounted by the platform host.
 
 Feature-owned admin UI lives in `modules/{module}/contracts/admin.yaml`.
 
-Each panel must declare one semantic section:
-
-```text
-overview | access | billing | usage | activity | settings | integrations | support
-```
+Each panel names the admin page it appears on with `page`: a page id declared
+in the app's `admin/admin_registry.yaml`, normally one of the standard pages
+above. A panel whose page is not declared has nowhere to render, and the
+generated-bundle scanner rejects the bundle
+(`factory_app/workflows/AppGenerator/tools/generated_bundle_scanner.py`,
+"missing enabled admin page"). Panels on one page are shown in ascending
+`order`.
 
 The canonical module admin schema is `mozaiks.admin.v2`.
 
@@ -160,7 +206,7 @@ panels:
   - id: campaigns.overview
     label: Campaigns
     description: Review and manage campaign activity.
-    section: usage
+    page: usage
     order: 20
     renderer: schema
     layout: full-width
@@ -219,8 +265,8 @@ be a new contract with explicit ownership, registration, and validation rules.
 "Fully componentized" in the admin system means:
 
 - the shell is presentation-first and consumes a resolved navigation model
-- built-in section ids and routes come from one canonical registry
-- module and app-backend panels plug into those sections through explicit
+- standard page ids and routes come from one canonical catalog
+- module and app-backend panels plug into those pages through explicit
   contracts
 - custom React is a bounded extension point declared by contract, not an ad hoc
   frontend escape hatch
@@ -233,37 +279,44 @@ host-owned generated-app admin shell by default.
 A connected app backend may contribute app-business admin panels through
 `GET {app_backend_url}/api/admin/config`.
 
-Those panels must declare:
+The config declares `schema_version: mozaiks.admin.app_backend.v1` and
+`panels[]`. Each panel declares:
 
-- `schema_version: mozaiks.admin.app_backend.v1`
-- `panels[]`
-- `renderer: builtin | schema | custom_component`
-- `builtin_panel` for builtin panels
-- `layout + sections[]` for schema panels
-- `component` for bounded custom components
+- `section`: the standard admin page it appears on. The shell renders the
+  panel on that page, with that page's module panels, when the registry
+  declares the page.
+- `renderer: schema` with `layout + sections[]`, or `renderer: custom_component`
+  with `component`.
 
-Recommended generated file ownership for split backends:
+A backend with no admin config route (404) contributes no panels; any other
+failure is reported on the admin pages.
 
-- `app/services/admin_config.py` returns the canonical payload
-- `app/services/routes/admin.py` exposes it through
-  `mozaiksai.core.admin.build_app_backend_admin_router(...)`
-- AppGenerator should treat `ControllerOutput.app_backend_admin_config` as the
-  typed source of truth and may regenerate those two files from it during
-  assembly/download validation.
+`renderer: builtin` (`builtin_panel: stats | users | subscriptions`) is also in
+the contract, but it is not served end to end: each built-in panel reads its
+data from further app-backend routes, and nothing in this repository
+implements them. See
+[App-Backend Admin Contract](../builder/app-backend-admin-contract.md#renderer-builtin).
+
+Generated file ownership for split backends:
+
+- `app/services/admin_config.py` returns the canonical payload as a plain dict
+- `app/services/routes/admin.py` exposes it at `GET /api/admin/config` as a
+  self-contained FastAPI router with no Mozaiks import
+- AppGenerator treats `ControllerOutput.app_backend_admin_config` as the typed
+  source of truth and renders those two files from it.
 
 This keeps admin rendering deterministic across module-owned and app-backend
 surfaces.
-
-The detailed connected app-backend panel contract remains repo-internal
-planning material for now. Keep the public contract anchored on this page plus
-the host-owned generated-app admin shell behavior described here.
 
 ## Generator Rules
 
 - Populate `app/app.json` `admins` for admin bootstrap access.
 - Generate `modules/{module}/contracts/admin.yaml` only when the module needs feature-owned admin panels.
-- Every generated admin panel must set `section` to one of the semantic admin
-  sections listed above.
+- Every generated module admin panel must set `page` to a page id declared in
+  `admin/admin_registry.yaml`, and the registry must declare every page a
+  panel references.
+- Declare `overview`, `usage`, `operations`, and `settings` always, `access`
+  when the app has sign-in, and any other page only when a panel renders on it.
 - Prefer `renderer: schema` with `layout + sections[]`.
 - Use `renderer: custom_component` only when the shipped primitive system
   cannot express the panel cleanly.

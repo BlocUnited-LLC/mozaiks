@@ -1,15 +1,9 @@
+import { STANDARD_ADMIN_PAGE_IDS } from './adminPages.js';
+
 export const APP_BACKEND_ADMIN_SCHEMA_VERSION = 'mozaiks.admin.app_backend.v1';
 
-export const APP_ADMIN_SECTION_IDS = Object.freeze([
-  'overview',
-  'access',
-  'billing',
-  'usage',
-  'operations',
-  'settings',
-  'integrations',
-  'support',
-]);
+// An app-backend panel names the standard admin page it appears on.
+export const APP_ADMIN_SECTION_IDS = STANDARD_ADMIN_PAGE_IDS;
 
 export const APP_ADMIN_LAYOUTS = Object.freeze([
   'grid',

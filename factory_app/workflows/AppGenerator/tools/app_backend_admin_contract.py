@@ -4,17 +4,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from mozaiksai.core.admin.contract import STANDARD_ADMIN_PAGE_IDS
+
 APP_BACKEND_ADMIN_SCHEMA_VERSION = "mozaiks.admin.app_backend.v1"
-APP_BACKEND_ADMIN_SECTION_IDS = (
-    "overview",
-    "access",
-    "billing",
-    "usage",
-    "operations",
-    "settings",
-    "integrations",
-    "support",
-)
+# An app-backend panel names the standard admin page it appears on.
+APP_BACKEND_ADMIN_SECTION_IDS = STANDARD_ADMIN_PAGE_IDS
 APP_BACKEND_ADMIN_LAYOUTS = ("grid", "sidebar", "full-width", "split")
 APP_BACKEND_ADMIN_BUILTIN_PANELS = ("stats", "users", "subscriptions")
 
@@ -56,11 +50,15 @@ class AppBackendAdminPanel(AppBackendAdminContractModel):
     id: str
     label: str
     description: str | None = None
+    # The ids of STANDARD_ADMIN_PAGE_IDS, in the same order. A Literal keeps the
+    # generated JSON schema a closed enum; tests/test_admin_page_catalog.py
+    # fails if the two differ.
     section: Literal[
         "overview",
         "access",
-        "billing",
         "usage",
+        "billing",
+        "activity",
         "operations",
         "settings",
         "integrations",

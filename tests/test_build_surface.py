@@ -48,8 +48,9 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     assert '"path": "/settings"' not in manifest_source
     assert '"path": "/apps"' in manifest_source
     assert '"component": "AppsPage"' in manifest_source
-    assert '"path": "/apps/:appId/access"' in manifest_source
-    assert '"component": "AppAccessPage"' in manifest_source
+    # The first-party Studio has no account directory, so it mounts no Access page.
+    assert '"path": "/apps/:appId/access"' not in manifest_source
+    assert '"component": "AppAccessPage"' not in manifest_source
     assert '"path": "/apps/:appId/building"' in manifest_source
     assert '"component": "DashboardPortalPage"' in manifest_source
     assert '"path": "/apps/:appId/users"' not in manifest_source
@@ -86,13 +87,13 @@ def test_factory_app_ui_barrel_registers_admin_pages_and_omits_removed_pages() -
     assert "registerComponent('DashboardPortalPage'" in admin_source
     assert "registerComponent('WorkspaceHostingPage'" not in admin_source
     assert "registerComponent('AppHealthPage'" in admin_source
-    assert "registerComponent('AppAccessPage'" in admin_source
+    assert "registerComponent('AppAccessPage'" not in admin_source
     assert "registerComponent('ProfilePage', ProfilePage, {" in admin_source
     assert "User profile surface" in admin_source
     assert "override: true" in admin_source
     assert "registerComponent('AppHostingPage'" not in admin_source
     assert "./pages/AppHealthPage.jsx" in admin_source
-    assert "./pages/AppAccessPage.jsx" in admin_source
+    assert "./pages/AppAccessPage.jsx" not in admin_source
     assert "./pages/DashboardPortalPage.jsx" in admin_source
     assert "./pages/AppHostingPage.jsx" not in admin_source
     assert "AppBuildPage" not in source

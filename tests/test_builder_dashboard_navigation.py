@@ -147,8 +147,10 @@ def test_builder_routes_keep_auth_without_global_admin_guard():
     for route in routes:
         if route.get("meta", {}).get("navigation", {}).get("group") == "app-studio":
             assert "requiresRole" not in route["meta"]
-    users = next(route for route in routes if route["path"] == "/users")
-    assert users["meta"]["requiresRole"] == "admin"
+    # Workspace pages backed by admin-only data keep the admin guard.
+    for path in ("/usage", "/integrations", "/support", "/settings/ai-models"):
+        workspace_page = next(route for route in routes if route["path"] == path)
+        assert workspace_page["meta"]["requiresRole"] == "admin"
 
 
 def test_anonymous_cannot_resolve_dashboard_link():
