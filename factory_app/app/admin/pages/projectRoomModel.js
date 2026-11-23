@@ -236,10 +236,12 @@ export function projectAction({ status, app = null, appId = null } = {}) {
   }
 
   const label = status?.kind === 'not_started' ? 'Start build' : 'Continue build'
-  if (resume) return { type: 'link', label, href: resume }
+  // A saved build waiting for review is reviewed on the build review page,
+  // as My Apps routes it, even when its generation chat is still recorded.
   if (lifecycle === 'review' && text(run.artifact_version_id)) {
     return { type: 'link', label, href: reviewHref(routeAppId) }
   }
+  if (resume) return { type: 'link', label, href: resume }
   if (lifecycle === 'draft' && buildRegistryId) {
     return { type: 'start', label, workflowId: 'ValueEngine', buildRegistryId }
   }

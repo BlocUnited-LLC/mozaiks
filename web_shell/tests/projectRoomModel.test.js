@@ -126,9 +126,10 @@ test("the build run's chat wins over stale top-level chat fields", () => {
   assert.equal(action.href, "/chat?workflow=AppGenerator&mode=workflow&chat_id=run-chat&app_id=mozaiks-factory");
 });
 
-test("a passed draft app waiting for review opens the build review", () => {
+test("a passed draft app waiting for review opens the build review, not its generation chat", () => {
   const app = {
-    build_registry_id: "appreg_1", app_id: "draft-app-1", status: "review",
+    build_registry_id: "appreg_1", app_id: "draft-app-1", status: "review", chat_app_id: "mozaiks-factory",
+    active_chat_id: "gen-chat", active_workflow_id: "AppGenerator",
     current_build_run: { artifact_version_id: "av_app_bundle_1" },
   };
   const versions = BUILD_STEPS.slice(0, 5).map((step) => row(step.family, 1, "current", "skipped"))

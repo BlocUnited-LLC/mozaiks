@@ -13,7 +13,7 @@ export default function ProjectBuildButton({ action, size = 'sm', className = ''
   const { startWorkflow, starting, error } = useWorkflowStart()
   if (!action) return null
   if (action.type === 'link') {
-    return <LinkButton to={action.href} size={size} className={className}>{action.label}</LinkButton>
+    return <LinkButton to={action.href} variant="primary" size={size} className={className}>{action.label}</LinkButton>
   }
   if (action.type === 'start') {
     return (
