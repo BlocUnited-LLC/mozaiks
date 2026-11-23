@@ -35,7 +35,7 @@ in the app's Studio menu:
 | Overview | `/apps/:appId/overview` | App identity, lifecycle state, KPIs, and next step. |
 | Revenue | `/apps/:appId/revenue` | Recurring-revenue metrics, trend, and MRR movement. Empty until a billing integration records revenue. |
 | Users | `/apps/:appId/audience` | Acquisition, engagement, conversion, and the app's lifecycle funnel. |
-| Building | `/apps/:appId/building` | Build requests, artifact versions, approval queue, and build workflow launches. |
+| Project | `/apps/:appId/building` | Where the app's build stands with one button to start or continue it, the build steps, the saved build documents, and every version. |
 | Token Usage | `/apps/:appId/usage` | App chats, workflows, tokens, and cost. |
 | Health | `/apps/:appId/health` | What needs attention: the latest build's validation result, failed runs, and integrations that are missing a credential or failing their check. |
 | Integrations | `/apps/:appId/integrations` | The app's connections, credentials, and build requirements. |
@@ -52,7 +52,7 @@ Apps may hide or extend portals through the dashboard manifest. Capability packs
 can contribute panels without taking over the whole dashboard.
 
 The generic factory `DashboardPortalPage` renders manifest-backed lanes such as
-Building. Mount it from `ui/route_manifest.json` with
+Project. Mount it from `ui/route_manifest.json` with
 `component: DashboardPortalPage` and keep portal content in
 `dashboard/dashboard.yaml`; do not copy the factory page into an app workspace.
 
@@ -65,6 +65,39 @@ Discussion, voting, proposal workflows, and community moderation belong to
 app-owned modules and routes. A host product can expose admin review or
 moderation summaries through module or custom dashboard panels without copying
 those product semantics into the generic Factory/Studio defaults.
+
+## Project
+
+**Route:** `/apps/:appId/building`
+
+One page per app, in plain language and read-only:
+
+- **Status and one button.** "This app's build hasn't started." (Start build),
+  "First build in progress. Next step: …" (Continue build), "Built. Last
+  updated …" (Make a change), or "The last build didn't pass its checks." (See
+  what failed, which opens the build review page). When the app's status (the
+  one My Apps shows) is Needs Revision or Review, the page says so instead:
+  "Needs a change before the build can continue." (Continue build) or "Ready
+  for your review." (Review the app). The button opens this app's
+  build conversation, the build review page, or starts the app's build on the
+  server. If the server records no build conversation to reopen, the page says
+  so.
+- **Build steps**, below the status in the same card, in build order: Idea, Look & feel, Design, Plans & pricing,
+  AI workflows, App. A step is done once its document has a current version.
+- **Documents.** A card for the latest version of each saved document: Idea &
+  value, Look & feel, Design, Plans & pricing, AI workflows, App, and for an
+  imported app what discovery found. Each card shows its version, date, and
+  whether it is Current, Draft, Replaced, Out of date, or didn't pass checks.
+  Opening a card shows the document as headings, paragraphs, and lists, with
+  colours as swatches; "Show raw" shows the saved JSON. The App card links to
+  the build review page.
+- **All versions**, collapsed, one row per saved version.
+
+My Apps shows the same status and button for up to five apps whose build is
+not finished, under "Builds in progress", above the app list.
+
+A host product can add its own section to this page with a `custom_component`
+panel; see [App Dashboard Contract](../architecture/app/app-dashboard-contract.md#host-sections).
 
 ## Support
 
@@ -104,4 +137,4 @@ This page is linked from other pages and is not listed in the menu.
 
 | Page | Route | Opens from |
 | --- | --- | --- |
-| Build review | `/apps/:appId/activity` | Overview and Building, to review a saved build and its artifact history |
+| Build review | `/apps/:appId/activity` | Overview and Project, to review a saved build and its version history |

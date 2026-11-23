@@ -192,7 +192,7 @@ export function getAppPrimaryAction(app) {
   const canContinueBuild = lifecycle.primaryAction === 'build' && href.startsWith('/chat?')
   return {
     kind: canContinueBuild ? 'build' : 'overview',
-    label: canContinueBuild ? lifecycle.primaryActionLabel : lifecycle.primaryAction === 'build' ? 'Open Building' : 'Open App Studio',
+    label: canContinueBuild ? lifecycle.primaryActionLabel : lifecycle.primaryAction === 'build' ? 'Open Project' : 'Open App Studio',
     href,
   }
 }

@@ -12,7 +12,7 @@ Use these terms in visible product copy:
 - `Apps`
 - `App Studio`
 - `Overview`
-- `Building`
+- `Project`
 - `Access`
 - `Usage`
 - `Integrations`
@@ -21,7 +21,7 @@ Hosted deployments may add provider-owned sections such as billing or hosting,
 but those routes are not owned by the OSS first-party Studio.
 
 Workflow-owned concepts like `Build` may still appear in lifecycle copy. The
-canonical persistent surface is the `Building` portal, not a standalone
+canonical persistent surface is the `Project` portal (route `/apps/:appId/building`), not a standalone
 `/build` page.
 
 ## Internal Terminology
@@ -137,7 +137,7 @@ App-level routes:
 - `/apps/:appId/overview` -> App Studio overview
 - `/apps/:appId/revenue` -> recurring-revenue analytics
 - `/apps/:appId/audience` -> user analytics and the lifecycle funnel
-- `/apps/:appId/building` -> manifest-backed Building portal for build requests, artifacts, approvals, and workflow launch
+- `/apps/:appId/building` -> manifest-backed Project portal: build status with one button, build steps, saved build documents, and every version
 - `/apps/:appId/usage` -> app usage
 - `/apps/:appId/health` -> what needs attention: latest build validation, failed runs, integrations missing a credential or failing their check
 - `/apps/:appId/integrations` -> owner-managed connections and integration requirements for the selected app
@@ -177,7 +177,7 @@ product billing routes.
 | `/apps/:appId/overview` | App Overview | App-scoped summary, next actions, connected services, build state, and activity |
 | `/apps/:appId/revenue` | App Revenue | Recurring-revenue metrics, trend, and the MRR movement bridge |
 | `/apps/:appId/audience` | App Users | Acquisition, engagement, conversion, and the app's lifecycle funnel |
-| `/apps/:appId/building` | Building | Generic dashboard portal rendered from `dashboard/dashboard.yaml`; build requests, artifacts, approvals, and workflow launch |
+| `/apps/:appId/building` | Project | Generic dashboard portal rendered from `dashboard/dashboard.yaml`; build status with one button, build steps, saved build documents (readable), every version, and host-added sections |
 | `/apps/:appId/health` | App Health | Specific things to fix, from the latest build's validation result, failed runs, and integrations missing a credential or failing their check |
 | `/apps/:appId/usage` | App Usage | App-scoped input/output token usage, cost signals, totals, and averages |
 | `/apps/:appId/integrations` | Integrations | Owner-scoped connection setup, write-only credentials, manual health checks for supported services, and build requirements |

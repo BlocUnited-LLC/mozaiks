@@ -213,13 +213,13 @@
     {
       "path": "/apps/:appId/building",
       "component": "DashboardPortalPage",
-      "label": "Building",
+      "label": "Project",
       "order": 23,
       "meta": {
         "surfaces": ["studio"],
-        "title": "Building",
+        "title": "Project",
         "appShell": true,
-        "ai_context": "The user is on the App Building portal. It renders dashboard.yaml build panels for build requests, artifact versions, approval state, and workflow launch actions.",
+        "ai_context": "The user is on the app Project page. It shows where the app build stands with one button to start or continue it, the build steps in order, the saved build documents (idea, look and feel, design, plans and pricing, AI workflows, app) as readable cards, and every saved version.",
         "navigation": {
           "group": "app-studio",
           "scope": "local",

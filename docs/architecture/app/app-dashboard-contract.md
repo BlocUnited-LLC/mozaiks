@@ -107,21 +107,14 @@ workspace:
 app:
   portals:
     - id: building
-      label: Building
+      label: Project
       route: /apps/:appId/building
       icon: hammer
       order: 10
-      capabilities: [build_requests, artifact_versions, approval_queue]
       panels:
-        - id: requests
-          type: build_requests
-          title: Build state
-        - id: artifacts
-          type: artifact_timeline
-          title: Build versions
-        - id: approvals
-          type: approval_queue
-          title: Approvals
+        - id: project
+          type: build_project
+          title: Project
 ```
 
 ## Canonical App Portals
@@ -131,7 +124,7 @@ The default App Dashboard lanes are:
 | Portal | Purpose |
 | --- | --- |
 | `overview` | App identity, lifecycle, KPIs, next step, and top-level alerts. |
-| `building` | Build state, build versions, and approval queue. |
+| `building` | The app's Project: where the build stands, its saved build documents, and every version. |
 | `branding` | Brand kit, logos, themes, generated media, and promoted brand assets. |
 | `launch` | Landing page status, hosting, domains, deployment readiness, and launch workflows. |
 | `growth` | Landing-page improvement, marketing campaigns, campaign assets, and growth workflow launch actions. |
@@ -177,11 +170,75 @@ remain valid while the Dashboard Portal renderer is adopted.
 `DashboardPortalPage` reads the active `mozaiks.dashboard.v1` manifest through
 `/api/studio/dashboard`, matches the current route to an enabled portal, then
 renders known panel types against Studio data. The generic renderer currently
-covers summary, next step, portal links, build requests, artifact timelines,
-approval queues, and explicitly declared workflow launch panels. Apps should mount it by
+covers summary, next step, portal links, the `build_project` Project panel, and
+`custom_component` panels. Apps should mount it by
 declaring a normal route-manifest entry with `component: DashboardPortalPage`;
 they should not copy the factory page into their workspace to activate a
 default portal.
+
+### The Project Panel
+
+`build_project` renders an app's Project from records the server already keeps,
+read-only:
+
+- the saved build documents, read from `GET /api/studio/build/history` in one
+  unfiltered request of 100 rows. History sorts by version number across
+  families, so when that page is full a document can sit behind internal
+  records; only then is each document family missing from it read with its own
+  `build_family` filter (25 rows). A full page means older versions may exist,
+  and the version list says it shows only the latest ones. A failed read shows
+  an error with a retry inside the Project panel; the rest of the page stays.
+  Each document shows its latest `current` version, or its newest
+  version when none is current. Internal families (`app_context_version`,
+  `app_intelligence_snapshot`, `app_context_graph`, `source_context_bundle`,
+  `brownfield_registration`) are not shown;
+- a document's text, which is its saved `commit_metadata.metadata.summary_payload`
+  (the content of its single JSON file), rendered as headings, paragraphs, and
+  lists. The App document links to the build review page instead;
+- the build steps in the `build` workflow sequence order (Idea, Look & feel,
+  Design, Plans & pricing, AI workflows, App). A step is done when a current
+  version of its document exists;
+- one status sentence and one button. The button opens the app's recorded build
+  conversation (`/chat?workflow=…&chat_id=…&app_id=<chat_app_id>`), the build
+  review page, or asks `POST /api/workflows/trigger` to start `ValueEngine` (a
+  draft with no conversation) or `AppReview` (a built app) bound to the app's
+  `build_registry_id`. When the server records no entry the page can open, it
+  says so.
+
+My Apps lists up to five in-build apps under "Builds in progress" with the same
+sentence and button, using one history request per listed app, plus one for the
+app version only when a full first page left it out. A next step whose document
+family a full page left out is not guessed ("First build in progress.").
+
+The status follows the app's lifecycle state where it says more than the
+documents: Needs Revision, Review, Deploying ("Being deployed."), Archived
+("Archived."), and a rebuild in progress (a building state with a recorded
+build conversation, even when an earlier app version passed). An active app
+without a passing app version, such as an imported one, reads "This app is
+live." with a link to its overview.
+
+### Host Sections
+
+A `custom_component` panel renders the component registered under its
+`component` name in the shell component registry, with props `panel`, `appId`,
+`app` (the app's Factory registry entry), and `buildRegistryId`. A host adds a
+section to the Project page by overlaying the `building` portal by id; panels
+merge by id, so the Project panel stays and the host panel is appended:
+
+```yaml
+app:
+  portals:
+    - id: building
+      panels:
+        - id: host_section
+          type: custom_component
+          source: custom
+          component: HostProjectSection
+          order: 10
+```
+
+The OSS Project page has no voting, discussion, or governance; a host product
+that offers those renders them in its own registered component.
 
 ### App-owned Management Composition
 

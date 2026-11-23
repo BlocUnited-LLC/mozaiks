@@ -125,6 +125,45 @@ def test_dashboard_manifest_overlay_can_customize_default_portals() -> None:
     assert community.route == "/apps/:appId/community"
 
 
+def test_project_portal_reads_saved_documents_and_hosts_can_append_a_section() -> None:
+    default = build_default_dashboard_manifest()
+    project = next(portal for portal in default.app.portals if portal.id == "building")
+    assert project.label == "Project"
+    assert [(panel.id, panel.type) for panel in project.panels] == [("project", "build_project")]
+    assert project.capabilities == []
+
+    # A host appends its own section by portal id; the Project panel stays first.
+    raw = yaml.safe_load(
+        """
+        schema_version: mozaiks.dashboard.v1
+        extends: default
+        app:
+          portals:
+            - id: building
+              panels:
+                - id: host_section
+                  type: custom_component
+                  title: Host section
+                  source: custom
+                  component: HostProjectSection
+                  order: 10
+        """
+    )
+    manifest = DashboardManifest.model_validate(merge_dashboard_manifest_overlay(raw))
+    merged = next(portal for portal in manifest.app.portals if portal.id == "building")
+    assert [(panel.id, panel.type) for panel in merged.panels] == [
+        ("project", "build_project"),
+        ("host_section", "custom_component"),
+    ]
+    assert merged.panels[1].component == "HostProjectSection"
+
+    for removed in ("build_requests", "artifact_timeline", "approval_queue", "workflow_launcher"):
+        with pytest.raises(ValidationError):
+            DashboardManifest.model_validate(merge_dashboard_manifest_overlay({
+                "app": {"portals": [{"id": "building", "panels": [{"id": "old", "type": removed}]}]},
+            }))
+
+
 def test_load_dashboard_manifest_reads_app_root_dashboard_yaml(tmp_path: Path) -> None:
     dashboard_dir = tmp_path / "dashboard"
     dashboard_dir.mkdir()

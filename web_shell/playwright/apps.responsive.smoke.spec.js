@@ -77,21 +77,73 @@ const dashboardPayload = {
       },
       {
         id: 'building',
-        label: 'Building',
+        label: 'Project',
         route: '/apps/:appId/building',
-        description: 'Build requests, build versions, and approval queue.',
+        description: 'Where the build stands, its saved documents, and every version.',
         enabled: true,
-        capabilities: ['build_requests', 'artifact_versions', 'approval_queue'],
         panels: [
-          { id: 'requests', type: 'build_requests', title: 'Build state' },
-          { id: 'artifacts', type: 'artifact_timeline', title: 'Build versions' },
-          { id: 'approvals', type: 'approval_queue', title: 'Approvals' },
+          { id: 'project', type: 'build_project', title: 'Project' },
         ],
       },
     ],
   },
 };
 const APP_ID = 'campaign-revision-workbench';
+
+// Saved build documents as GET /api/studio/build/history returns them
+// (BuildRecord.model_dump(by_alias=False)); the text is commit_metadata.metadata.summary_payload.
+function documentRow(family, version, lifecycle, validation, metadata, createdAt) {
+  return {
+    id: `av_${family}_${version}`,
+    app_id: APP_ID,
+    build_family: family,
+    build_key: family,
+    version_number: version,
+    parent_build_record_id: null,
+    lineage_root_id: `av_${family}_1`,
+    source_workflow: null,
+    lifecycle_status: lifecycle,
+    validation_status: validation,
+    files_manifest: [],
+    commit_metadata: { message: family, metadata },
+    created_at: createdAt,
+    updated_at: createdAt,
+  };
+}
+const projectDocumentRows = [
+  documentRow('concept', 2, 'current', 'skipped', { summary_format: 'json', summary_payload: {
+    app_id: APP_ID,
+    app_name: 'Campaign Revision Workbench',
+    value_proposition: 'One place to revise campaigns with stakeholder feedback.',
+    target_users: ['Campaign managers', 'Stakeholders'],
+    core_jobs: ['Collect feedback on a draft', 'Track each revision'],
+  } }, '2025-02-01T10:00:00Z'),
+  documentRow('concept', 1, 'superseded', 'skipped', { summary_format: 'json', summary_payload: { app_name: 'Campaign Desk' } }, '2025-01-30T10:00:00Z'),
+  documentRow('theme_capture', 1, 'current', 'skipped', { summary_format: 'json', summary_payload: {
+    identity: { name: 'Campaign Revision Workbench', tagline: 'Revise together.' },
+    theme_config: { theme: { primary: '#2F9C95', font: 'Roboto', appearance: 'light' } },
+  } }, '2025-02-02T10:00:00Z'),
+  documentRow('design_docs', 1, 'current', 'skipped', { summary_format: 'json', summary_payload: {
+    frontend_markdown: '# Frontend Design\n\nA review queue and a revision timeline.',
+  } }, '2025-02-03T10:00:00Z'),
+  documentRow('subscription_contract', 1, 'current', 'skipped', { summary_format: 'json', summary_payload: {
+    contract_required: false, rationale: 'Internal tool without payments.',
+  } }, '2025-02-03T11:00:00Z'),
+  documentRow('workflow_bundle', 1, 'current', 'pending', {
+    build_registry_id: 'demo_campaign_revision', artifact_path: null, workflow_name: 'Revision assistant',
+    workflow_plan_review: { review_id: 'r1', status: 'not_required', rationale: 'Deterministic modules only.' },
+  }, '2025-02-04T10:00:00Z'),
+  // An App Intelligence index record in the same history; never a Project document.
+  documentRow('app_context_version', 40, 'current', 'passed', { summary_format: 'json', summary_payload: {} }, '2025-02-06T10:00:00Z'),
+];
+
+function historyRows(url) {
+  const family = url.searchParams.get('build_family');
+  const appRows = buildAppStudioPayload(APP_ID).buildHistory.artifact_versions;
+  if (family === 'app_bundle') return appRows;
+  if (family) return projectDocumentRows.filter((row) => row.build_family === family);
+  return [...projectDocumentRows, ...appRows];
+}
 const INTEGRATIONS_QA_DIR = process.env.INTEGRATIONS_UI_QA_DIR
   || path.join(repoRoot, '.logs', 'ui-qa', 'integrations-health-check');
 const INTEGRATIONS_QA_ENABLED = Boolean(process.env.INTEGRATIONS_UI_QA);
@@ -250,17 +302,25 @@ function buildAppStudioPayload(appId = APP_ID) {
       artifact_versions: [
         {
           id: 'ver-17',
+          app_id: appId,
+          build_family: 'app_bundle',
+          build_key: 'app_bundle',
           version_number: 17,
-          lifecycle_status: 'deployed',
+          lifecycle_status: 'current',
           validation_status: 'passed',
           created_at: '2025-02-05T08:50:00Z',
+          updated_at: '2025-02-05T08:50:00Z',
         },
         {
           id: 'ver-16',
+          app_id: appId,
+          build_family: 'app_bundle',
+          build_key: 'app_bundle',
           version_number: 16,
-          lifecycle_status: 'awaiting_review',
+          lifecycle_status: 'draft',
           validation_status: 'pending',
           created_at: '2025-02-04T17:20:00Z',
+          updated_at: '2025-02-04T17:20:00Z',
         },
       ],
     },
@@ -1078,11 +1138,10 @@ async function mockStudioApis(page) {
 
   await page.route('**/api/studio/build/history?**', async (route) => {
     const url = new URL(route.request().url());
-    const payload = buildAppStudioPayload(url.searchParams.get('app_id') || APP_ID);
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify(payload.buildHistory),
+      body: JSON.stringify({ app_id: APP_ID, artifact_versions: historyRows(url), change_requests: [] }),
     });
   });
 
@@ -2009,7 +2068,7 @@ for (const chatId of [null, 'previous-build-chat']) {
 }
 
 for (const missingField of ['active_chat_id', 'active_workflow_id']) {
-  test(`app overview without ${missingField} opens Building without inventing a resume`, async ({ page }) => {
+  test(`app overview without ${missingField} opens Project without inventing a resume`, async ({ page }) => {
     await mockOverviewProgress(page, { currentBuildRun: null, description: null });
     // An incomplete saved binding must not synthesize ValueEngine or resume a new chat.
     await page.route('**/api/studio/overview?**', route => route.fulfill({
@@ -2024,11 +2083,11 @@ for (const missingField of ['active_chat_id', 'active_workflow_id']) {
     await expect(main.getByText('App description is not available.')).toBeVisible();
     await expect(main.getByText('Latest saved build progress.')).toHaveCount(0);
     await expect(main.getByRole('link', { name: 'Continue Build' })).toHaveCount(0);
-    const building = main.getByRole('link', { name: 'Open Building', exact: true });
-    await expect(building).toHaveAttribute('href', `/apps/${APP_ID}/building`);
-    await building.click();
+    const project = main.getByRole('link', { name: 'Open Project', exact: true });
+    await expect(project).toHaveAttribute('href', `/apps/${APP_ID}/building`);
+    await project.click();
     await expect(page).toHaveURL(new RegExp(`/apps/${APP_ID}/building$`));
-    await expect(main.getByRole('heading', { name: 'Building', exact: true })).toBeVisible();
+    await expect(main.getByRole('heading', { name: 'Project', exact: true })).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });
 }
@@ -2050,27 +2109,133 @@ for (const [revenue, cost, expected] of [[100, 40, '$60.00'], [null, 40, 'Pendin
   });
 }
 
-test('app building route stays responsive across desktop and mobile widths', async ({ page }) => {
+test('app project route stays responsive across desktop and mobile widths', async ({ page }, testInfo) => {
+  // The onboarding tour would cover the document cards on mobile.
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', (route) => route.fulfill({
+    json: buildOnboardingStatusPayload({ dismissed: true }),
+  }));
+  const triggers = [];
+  const historyReads = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === '/api/studio/build/history') historyReads.push(url.search);
+  });
+  await page.route('**/api/workflows/trigger', async (route) => {
+    triggers.push(route.request().postDataJSON());
+    await route.fulfill({ json: { chat_id: 'review-chat', workflow_id: 'AppReview', execution_mode: 'workflow' } });
+  });
   await page.goto(`/apps/${APP_ID}/building`);
   const main = page.locator('main');
 
-  await expect(main.getByRole('heading', { name: 'Building', exact: true })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Build state' })).toBeVisible();
-  await expect(main.getByText('Revise the campaign approval workspace')).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Build versions' })).toBeVisible();
-  await expect(main.getByText('Build v17').first()).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Approvals' })).toBeVisible();
-  await expect(main.getByText('Owner approval before promotion')).toBeVisible();
-  await expectNoHorizontalOverflow(page);
+  await expect(main.getByRole('heading', { name: 'Project', exact: true })).toBeVisible();
+  // The fixture app needs a revision: the lifecycle My Apps shows wins over document steps.
+  await expect(main.getByText('Needs a change before the build can continue.')).toBeVisible();
+  await expect(main.getByRole('link', { name: 'Continue build', exact: true })).toHaveAttribute(
+    'href', '/chat?workflow=AppGenerator&mode=workflow&chat_id=campaign-revision-chat&app_id=factory-session-app',
+  );
 
-  const viewport = page.viewportSize();
-  expect(viewport).not.toBeNull();
+  // One unfiltered history page holds every document here: no per-family reads.
+  // (The other read is the app-version history the shared App Studio data loads.)
+  expect(historyReads.filter((search) => !search.includes('build_family='))).toEqual(['?build_registry_id=demo_campaign_revision&limit=100']);
+  expect(historyReads.filter((search) => search.includes('build_family=') && !search.includes('build_family=app_bundle'))).toEqual([]);
 
-  if (viewport.width < 768) {
-    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
-  } else {
-    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
+  // Once live, the current app version passed its checks: built, with one button.
+  const live = { ...appsPayload.apps[0], status: 'active', current_build_run: { artifact_version_id: 'ver-17' } };
+  await page.route('**/api/studio/apps', (route) => route.fulfill({ json: { apps: [live, ...appsPayload.apps.slice(1)], metrics: {} } }));
+  await page.reload();
+  await expect(main.getByText(/^Built\. Last updated /)).toBeVisible();
+  await expect(main.getByRole('list', { name: 'Build steps' }).getByRole('listitem')).toHaveCount(6);
+  // The old Building panels read a record nothing writes; none remain.
+  for (const removed of ['Build state', 'Build versions', 'Approvals', 'Build requests']) {
+    await expect(main.getByRole('heading', { name: removed, exact: true })).toHaveCount(0);
   }
+  await expect(main.getByText('Idea', { exact: true })).toBeVisible();
+  await expect(main.getByText('Plans & pricing', { exact: true }).first()).toBeVisible();
+
+  const documents = main.locator('section[aria-labelledby="project-documents-heading"]');
+  await expect(documents.getByRole('button', { name: /^Open / })).toHaveText([
+    /Idea & value/, /Look & feel/, /Design/, /Plans & pricing/, /AI workflows/, /App/,
+  ]);
+  await expect(documents.getByRole('button', { name: 'Open Idea & value' })).toContainText('Version 2');
+  await expect(documents.getByRole('button', { name: 'Open App' })).toContainText('Version 17');
+  await expectNoHorizontalOverflow(page);
+  await page.screenshot({ path: testInfo.outputPath('project-built.png'), fullPage: true });
+
+  await documents.getByRole('button', { name: 'Open Look & feel' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Look & feel' });
+  await expect(dialog.getByRole('heading', { name: 'Theme config' })).toBeVisible();
+  await expect(dialog.getByText('#2F9C95')).toBeVisible();
+  await expect(dialog.getByText('{')).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Show raw' }).click();
+  await expect(dialog.locator('pre')).toContainText('"primary": "#2F9C95"');
+  await expectNoHorizontalOverflow(page);
+  await dialog.getByRole('button', { name: 'Close overlay' }).click();
+
+  await main.locator('summary', { hasText: 'All versions' }).click();
+  await expect(main.getByText('Idea & value · Version 1')).toBeVisible();
+  await expect(main.getByText(/App intelligence|App context/i)).toHaveCount(0);
+
+  await main.getByRole('button', { name: 'Make a change' }).click();
+  await expect(page).toHaveURL(/\/chat\?.*chat_id=review-chat/);
+  expect(triggers).toEqual([expect.objectContaining({
+    workflow_id: 'AppReview', trigger_source: 'manual', build_registry_id: 'demo_campaign_revision',
+  })]);
+});
+
+test('a failed history read degrades only the Project panel, which can retry', async ({ page }) => {
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', (route) => route.fulfill({
+    json: buildOnboardingStatusPayload({ dismissed: true }),
+  }));
+  let refuse = true;
+  await page.route('**/api/studio/build/history?**', async (route) => {
+    const url = new URL(route.request().url());
+    if (refuse && !url.searchParams.get('build_family')) {
+      return route.fulfill({ status: 429, json: { detail: 'Too many requests' } });
+    }
+    return route.fulfill({ json: { app_id: APP_ID, artifact_versions: historyRows(url), change_requests: [] } });
+  });
+  await page.goto(`/apps/${APP_ID}/building`);
+  const main = page.locator('main');
+  await expect(main.getByRole('heading', { name: 'Project', exact: true })).toBeVisible();
+  await expect(main.getByText('Saved documents could not be loaded')).toBeVisible();
+  refuse = false;
+  await main.getByRole('button', { name: 'Try again' }).click();
+  await expect(main.getByText('Needs a change before the build can continue.')).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Open Idea & value' })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+});
+
+test('a first build in progress continues the app build conversation from Project and My Apps', async ({ page }, testInfo) => {
+  const building = {
+    ...appsPayload.apps[0], status: 'building', active_chat_id: 'build-chat', active_workflow_id: 'DesignDocs',
+    current_build_run: { build_id: 'b1', phase: 'genesis', active_chat_id: 'build-chat', active_workflow_id: 'DesignDocs' },
+  };
+  await page.route('**/api/studio/apps', (route) => route.fulfill({ json: { apps: [building, ...appsPayload.apps.slice(1)], metrics: {} } }));
+  const firstSteps = projectDocumentRows.filter((row) => ['concept', 'theme_capture'].includes(row.build_family));
+  await page.route('**/api/studio/build/history?**', (route) => {
+    const url = new URL(route.request().url());
+    const family = url.searchParams.get('build_family');
+    const rows = family ? firstSteps.filter((row) => row.build_family === family) : firstSteps;
+    return route.fulfill({ json: { app_id: APP_ID, artifact_versions: rows, change_requests: [] } });
+  });
+  const resume = '/chat?workflow=DesignDocs&mode=workflow&chat_id=build-chat&app_id=factory-session-app';
+
+  await page.goto(`/apps/${APP_ID}/building`);
+  const main = page.locator('main');
+  await expect(main.getByText('First build in progress. Next step: design the app.')).toBeVisible();
+  await expect(main.getByRole('link', { name: 'Continue build', exact: true })).toHaveAttribute('href', resume);
+  await expect(main.getByText('Next', { exact: true })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await page.screenshot({ path: testInfo.outputPath('project-in-progress.png'), fullPage: true });
+
+  await page.goto('/apps');
+  const inProgress = main.locator('section').filter({ has: page.getByRole('heading', { name: 'Builds in progress' }) });
+  await expect(inProgress.getByText('Campaign Revision Workbench')).toBeVisible();
+  await expect(inProgress.getByText('First build in progress. Next step: design the app.')).toBeVisible();
+  await expect(inProgress.getByRole('link', { name: 'Continue build', exact: true })).toHaveAttribute('href', resume);
+  await expect(main.getByPlaceholder('Search apps...')).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await page.screenshot({ path: testInfo.outputPath('apps-builds-in-progress.png'), fullPage: true });
 });
 
 test('app integrations route stays responsive across desktop and mobile widths', async ({ page }, testInfo) => {
@@ -2676,8 +2841,8 @@ test('mobile app Studio navigation keeps route transitions stable', async ({ pag
   const routeChecks = [
     {
       href: `/apps/${APP_ID}/building`,
-      heading: 'Building',
-      detail: async () => expect(main.getByRole('heading', { name: 'Build state' })).toBeVisible(),
+      heading: 'Project',
+      detail: async () => expect(main.getByRole('heading', { name: 'Documents' })).toBeVisible(),
     },
     {
       href: `/apps/${APP_ID}/usage`,
