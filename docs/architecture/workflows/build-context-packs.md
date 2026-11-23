@@ -749,12 +749,14 @@ on what it introduces:
 | --- | --- |
 | `route_path_conflict` | Two pages claim one path on one surface: route manifest, `ui/pages` schemas, workflow entrypoints, admin pages, and the shell's core chat and profile routes. A pack may route its own admin page. |
 | `app_contract_error` | A new error from the shared app contract and functional checks, such as a page that calls a module action the upgrade removes. |
+| `unresolved_workflow_reference` | An app declaration names a workflow, transition or sequence the plan removes, or one of the pack's own routes targets a workflow the runtime cannot launch. |
 | `invalid_module` | The runtime would refuse to load one of the pack's modules. Its declarations are read with the runtime's own rules and its handler source is parsed; no pack code runs. |
 
 A handler method counts as missing only where the module's own source shows the
 whole handler class. The full generated-bundle scan is not used here: it also
 enforces which files generation may write. Errors the app already had do not
-block a pack. `verify` reports these findings for the pack's own modules and
+block a pack. Generator-materialized packs get the same checks, against everything
+their base upgrade writes, plus the requirements of installed packs. `verify` reports these findings for the pack's own modules and
 routes.
 
 Bundle validation resolves a route's component the same way. Module page sources

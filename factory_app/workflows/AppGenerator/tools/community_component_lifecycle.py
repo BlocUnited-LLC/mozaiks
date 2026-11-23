@@ -562,6 +562,54 @@ def _plan_upgrade(
     ), data_contract
 
 
+def prepare_component_upgrade(
+    *,
+    build_context_root: str | Path,
+    candidate_pack_source_path: str | Path,
+    workspace_app_root: str | Path,
+) -> tuple[UpgradePlan, dict[str, str | None]]:
+    """An upgrade's plan and every app file applying it writes (``None`` removes one).
+
+    Nothing is written. A blocked plan has no writes.
+    """
+
+    root = Path(build_context_root).resolve()
+    app_root = Path(workspace_app_root).resolve()
+    candidate_source = Path(candidate_pack_source_path).resolve()
+    pack_id = _pack_id_from_context(candidate_source)
+    plan, data_contract = _plan_upgrade(
+        build_context_root=root,
+        candidate_pack_source_path=candidate_source,
+        workspace_app_root=app_root,
+    )
+    if plan.potential_conflicts:
+        return plan, {}
+
+    candidate = _component_entry_from_verified_pack(candidate_source, pack_id)
+    # The candidate is an external source: select it with the identity just verified, as any external pack.
+    # The packs it requires are selected beside it from their installed pins, so selection validates;
+    # only the candidate's own provenance is kept.
+    descriptors = [{
+        "id": pack_id, "pack_id": pack_id, "pack_source_path": str(candidate_source),
+        "version": candidate["version"], "digest": candidate["digest"],
+    }, *resolve_installed_component_descriptors(
+        build_context_root=root, selected_pack_ids=_installed_dependency_closure(root, candidate),
+    )]
+    rendered = _files_by_name(resolve_managed_capability_templates(descriptors))
+    provenance = _merged_provenance(app_root, _own_provenance(json.loads(rendered.pop(_PROVENANCE_PATH)), pack_id), pack_id)
+    # Validate the upgraded provenance against the app as it will be, before anything is written.
+    writes: dict[str, str | None] = {path: rendered[path] for path in sorted(plan.added_files + plan.changed_files)}
+    writes.update(dict.fromkeys(plan.removed_files))
+    if data_contract is not None:
+        writes[_DATA_CONTRACT_PATH] = data_contract
+    writes[_PROVENANCE_PATH] = json.dumps(provenance, indent=2, sort_keys=True) + "\n"
+    planned = {path: text for path, text in {**_app_files(app_root), **writes}.items() if text is not None}
+    provenance_errors = [error for error in scan_generated_bundle(planned) if "pack_provenance" in error]
+    if provenance_errors:
+        raise CommunityComponentLifecycleError(f"Updated component provenance failed validation: {provenance_errors}")
+    return plan, writes
+
+
 def apply_component_upgrade(
     *,
     build_context_root: str | Path,
@@ -574,7 +622,7 @@ def apply_component_upgrade(
     app_root = Path(workspace_app_root).resolve()
     candidate_source = Path(candidate_pack_source_path).resolve()
     pack_id = _pack_id_from_context(candidate_source)
-    plan, data_contract = _plan_upgrade(
+    plan, writes = prepare_component_upgrade(
         build_context_root=root,
         candidate_pack_source_path=candidate_source,
         workspace_app_root=app_root,
@@ -590,42 +638,13 @@ def apply_component_upgrade(
         )
 
     candidate = _component_entry_from_verified_pack(candidate_source, pack_id)
-    # The candidate is an external source: select it with the identity just verified, as any external pack.
-    # The packs it requires are selected beside it from their installed pins, so selection validates;
-    # only the candidate's own provenance is kept.
-    descriptors = [{
-        "id": pack_id, "pack_id": pack_id, "pack_source_path": str(candidate_source),
-        "version": candidate["version"], "digest": candidate["digest"],
-    }, *resolve_installed_component_descriptors(
-        build_context_root=root, selected_pack_ids=_installed_dependency_closure(root, candidate),
-    )]
-    rendered = _files_by_name(resolve_managed_capability_templates(descriptors))
-    provenance = _merged_provenance(app_root, _own_provenance(json.loads(rendered.pop(_PROVENANCE_PATH)), pack_id), pack_id)
-    # Validate the upgraded provenance against the app as it will be, before anything is written.
-    planned = _app_files(app_root)
-    planned.update({path: rendered[path] for path in plan.added_files + plan.changed_files})
-    for path in plan.removed_files:
-        planned.pop(path, None)
-    if data_contract is not None:
-        planned[_DATA_CONTRACT_PATH] = data_contract
-    planned[_PROVENANCE_PATH] = json.dumps(provenance, indent=2, sort_keys=True) + "\n"
-    provenance_errors = [error for error in scan_generated_bundle(planned) if "pack_provenance" in error]
-    if provenance_errors:
-        raise CommunityComponentLifecycleError(f"Updated component provenance failed validation: {provenance_errors}")
-    for path in sorted(plan.added_files + plan.changed_files):
+    for path, text in writes.items():
         target = app_root / path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(rendered[path], encoding="utf-8")
-    for path in plan.removed_files:
-        target = app_root / path
-        if target.exists():
+        if text is not None:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+        elif target.exists():
             target.unlink()
-    if data_contract is not None:
-        (app_root / _DATA_CONTRACT_PATH).parent.mkdir(parents=True, exist_ok=True)
-        (app_root / _DATA_CONTRACT_PATH).write_text(data_contract, encoding="utf-8")
-
-    (app_root / _PROVENANCE_PATH).parent.mkdir(parents=True, exist_ok=True)
-    (app_root / _PROVENANCE_PATH).write_text(planned[_PROVENANCE_PATH], encoding="utf-8")
 
     state = load_installed_components(root)
     installed = component_by_id(state)
@@ -693,5 +712,6 @@ __all__ = [
     "apply_component_upgrade",
     "install_verified_local_pack",
     "plan_component_upgrade",
+    "prepare_component_upgrade",
     "resolve_installed_component_descriptors",
 ]

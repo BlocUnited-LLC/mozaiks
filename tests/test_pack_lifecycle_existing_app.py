@@ -2394,3 +2394,328 @@ def test_verify_reports_an_app_route_over_a_library_admin_page(tmp_path):
     _edit(roots.app_root / "ui/route_manifest.json", home, f"{route},\n        {home}")
     [report] = verify_installed_components(roots=roots)["packs"]
     assert [(row["kind"], row["key"]) for row in report["findings"]] == [("route_path_conflict", path)]
+
+
+# --------------------------------------------------------------------------------------
+# Generator-materialized packs: the checks see what the base lifecycle writes
+# --------------------------------------------------------------------------------------
+
+
+def _generator_pack(tmp_path: Path, version: str, *, modules: tuple[str, ...], requires: dict | None = None) -> Path:
+    """A pack AppGenerator materializes: one module per name, each with its own data surface."""
+    pack = _capability_pack(tmp_path / f"generated-{version}", "generated")
+    _edit(pack / "context.yaml", "version: 1.0.0", f"version: {version}")
+    templates = pack / "templates"
+    shutil.rmtree(templates / "modules")
+    outputs = []
+    surfaces = []
+    for module in modules:
+        folder = templates / "modules" / module
+        (folder / "backend").mkdir(parents=True)
+        (folder / "module.yaml").write_text(
+            f"schema_version: mozaiks.module.v1\nmodule:\n  id: {module}\n  display_name: {module}\n  version: 1.0.0\n"
+            f"  description: The {module} module.\n  handler: backend.handler:Handler\n",
+            encoding="utf-8",
+        )
+        (folder / "backend/handler.py").write_text("class Handler:\n    pass\n", encoding="utf-8")
+        outputs += [f"modules/{module}/module.yaml", f"modules/{module}/backend/handler.py"]
+        surfaces.append({
+            "surface_id": module, "surface_kind": "module", "primary_entities": [module],
+            "collections": [{
+                "name": module, "entity": module, "mongo_collection": f"{module}_rows", "data_alias": f"{module}.rows",
+                "scope": "app", "tenancy": "app_wide", "owner_field": None, "owner_module": module,
+                "ownership": {"surface_id": module, "surface_kind": "module"},
+                "fields": [{"name": "label", "type": "string", "required": True}],
+            }],
+        })
+    if surfaces:
+        (templates / "data").mkdir(parents=True)
+        (templates / "data/contract.json").write_text(json.dumps({"version": "1", "surfaces": surfaces}), encoding="utf-8")
+        outputs.append("data/contract.json")
+    templates.mkdir(exist_ok=True)
+    (templates / "services").mkdir()
+    (templates / "services/generated_marker.py").write_text(f"VERSION = {version!r}\n", encoding="utf-8")
+    contract = {
+        "contract_id": "library.generated", "contract_type": "build_pack_instructions",
+        "required_outputs": [{"path": path, "owner": "templates"} for path in outputs],
+    }
+    if requires:
+        contract["requires"] = requires
+    (pack / "contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
+    return pack
+
+
+def _materialize(roots, pack: Path) -> None:
+    """Write a pack into an app as AppGenerator assembly does."""
+    from factory_app.workflows.AppGenerator.tools import (
+        resolve_managed_capability_templates as resolver,
+    )
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        install_verified_local_pack,
+    )
+    from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
+
+    install_verified_local_pack(pack_source_path=pack, build_context_root=roots.build_context_root)
+    metadata = resolver.verify_pack_integrity(pack, "library.generated")
+    selected = [{
+        "id": "library.generated", "pack_id": "library.generated", "pack_source_path": str(pack),
+        "version": metadata["version"], "digest": metadata["digest"],
+    }]
+    contract = roots.app_root / "data/contract.json"
+    contributions = resolver.verified_pack_data_contracts(resolver.verified_pack_template_inventory(selected))
+    composed = compile_data_contract(json.loads(contract.read_text(encoding="utf-8")), pack_data_contracts=contributions)
+    files = {row["filename"]: row["content"] for row in resolver.resolve_managed_capability_templates(selected)}
+    files["data/contract.json"] = json.dumps(composed, indent=2)
+    for path, content in files.items():
+        target = roots.app_root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+
+def _orders_module(roots) -> None:
+    """The module the app's own data surface names, so the app has no contract error of its own."""
+    target = roots.app_root / "modules/orders/module.yaml"
+    target.parent.mkdir(parents=True)
+    target.write_text("module:\n  id: orders\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("app_error", [False, True], ids=["clean-app", "app-with-an-error"])
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [(("ledger", "journal"), ("ledger",)), (("ledger",), ("ledger", "journal")), (("ledger",), ()), ((), ("ledger",))],
+    ids=["retire-a-module", "add-a-module", "retire-all-data", "first-data"],
+)
+def test_a_generator_upgrade_is_checked_against_the_contract_it_writes(tmp_path, before, after, app_error):
+    roots = _ordinary_app(tmp_path / "shop")
+    if not app_error:
+        _orders_module(roots)
+    _materialize(roots, _generator_pack(tmp_path, "1.0.0", modules=before))
+    library = _pack(tmp_path)
+    apply_component_install(source=PackSource(directory=library), roots=roots)
+    candidate = PackSource(directory=_generator_pack(tmp_path, "2.0.0", modules=after))
+    app = _tree(tmp_path / "shop")
+    plan = plan_workspace_upgrade(source=candidate, roots=roots)
+    assert (plan.status, plan.conflicts) == ("ready", [])
+    assert _tree(tmp_path / "shop") == app
+    assert apply_workspace_upgrade(source=candidate, roots=roots).status == "applied"
+    document = json.loads((roots.app_root / "data/contract.json").read_text(encoding="utf-8"))
+    assert {row["surface_id"] for row in document["surfaces"]} == {"orders", "stock_ledger", *after}
+    # The recomposed contract keeps what another library owns.
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+
+
+@pytest.mark.parametrize("app_error", [False, True], ids=["clean-app", "app-with-an-error"])
+def test_a_plan_cannot_add_to_an_error_the_app_already_has(tmp_path, app_error):
+    roots = _ordinary_app(tmp_path / "shop")
+    if not app_error:
+        _orders_module(roots)
+    contract = roots.app_root / "data/contract.json"
+    document = json.loads(contract.read_text(encoding="utf-8"))
+    document["surfaces"].append({**document["surfaces"][0], "surface_id": "alpha", "collections": []})
+    contract.write_text(json.dumps(document, indent=4) + "\n", encoding="utf-8")
+    page = _page_pack(tmp_path, "alpha", component="alpha:DashboardPage")
+    apply_component_install(source=PackSource(directory=page), roots=roots)
+    # The app's data surface still names the module the next version drops.
+    candidate = _capability_pack(tmp_path / "v2", "alpha")
+    _edit(candidate / "context.yaml", "version: 1.0.0", "version: 2.0.0")
+    plan = plan_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+    assert [row["kind"] for row in plan.conflicts] == ["app_contract_error"]
+    assert "'alpha'" in plan.conflicts[0]["detail"]
+
+
+def test_the_base_lifecycle_writes_exactly_what_it_prepares(tmp_path):
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        apply_component_upgrade,
+        prepare_component_upgrade,
+    )
+
+    roots = _ordinary_app(tmp_path / "shop")
+    _materialize(roots, _generator_pack(tmp_path, "1.0.0", modules=("ledger", "journal")))
+    arguments = {
+        "build_context_root": roots.build_context_root, "workspace_app_root": roots.app_root,
+        "candidate_pack_source_path": _generator_pack(tmp_path, "2.0.0", modules=("ledger",)),
+    }
+    before = _tree(roots.app_root)
+    plan, writes = prepare_component_upgrade(**arguments)
+    assert _tree(roots.app_root) == before
+    assert {"data/contract.json", ".mozaiks/pack_provenance.json", "services/generated_marker.py"} <= writes.keys()
+    assert writes["modules/journal/module.yaml"] is None
+    assert apply_component_upgrade(**arguments) == plan
+    after = _tree(roots.app_root)
+    changed = {path for path in before.keys() | after.keys() if before.get(path) != after.get(path)}
+    assert changed == writes.keys()
+    for path, text in writes.items():
+        # Provenance records the time it was generated.
+        if path != ".mozaiks/pack_provenance.json":
+            assert (text is None and path not in after) or after[path].decode().replace("\r\n", "\n") == text
+
+
+def _consumer(tmp_path: Path, requires: dict) -> Path:
+    pack = _capability_pack(tmp_path, "consumer")
+    document = yaml.safe_load((pack / "contract.yaml").read_text(encoding="utf-8"))
+    document["requires"] = requires
+    (pack / "contract.yaml").write_text(yaml.safe_dump(document), encoding="utf-8")
+    return pack
+
+
+@pytest.mark.parametrize("requirement", ["import", "module", "pinned-version"])
+def test_a_generator_upgrade_keeps_what_installed_libraries_require(tmp_path, requirement):
+    roots = _ordinary_app(tmp_path / "shop")
+    _materialize(roots, _generator_pack(tmp_path, "1.0.0", modules=("ledger", "journal")))
+    requires = {
+        "import": {"imports": ["app.modules.journal.backend.handler"]},
+        "module": {"modules": [{"module_id": "journal", "actions": []}]},
+        "pinned-version": {"packs": [{"pack_id": "library.generated", "version": "1.0.0"}]},
+    }[requirement]
+    apply_component_install(source=PackSource(directory=_consumer(tmp_path, requires)), roots=roots)
+    modules = ("ledger", "journal") if requirement == "pinned-version" else ("ledger",)
+    candidate = PackSource(directory=_generator_pack(tmp_path, "2.0.0", modules=modules))
+    before = _tree(tmp_path / "shop")
+    plan = plan_workspace_upgrade(source=candidate, roots=roots)
+    assert plan.status == "blocked"
+    assert {(row["kind"], row["owner"]) for row in plan.conflicts} == {("required_by", "library.consumer")}
+    with pytest.raises(CommunityComponentConflictError):
+        apply_workspace_upgrade(source=candidate, roots=roots)
+    assert _tree(tmp_path / "shop") == before
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+
+
+def test_a_generator_upgrade_must_meet_its_own_declared_requirements(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    _materialize(roots, _generator_pack(tmp_path, "1.0.0", modules=("ledger",)))
+    missing = _generator_pack(tmp_path, "2.0.0", modules=("ledger",), requires={"imports": ["app.services.absent"]})
+    plan = plan_workspace_upgrade(source=PackSource(directory=missing), roots=roots)
+    assert [(row["kind"], row["key"]) for row in plan.conflicts] == [("missing_host_import", "app.services.absent")]
+    own = _generator_pack(tmp_path, "3.0.0", modules=("ledger",), requires={"imports": ["app.services.generated_marker"]})
+    assert plan_workspace_upgrade(source=PackSource(directory=own), roots=roots).status == "ready"
+
+
+# --------------------------------------------------------------------------------------
+# Workflow targets
+# --------------------------------------------------------------------------------------
+
+
+def _renamed_workflow(tmp_path: Path) -> Path:
+    pack = _version_two(tmp_path)
+    (pack / "workflows/StockReview").rename(pack / "workflows/StockReviewV2")
+    _edit(pack / "workflows/StockReviewV2/orchestrator.yaml", "workflow_name: StockReview", "workflow_name: StockReviewV2")
+    _edit(pack / "workflows/extended_orchestration/extension_registry.json", "StockReview", "StockReviewV2")
+    return pack
+
+
+WORKFLOW_TARGETS = {
+    "route": ("ui/route_manifest.json", None),
+    "startup": ("config/ai.json", '{"workflows": {"entry_point": "StockReview"}}'),
+    "dashboard": ("config/dashboard.yaml", "panels:\n  - id: review\n    source: workflow\n    workflow_id: StockReview\n"),
+    "page-action": ("ui/pages/review.yaml", "actions:\n  - action_type: workflow\n    workflow_id: StockReview\n"),
+    "link": ("config/shell.json", '{"shortcuts": [{"href": "/chat?mode=workflow&workflow=StockReview"}]}'),
+}
+
+
+@pytest.mark.parametrize("registry", [True, False], ids=["registry", "no-registry"])
+@pytest.mark.parametrize("target", WORKFLOW_TARGETS)
+def test_an_upgrade_cannot_rename_a_workflow_the_app_targets(tmp_path, target, registry):
+    roots = _ordinary_app(tmp_path / "shop", registry=registry)
+    apply_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots)
+    path, text = WORKFLOW_TARGETS[target]
+    if text is None:
+        home = '{ "id": "home"'
+        route = json.dumps({"id": "mine", "path": "/mine", "workflow": "StockReview"})
+        _edit(roots.app_root / path, home, f"{route},\n        {home}")
+    else:
+        (roots.app_root / path).parent.mkdir(parents=True, exist_ok=True)
+        (roots.app_root / path).write_text(text, encoding="utf-8")
+    source = PackSource(directory=_renamed_workflow(tmp_path))
+    before = _tree(tmp_path / "shop")
+    plan = plan_workspace_upgrade(source=source, roots=roots)
+    assert [(row["kind"], row["key"], row["path"]) for row in plan.conflicts] == [
+        ("unresolved_workflow_reference", "StockReview", path),
+    ]
+    with pytest.raises(CommunityComponentConflictError):
+        apply_workspace_upgrade(source=source, roots=roots)
+    assert _tree(tmp_path / "shop") == before
+
+
+def test_an_upgrade_cannot_drop_a_transition_the_app_targets(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    registry = pack / "workflows/extended_orchestration/extension_registry.json"
+    document = json.loads(registry.read_text(encoding="utf-8"))
+    document["transitions"] = [
+        {"id": "choose-review", "transition_type": "silent", "route_to": "StockReview", "route_type": "workflow"},
+    ]
+    registry.write_text(json.dumps(document), encoding="utf-8")
+    apply_component_install(source=PackSource(directory=pack), roots=roots)
+    home = '{ "id": "home"'
+    route = json.dumps({"id": "mine", "path": "/mine", "transition": "choose-review"})
+    _edit(roots.app_root / "ui/route_manifest.json", home, f"{route},\n        {home}")
+    plan = plan_workspace_upgrade(source=PackSource(directory=_version_two(tmp_path)), roots=roots)
+    assert ("unresolved_workflow_reference", "choose-review") in {(row["kind"], row["key"]) for row in plan.conflicts}
+
+
+def test_workflow_names_the_plan_does_not_lose_do_not_block(tmp_path):
+    roots = _install(tmp_path)
+    home = '{ "id": "home"'
+    route = json.dumps({"id": "mine", "path": "/mine", "workflow": "NeverExisted", "label": "StockReview"})
+    _edit(roots.app_root / "ui/route_manifest.json", home, f"{route},\n        {home}")
+    assert apply_workspace_upgrade(source=PackSource(directory=_renamed_workflow(tmp_path)), roots=roots).status == "applied"
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+
+
+def test_a_library_route_must_target_a_workflow_the_runtime_can_launch(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    _edit(pack / "templates/ui/route_manifest.json", '"component": "StockLedgerPage"', '"workflow": "StockReview"')
+    apply_component_install(source=PackSource(directory=pack), roots=roots)
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+    registry = roots.workflows_root / "extended_orchestration/extension_registry.json"
+    document = json.loads(registry.read_text(encoding="utf-8"))
+    document["workflows"] = []
+    registry.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    [report] = verify_installed_components(roots=roots)["packs"]
+    assert ("unresolved_workflow_reference", "StockReview") in {(row["kind"], row.get("key")) for row in report["findings"]}
+    other = _pack(tmp_path, "other")
+    _edit(other / "templates/ui/route_manifest.json", '"component": "StockLedgerPage"', '"workflow": "Ghost"')
+    fresh = _ordinary_app(tmp_path / "fresh")
+    plan = plan_component_install(source=PackSource(directory=other), roots=fresh)
+    assert ("unresolved_workflow_reference", "Ghost") in {(row["kind"], row["key"]) for row in plan.conflicts}
+
+
+# --------------------------------------------------------------------------------------
+# A moved source directory
+# --------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("operation", ["install", "upgrade"])
+@pytest.mark.parametrize("fault", ["moved", "changed", "unbound"])
+def test_an_unchanged_directory_install_rebinds_a_source_that_no_longer_serves(tmp_path, operation, fault):
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        resolve_installed_component_descriptors,
+    )
+    from factory_app.workflows.AppGenerator.tools.community_component_state import (
+        installed_component_sources_path,
+    )
+
+    roots = _ordinary_app(tmp_path / "shop")
+    original = _pack(tmp_path)
+    apply_component_install(source=PackSource(directory=original), roots=roots)
+    moved = tmp_path / "packs/moved"
+    shutil.copytree(original, moved)
+    sidecar = installed_component_sources_path(roots.build_context_root)
+    if fault == "moved":
+        shutil.rmtree(original)
+    elif fault == "changed":
+        (original / "templates/config/stock_ledger.yaml").write_text("low_stock_threshold: 9\n", encoding="utf-8")
+    else:
+        sidecar.unlink()
+    resolve = {"build_context_root": roots.build_context_root, "selected_pack_ids": [PACK_ID]}
+    with pytest.raises(Exception, match="stock_ledger|context not found"):
+        resolve_installed_component_descriptors(**resolve)
+    before = _tree(tmp_path / "shop")
+    apply = apply_component_install if operation == "install" else apply_workspace_upgrade
+    assert apply(source=PackSource(directory=moved), roots=roots).status == "unchanged"
+    after = _tree(tmp_path / "shop")
+    relative = sidecar.relative_to(tmp_path / "shop").as_posix()
+    assert {path for path in before.keys() | after.keys() if before.get(path) != after.get(path)} == {relative}
+    [descriptor] = resolve_installed_component_descriptors(**resolve)
+    assert Path(descriptor["pack_source_path"]).samefile(moved)

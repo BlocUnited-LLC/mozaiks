@@ -86,7 +86,7 @@ from .community_component_lifecycle import (
     _pack_id_from_context,
     _render_pack,
     apply_component_upgrade,
-    plan_component_upgrade,
+    prepare_component_upgrade,
 )
 from .community_component_sources import (
     PackSource,
@@ -992,13 +992,78 @@ def _module_component_conflicts(
     )
 
 
+_TARGET_KEYS = {
+    "sequence": re.compile(r"(?:workflow_?)?sequence(?:_?id)?", re.IGNORECASE),
+    "transition": re.compile(r"transition(?:_?id)?", re.IGNORECASE),
+    "workflow": re.compile(r"(?:\w+_)?workflow(?:_?(?:id|name))?s?|entry_point", re.IGNORECASE),
+}
+_WORKFLOW_QUERY = re.compile(r"[?&]workflow(?:_id)?=([^&#]+)")
+
+
+def _workflow_targets(document: Any) -> set[tuple[str, str]]:
+    """Every workflow, transition and workflow sequence a declaration names."""
+    if isinstance(document, list):
+        return set().union(*(_workflow_targets(item) for item in document))
+    if isinstance(document, str):
+        return {("workflow", name) for name in _WORKFLOW_QUERY.findall(document)}
+    if not isinstance(document, dict):
+        return set()
+    found: set[tuple[str, str]] = set()
+    for key, value in document.items():
+        found |= _workflow_targets(value)
+        kind = next((kind for kind, pattern in _TARGET_KEYS.items() if pattern.fullmatch(str(key))), None)
+        if kind is not None:
+            found |= {(kind, item) for item in (value if isinstance(value, list) else [value]) if isinstance(item, str)}
+    return found
+
+
+def _workflow_inventory(app: _ProspectiveApp, roots: WorkspaceRoots) -> set[tuple[str, str]]:
+    """What the runtime can launch: with a registry, the listed workflows that have a source folder."""
+    folders: dict[str, str] = {}
+    for _label, files in app.workflow_roots:
+        folders.update({
+            path.split("/", 1)[0].lower(): path.split("/", 1)[0] for path in files if path.endswith("/orchestrator.yaml")
+        })
+    graph = _workflow_graph(app, roots)
+    if graph is None:
+        return {("workflow", name) for name in folders.values()}
+    return {
+        *(("workflow", row.id) for row in graph.workflows if row.id.lower() in folders),
+        *(("transition", row.id) for row in graph.transitions),
+        *(("sequence", row.id) for row in graph.journeys),
+    }
+
+
+def _app_workflow_targets(app: _ProspectiveApp) -> dict[tuple[str, str], list[str]]:
+    targets: dict[tuple[str, str], list[str]] = {}
+    for path, text in sorted(app.texts.items()):
+        if not path.endswith((".json", ".yaml", ".yml")):
+            continue
+        try:
+            document = json.loads(text) if path.endswith(".json") else yaml.safe_load(text)
+        except (ValueError, yaml.YAMLError):
+            continue
+        for target in _workflow_targets(document):
+            targets.setdefault(target, []).append(path)
+    return targets
+
+
+def _workflow_reference_conflict(target: tuple[str, str], paths: list[str]) -> dict[str, str]:
+    kind, name = target
+    return {
+        "kind": "unresolved_workflow_reference", "key": name, "path": paths[0],
+        "detail": f"{kind} {name!r}, used in {paths}, is not available to launch",
+    }
+
+
 def _is_own_admin_route(pages: list[str], path: str, own_paths: set[str]) -> bool:
     """Whether the only pages at a path are one pack's admin page and the custom route it gives that page."""
     return path in own_paths and sorted(page.split(" ", 1)[0] for page in pages) == ["admin_page", "route_manifest"]
 
 
 def _check_prospective_app(
-    owned_paths: set[str], routes: set[str], own_admin_routes: set[str], roots: WorkspaceRoots, plan: LifecyclePlan,
+    owned_paths: set[str], routes: set[str], own_workflows: set[str], own_admin_routes: set[str],
+    roots: WorkspaceRoots, plan: LifecyclePlan,
     writes: Mapping[Path, str | None], *, complete: bool,
 ) -> None:
     """Block what the plan would break in the resulting app.
@@ -1012,6 +1077,13 @@ def _check_prospective_app(
     state = _component_state(app)
     if state.ambiguous or state.unresolved or state.barrel_errors or state.workflow_barrel_errors:
         _module_component_conflicts(owned_paths, routes, state, plan, before=_component_state(before))
+    available = _workflow_inventory(app, roots)
+    lost = _workflow_inventory(before, roots) - available
+    own_targets = {("workflow", name) for name in own_workflows}
+    if lost or own_targets - available:
+        for target, paths in sorted(_app_workflow_targets(app).items()):
+            if target in lost or (target in own_targets and target not in available):
+                plan.conflicts.append(_workflow_reference_conflict(target, paths))
     collisions = _shell_path_collisions(app, roots)
     if collisions:
         known_pages = _shell_path_collisions(before, roots)
@@ -1029,10 +1101,14 @@ def _check_prospective_app(
         plan.conflicts.extend(row for row in invalid if row not in known_invalid)
     errors = _app_contract_errors(app)
     if errors:
-        known = Counter(_contract_error_key(error) for error in _app_contract_errors(before))
+        known_errors = _app_contract_errors(before)
+        known = Counter(_contract_error_key(error) for error in known_errors)
+        known_items: dict[str, set[str]] = {}
+        for error in known_errors:
+            known_items.setdefault(_contract_error_key(error), set()).update(_contract_error_items(error))
         for error in errors:
             key = _contract_error_key(error)
-            if known[key]:
+            if known[key] and _contract_error_items(error) <= known_items[key]:
                 known[key] -= 1
             else:
                 plan.conflicts.append({"kind": "app_contract_error", "detail": error})
@@ -1069,9 +1145,21 @@ def _app_contract_errors(app: _ProspectiveApp) -> list[str]:
     """
     diagnostics = scan_functional_generated_app(app.texts, check_placeholders=False, authored_code=True)
     return [
-        *scan_app_contracts(app.texts),
+        *(error for error in scan_app_contracts(app.texts) if not _is_componentless_route(app, error)),
         *(row.message for row in diagnostics if row.severity == "error" and row.code != "MISSING_ROUTE_COMPONENT"),
     ]
+
+
+def _is_componentless_route(app: _ProspectiveApp, error: str) -> bool:
+    """Whether the error only asks for a component on a route that launches a workflow or a transition.
+
+    The shell serves such a route (``_normalize_shell_page_entry``); the scan's rule is for generated pages.
+    """
+    match = re.fullmatch(r"ui/route_manifest\.json: pages\[(\d+)\] 'component' must be a non-empty string", error)
+    if match is None:
+        return False
+    page = json.loads(app.texts[_ROUTE_MANIFEST_PATH])["pages"][int(match.group(1))]
+    return any(isinstance(page.get(key), str) and page[key].strip() for key in ("workflow", "transition"))
 
 
 def _contract_error_key(error: str) -> str:
@@ -1079,6 +1167,12 @@ def _contract_error_key(error: str) -> str:
     key = re.sub(r"\[[^\[\]]*\]", "[]", error)
     # A dangling endpoint stays the same error whether its module or only its action is missing.
     return re.sub(r"(api_endpoint '[^']*') references .*", r"\1", key, flags=re.DOTALL)
+
+
+def _contract_error_items(error: str) -> set[str]:
+    """What an error lists as offending: one error can grow without becoming a second one."""
+    match = re.search(r"\[('[^']*'(?:, '[^']*')*)\]", error)
+    return set(re.findall(r"'([^']*)'", match.group(1))) if match else set()
 
 
 @contextmanager
@@ -1092,16 +1186,20 @@ def _materialized(texts: Mapping[str, str]) -> Iterator[Path]:
         yield root
 
 
+def _workflow_graph(app: _ProspectiveApp, roots: WorkspaceRoots) -> Any:
+    if app.registry is None:
+        return None
+    try:
+        return _effective_workflow_graph(parse_document(app.registry, "json"), roots)[0]
+    except (ValueError, OSError, CompositionFormatError):
+        # The registry checks report it; the shell reads no entrypoints from it.
+        return None
+
+
 def _shell_inventory(app: _ProspectiveApp, roots: WorkspaceRoots) -> list[tuple[str, dict[str, Any]]]:
     from mozaiksai.hosts.shell_config import declared_shell_pages
 
-    graph = None
-    if app.registry is not None:
-        try:
-            graph = _effective_workflow_graph(parse_document(app.registry, "json"), roots)[0]
-        except (ValueError, OSError, CompositionFormatError):
-            # The registry checks report it; the shell reads no entrypoints from it.
-            graph = None
+    graph = _workflow_graph(app, roots)
     with _materialized({
         path: text for path, text in app.texts.items()
         if path in {_ROUTE_MANIFEST_PATH, "admin/admin_registry.yaml"} or path.startswith("ui/pages/")
@@ -1802,6 +1900,7 @@ def _plan_workspace_change(
         {*rendered.owned, *rendered.seeds, *recorded.owned,
          *(f"workflows/{path}" for path in (*rendered.workflow_files, *recorded.workflow))},
         _contributed_values(rendered, _ROUTE_MANIFEST_PATH, "component"),
+        _contributed_values(rendered, _ROUTE_MANIFEST_PATH, "workflow"),
         _contributed_values(rendered, _ROUTE_MANIFEST_PATH, "path") & _contributed_values(rendered, _ADMIN_REGISTRY_PATH, "path"),
         roots, plan, outcome.writes, complete=complete,
     )
@@ -1874,6 +1973,28 @@ def _source_binding_writes(
     return writes, directories
 
 
+def _refresh_source_binding(candidate: _Candidate, rendered: _RenderedPack, roots: WorkspaceRoots) -> None:
+    """Rebind an unchanged pack to the verified source just given, when the recorded one no longer serves it."""
+    root = roots.build_context_root
+    if candidate.locator is None:
+        if component_by_id(load_installed_components(root)).get(rendered.pack_id) != rendered.entry:
+            # A pin from a Git commit keeps the snapshot it names.
+            return
+        bound = load_installed_component_sources(root).get(rendered.pack_id)
+        if bound is not None and _source_serves(Path(bound), rendered):
+            return
+    writes, directories = _source_binding_writes(candidate, rendered, roots, repair=True)
+    _commit(writes, roots, directories=directories)
+
+
+def _source_serves(source: Path, rendered: _RenderedPack) -> bool:
+    try:
+        metadata = verify_pack_integrity(source, rendered.pack_id)
+    except (OSError, ManagedCapabilityTemplateError):
+        return False
+    return (metadata["version"], metadata["digest"]) == (rendered.entry["version"], rendered.entry["digest"])
+
+
 def _apply_workspace_change(
     outcome: _Outcome, rendered: _RenderedPack, manifest: dict[str, Any], candidate: _Candidate, roots: WorkspaceRoots,
 ) -> None:
@@ -1909,9 +2030,7 @@ def apply_component_install(*, source: PackSource, roots: WorkspaceRoots, adopt:
         outcome, rendered, manifest = _plan_workspace_change("install", candidate, roots, adopt=adopt)
         plan = outcome.plan
         if plan.status == "unchanged":
-            if candidate.locator is not None:
-                writes, directories = _source_binding_writes(candidate, rendered, roots, repair=True)
-                _commit(writes, roots, directories=directories)
+            _refresh_source_binding(candidate, rendered, roots)
             return plan
         if plan.status == "blocked":
             raise _blocked(plan)
@@ -1939,9 +2058,7 @@ def apply_workspace_upgrade(*, source: PackSource, roots: WorkspaceRoots) -> Lif
         outcome, rendered, manifest = _plan_workspace_change("upgrade", candidate, roots, adopt=False)
         plan = outcome.plan
         if plan.status == "unchanged":
-            if candidate.locator is not None:
-                writes, directories = _source_binding_writes(candidate, rendered, roots, repair=True)
-                _commit(writes, roots, directories=directories)
+            _refresh_source_binding(candidate, rendered, roots)
             return plan
         if plan.status == "blocked":
             raise _blocked(plan)
@@ -1978,19 +2095,28 @@ def _generator_upgrade_plan(candidate: _Candidate, roots: WorkspaceRoots, *, app
                 f"Pack '{candidate.pack_id}' was materialized by AppGenerator; upgrade it from a directory "
                 "checkout of that commit rather than --git, because its upgrade path re-reads the source later."
             )
-        preview = plan_component_upgrade(
+        # Everything the base lifecycle writes, so the checks see the app it produces.
+        preview, base_writes = prepare_component_upgrade(
             build_context_root=roots.build_context_root,
             candidate_pack_source_path=candidate.pack_dir,
             workspace_app_root=roots.app_root,
         )
         plan = _plan_from_base_upgrade(preview, metadata, candidate, applied=False)
         files, _ui_roots, _data = _render_pack(candidate.pack_dir, candidate.pack_id)
-        writes: dict[Path, str | None] = {
-            _destination(roots.app_root, path): files.get(path)
-            for path in preview.added_files + preview.changed_files + preview.removed_files
-        }
+        entry = _component_entry_from_verified_pack(candidate.pack_dir, candidate.pack_id)
+        # Only what the pack declares is required of the host, as for every installed dependent.
+        rendered = _RenderedPack(
+            pack_id=candidate.pack_id, entry=entry, contract={"requires": entry.get("host_requirements") or {}},
+        )
+        writes = {_destination(roots.app_root, path): text for path, text in base_writes.items()}
+        outcome = _Outcome(plan=plan, writes=writes)
+        complete = not plan.conflicts
+        _check_dependencies(rendered, installed, plan, current=current)
+        if complete:
+            _check_host_requirements(rendered, roots, plan, writes)
+            _check_dependent_host_requirements(rendered, installed, roots, outcome)
         owned = {*files, *_recorded(_provenance(roots.app_root), candidate.pack_id).owned}
-        _check_prospective_app(owned, set(), set(), roots, plan, writes, complete=not plan.conflicts)
+        _check_prospective_app(owned, set(), set(), set(), roots, plan, writes, complete=complete)
         if plan.conflicts:
             plan.status = "blocked"
         if not apply:
@@ -2042,6 +2168,7 @@ def verify_installed_components(*, roots: WorkspaceRoots) -> dict[str, Any]:
     components = _component_state(app)
     app_errors = _app_contract_errors(app) if installed else []
     collisions = _shell_path_collisions(app, roots) if installed else {}
+    launchable = _workflow_inventory(app, roots)
     for entry in sorted(_pack_entries(manifest), key=lambda item: str(item.get("pack_id") or "")):
         pack_id = str(entry.get("pack_id") or "")
         entries_seen.add(pack_id)
@@ -2067,6 +2194,11 @@ def verify_installed_components(*, roots: WorkspaceRoots) -> dict[str, Any]:
                     _workflow_registry_conflicts(registry_document, roots, checked)
                 except CompositionFormatError as exc:
                     checked.conflicts.append({"kind": "invalid_workflow_registry", "detail": str(exc)})
+        own_workflows = _recorded_values(recorded, roots, _ROUTE_MANIFEST_PATH, "workflow")
+        checked.conflicts.extend(
+            _workflow_reference_conflict(("workflow", name), [_ROUTE_MANIFEST_PATH])
+            for name in sorted(own_workflows) if ("workflow", name) not in launchable
+        )
         route_paths = _recorded_values(recorded, roots, _ROUTE_MANIFEST_PATH, "path")
         admin_paths = _recorded_values(recorded, roots, _ADMIN_REGISTRY_PATH, "path")
         _module_component_conflicts(
