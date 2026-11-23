@@ -838,7 +838,7 @@ test('Request changes keeps the revised inline approval actionable without reloa
         window.deliverReview=event=>setMessages(previous=>sanitizeVisibleWorkflowMessages(
           upsertInlineToolCallMessage(previous,buildInlineToolCallMessageFromEvent(event,'DesignDocs'))));
         return <main>{messages.map(message=><section key={message.id} data-event={message.toolCall.tool_call_id}>
-          <ToolCallRenderer toolCall={message.toolCall} isCompleted={message.tool_call_completed}
+          <ToolCallRenderer ToolRenderer={UIToolRenderer} toolCall={message.toolCall} isCompleted={message.tool_call_completed}
             onResponse={async response=>{
               await submitToolCallResponse(message.toolCall.tool_call_id,response);
               setMessages(previous=>previous.map(item=>item.id===message.id?{...item,tool_call_completed:true}:item));
