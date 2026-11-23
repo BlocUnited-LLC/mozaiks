@@ -6513,6 +6513,7 @@ const ChatPage = () => {
             ? 'relative flex-1 min-h-0'
             : 'flex-1 min-w-0 min-h-0 -my-2 h-[calc(100%+1rem)]'}>
             <FluidChatLayout
+              conversationMode={conversationMode}
               layoutMode={effectiveLayoutMode}
               isMobile={isMobileView}
               mobileDrawerState={conversationMode === 'workflow' ? mobileDrawerState : 'hidden'}

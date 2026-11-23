@@ -52,11 +52,12 @@ test('ChatPage retains one live artifact and conversation across responsive layo
           <iframe title="Live app preview" src="/preview" style={{width:'100%',flex:1,minHeight:180,border:0,background:'white'}} />
         </section>;
       };
-      function Conversation() {
+      function Conversation({mode}) {
         const [draft,setDraft] = useState('');
         const [composerDisabled,setComposerDisabled] = useState(false);
         useEffect(() => { window.lifecycle.chatMounts += 1; window.setComposerDisabled = setComposerDisabled; }, []);
-        return <section aria-label="Conversation" style={{display:'flex',flexDirection:'column',height:'100%',padding:16,background:'#17263a'}}>
+        return <section aria-label="Conversation" className={mode === 'ask' ? 'cosmic-ui-module' : undefined}
+          style={{display:'flex',flexDirection:'column',height:'100%',padding:16,background:'#17263a'}}>
           <h1>Build conversation</h1><p style={{flex:1}}>Review your draft app.</p>
           <label>Message<textarea aria-label="Message" disabled={composerDisabled} value={draft} onChange={event => setDraft(event.target.value)} /></label>
           <button>Send message</button>
@@ -102,7 +103,7 @@ test('ChatPage retains one live artifact and conversation across responsive layo
           hasLiveArtifactContent:hasArtifact === true,
           setHasUnseenArtifact,hasUnseenChat,setHasUnseenChat,forceOverlay,isInWidgetMode:false,
           widgetChatMinimized:false,setWidgetChatMinimized:noop});
-        const chatInterface = <Conversation />;
+        const chatInterface = <Conversation mode={conversationMode} />;
         const currentArtifactMessages = hasArtifact ? [{id:'artifact-1',toolCall:{tool_name:'Preview',payload:{}}}] : [];
         const mainPaddingClass = 'pt-14 md:pt-16';
         const mainContentStyle = isMobileView ? {paddingTop:'calc(env(safe-area-inset-top, 0px) + 3.5rem)'} : undefined;
@@ -478,7 +479,10 @@ test('ChatPage retains one live artifact and conversation across responsive layo
     await expect(page.getByText('Saved conversations',{exact:true})).toBeVisible();
     await expect(canvasTitle).toHaveCount(0);
     await expect(page.locator('iframe')).toBeHidden();
+    const askFrame = page.getByRole('region',{name:'Conversation',exact:true});
+    await expect(askFrame).toHaveCSS('margin-top','12px');
     await resize({width:390,height:900});
+    await expect(askFrame).toHaveCSS('margin-top','28px');
     await expect(page.locator('textarea')).toHaveValue('Keep this unsent draft');
     await resize({width:1280,height:900});
     await expect(page.locator('textarea')).toHaveValue('Keep this unsent draft');
