@@ -30,6 +30,10 @@ function normalizeToolCallId(toolName, componentType, fallbackId = null) {
 }
 
 export function buildInlineToolCallMessageFromEvent(data, currentWorkflowName) {
+  return buildToolCallMessageFromEvent(data, currentWorkflowName, INLINE_DISPLAY);
+}
+
+export function buildToolCallMessageFromEvent(data, currentWorkflowName, expectedDisplay) {
   if (!data || typeof data !== 'object') {
     return null;
   }
@@ -48,12 +52,12 @@ export function buildInlineToolCallMessageFromEvent(data, currentWorkflowName) {
     || INLINE_DISPLAY
   ).trim().toLowerCase();
 
-  if (display !== INLINE_DISPLAY) {
+  if (display !== expectedDisplay) {
     return null;
   }
 
-  const toolName = data.tool_name || detail.tool_name || payload.tool_name || data.component_type || detail.component_type || null;
-  const componentType = data.component_type || detail.component_type || payload.component_type || toolName;
+  const toolName = data.tool_name || detail.tool_name || payload.tool_name || data.component_type || detail.component_type || data.component || detail.component || null;
+  const componentType = data.component_type || detail.component_type || payload.component_type || data.component || detail.component || toolName;
   if (!toolName && !componentType) {
     return null;
   }
@@ -91,6 +95,7 @@ export function buildInlineToolCallMessageFromEvent(data, currentWorkflowName) {
       workflow_name: workflowName,
       display,
       component_type: componentType || toolName,
+      ...((data.response_available ?? detail.response_available) === false && { response_available: false }),
     },
     metadata: {
       toolCallId,

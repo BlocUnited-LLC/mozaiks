@@ -8,7 +8,7 @@ import {
   getCurrentAppId,
 } from './themeProvider';
 
-export function useTheme(appId = null) {
+export function useTheme(appId = null, { applyToDocument = true } = {}) {
   const resolvedAppId = appId || getCurrentAppId();
   const [result, setResult] = useState(null);
   const theme = getCachedTheme(resolvedAppId)
@@ -21,7 +21,7 @@ export function useTheme(appId = null) {
       try {
         const loadedTheme = await getTheme(resolvedAppId);
         if (!cancelled && getCachedTheme(resolvedAppId) === loadedTheme) {
-          applyTheme(loadedTheme);
+          if (applyToDocument) applyTheme(loadedTheme);
           setResult({ appId: resolvedAppId, theme: loadedTheme });
         }
       } catch (error) {
@@ -30,7 +30,7 @@ export function useTheme(appId = null) {
           if (error instanceof PageTitleStyleError) {
             setResult({ appId: resolvedAppId, error });
           } else {
-            applyTheme(DEFAULT_THEME);
+            if (applyToDocument) applyTheme(DEFAULT_THEME);
             setResult({ appId: resolvedAppId, theme: DEFAULT_THEME });
           }
         }
@@ -42,7 +42,7 @@ export function useTheme(appId = null) {
     return () => {
       cancelled = true;
     };
-  }, [resolvedAppId]);
+  }, [resolvedAppId, applyToDocument]);
 
   if (result?.appId === resolvedAppId && result.error) throw result.error;
   return { theme: theme || DEFAULT_THEME, loading: !theme };

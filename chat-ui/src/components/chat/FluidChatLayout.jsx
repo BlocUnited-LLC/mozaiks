@@ -139,7 +139,7 @@ const FluidChatLayout = ({
     'relative flex flex-col min-w-0 min-h-0 h-full self-stretch transition-all duration-500 ease-in-out pt-0';
 
   return (
-    <div className={`flex h-full min-h-0 relative overflow-hidden ${isMobile || layoutMode === 'view' || layoutMode === 'full' ? 'gap-0 p-0' : 'gap-2 p-2'} items-stretch`}>
+    <div className={`workflow-workspace flex h-full min-h-0 relative overflow-hidden ${isMobile || layoutMode === 'view' || layoutMode === 'full' ? 'gap-0 p-0' : 'gap-2 p-2'} items-stretch`}>
       {/* Retain the conversation while its presentation is hidden or minimized. */}
       <div
         ref={chatPaneRef}

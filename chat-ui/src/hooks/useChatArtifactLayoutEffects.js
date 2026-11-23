@@ -16,6 +16,7 @@ export function useChatArtifactLayoutEffects({
   widgetOverlayOpen,
   setWidgetOverlayOpen,
   isSidePanelOpen,
+  hasArtifactContent,
   setIsSidePanelOpen,
   isMobileView,
   mobileDrawerState,
@@ -97,18 +98,23 @@ export function useChatArtifactLayoutEffects({
   }, [isMobileView, isSidePanelOpen, layoutMode, setIsSidePanelOpen, setMobileDrawerState]);
 
   useEffect(() => {
-    // Project the existing panel state when presentation changes. Resizing must
-    // not dispatch a layout change, which also closes the panel in the reducer.
-    setMobileDrawerState(isSidePanelOpen ? 'expanded' : 'peek');
-  }, [isMobileView, isSidePanelOpen, setMobileDrawerState]);
+    setMobileDrawerState('peek');
+  }, [currentChatId, conversationMode, setMobileDrawerState]);
 
   useEffect(() => {
-    if (!isSidePanelOpen) {
+    // A new workflow shows the empty canvas on desktop. Mobile starts on the
+    // conversation and opens the drawer for output or an explicit logo click.
+    if (!isSidePanelOpen) setMobileDrawerState('peek');
+    else if (hasArtifactContent || layoutMode === 'view') setMobileDrawerState('expanded');
+  }, [currentChatId, conversationMode, isMobileView, isSidePanelOpen, hasArtifactContent, layoutMode, setMobileDrawerState]);
+
+  useEffect(() => {
+    if (!isSidePanelOpen || !hasArtifactContent) {
       setHasUnseenArtifact(false);
       return;
     }
     setHasUnseenArtifact(mobileDrawerState !== 'expanded');
-  }, [isSidePanelOpen, mobileDrawerState, setHasUnseenArtifact]);
+  }, [hasArtifactContent, isSidePanelOpen, mobileDrawerState, setHasUnseenArtifact]);
 
   useEffect(() => {
     if (mobileDrawerState !== 'expanded' && hasUnseenChat) {
@@ -117,14 +123,14 @@ export function useChatArtifactLayoutEffects({
   }, [hasUnseenChat, mobileDrawerState, setHasUnseenChat]);
 
   useEffect(() => {
-    if (isSidePanelOpen && forceOverlay) {
+    if (isSidePanelOpen && forceOverlay && (!isMobileView || mobileDrawerState === 'expanded')) {
       const { overflow } = document.body.style;
       document.body.style.overflow = 'hidden';
       return () => {
         document.body.style.overflow = overflow;
       };
     }
-  }, [forceOverlay, isSidePanelOpen]);
+  }, [forceOverlay, isSidePanelOpen, isMobileView, mobileDrawerState]);
 
   useEffect(() => {
     if (!isInWidgetMode && widgetChatMinimized) {

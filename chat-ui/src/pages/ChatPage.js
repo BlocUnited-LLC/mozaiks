@@ -6,7 +6,7 @@ import { shouldReconnectAfterClose } from '../adapters/socketClose.js';
 import ArtifactPanel from '../components/chat/ArtifactPanel';
 import FluidChatLayout from '../components/chat/FluidChatLayout';
 import { TransitionScreen } from '../ui/screens/TransitionScreen';
-import { applyArtifactUpdate, applyOptimisticUpdate, deriveArtifactId, interpolateParams } from '../core/actions/actionUtils';
+import { applyArtifactUpdate, applyOptimisticUpdate, buildArtifactAction, deriveArtifactId } from '../core/actions/actionUtils';
 import { useNavigate, useLocation } from "react-router-dom";
 import { useContext } from "react";
 import { useChatUI } from "../context/ChatUIContext";
@@ -5816,40 +5816,12 @@ const ChatPage = () => {
   }, [ensureGeneralMode, isPrimaryChatRoute]);
 
   const sendArtifactAction = useCallback((action, contextData = {}) => {
-    if (!action || !action.tool) {
-      return null;
-    }
-
-    const artifactPayload = contextData?.artifactPayload || contextData?.payload || contextData || {};
     const fallbackId = currentArtifactContext?.id || (lastArtifactEventRef.current ? String(lastArtifactEventRef.current) : null);
-    const artifactId = deriveArtifactId(artifactPayload, fallbackId);
-    const actionId = (crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
-
-    const paramsContext = {
-      artifact: artifactPayload,
-      ...artifactPayload,
-      ...contextData,
-      artifact_id: artifactId,
-      app_id: currentAppId,
-      chat_id: currentChatId,
-      user_id: currentUserId,
-      workflow_name: currentWorkflowName,
-    };
-    const params = interpolateParams(action.params || {}, paramsContext);
-
-    const payload = {
-      type: 'artifact.action',
-      action_id: actionId,
-      artifact_id: artifactId,
-      tool: action.tool,
-      params,
-      context: {
-        chat_id: currentChatId,
-        app_id: currentAppId,
-        user_id: currentUserId,
-        workflow_name: currentWorkflowName,
-      }
-    };
+    const payload = buildArtifactAction(action, contextData, {
+      chat_id: currentChatId, app_id: currentAppId, user_id: currentUserId, workflow_name: currentWorkflowName,
+    }, fallbackId);
+    if (!payload) return null;
+    const { action_id: actionId, artifact_id: artifactId } = payload;
 
     const connection = wsRef.current;
     if (connection && typeof connection.send === 'function') {
@@ -6047,6 +6019,7 @@ const ChatPage = () => {
   }, []);
 
   useChatArtifactLayoutEffects({
+    hasArtifactContent: currentArtifactMessages.length > 0,
     connectionStatus,
     currentChatId,
     chatExists,

@@ -39,19 +39,17 @@ const shouldOpenArtifactPanel = (layoutMode) => layoutMode !== 'full';
 
 export const createInitialSurfaceState = (conversationMode = 'workflow') => {
   const normalizedConversation = normalizeConversationMode(conversationMode);
-  // Always start in 'full' (chat-only) layout — the artifact pane opens only
-  // when an actual artifact event is received.
-  const layoutMode = 'full';
+  const layoutMode = normalizedConversation === 'workflow' ? 'split' : 'full';
   return {
     conversationMode: normalizedConversation,
     layoutMode,
-    previousLayoutMode: 'full',
+    previousLayoutMode: 'split',
     surfaceMode: deriveSurfaceMode(normalizedConversation, layoutMode),
     workflowStatus: 'idle',
     artifact: {
       status: ARTIFACT_STATUS.INACTIVE,
       display: null,
-      panelOpen: false,
+      panelOpen: shouldOpenArtifactPanel(layoutMode),
       lastEventId: null,
     },
     widget: {
@@ -88,15 +86,7 @@ export const uiSurfaceReducer = (state, action) => {
         };
       }
 
-      // Restore non-full layout only if the user had previously opened the
-      // artifact pane AND there is still an artifact in state to show.
-      // If no artifact is present (status === INACTIVE), keep 'full' so the
-      // pane stays closed until a real artifact event arrives.
-      const hasArtifact = state.artifact.status !== ARTIFACT_STATUS.INACTIVE;
-      const restoredLayout = (state.previousLayoutMode && state.previousLayoutMode !== 'full' && hasArtifact)
-        ? state.previousLayoutMode
-        : 'full';
-      const normalizedLayout = normalizeLayoutMode(restoredLayout);
+      const normalizedLayout = normalizeLayoutMode(state.previousLayoutMode);
       return {
         ...state,
         conversationMode: 'workflow',
@@ -206,7 +196,8 @@ export const uiSurfaceReducer = (state, action) => {
         artifact: {
           ...state.artifact,
           panelOpen: nextPanelOpen,
-          status: nextPanelOpen ? ARTIFACT_STATUS.ACTIVE : state.artifact.status,
+          status: nextPanelOpen && state.artifact.status === ARTIFACT_STATUS.STALE
+            ? ARTIFACT_STATUS.ACTIVE : state.artifact.status,
         },
       };
     }
@@ -238,7 +229,7 @@ export const uiSurfaceReducer = (state, action) => {
       };
     }
     case 'ARTIFACT_CLEARED': {
-      const nextLayout = state.conversationMode === 'ask' ? 'full' : 'full';
+      const nextLayout = state.layoutMode === 'view' ? state.previousLayoutMode : state.layoutMode;
       return {
         ...state,
         layoutMode: nextLayout,
@@ -247,7 +238,7 @@ export const uiSurfaceReducer = (state, action) => {
           ...state.artifact,
           status: ARTIFACT_STATUS.INACTIVE,
           display: null,
-          panelOpen: false,
+          panelOpen: shouldOpenArtifactPanel(nextLayout),
           lastEventId: null,
         },
       };

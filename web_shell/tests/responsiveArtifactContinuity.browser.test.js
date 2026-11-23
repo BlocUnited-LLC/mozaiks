@@ -26,6 +26,7 @@ test('ChatPage retains one live artifact and conversation across responsive layo
       import {createRoot} from 'react-dom/client';
       import FluidChatLayout from ${JSON.stringify(path.join(ui, 'components/chat/FluidChatLayout.jsx'))};
       import MobileArtifactDrawer from ${JSON.stringify(path.join(ui, 'components/chat/MobileArtifactDrawer.jsx'))};
+      import ${JSON.stringify(path.join(ui, 'styles/chatShell.css'))};
       import ArtifactPanel from ${JSON.stringify(path.join(ui, 'components/chat/ArtifactPanel.jsx'))};
       import {useChatArtifactLayoutEffects} from ${JSON.stringify(path.join(ui, 'hooks/useChatArtifactLayoutEffects.js'))};
       import {createInitialSurfaceState, uiSurfaceReducer} from ${JSON.stringify(path.join(ui, 'state/uiSurfaceReducer.js'))};
@@ -73,7 +74,7 @@ test('ChatPage retains one live artifact and conversation across responsive layo
         const [hasUnseenArtifact,setHasUnseenArtifact] = useState(false);
         const [hasUnseenChat,setHasUnseenChat] = useState(false);
         const artifactRestoredOnceRef = useRef(false);
-        const [hasArtifact,setHasArtifact] = useState(true);
+        const [hasArtifact,setHasArtifact] = useState(false);
         const conversationMode = surface.conversationMode;
         const effectiveLayoutMode = conversationMode === 'ask' ? 'full' : layoutMode;
         const isViewMode = effectiveLayoutMode === 'view';
@@ -88,6 +89,7 @@ test('ChatPage retains one live artifact and conversation across responsive layo
           if (isMobileView) setMobileDrawerState(mode === 'full' ? 'peek' : 'expanded');
         };
         window.clearTestArtifact = () => setHasArtifact(false);
+        window.deliverTestArtifact = () => setHasArtifact(true);
         window.setTestConversation = mode => dispatch({type:'SET_CONVERSATION_MODE',mode});
         useLayoutEffect(() => {
           window.testState = {layoutMode,isMobileView,mobileDrawerState,isSidePanelOpen,conversationMode};
@@ -95,7 +97,7 @@ test('ChatPage retains one live artifact and conversation across responsive layo
         useChatArtifactLayoutEffects({connectionStatus:'disconnected',currentChatId:'chat-1',chatExists:false,
           artifactRestoredOnceRef,conversationMode,currentWorkflowName:'Review',restoreStoredArtifactForChat:noop,
           layoutMode,setLayoutMode,setIsMobileView,setForceOverlay,widgetOverlayOpen:false,setWidgetOverlayOpen:noop,
-          isSidePanelOpen,setIsSidePanelOpen,isMobileView,mobileDrawerState,setMobileDrawerState,
+          isSidePanelOpen,setIsSidePanelOpen,isMobileView,mobileDrawerState,setMobileDrawerState,hasArtifactContent:hasArtifact,
           setHasUnseenArtifact,hasUnseenChat,setHasUnseenChat,forceOverlay,isInWidgetMode:false,
           widgetChatMinimized:false,setWidgetChatMinimized:noop});
         const chatInterface = <Conversation />;
@@ -106,7 +108,8 @@ test('ChatPage retains one live artifact and conversation across responsive layo
         const mobileChatTopMarginClass = 'mt-0';
         const mobileChatPaddingBottomClass = 'pb-[calc(env(safe-area-inset-bottom,0px)+0.5rem)]';
         const showInitSpinner = false, pendingTransitionId = null, chatBackgroundSrc = null;
-        const user = null, chatTheme = null, themeLoading = false;
+        const user = null, themeLoading = false;
+        const chatTheme = {branding:{name:'Orchard Kitchen',logo:'/orchard-mark.svg'}};
         const handleNotificationClick = noop, handleHeaderAction = noop;
         const artifactPanelLoading = false, currentChatId = 'chat-1', currentWorkflowName = 'Review';
         const sendArtifactAction = noop, actionStatusMap = {}, viewWidget = null;
@@ -135,6 +138,11 @@ test('ChatPage retains one live artifact and conversation across responsive layo
   );
   let previewRequests = 0;
   const server = http.createServer((request,response) => {
+    if (request.url === '/orchard-mark.svg') {
+      response.setHeader('Content-Type','image/svg+xml');
+      response.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="12" fill="green"/></svg>');
+      return;
+    }
     if (request.url === '/fixture.js') {response.setHeader('Content-Type','text/javascript');response.end(bundle.outputFiles.find(file=>file.path.endsWith('.js')).text);return;}
     response.setHeader('Content-Type','text/html');
     if (request.url === '/preview') {
@@ -143,7 +151,7 @@ test('ChatPage retains one live artifact and conversation across responsive layo
     }
     response.end(`<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><style>${styles.css}
       ${bundle.outputFiles.find(file=>file.path.endsWith('.css'))?.text || ''}
-      :root{--color-primary:#22d3ee;--color-primary-rgb:34,211,238;--color-primary-light-rgb:103,232,249;--shell-header-height:3.5rem}
+      :root{--color-primary:#346849;--color-primary-rgb:52,104,73;--color-primary-light:#569263;--color-primary-light-rgb:86,146,99;--shell-header-height:3.5rem}
       body{margin:0;background:#08111f;color:white;font:16px Arial}button{padding:8px}textarea{display:block;width:100%;background:white;color:#111}
     </style><div id="root"></div><script type="module" src="/fixture.js"></script>`);
   });
@@ -212,14 +220,65 @@ test('ChatPage retains one live artifact and conversation across responsive layo
       console.error('Failed to capture first-resize diagnostics:',diagnosticError);
     }
   };
-  await expect(page.getByLabel('Message',{exact:true})).toBeVisible();
-  await page.getByLabel('Message',{exact:true}).fill('Keep this unsent draft');
-  await expect(page.locator('iframe')).toHaveCount(0);
-  await page.getByRole('button',{name:'Open artifact',exact:true}).click();
-  await expectState({layoutMode:'split',isSidePanelOpen:true});
+  const canvasTitle = page.getByRole('heading',{name:'Artifact',exact:true});
+  const canvasLogo = page.getByRole('img',{name:'Orchard Kitchen logo'});
+  await t.test('a new desktop workflow shows an empty branded canvas alongside the conversation',async()=>{
+    const composer = page.getByLabel('Message',{exact:true});
+    await expect(composer).toBeVisible();
+    await expect(canvasTitle).toBeVisible();
+    await expect(page.getByText('Canvas Output',{exact:true})).toBeVisible();
+    await expect(canvasLogo).toHaveAttribute('src','/orchard-mark.svg');
+    await expect.poll(()=>canvasLogo.evaluate(img=>img.complete && img.naturalWidth>0)).toBe(true);
+    const emptyChrome = await canvasLogo.evaluate(img=>{
+      const scroller = img.closest('.my-scroll1');
+      const area = scroller.getBoundingClientRect();
+      const logo = img.getBoundingClientRect();
+      const originalScrollbar = getComputedStyle(scroller).scrollbarColor;
+      scroller.style.setProperty('--color-primary-light','#af275e');
+      const recoloredScrollbar = getComputedStyle(scroller).scrollbarColor;
+      scroller.style.removeProperty('--color-primary-light');
+      return {
+        horizontalOffset:Math.abs((logo.left + logo.width/2) - (area.left + area.width/2)),
+        verticalOffset:Math.abs((logo.top + logo.height/2) - (area.top + area.height/2)),
+        originalScrollbar,recoloredScrollbar,
+      };
+    });
+    assert.ok(emptyChrome.horizontalOffset < 12 && emptyChrome.verticalOffset < 12,'empty canvas centers the app logo');
+    assert.notEqual(emptyChrome.originalScrollbar,emptyChrome.recoloredScrollbar,'scrollbar thumb tracks the app palette');
+    const conversation = await page.locator('.chat-pane-transition').boundingBox();
+    const canvas = await page.locator('.artifact-panel').boundingBox();
+    assert.ok(canvas.x >= conversation.x + conversation.width - 2,'separate horizontal panes');
+    assert.ok(Math.abs(conversation.width - canvas.width) < 12,'equally sized panes');
+    assert.ok(Math.abs(conversation.y - canvas.y) < 5,'aligned top edges');
+    assert.ok(Math.min(conversation.height,canvas.height) > page.viewportSize().height * .75,'tall work area');
+    await composer.fill('Keep this unsent draft');
+    await expect(page.locator('iframe')).toHaveCount(0);
+  });
+  await t.test('a new mobile workflow opens on the composer and can reveal the empty canvas',async()=>{
+    const phone = await browser.newPage({viewport:{width:390,height:844}});
+    try {
+      await phone.goto(page.url());
+      await expect.poll(()=>phone.evaluate(()=>window.testState?.isMobileView)).toBe(true);
+      const composer = phone.getByRole('textbox',{name:'Message'});
+      const heading = phone.getByRole('heading',{name:'Artifact',exact:true});
+      await expect(composer).toBeVisible();
+      await expect(heading).toHaveCount(0);
+      await phone.evaluate(()=>window.toggleTestArtifact());
+      await expect(heading).toBeVisible();
+      await expect(phone.getByRole('img',{name:'Orchard Kitchen logo'})).toBeVisible();
+      await phone.getByRole('button',{name:'Collapse artifact workspace'}).click();
+      await expect(composer).toBeVisible();
+      await expect(heading).toHaveCount(0);
+    } finally {
+      await phone.close();
+    }
+  });
+  await page.evaluate(()=>window.deliverTestArtifact());
   const frame = page.frameLocator('iframe[title="Live app preview"]');
   try {
     await expect(frame.getByRole('button',{name:'Add item',exact:true})).toBeVisible();
+    await expect(canvasTitle).toBeVisible();
+    await expect(canvasLogo).toHaveCount(0);
     await frame.getByRole('button',{name:'Add item',exact:true}).click();
     await frame.getByLabel('Preview note').fill('Keep this app state');
     await expect(frame.getByRole('button',{name:'Item added',exact:true})).toBeVisible();
@@ -408,6 +467,7 @@ test('ChatPage retains one live artifact and conversation across responsive layo
     await page.evaluate(()=>window.setTestConversation('ask'));
     await expectState({conversationMode:'ask',layoutMode:'full',isSidePanelOpen:false});
     await expect(page.getByText('Saved conversations',{exact:true})).toBeVisible();
+    await expect(canvasTitle).toHaveCount(0);
     await expect(page.locator('iframe')).toBeHidden();
     await resize({width:390,height:900});
     await expect(page.locator('textarea')).toHaveValue('Keep this unsent draft');

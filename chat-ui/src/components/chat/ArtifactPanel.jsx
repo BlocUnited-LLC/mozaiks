@@ -13,7 +13,7 @@ const ArtifactPanel = ({
   isMobile = false,
   isEmbedded = false,
   messages = [],
-  workflowName = null,
+  ToolRenderer = UIToolRenderer,
   viewMode = false,
   onExitView = null,
   onExpand = null,
@@ -54,13 +54,6 @@ const ArtifactPanel = ({
     return typeof type === 'string' && type.startsWith('core.');
   };
 
-  const emptyStateTitle = workflowName
-    ? workflowName.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ')
-    : 'Results';
-  const emptyStateMessage = isViewSurface
-    ? 'There are no saved results to display.'
-    : 'Follow progress in the chat. Your results will appear here when they’re ready.';
-
   const loadingSurface = (
     <ArtifactLoadingState
       chatTheme={chatTheme}
@@ -79,43 +72,32 @@ const ArtifactPanel = ({
 
       {/* Panel Content */}
       <div className={contentClasses} style={{ overflow: 'clip', width: '100%' }}>
-        {hasMessages && (viewMode ? onExitView : onExpand) && (
-          <div className="flex justify-end border-b border-white/10 px-3 py-2">
+        <header className="workflow-canvas-header chat-header-backdrop">
+          <span className="workflow-canvas-icon" aria-hidden="true">🎨</span>
+          <div className="min-w-0 flex-1">
+            <h2 className="heading-font">Artifact</h2>
+            <span>Canvas Output</span>
+          </div>
+          {(viewMode ? onExitView : hasMessages && onExpand) && (
             <button type="button" onClick={viewMode ? onExitView : onExpand}
-              className="rounded-lg border border-white/20 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/10">
+              className="workflow-canvas-action">
               {viewMode ? 'Return to chat' : 'Expand artifact'}
             </button>
-          </div>
-        )}
+          )}
+        </header>
         {/* Artifact Content Area - match chat scroll treatment */}
         <div className="flex-1 min-h-0 relative overflow-hidden" role="region" aria-label="Artifact output stream">
-          <div className="absolute inset-0 pointer-events-none bg-[rgba(0,0,0,0.45)] z-0" />
+          <div className="absolute inset-0 pointer-events-none workflow-canvas-backdrop z-0" />
 
           <div className={`absolute inset-0 overflow-y-auto ${scrollPaddingClass} my-scroll1 z-10 h-full flex flex-col`}>
             {/* Empty artifacts retain the app identity. */}
             {showLoadingState && !hasMessages ? (
               loadingSurface
             ) : (!messages || messages.length === 0) ? (
-              <div className="flex flex-1 items-center justify-center min-h-full md:min-h-[500px]">
-                <div className="max-w-md w-full rounded-3xl border border-[rgba(var(--color-primary-light-rgb),0.28)] bg-[rgba(6,11,25,0.72)] shadow-[0_24px_60px_rgba(2,6,23,0.55)] backdrop-blur-xl px-6 py-8 sm:px-8 sm:py-10 text-center">
-                  <div className="mx-auto mb-5 w-24 h-24 sm:w-28 sm:h-28 bg-gradient-to-br from-[var(--color-primary)]/20 to-[var(--color-secondary)]/20 rounded-2xl sm:rounded-3xl border-2 border-[var(--color-primary-light)]/45 flex items-center justify-center backdrop-blur-sm shadow-2xl">
-                    <img
-                      src={brandLogoSrc}
-                      alt={`${chatTheme?.branding?.name || 'App'} logo`}
-                      className="w-16 h-16 sm:w-20 sm:h-20"
-                      onError={event => applyBrandImageFallback(event, getBrandLogoSrc({ branding: { name: chatTheme?.branding?.name } }))}
-                    />
-                  </div>
-                  <div className="text-[11px] uppercase tracking-[0.28em] text-[rgba(var(--color-primary-light-rgb),0.72)] mb-3 heading-font">
-                    {emptyStateTitle}
-                  </div>
-                  <div className="text-lg sm:text-xl font-semibold text-white mb-2 heading-font">
-                    No results to show yet
-                  </div>
-                  <div className="text-sm sm:text-base text-[rgba(226,232,240,0.78)] leading-6">
-                    {emptyStateMessage}
-                  </div>
-                </div>
+              <div className="workflow-canvas-empty">
+                <img src={brandLogoSrc} alt={`${chatTheme?.branding?.name || 'App'} logo`}
+                  onError={event => applyBrandImageFallback(event, getBrandLogoSrc({ branding: { name: chatTheme?.branding?.name } }))} />
+                <span className="sr-only">Workflow output will appear here.</span>
               </div>
             ) : (
               <div className={contentStackClass}>
@@ -146,14 +128,14 @@ const ArtifactPanel = ({
                       : 'app-ui-component';
                     return (
                       <div key={artifactRenderKey(m.toolCall, m.id || idx)} className={wrapperClass}>
-                        <UIToolRenderer
+                        <ToolRenderer
                           event={m.toolCall}
                           onResponse={m.toolCall.onResponse}
                           onArtifactAction={onArtifactAction}
                           actionStatusMap={actionStatusMap}
                           className={rendererClass}
                         />
-                        {!isCoreArtifact && (
+                        {!isCoreArtifact && m.toolCall.response_available !== false && (
                           <ArtifactActionsBar
                             actions={actions}
                             artifactPayload={payload}
