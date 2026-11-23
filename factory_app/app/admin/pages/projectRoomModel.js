@@ -155,11 +155,17 @@ function activeChat(app) {
 /**
  * Where the app's build stands.
  *
- * kind: `not_started` (nothing saved and no build conversation), `in_progress`,
- * `built` (the current app version passed its checks) or `failed` (the newest
- * app version did not pass its checks).
+ * The app's lifecycle state (the one My Apps shows) wins when it says the
+ * build waits on the owner: `needs_change` (lifecycle `needs_revision`) and
+ * `ready_for_review` (lifecycle `review`). Otherwise the saved documents
+ * decide: `not_started` (nothing saved and no build conversation),
+ * `in_progress`, `built` (the current app version passed its checks) or
+ * `failed` (the newest app version did not pass its checks).
  */
 export function projectStatus({ versions: rows = [], app = null } = {}) {
+  const lifecycle = lifecycleOf(app)
+  if (lifecycle === 'needs_revision') return { kind: 'needs_change', nextStep: null, date: null }
+  if (lifecycle === 'review') return { kind: 'ready_for_review', nextStep: null, date: null }
   const versions = projectVersions(rows)
   const appVersions = versionsOf(versions, 'app_bundle')
   const newestApp = appVersions[0] || null
@@ -191,6 +197,10 @@ export function projectStatusSentence(status, formatDate = (value) => String(val
       return status.date ? `Built. Last updated ${formatDate(status.date)}.` : 'Built.'
     case 'failed':
       return "The last build didn't pass its checks."
+    case 'needs_change':
+      return 'Needs a change before the build can continue.'
+    case 'ready_for_review':
+      return 'Ready for your review.'
     default:
       return `${status?.firstBuild === false ? 'Build' : 'First build'} in progress. Next step: ${status?.nextStep || 'review the app'}.`
   }
@@ -228,6 +238,18 @@ export function projectAction({ status, app = null, appId = null } = {}) {
   if (status?.kind === 'failed') {
     return { type: 'link', label: 'See what failed', href: reviewHref(routeAppId) }
   }
+  if (status?.kind === 'ready_for_review') {
+    // A saved build waiting for review is reviewed on the build review page,
+    // as My Apps routes it, even when its generation chat is still recorded.
+    if (text(run.artifact_version_id)) return { type: 'link', label: 'Review the app', href: reviewHref(routeAppId) }
+    if (resume) return { type: 'link', label: 'Review the app', href: resume }
+    return { type: 'none', label: 'Review the app', reason: 'This app has no saved build to review yet.' }
+  }
+  if (status?.kind === 'needs_change') {
+    if (resume) return { type: 'link', label: 'Continue build', href: resume }
+    if (text(run.artifact_version_id)) return { type: 'link', label: 'Continue build', href: reviewHref(routeAppId) }
+    return { type: 'none', label: 'Continue build', reason: 'This app has no build conversation to reopen.' }
+  }
   if (status?.kind === 'built') {
     if (buildRegistryId && (activeChat(app) || (REVIEW_STATES.has(lifecycle) && text(run.artifact_version_id)))) {
       return { type: 'start', label: 'Make a change', workflowId: 'AppReview', buildRegistryId }
@@ -236,11 +258,6 @@ export function projectAction({ status, app = null, appId = null } = {}) {
   }
 
   const label = status?.kind === 'not_started' ? 'Start build' : 'Continue build'
-  // A saved build waiting for review is reviewed on the build review page,
-  // as My Apps routes it, even when its generation chat is still recorded.
-  if (lifecycle === 'review' && text(run.artifact_version_id)) {
-    return { type: 'link', label, href: reviewHref(routeAppId) }
-  }
   if (resume) return { type: 'link', label, href: resume }
   if (lifecycle === 'draft' && buildRegistryId) {
     return { type: 'start', label, workflowId: 'ValueEngine', buildRegistryId }

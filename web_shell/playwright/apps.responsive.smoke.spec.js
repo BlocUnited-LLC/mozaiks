@@ -2123,8 +2123,18 @@ test('app project route stays responsive across desktop and mobile widths', asyn
   const main = page.locator('main');
 
   await expect(main.getByRole('heading', { name: 'Project', exact: true })).toBeVisible();
-  // The current app version passed its checks: built, with one button.
+  // The fixture app needs a revision: the lifecycle My Apps shows wins over document steps.
+  await expect(main.getByText('Needs a change before the build can continue.')).toBeVisible();
+  await expect(main.getByRole('link', { name: 'Continue build', exact: true })).toHaveAttribute(
+    'href', '/chat?workflow=AppGenerator&mode=workflow&chat_id=campaign-revision-chat&app_id=factory-session-app',
+  );
+
+  // Once live, the current app version passed its checks: built, with one button.
+  const live = { ...appsPayload.apps[0], status: 'active', current_build_run: { artifact_version_id: 'ver-17' } };
+  await page.route('**/api/studio/apps', (route) => route.fulfill({ json: { apps: [live, ...appsPayload.apps.slice(1)], metrics: {} } }));
+  await page.reload();
   await expect(main.getByText(/^Built\. Last updated /)).toBeVisible();
+  await expect(main.getByRole('list', { name: 'Build steps' }).getByRole('listitem')).toHaveCount(6);
   // The old Building panels read a record nothing writes; none remain.
   for (const removed of ['Build state', 'Build versions', 'Approvals', 'Build requests']) {
     await expect(main.getByRole('heading', { name: removed, exact: true })).toHaveCount(0);

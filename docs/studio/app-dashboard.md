@@ -75,11 +75,14 @@ One page per app, in plain language and read-only:
 - **Status and one button.** "This app's build hasn't started." (Start build),
   "First build in progress. Next step: …" (Continue build), "Built. Last
   updated …" (Make a change), or "The last build didn't pass its checks." (See
-  what failed, which opens the build review page). The button opens this app's
+  what failed, which opens the build review page). When the app's status (the
+  one My Apps shows) is Needs Revision or Review, the page says so instead:
+  "Needs a change before the build can continue." (Continue build) or "Ready
+  for your review." (Review the app). The button opens this app's
   build conversation, the build review page, or starts the app's build on the
   server. If the server records no build conversation to reopen, the page says
   so.
-- **Build steps** in build order: Idea, Look & feel, Design, Plans & pricing,
+- **Build steps**, below the status in the same card, in build order: Idea, Look & feel, Design, Plans & pricing,
   AI workflows, App. A step is done once its document has a current version.
 - **Documents.** A card for the latest version of each saved document: Idea &
   value, Look & feel, Design, Plans & pricing, AI workflows, App, and for an

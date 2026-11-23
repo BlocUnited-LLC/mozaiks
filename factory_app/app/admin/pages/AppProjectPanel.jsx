@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import { ProgressTracker } from '@mozaiks/chat-ui/ui'
 import {
   LinkButton,
-  Panel,
   StatusPill,
   StudioInlineEmptyState,
   StudioLoadingState,
@@ -57,29 +55,70 @@ function useProjectVersions(buildRegistryId, dataMode, demoVersions) {
   return { loading: state.key !== key, ...state }
 }
 
-function StatusCard({ status, action }) {
+const STEP_MARKS = {
+  done: { icon: '✓', ring: 'border-success/60 bg-success/10 text-success', text: 'text-foreground' },
+  next: { icon: '→', ring: 'border-primary/70 bg-primary/10 text-primary', text: 'text-foreground' },
+  not_started: { icon: '', ring: 'border-border bg-muted/40 text-muted-foreground', text: 'text-muted-foreground' },
+}
+
+/** A short step date: "Sep 15", with the year only when it is not this year. */
+function formatStepDay(value) {
+  if (!value) return ''
+  try {
+    const date = new Date(value)
+    const sameYear = date.getFullYear() === new Date().getFullYear()
+    return new Intl.DateTimeFormat(undefined, sameYear
+      ? { month: 'short', day: 'numeric' }
+      : { month: 'short', day: 'numeric', year: 'numeric' }).format(date)
+  } catch {
+    return ''
+  }
+}
+
+function stepDetail(step) {
+  if (step.state === 'done') return `Done${step.date ? ` · ${formatStepDay(step.date)}` : ''}`
+  return step.state === 'next' ? 'Next' : 'Not started'
+}
+
+/** The build steps in order, across the card: one row on wide screens, wrapping on narrow ones. */
+function StepStrip({ steps }) {
   return (
-    <SurfaceCard accent>
-      <p className="text-lg font-semibold leading-7 text-foreground">{projectStatusSentence(status, formatDay)}</p>
-      <div className="mt-4">
-        <ProjectBuildButton action={action} />
-      </div>
-    </SurfaceCard>
+    <ol aria-label="Build steps" className="grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3 lg:grid-cols-6">
+      {steps.map((step) => {
+        const mark = STEP_MARKS[step.state] || STEP_MARKS.not_started
+        return (
+          <li key={step.family} className="flex min-w-0 items-start gap-2" aria-current={step.state === 'next' ? 'step' : undefined}>
+            <span
+              aria-hidden="true"
+              className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-bold ${mark.ring}`}
+            >
+              {mark.icon}
+            </span>
+            <span className="min-w-0">
+              <span className={`block text-sm font-semibold leading-5 ${mark.text}`}>{step.label}</span>
+              <span className="block text-xs leading-5 text-muted-foreground">{stepDetail(step)}</span>
+            </span>
+          </li>
+        )
+      })}
+    </ol>
   )
 }
 
-function StepList({ steps }) {
-  const stages = steps.map((step) => ({
-    label: step.label,
-    status: step.state === 'done' ? 'done' : step.state === 'next' ? 'active' : 'pending',
-    description: step.state === 'done'
-      ? `Done${step.date ? ` · ${formatDay(step.date)}` : ''}`
-      : step.state === 'next' ? 'Next' : 'Not started',
-  }))
+/** One top section: where the build stands, its one button, then the steps. */
+function StatusSection({ status, action, steps }) {
   return (
-    <Panel title="Build steps">
-      <ProgressTracker id="project-build-steps" stages={stages} />
-    </Panel>
+    <SurfaceCard accent>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-lg font-semibold leading-7 text-foreground">{projectStatusSentence(status, formatDay)}</p>
+        <div className="shrink-0">
+          <ProjectBuildButton action={action} />
+        </div>
+      </div>
+      <div className="mt-5 border-t border-border/50 pt-4">
+        <StepStrip steps={steps} />
+      </div>
+    </SurfaceCard>
   )
 }
 
@@ -175,10 +214,7 @@ export default function AppProjectPanel({ appId, app, buildRegistryId, dataMode,
       {error ? (
         <StudioInlineEmptyState title="Saved documents could not be loaded" description={error} />
       ) : (
-        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-          <StatusCard status={status} action={action} />
-          <StepList steps={steps} />
-        </div>
+        <StatusSection status={status} action={action} steps={steps} />
       )}
       {incomplete ? (
         <p className="text-sm text-warning">Some documents could not be loaded. Refresh to try again.</p>

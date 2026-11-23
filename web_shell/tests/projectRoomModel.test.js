@@ -126,7 +126,7 @@ test("the build run's chat wins over stale top-level chat fields", () => {
   assert.equal(action.href, "/chat?workflow=AppGenerator&mode=workflow&chat_id=run-chat&app_id=mozaiks-factory");
 });
 
-test("a passed draft app waiting for review opens the build review, not its generation chat", () => {
+test("an app in review says so and opens the build review, not its generation chat", () => {
   const app = {
     build_registry_id: "appreg_1", app_id: "draft-app-1", status: "review", chat_app_id: "mozaiks-factory",
     active_chat_id: "gen-chat", active_workflow_id: "AppGenerator",
@@ -135,10 +135,34 @@ test("a passed draft app waiting for review opens the build review, not its gene
   const versions = BUILD_STEPS.slice(0, 5).map((step) => row(step.family, 1, "current", "skipped"))
     .concat(row("app_bundle", 1, "draft", "passed"));
   const status = projectStatus({ versions, app });
-  assert.equal(projectStatusSentence(status), "First build in progress. Next step: review the app.");
+  assert.equal(status.kind, "ready_for_review");
+  assert.equal(projectStatusSentence(status), "Ready for your review.");
   assert.deepEqual(projectAction({ status, app, appId: "draft-app-1" }), {
-    type: "link", label: "Continue build", href: "/apps/draft-app-1/activity",
+    type: "link", label: "Review the app", href: "/apps/draft-app-1/activity",
   });
+  // Without a saved build the recorded chat is the only way back.
+  const noBuild = { ...app, current_build_run: {} };
+  assert.equal(projectAction({ status, app: noBuild }).href, "/chat?workflow=AppGenerator&mode=workflow&chat_id=gen-chat&app_id=mozaiks-factory");
+});
+
+test("the lifecycle state My Apps shows wins over the next document step", () => {
+  const versions = BUILD_STEPS.slice(0, 5).map((step) => row(step.family, 1, "current", "skipped"));
+  const app = { ...buildingApp, status: "needs_revision", active_workflow_id: "AppGenerator" };
+  const status = projectStatus({ versions, app });
+  assert.equal(status.kind, "needs_change");
+  assert.equal(projectStatusSentence(status), "Needs a change before the build can continue.");
+  assert.deepEqual(projectAction({ status, app, appId: "draft-app-1" }), {
+    type: "link", label: "Continue build",
+    href: "/chat?workflow=AppGenerator&mode=workflow&chat_id=chat-1&app_id=mozaiks-factory",
+  });
+  // A failed or passed app version does not hide a requested revision either.
+  for (const validation of ["failed", "passed"]) {
+    const withApp = versions.concat(row("app_bundle", 2, validation === "passed" ? "current" : "draft", validation));
+    assert.equal(projectStatus({ versions: withApp, app }).kind, "needs_change");
+  }
+  // lifecycle_state (the overview record) is read the same way as status (the list entry).
+  assert.equal(projectStatus({ versions, app: { lifecycle_state: "review" } }).kind, "ready_for_review");
+  assert.equal(projectStatus({ versions, app: { ...buildingApp } }).kind, "in_progress");
 });
 
 test("a built app offers a change through the app's review chat", () => {
@@ -166,9 +190,11 @@ test("a failed newest app version points at what failed", () => {
 });
 
 test("no recorded entry is reported instead of inventing one", () => {
-  const app = { build_registry_id: "appreg_1", app_id: "draft-app-1", status: "needs_revision" };
-  const status = projectStatus({ versions: [row("concept", 1, "current", "skipped")], app });
-  assert.equal(projectAction({ status, app }).type, "none");
+  for (const lifecycle of ["needs_revision", "building"]) {
+    const app = { build_registry_id: "appreg_1", app_id: "draft-app-1", status: lifecycle };
+    const status = projectStatus({ versions: [row("concept", 1, "current", "skipped")], app });
+    assert.equal(projectAction({ status, app }).type, "none");
+  }
 });
 
 test("document content is the saved summary payload; workflow bundles show their plan", () => {
