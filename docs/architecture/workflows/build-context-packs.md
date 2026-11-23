@@ -740,6 +740,21 @@ pack's own routes names a component nothing registers. `verify` reports the
 pack's own routes and references to its modules. An app reference that was
 already unresolved does not block a pack.
 
+The resulting app is checked before anything is written, and a plan blocks only
+on what it introduces:
+
+| Conflict | Meaning |
+| --- | --- |
+| `route_path_conflict` | Two pages claim one path on one surface: route manifest, `ui/pages` schemas, workflow entrypoints, admin pages and the shell's profile pages. A pack may route its own admin page. |
+| `app_contract_error` | A new error from the shared app contract and functional checks, such as a page that calls a module action the upgrade removes. |
+| `invalid_module` | The runtime would refuse to load one of the pack's modules. Its declarations are read with the runtime's own rules and its handler source is parsed; no pack code runs. |
+
+A handler method counts as missing only where the module's own source shows the
+whole handler class. The full generated-bundle scan is not used here: it also
+enforces which files generation may write. Errors the app already had do not
+block a pack. `verify` reports these findings for the pack's own modules and
+routes.
+
 Bundle validation resolves a route's component the same way. Module page sources
 are `modules/<module_id>/ui/<Component>.jsx` beside the barrel; a component no
 barrel exports stays unresolved.

@@ -1751,7 +1751,14 @@ def _page_pack(tmp_path: Path, name: str, *, module: str | None = None, componen
     module = module or name
     (templates / "modules" / module / "ui").mkdir(parents=True, exist_ok=True)
     (templates / "ui").mkdir()
-    (templates / "modules" / module / "module.yaml").write_text(f"module:\n  id: {module}\n", encoding="utf-8")
+    (templates / "modules" / module / "module.yaml").write_text(
+        "schema_version: mozaiks.module.v1\n"
+        f"module:\n  id: {module}\n  display_name: {module}\n  version: 1.0.0\n  description: Pages of {module}.\n"
+        "  handler: backend.handler:PageHandler\n",
+        encoding="utf-8",
+    )
+    (templates / "modules" / module / "backend").mkdir()
+    (templates / "modules" / module / "backend/handler.py").write_text("class PageHandler:\n    pass\n", encoding="utf-8")
     (templates / "modules" / module / "ui/index.js").write_text(
         "export { default as DashboardPage } from './DashboardPage.jsx';\n", encoding="utf-8",
     )
@@ -1985,3 +1992,256 @@ def test_a_generator_pack_upgrade_cannot_orphan_a_component_reference(tmp_path):
     assert _tree(tmp_path / "shop") == before
     renamed.write_text("export const HelloPanel = () => null;\n", encoding="utf-8")
     assert apply_workspace_upgrade(source=PackSource(directory=candidate), roots=roots).status == "applied"
+
+
+# --------------------------------------------------------------------------------------
+# The resulting app: routes, action references and module declarations
+# --------------------------------------------------------------------------------------
+
+
+def _schema_page(roots, name: str, route: str, endpoint: str | None = None) -> None:
+    page = {
+        "schema_version": "mozaiks.page.v1", "name": name, "route": route, "title": name, "page_type": "record_list",
+        "sections": [{"id": "rows", "primitive": "DataTable", "config": {"api_endpoint": endpoint}}] if endpoint else [],
+    }
+    target = roots.app_root / "ui/pages" / f"{name}.yaml"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(yaml.safe_dump(page), encoding="utf-8")
+
+
+def _entrypoint(roots, path: str) -> None:
+    registry = roots.workflows_root / "extended_orchestration/extension_registry.json"
+    document = json.loads(registry.read_text(encoding="utf-8"))
+    document["workflows"] = [{"id": "Own"}]
+    document["entrypoints"] = [{"id": "own", "path": path, "workflow": "Own"}]
+    registry.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    (roots.workflows_root / "Own").mkdir()
+    (roots.workflows_root / "Own/orchestrator.yaml").write_text("workflow_name: Own\n", encoding="utf-8")
+
+
+def _route_conflicts(plan) -> list[tuple[str, str]]:
+    return [(row["kind"], row["key"]) for row in plan.conflicts if row["kind"] == "route_path_conflict"]
+
+
+@pytest.mark.parametrize("owner", ["page-schema", "page-schema-folder", "workflow-entrypoint", "admin-page", "profile"])
+def test_a_library_route_cannot_take_a_path_the_shell_already_serves(tmp_path, owner):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    path = "/stock"
+    if owner == "page-schema":
+        _schema_page(roots, "stockroom", path)
+    elif owner == "page-schema-folder":
+        folder = roots.app_root / "ui/pages/stockroom"
+        folder.mkdir(parents=True)
+        (folder / "page.yaml").write_text("name: stockroom\nroute: /stock\n", encoding="utf-8")
+    elif owner == "workflow-entrypoint":
+        _entrypoint(roots, path)
+    else:
+        path = "/admin/orders_admin" if owner == "admin-page" else "/me"
+        _edit(pack / "templates/ui/route_manifest.json", '"/stock"', f'"{path}"')
+    before = _tree(tmp_path / "shop")
+    plan = plan_component_install(source=PackSource(directory=pack), roots=roots)
+    assert _route_conflicts(plan) == [("route_path_conflict", path)]
+    assert len(plan.conflicts) == 1
+    with pytest.raises(CommunityComponentConflictError):
+        apply_component_install(source=PackSource(directory=pack), roots=roots)
+    assert _tree(tmp_path / "shop") == before
+
+
+def test_a_library_entrypoint_cannot_take_an_app_path(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    registry = pack / "workflows/extended_orchestration/extension_registry.json"
+    document = json.loads(registry.read_text(encoding="utf-8"))
+    document["entrypoints"] = [{"id": "review", "path": "/", "workflow": "StockReview"}]
+    registry.write_text(json.dumps(document), encoding="utf-8")
+    plan = plan_component_install(source=PackSource(directory=pack), roots=roots)
+    assert _route_conflicts(plan) == [("route_path_conflict", "/")]
+
+
+def test_route_collisions_the_plan_does_not_introduce_do_not_block(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    # The app already serves one path twice, and the library page is on another surface than the app page.
+    _schema_page(roots, "first", "/twice")
+    _schema_page(roots, "second", "/twice")
+    _edit(
+        roots.app_root / "ui/route_manifest.json", '{ "id": "home"',
+        '{"id": "mine", "path": "/stock", "component": "HomePage", "meta": {"surfaces": ["studio"]}},\n        { "id": "home"',
+    )
+    pack = _pack(tmp_path)
+    _edit(pack / "templates/ui/route_manifest.json", '"requiresAuth": true', '"meta": {"surfaces": ["platform"]}')
+    # A library may give its own admin page a custom route.
+    _edit(pack / "templates/ui/route_manifest.json", '"path": "/stock"', '"path": "/stock", "order": 3')
+    assert apply_component_install(source=PackSource(directory=pack), roots=roots).status == "applied"
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+    _schema_page(roots, "third", "/stock")
+    [report] = verify_installed_components(roots=roots)["packs"]
+    assert [(row["kind"], row["key"]) for row in report["findings"]] == [("route_path_conflict", "/stock")]
+
+
+def test_a_manifest_entry_for_a_schema_page_is_the_same_page(tmp_path):
+    # The shipped example apps list their schema pages in the manifest too.
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    source = pack / "templates/ui/route_manifest.json"
+    document = json.loads(source.read_text(encoding="utf-8"))
+    document["pages"].append({"id": "stockroom", "path": "/stockroom", "component": "SchemaPage", "schema": "stockroom"})
+    source.write_text(json.dumps(document), encoding="utf-8")
+    page = pack / "templates/ui/pages/stockroom.yaml"
+    page.parent.mkdir(parents=True)
+    page.write_text(yaml.safe_dump({
+        "schema_version": "mozaiks.page.v1", "name": "stockroom", "route": "/stockroom", "title": "Stockroom",
+        "page_type": "record_list", "sections": [],
+    }), encoding="utf-8")
+    assert _route_conflicts(plan_component_install(source=PackSource(directory=pack), roots=roots)) == []
+    _schema_page(roots, "other", "/stockroom")
+    assert _route_conflicts(plan_component_install(source=PackSource(directory=pack), roots=roots)) == [
+        ("route_path_conflict", "/stockroom"),
+    ]
+
+
+def test_a_library_may_route_its_own_admin_page(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    registry = yaml.safe_load((pack / "templates/admin/admin_registry.yaml").read_text(encoding="utf-8"))
+    path = registry["pages"][0]["path"]
+    _edit(pack / "templates/ui/route_manifest.json", '"/stock"', f'"{path}"')
+    assert plan_component_install(source=PackSource(directory=pack), roots=roots).conflicts == []
+
+
+@pytest.mark.parametrize("manifest", [True, False], ids=["existing-manifest", "missing-manifest"])
+def test_two_library_pages_cannot_share_a_path(tmp_path, manifest):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    source = pack / "templates/ui/route_manifest.json"
+    document = json.loads(source.read_text(encoding="utf-8"))
+    document["pages"].append({**document["pages"][0], "id": "stock-again", "title": "Again"})
+    source.write_text(json.dumps(document), encoding="utf-8")
+    if not manifest:
+        (roots.app_root / "ui/route_manifest.json").unlink()
+    before = _tree(tmp_path / "shop")
+    plan = plan_component_install(source=PackSource(directory=pack), roots=roots)
+    assert _route_conflicts(plan) == [("route_path_conflict", "/stock")]
+    with pytest.raises(CommunityComponentConflictError):
+        apply_component_install(source=PackSource(directory=pack), roots=roots)
+    assert _tree(tmp_path / "shop") == before
+
+
+def _renamed_action(tmp_path: Path) -> Path:
+    pack = _version_two(tmp_path)
+    _edit(pack / "templates/modules/stock_ledger/module.yaml", "  - id: list_items\n", "  - id: list_new_items\n")
+    return pack
+
+
+@pytest.mark.parametrize("reference", ["page", "page-source"])
+def test_an_upgrade_cannot_remove_an_action_the_app_uses(tmp_path, reference):
+    roots = _install(tmp_path)
+    if reference == "page":
+        _schema_page(roots, "stockroom", "/stockroom", "/api/modules/stock_ledger/list_items")
+    else:
+        page = roots.app_root / "ui/pages/custom/stock.jsx"
+        page.parent.mkdir(parents=True)
+        page.write_text("export default () => moduleAction('stock_ledger', 'list_items');\n", encoding="utf-8")
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+    candidate = _renamed_action(tmp_path)
+    before = _tree(tmp_path / "shop")
+    plan = plan_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+    assert plan.status == "blocked"
+    assert {row["kind"] for row in plan.conflicts} == {"app_contract_error"}
+    assert any("list_items" in row["detail"] for row in plan.conflicts)
+    with pytest.raises(CommunityComponentConflictError):
+        apply_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+    assert _tree(tmp_path / "shop") == before
+
+
+def test_verify_reports_an_app_page_that_names_a_missing_library_action(tmp_path):
+    roots = _install(tmp_path)
+    _schema_page(roots, "stockroom", "/stockroom", "/api/modules/stock_ledger/gone")
+    [report] = verify_installed_components(roots=roots)["packs"]
+    assert {row["kind"] for row in report["findings"]} == {"app_contract_error"}
+
+
+def test_errors_the_app_already_has_do_not_block_a_library(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    # A dangling module, a dangling future library action, and an invalid route all predate the library.
+    _schema_page(roots, "broken", "/broken", "/api/modules/nowhere/nothing")
+    _schema_page(roots, "early", "/early", "/api/modules/stock_ledger/not_yet")
+    _edit(roots.app_root / "ui/route_manifest.json", '{ "id": "home"', '{"id": "bad", "path": "bad"},\n        { "id": "home"')
+    own = roots.app_root / "modules/own/module.yaml"
+    own.parent.mkdir(parents=True)
+    own.write_text("module:\n  id: own\n  handler: backend.handler:Missing\nactions:\n  - id: go\n    handler_method: go\n", encoding="utf-8")
+    assert plan_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots).conflicts == []
+    apply_component_install(source=PackSource(directory=_pack(tmp_path, "again")), roots=roots)
+    assert plan_workspace_upgrade(source=PackSource(directory=_version_two(tmp_path)), roots=roots).conflicts == []
+
+
+HANDLER = "modules/stock_ledger/backend/handler.py"
+MODULE = "modules/stock_ledger/module.yaml"
+INVALID_MODULES = {
+    "missing-method": (MODULE, "handler_method: list_items", "handler_method: missing_method"),
+    "missing-class": (MODULE, "backend.handler:StockLedgerHandler", "backend.handler:OtherHandler"),
+    "missing-file": (MODULE, "backend.handler:StockLedgerHandler", "backend.other:StockLedgerHandler"),
+    "module-id": (MODULE, "  id: stock_ledger\n", "  id: other_ledger\n"),
+    "unknown-field": (MODULE, "actions:\n", "unknown_block: true\nactions:\n"),
+    "undeclared-event": (MODULE, "    handler_method: list_items\n", "    handler_method: list_items\n    emits: [stock.listed]\n"),
+    "account-data": (MODULE, "  version: 1.0.0\n", "  version: 1.0.0\n  user_data_scope: true\n"),
+    "companion": ("modules/stock_ledger/contracts/settings.yaml", None, "settings: 3\n"),
+}
+
+
+@pytest.mark.parametrize("operation", ["install", "upgrade"])
+@pytest.mark.parametrize("fault", INVALID_MODULES)
+def test_a_module_the_runtime_would_not_load_is_refused(tmp_path, operation, fault):
+    path, old, new = INVALID_MODULES[fault]
+    if operation == "upgrade":
+        roots, pack = _install(tmp_path), _version_two(tmp_path)
+        plan_for, apply = plan_workspace_upgrade, apply_workspace_upgrade
+    else:
+        roots, pack = _ordinary_app(tmp_path / "shop"), _pack(tmp_path)
+        plan_for, apply = plan_component_install, apply_component_install
+    target = pack / "templates" / path
+    if old is None:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(new, encoding="utf-8")
+    else:
+        _edit(target, old, new)
+    before = _tree(tmp_path / "shop")
+    plan = plan_for(source=PackSource(directory=pack), roots=roots)
+    assert plan.status == "blocked"
+    assert {row["kind"] for row in plan.conflicts} <= {"invalid_module", "app_contract_error"}
+    with pytest.raises(CommunityComponentConflictError):
+        apply(source=PackSource(directory=pack), roots=roots)
+    assert _tree(tmp_path / "shop") == before
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [
+        "from mozaiksai.somewhere import Base\n\n\nclass StockLedgerHandler(Base):\n    pass\n",
+        "def _call(self, ctx, **params):\n    return {}\n\n\nclass StockLedgerHandler:\n    list_items = _call\n    record_item = _call\n",
+        "class Base:\n    def list_items(self): ...\n    def record_item(self): ...\n\n\nclass StockLedgerHandler(Base):\n    ready: bool = True\n",
+        "from .impl import Implementation as StockLedgerHandler\n",
+        "class StockLedgerHandler:\n    for name in ('list_items', 'record_item'):\n        locals()[name] = lambda self: {}\n",
+    ],
+    ids=["outside-base", "assigned", "module-base", "imported", "dynamic"],
+)
+def test_a_handler_the_source_does_not_fully_show_is_not_refused(tmp_path, handler):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    (pack / "templates" / HANDLER).write_text(handler, encoding="utf-8")
+    plan = plan_component_install(source=PackSource(directory=pack), roots=roots)
+    assert [row for row in plan.conflicts if row["kind"] in {"invalid_module", "app_contract_error"}] == []
+
+
+def test_checking_a_library_module_never_runs_its_code(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    marker = tmp_path / "ran"
+    handler = pack / "templates" / HANDLER
+    handler.write_text(f"open({str(marker)!r}, 'w').close()\n" + handler.read_text(encoding="utf-8"), encoding="utf-8")
+    path, modules = list(sys.path), set(sys.modules)
+    apply_component_install(source=PackSource(directory=pack), roots=roots)
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+    assert not marker.exists()
+    assert sys.path == path
+    assert not [name for name in set(sys.modules) - modules if name.startswith(("modules", "services", "mozaiks_runtime_module_"))]

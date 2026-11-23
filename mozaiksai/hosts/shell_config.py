@@ -190,9 +190,12 @@ def _title_from_id(value: str) -> str:
     return " ".join(part.capitalize() for part in re.split(r"[-_]+", value) if part)
 
 
+SHELL_SURFACES = ("platform", "studio", "user")
+
+
 def _normalize_shell_surface(surface: str | None) -> str:
     candidate = str(surface or "platform").strip().lower()
-    return candidate if candidate in {"platform", "studio", "user"} else "platform"
+    return candidate if candidate in SHELL_SURFACES else "platform"
 
 
 def _normalize_shell_mode(value: Any) -> str | None:
@@ -755,6 +758,57 @@ def _dedupe_and_sort_pages(pages: list[dict]) -> list[dict]:
     )
 
 
+def declared_shell_pages(app_root: Path, workflow_graph: Any = None) -> list[tuple[str, dict]]:
+    """Every page an app declares for a shell path, with its source, in ``build_shell_config`` precedence.
+
+    The shell keeps the first page of a path, so a later one with the same path
+    on the same surface is unreachable.
+    """
+    inventory: list[tuple[str, dict]] = []
+    for source, loader in (("route_manifest", _load_ui_route_manifest_pages), ("page_schema", _load_page_schema_routes)):
+        try:
+            inventory.extend((source, page) for page in loader(app_root))
+        except Exception as exc:
+            logger.warning("[shell-config] Could not read %s: %s", source, exc)
+    if workflow_graph is not None:
+        inventory.extend(("workflow_entrypoint", page) for page in _workflow_entrypoint_pages(workflow_graph))
+    inventory.extend(
+        ("shell", {key: route[key] for key in ("path", "component", "label")})
+        for route in (PROFILE_SHELL_ROUTE, PUBLIC_PROFILE_SHELL_ROUTE)
+    )
+    inventory.extend(
+        ("admin_page", {"path": route["path"], "label": route["label"], "meta": {"surfaces": route["surfaces"]}})
+        for route in build_admin_shell_routes(load_admin_registry(app_root))
+    )
+    return inventory
+
+
+def shell_path_collisions(inventory: list[tuple[str, dict]]) -> dict[str, list[str]]:
+    """Paths several declared pages claim on one surface, with a description of each page.
+
+    A manifest entry that restates a page another source declares (a schema
+    page's own route, or the shell's profile page) is that page, not a second one.
+    """
+    collisions: dict[str, list[str]] = {}
+    for surface in SHELL_SURFACES:
+        by_path: dict[str, list[str]] = {}
+        targets: dict[tuple[str, str, Any], set[str]] = {}
+        for source, page in inventory:
+            if _page_targets_surface(page, surface=surface):
+                stated_by = targets.setdefault((page["path"], str(page.get("component") or ""), page.get("schema")), set())
+                restated = bool(page.get("component")) and bool(stated_by - {source})
+                stated_by.add(source)
+                if restated:
+                    continue
+                # Position only sets a default order; it is not part of which page this is.
+                identity = {key: page[key] for key in ("label", "component", "schema", "workflow", "transition") if page.get(key)}
+                by_path.setdefault(page["path"], []).append(f"{source} {json.dumps(identity, sort_keys=True)}")
+        for path, pages in by_path.items():
+            if len(pages) > 1 and len(pages) > len(collisions.get(path, [])):
+                collisions[path] = pages
+    return collisions
+
+
 def _load_ui_route_manifest_pages(app_root: Path) -> list[dict]:
     manifest_path = (app_root / "ui" / "route_manifest.json").resolve()
     if manifest_path is None:
@@ -774,12 +828,15 @@ def _load_ui_route_manifest_pages(app_root: Path) -> list[dict]:
 
 
 def _load_workflow_entrypoint_pages(app_root: Path) -> list[dict]:
-    from mozaiksai.core.workflow.pack.config import list_entrypoints, load_global_pack_graph
+    from mozaiksai.core.workflow.pack.config import load_global_pack_graph
 
     _ = app_root
     pack = load_global_pack_graph()
-    if pack is None:
-        return []
+    return [] if pack is None else _workflow_entrypoint_pages(pack)
+
+
+def _workflow_entrypoint_pages(pack: Any) -> list[dict]:
+    from mozaiksai.core.workflow.pack.config import list_entrypoints
 
     transition_shell_modes = {
         transition.id: transition.ui.shell_mode

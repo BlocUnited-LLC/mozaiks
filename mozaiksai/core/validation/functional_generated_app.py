@@ -213,6 +213,8 @@ def _validate_action_handlers(
     files: dict[str, str],
     actions: dict[str, dict[str, Any]],
     diagnostics: list[FunctionalGeneratedAppDiagnostic],
+    *,
+    authored_code: bool = False,
 ) -> None:
     parsed_handlers: dict[str, ast.Module] = {}
 
@@ -229,6 +231,9 @@ def _validate_action_handlers(
         except SyntaxError as exc:
             diagnostics.append(_diag("INVALID_PYTHON", f"{path} must parse as Python: {exc}", path=path))
             return None
+
+    # Handler classes whose attributes the module's own source does not fully show.
+    open_classes: set[tuple[str, str]] = set()
 
     def class_methods(module_id: str, class_name: str, *, seen: set[str] | None = None) -> set[str] | None:
         seen = seen or set()
@@ -256,18 +261,40 @@ def _validate_action_handlers(
             for node in class_node.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         )
+        if authored_code:
+            for node in class_node.body:
+                if isinstance(node, ast.Assign):
+                    methods.update(target.id for target in node.targets if isinstance(target, ast.Name))
+                elif isinstance(node, ast.AnnAssign) and node.value is not None and isinstance(node.target, ast.Name):
+                    methods.add(node.target.id)
+                elif not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.AnnAssign, ast.Expr, ast.Pass)):
+                    open_classes.add((module_id, class_name))
+            if class_node.decorator_list or class_node.keywords:
+                open_classes.add((module_id, class_name))
         for base in class_node.bases:
             base_name = ""
             if isinstance(base, ast.Name):
                 base_name = base.id
             elif isinstance(base, ast.Attribute):
                 base_name = base.attr
-            if not base_name:
-                continue
-            inherited = class_methods(module_id, base_name, seen=seen)
+            inherited = class_methods(module_id, base_name, seen=seen) if base_name else None
             if inherited:
                 methods.update(inherited)
+            if (inherited is None and base_name != "object") or (module_id, base_name) in open_classes:
+                open_classes.add((module_id, class_name))
         return methods
+
+    def bound_elsewhere(handler_path: str, class_name: str) -> bool:
+        """Whether the handler file binds the class by something other than a class statement."""
+        tree = parse_backend(handler_path)
+        for node in ast.walk(tree) if tree is not None else ():
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                names = {alias.asname or alias.name for alias in node.names}
+                if class_name in names or "*" in names:
+                    return True
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == class_name:
+                return True
+        return False
 
     for action in actions.values():
         handler = action["handler"]
@@ -306,6 +333,8 @@ def _validate_action_handlers(
             continue
         methods = class_methods(module_id, class_name)
         if methods is None:
+            if authored_code and bound_elsewhere(handler_path, class_name):
+                continue
             diagnostics.append(
                 _diag(
                     "MISSING_MODULE_HANDLER",
@@ -315,6 +344,8 @@ def _validate_action_handlers(
             )
             continue
         if handler_method not in methods:
+            if authored_code and (module_id, class_name) in open_classes:
+                continue
             diagnostics.append(
                 _diag(
                     "MISSING_MODULE_ACTION",
@@ -652,18 +683,23 @@ def scan_functional_generated_app(
     capability_packs: list[dict[str, Any]] | None = None,
     inherited_components: frozenset[str] = frozenset(),
     check_placeholders: bool = True,
+    authored_code: bool = False,
 ) -> list[FunctionalGeneratedAppDiagnostic]:
     """Validate cross-artifact functional coherence for a canonical app bundle.
 
     This intentionally stays deterministic and contract-driven. It checks
     canonical manifests and generated source references, but does not attempt to
     understand arbitrary Python or JavaScript control flow.
+
+    ``authored_code`` is for handwritten modules: a handler method is missing
+    only where the module's own source shows the whole handler class, since a
+    base class or assignment outside it may provide the method at runtime.
     """
 
     safe_files = _safe_files(files)
     diagnostics: list[FunctionalGeneratedAppDiagnostic] = []
     actions = _module_action_registry(safe_files, diagnostics)
-    _validate_action_handlers(safe_files, actions, diagnostics)
+    _validate_action_handlers(safe_files, actions, diagnostics, authored_code=authored_code)
     _validate_routes(safe_files, diagnostics, inherited_components)
     refs = _collect_module_refs(safe_files, diagnostics)
     _validate_module_refs(actions, refs, diagnostics)

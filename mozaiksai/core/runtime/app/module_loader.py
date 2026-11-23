@@ -1267,6 +1267,37 @@ class ModuleLoader:
         if not module_dir.exists():
             raise ModuleLoadError(f"Module directory not found: {module_dir}")
 
+        definition, manifests, handler_path, class_name = self._read_declarations(name, module_dir)
+        handler = self._import_handler(name, module_dir, handler_path, class_name, definition)
+
+        if definition.module.user_data_scope:
+            self._register_account_data_handler(name, module_dir)
+
+        logger.info(
+            "MODULE_LOADED: %s v%s handler=%s actions=%s user_data_scope=%s",
+            name, definition.version, type(handler).__name__,
+            [a.id for a in definition.actions], definition.module.user_data_scope)
+        return LoadedModule(
+            definition=definition,
+            handler=handler,
+            path=module_dir,
+            manifests=manifests,
+        )
+
+    @classmethod
+    def validate_declarations(cls, name: str, module_dir: Path) -> ModuleDefinition:
+        """Apply every load rule that does not import the module's code; raises ``ModuleLoadError``.
+
+        Constructing a loader binds import paths to its workspace, so this reads
+        the declarations without one.
+        """
+        reader = cls.__new__(cls)
+        reader._taxonomy_advisory = False
+        return reader._read_declarations(name, module_dir)[0]
+
+    def _read_declarations(
+        self, name: str, module_dir: Path,
+    ) -> tuple[ModuleDefinition, ModuleCompanionManifests, Path, str]:
         yaml_path = module_dir / self.YAML_FILENAME
         if not yaml_path.exists():
             raise ModuleLoadError(f"module.yaml not found in {module_dir}")
@@ -1315,30 +1346,24 @@ class ModuleLoader:
                 f"handler path escapes module directory: {handler_path_rel}"
             ) from exc
 
-        handler = self._import_handler(name, module_dir, handler_path, class_name, definition)
-
         if definition.module.user_data_scope:
-            self._register_account_data_handler(name, module_dir)
+            self._account_data_handler_file(name, module_dir)
+        return definition, manifests, handler_path, class_name
 
-        logger.info(
-            "MODULE_LOADED: %s v%s handler=%s actions=%s user_data_scope=%s",
-            name, definition.version, type(handler).__name__,
-            [a.id for a in definition.actions], definition.module.user_data_scope)
-        return LoadedModule(
-            definition=definition,
-            handler=handler,
-            path=module_dir,
-            manifests=manifests,
-        )
-
-    def _register_account_data_handler(self, module_id: str, module_dir: Path) -> None:
-        """Load the declared account-data implementation in the module's package."""
+    @staticmethod
+    def _account_data_handler_file(module_id: str, module_dir: Path) -> Path:
         relative_path = "backend/account_data_handler.py"
         handler_file = module_dir / relative_path
         if not handler_file.is_file():
             raise ModuleLoadError(
                 f"modules/{module_id}/{relative_path}: required by user_data_scope=true"
             )
+        return handler_file
+
+    def _register_account_data_handler(self, module_id: str, module_dir: Path) -> None:
+        """Load the declared account-data implementation in the module's package."""
+        relative_path = "backend/account_data_handler.py"
+        handler_file = self._account_data_handler_file(module_id, module_dir)
         try:
             handler_file.resolve().relative_to(module_dir.resolve())
             package_root = f"mozaiks_runtime_module_{module_id.replace('.', '_').replace('-', '_')}"
