@@ -710,9 +710,10 @@ runtime's default-registry overlay rules, including app-owned references to
 pack workflows. Every declared workflow must also retain a source folder after
 the planned writes; the packaged-default fallback follows the runtime rules.
 Removing or renaming a referenced workflow blocks the upgrade.
-Workflow assets must supply valid orchestrator and agent declarations, including
-a declared initial agent and a `workflow_name` that matches the folder, as the
-runtime requires. An app without a workflow registry launches every
+Every workflow YAML file an asset ships is checked with the runtime's own parsers,
+context contract and transition graph compiler before anything is written. The
+orchestrator must name its folder in `workflow_name`, and `initial_agent` must be
+a declared agent or `user`. An app without a workflow registry launches every
 loaded workflow, so initial registry entries are skipped there with a warning.
 Deleting an already-owned registry remains drift and blocks an upgrade.
 
@@ -730,6 +731,14 @@ install and upgrade block with `ambiguous_module_component`, and `verify` report
 it, unless the app registers the name itself with a literal `registerComponent`
 call. References written as `<module_id>:<Export>` are never ambiguous. A pack
 whose module barrel does not resolve blocks with `invalid_module_ui_barrel`.
+Exports resolve as ECMAScript resolves them: a name two `export *` sources bind
+differently is not exported.
+
+An install or upgrade blocks with `unresolved_component_reference` when it would
+remove a component that any app declaration still names, or when one of the
+pack's own routes names a component nothing registers. `verify` reports the
+pack's own routes and references to its modules. An app reference that was
+already unresolved does not block a pack.
 
 Bundle validation resolves a route's component the same way. Module page sources
 are `modules/<module_id>/ui/<Component>.jsx` beside the barrel; a component no

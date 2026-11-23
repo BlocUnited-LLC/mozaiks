@@ -30,6 +30,7 @@ from typing import Any
 
 import yaml
 
+from mozaiksai.core.runtime.app.auth_contract import APP_AUTH_COMPONENTS
 from mozaiksai.core.runtime.app.provenance import resolve_build_timestamp
 from mozaiksai.core.semantics.portable_path import (
     PortablePathError,
@@ -50,6 +51,7 @@ from mozaiksai.core.workflow.generator_support.persistence_artifacts import (
     normalize_data_contract_indexes,
 )
 from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+    SHELL_CORE_COMPONENTS,
     module_ui_components,
     module_ui_registrations,
     registered_component_names,
@@ -76,6 +78,7 @@ from .community_component_lifecycle import (
     _component_entry_from_verified_pack,
     _ensure_dependencies_satisfied,
     _pack_id_from_context,
+    _render_pack,
     apply_component_upgrade,
     plan_component_upgrade,
 )
@@ -811,64 +814,126 @@ def _component_references(document: Any) -> set[str]:
     return named.union(*(_component_references(value) for value in document.values()))
 
 
-def _module_component_findings(
-    roots: WorkspaceRoots, writes: Mapping[Path, str | None],
-) -> tuple[dict[str, tuple[list[str], list[str]]], dict[str, str]]:
-    """Plain component names several modules export and the app uses, and module barrels that do not resolve.
+@dataclass
+class _ComponentState:
+    """How the app's component references resolve in the shell's registry."""
+
+    registered: set[str] = field(default_factory=set)
+    # The app registers some names in a way that cannot be read statically.
+    dynamic: bool = False
+    # Plain name -> the modules that export it and the declarations that use it.
+    ambiguous: dict[str, tuple[list[str], list[str]]] = field(default_factory=dict)
+    # Name no one registers -> the declarations that use it.
+    unresolved: dict[str, list[str]] = field(default_factory=dict)
+    # Module id -> why its barrel does not resolve.
+    barrel_errors: dict[str, str] = field(default_factory=dict)
+
+
+def _component_state(roots: WorkspaceRoots, writes: Mapping[Path, str | None]) -> _ComponentState:
+    """Resolve component references as the app will be after the planned writes.
 
     The shell gives a plain name to whichever module it scans first. A name the
     app registers itself is the app's, and a ``<module_id>:<Export>`` reference
     is never ambiguous.
     """
-    texts = _planned_app_texts((roots.app_root / "modules", roots.app_root / "ui"), roots, writes)
+    state = _ComponentState()
+    texts = _planned_app_texts((roots.app_root,), roots, writes)
     sources = {path: text for path, text in texts.items() if _UI_SOURCE.fullmatch(path)}
     app_components: set[str] = set()
+    calls = False
     for path, text in sources.items():
         if path.startswith("ui/") and "registerComponent" in text:
             try:
-                app_components |= registered_component_names(text, path)
+                names, dynamic = registered_component_names(text, path)
             except ValueError:
                 # A source that does not parse proves no app override.
+                state.dynamic = True
                 continue
-    components, errors = module_ui_components(sources)
-    shared = {
-        name: sorted(providers)
-        for name, providers in module_ui_registrations(components, app_components).items() if len(providers) > 1
-    }
-    references: dict[str, list[str]] = {}
-    if shared:
-        declarations = _planned_app_texts((roots.app_root,), roots, writes)
-        registry = _planned_text(_destination(roots.workflows_root, WORKFLOW_REGISTRY_PATH), writes)
-        if isinstance(registry, str):
-            declarations[f"workflows/{WORKFLOW_REGISTRY_PATH}"] = registry
-        for path, text in sorted(declarations.items()):
-            if path.endswith((".json", ".yaml", ".yml")) and any(name in text for name in shared):
-                try:
-                    document = json.loads(text) if path.endswith(".json") else yaml.safe_load(text)
-                except (ValueError, yaml.YAMLError):
-                    continue
-                for name in _component_references(document) & shared.keys():
-                    references.setdefault(name, []).append(path)
-    return {name: (shared[name], paths) for name, paths in references.items()}, errors
+            app_components |= names
+            calls = calls or bool(names) or dynamic
+            state.dynamic = state.dynamic or dynamic
+    if not calls and re.search(r"\bregister\b", sources.get("ui/index.js", "")):
+        state.dynamic = True
+    components, state.barrel_errors = module_ui_components(sources)
+    registrations = module_ui_registrations(components, app_components)
+    state.registered = {*registrations, *app_components, *SHELL_CORE_COMPONENTS, *APP_AUTH_COMPONENTS}
+    declarations = {path: text for path, text in texts.items() if path.endswith((".json", ".yaml", ".yml"))}
+    registry = _planned_text(_destination(roots.workflows_root, WORKFLOW_REGISTRY_PATH), writes)
+    if isinstance(registry, str):
+        declarations[f"workflows/{WORKFLOW_REGISTRY_PATH}"] = registry
+    for path, text in sorted(declarations.items()):
+        if "component" not in text:
+            continue
+        try:
+            document = json.loads(text) if path.endswith(".json") else yaml.safe_load(text)
+        except (ValueError, yaml.YAMLError):
+            continue
+        for name in sorted(_component_references(document)):
+            providers = registrations.get(name, {})
+            if len(providers) > 1:
+                state.ambiguous.setdefault(name, (sorted(providers), []))[1].append(path)
+            elif name not in state.registered:
+                state.unresolved.setdefault(name, []).append(path)
+    return state
 
 
 def _module_component_conflicts(
-    owned_paths: set[str], ambiguous: Mapping[str, tuple[list[str], list[str]]], errors: Mapping[str, str],
-    plan: LifecyclePlan, *, before: Mapping[str, tuple[list[str], list[str]]] | None = None,
+    owned_paths: set[str], routes: set[str], state: _ComponentState, plan: LifecyclePlan, *,
+    before: _ComponentState | None = None,
 ) -> None:
-    """Report what involves this pack's modules, or (against ``before``) what the plan introduces."""
+    """Report what involves this pack's modules and routes, or (against ``before``) what the plan breaks."""
     modules = {path.split("/")[1] for path in owned_paths if path.startswith("modules/")}
-    for name, (providers, paths) in sorted(ambiguous.items()):
-        if modules.intersection(providers) or (before is not None and before.get(name) != (providers, paths)):
+    for name, (providers, paths) in sorted(state.ambiguous.items()):
+        if modules.intersection(providers) or (before is not None and before.ambiguous.get(name) != (providers, paths)):
             plan.conflicts.append({
                 "kind": "ambiguous_module_component", "key": name, "path": paths[0],
                 "detail": f"modules {providers} export {name!r}, used in {paths}; name one as '<module_id>:{name}' "
                           "or register the app's own component",
             })
+    for name, paths in sorted(state.unresolved.items()):
+        lost = before is not None and name in before.registered
+        own = name in routes or (":" in name and name.split(":", 1)[0] in modules)
+        # The pack answers for what it removes and for its own names; other unresolved names are the app's.
+        if lost or (own and not state.dynamic):
+            plan.conflicts.append({
+                "kind": "unresolved_component_reference", "key": name, "path": paths[0],
+                "detail": f"{name!r}, used in {paths}, is not exported by a module or registered by the app",
+            })
     plan.conflicts.extend(
         {"kind": "invalid_module_ui_barrel", "key": module_id, "detail": reason}
-        for module_id, reason in sorted(errors.items()) if module_id in modules
+        for module_id, reason in sorted(state.barrel_errors.items()) if module_id in modules
     )
+
+
+def _check_module_components(
+    owned_paths: set[str], routes: set[str], roots: WorkspaceRoots, plan: LifecyclePlan,
+    writes: Mapping[Path, str | None],
+) -> None:
+    state = _component_state(roots, writes)
+    if state.ambiguous or state.unresolved or state.barrel_errors:
+        _module_component_conflicts(owned_paths, routes, state, plan, before=_component_state(roots, {}))
+
+
+def _contributed_route_components(rendered: _RenderedPack) -> set[str]:
+    return {
+        entry["component"] for entry in rendered.contributions.get(_ROUTE_MANIFEST_PATH, {}).values()
+        if isinstance(entry, dict) and isinstance(entry.get("component"), str)
+    }
+
+
+def _recorded_route_components(recorded: _Recorded, roots: WorkspaceRoots) -> set[str]:
+    """The components the pack's recorded routes name in the app's current manifest."""
+    text = _read_text(_destination(roots.app_root, _ROUTE_MANIFEST_PATH))
+    addresses = recorded.entries.get(_ROUTE_MANIFEST_PATH, {})
+    if not addresses or not isinstance(text, str):
+        return set()
+    root = _ROOTS_BY_PATH[_ROUTE_MANIFEST_PATH]
+    try:
+        entries = keyed_entries(parse_document(text, root.fmt), root)
+    except CompositionFormatError:
+        return set()
+    routes = [entries[address] for address in addresses if address in entries]
+    return {route["component"] for route in routes if isinstance(route.get("component"), str)}
 
 
 # --------------------------------------------------------------------------------------
@@ -1537,12 +1602,10 @@ def _plan_workspace_change(
     _plan_entries(outcome, rendered, recorded, roots, other_entries, adopt=adopt)
     _check_host_requirements(rendered, roots, plan, outcome.writes)
     _check_dependent_host_requirements(rendered, installed, roots, outcome)
-    ambiguous, barrel_errors = _module_component_findings(roots, outcome.writes)
-    if ambiguous or barrel_errors:
-        before, _ = _module_component_findings(roots, {})
-        _module_component_conflicts(
-            {*rendered.owned, *rendered.seeds}, ambiguous, barrel_errors, plan, before=before,
-        )
+    _check_module_components(
+        # An upgrade also answers for the modules its previous version owned.
+        {*rendered.owned, *rendered.seeds, *recorded.owned}, _contributed_route_components(rendered), roots, plan, outcome.writes,
+    )
     if plan.conflicts:
         plan.status = "blocked"
     return outcome, rendered, manifest
@@ -1710,34 +1773,39 @@ def _generator_upgrade_plan(candidate: _Candidate, roots: WorkspaceRoots, *, app
         current = installed.get(candidate.pack_id)
         if current is None:
             raise CommunityComponentLifecycleError(f"Pack '{candidate.pack_id}' is not installed; use `mozaiks pack install`.")
-        if apply:
-            if candidate.locator is not None:
-                # The base lifecycle re-renders this source at the next upgrade, so it must outlive the command.
-                raise CommunityComponentLifecycleError(
-                    f"Pack '{candidate.pack_id}' was materialized by AppGenerator; upgrade it from a directory "
-                    "checkout of that commit rather than --git, because its upgrade path re-reads the source later."
-                )
-            preview = plan_component_upgrade(
-                build_context_root=roots.build_context_root,
-                candidate_pack_source_path=candidate.pack_dir,
-                workspace_app_root=roots.app_root,
+        if apply and candidate.locator is not None:
+            # The base lifecycle re-renders this source at the next upgrade, so it must outlive the command.
+            raise CommunityComponentLifecycleError(
+                f"Pack '{candidate.pack_id}' was materialized by AppGenerator; upgrade it from a directory "
+                "checkout of that commit rather than --git, because its upgrade path re-reads the source later."
             )
-            if preview.status == "blocked":
-                raise _blocked(_plan_from_base_upgrade(preview, metadata, candidate, applied=False))
-            result = apply_component_upgrade(
-                build_context_root=roots.build_context_root,
-                candidate_pack_source_path=candidate.pack_dir,
-                workspace_app_root=roots.app_root,
-            )
-        else:
-            result = plan_component_upgrade(
-                build_context_root=roots.build_context_root,
-                candidate_pack_source_path=candidate.pack_dir,
-                workspace_app_root=roots.app_root,
-            )
+        preview = plan_component_upgrade(
+            build_context_root=roots.build_context_root,
+            candidate_pack_source_path=candidate.pack_dir,
+            workspace_app_root=roots.app_root,
+        )
+        plan = _plan_from_base_upgrade(preview, metadata, candidate, applied=False)
+        files, _ui_roots, _data = _render_pack(candidate.pack_dir, candidate.pack_id)
+        writes: dict[Path, str | None] = {
+            _destination(roots.app_root, path): files.get(path)
+            for path in preview.added_files + preview.changed_files + preview.removed_files
+        }
+        owned = {*files, *_recorded(_provenance(roots.app_root), candidate.pack_id).owned}
+        _check_module_components(owned, set(), roots, plan, writes)
+        if plan.conflicts:
+            plan.status = "blocked"
+        if not apply:
+            return plan
+        if plan.status == "blocked":
+            raise _blocked(plan)
+        result = apply_component_upgrade(
+            build_context_root=roots.build_context_root,
+            candidate_pack_source_path=candidate.pack_dir,
+            workspace_app_root=roots.app_root,
+        )
     except ManagedCapabilityTemplateError as exc:
         raise CommunityComponentLifecycleError(str(exc)) from exc
-    return _plan_from_base_upgrade(result, metadata, candidate, applied=apply)
+    return _plan_from_base_upgrade(result, metadata, candidate, applied=True)
 
 
 def _plan_from_base_upgrade(result: UpgradePlan, metadata: dict[str, Any], candidate: _Candidate, *, applied: bool) -> LifecyclePlan:
@@ -1771,7 +1839,7 @@ def verify_installed_components(*, roots: WorkspaceRoots) -> dict[str, Any]:
     _check_recorded_paths(manifest, roots)
     reports: list[dict[str, Any]] = []
     entries_seen: set[str] = set()
-    ambiguous, barrel_errors = _module_component_findings(roots, {})
+    components = _component_state(roots, {})
     for entry in sorted(_pack_entries(manifest), key=lambda item: str(item.get("pack_id") or "")):
         pack_id = str(entry.get("pack_id") or "")
         entries_seen.add(pack_id)
@@ -1797,7 +1865,9 @@ def verify_installed_components(*, roots: WorkspaceRoots) -> dict[str, Any]:
                     _workflow_registry_conflicts(registry_document, roots, checked)
                 except CompositionFormatError as exc:
                     checked.conflicts.append({"kind": "invalid_workflow_registry", "detail": str(exc)})
-        _module_component_conflicts({*recorded.owned, *recorded.seeds}, ambiguous, barrel_errors, checked)
+        _module_component_conflicts(
+            {*recorded.owned, *recorded.seeds}, _recorded_route_components(recorded, roots), components, checked,
+        )
         findings.extend(checked.conflicts)
         for path, digest in sorted(recorded.owned.items()):
             current = _read_text(_destination(roots.app_root, path))

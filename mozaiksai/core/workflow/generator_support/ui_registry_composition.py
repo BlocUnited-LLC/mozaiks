@@ -556,9 +556,10 @@ def module_ui_registrations(
     return registrations
 
 
-def registered_component_names(source: str, label: str = "ui/index.js") -> set[str]:
-    """Every key an app UI source passes to ``registerComponent`` as a literal."""
+def registered_component_names(source: str, label: str = "ui/index.js") -> tuple[set[str], bool]:
+    """Every key an app UI source passes to ``registerComponent`` as a literal, and whether it passes others."""
     names: set[str] = set()
+    dynamic = False
     pending = [_parse(source, label)]
     while pending:
         node = pending.pop()
@@ -568,7 +569,9 @@ def registered_component_names(source: str, label: str = "ui/index.js") -> set[s
         arguments = _children(node.child_by_field_name("arguments"))
         if arguments and arguments[0].type == "string":
             names.add(_string(arguments[0]))
-    return names
+        else:
+            dynamic = True
+    return names, dynamic
 
 
 def _route_key(route: Mapping[str, Any]) -> str:

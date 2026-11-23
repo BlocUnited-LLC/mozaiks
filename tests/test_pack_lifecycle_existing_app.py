@@ -1820,7 +1820,7 @@ def test_an_app_component_override_wins_over_shared_module_names(tmp_path):
 def test_an_upgrade_cannot_introduce_a_shared_plain_component_name(tmp_path):
     roots = _ordinary_app(tmp_path / "shop")
     apply_component_install(source=PackSource(directory=_page_pack(tmp_path, "alpha")), roots=roots)
-    quiet = _page_pack(tmp_path, "beta", component="beta:DashboardPage", version="v1")
+    quiet = _page_pack(tmp_path, "beta", component="beta:BetaPage", version="v1")
     (quiet / "templates/modules/beta/ui/index.js").write_text(
         "export { default as BetaPage } from './DashboardPage.jsx';\n", encoding="utf-8",
     )
@@ -1839,5 +1839,149 @@ def test_a_module_barrel_that_does_not_resolve_is_refused(tmp_path):
     (pack / "templates/modules/alpha/ui/DashboardPage.jsx").unlink()
     before = _tree(tmp_path / "shop")
     plan = plan_component_install(source=PackSource(directory=pack), roots=roots)
-    assert [row["kind"] for row in plan.conflicts] == ["invalid_module_ui_barrel"]
+    assert {row["kind"] for row in plan.conflicts} == {"invalid_module_ui_barrel", "unresolved_component_reference"}
     assert _tree(tmp_path / "shop") == before
+
+
+def _renamed_page(tmp_path: Path, *, keep_route: bool) -> Path:
+    """Version 2 renames StockLedgerPage, with or without updating the library's own route."""
+    pack = _version_two(tmp_path)
+    ui = pack / "templates/modules/stock_ledger/ui"
+    (ui / "StockLedgerPage.jsx").rename(ui / "ReplacementPage.jsx")
+    (ui / "index.js").write_text("export { default as ReplacementPage } from './ReplacementPage.jsx';\n", encoding="utf-8")
+    if not keep_route:
+        _edit(pack / "templates/ui/route_manifest.json", '"StockLedgerPage"', '"ReplacementPage"')
+    return pack
+
+
+def _add_route(roots, component: str) -> None:
+    home = '{ "id": "home"'
+    route = json.dumps({"id": "mine", "path": "/mine", "component": component})
+    _edit(roots.app_root / "ui/route_manifest.json", home, f"{route},\n        {home}")
+
+
+@pytest.mark.parametrize("reference", ["pack-route", "app-route", "app-namespaced-route", "app-panel", "workflow-transition"])
+def test_an_upgrade_cannot_orphan_a_component_reference(tmp_path, reference):
+    roots = _install(tmp_path)
+    key = "StockLedgerPage"
+    if reference == "app-route":
+        _add_route(roots, key)
+    elif reference == "app-namespaced-route":
+        key = "stock_ledger:StockLedgerPage"
+        _add_route(roots, key)
+    elif reference == "app-panel":
+        panel = roots.app_root / "modules/orders/contracts/admin.yaml"
+        panel.parent.mkdir(parents=True)
+        panel.write_text(f"panels:\n  - id: stock\n    component: {key}\n", encoding="utf-8")
+    elif reference == "workflow-transition":
+        registry = roots.workflows_root / "extended_orchestration/extension_registry.json"
+        document = json.loads(registry.read_text(encoding="utf-8"))
+        document["transitions"] = [{
+            "id": "stock", "from": {"workflow": "StockReview"}, "to": {"workflow": "StockReview"}, "ui": {"component": key},
+        }]
+        registry.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    candidate = _renamed_page(tmp_path, keep_route=reference == "pack-route")
+    before = _tree(tmp_path / "shop")
+    plan = plan_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+    assert plan.status == "blocked"
+    assert key in {row["key"] for row in plan.conflicts if row["kind"] == "unresolved_component_reference"}
+    with pytest.raises(CommunityComponentConflictError):
+        apply_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+    assert _tree(tmp_path / "shop") == before
+
+
+def test_an_upgrade_may_rename_a_page_its_own_route_follows(tmp_path):
+    roots = _install(tmp_path)
+    # An unresolved reference the app already had, and one it resolves itself, do not block the library.
+    _add_route(roots, "SomethingElseEntirely")
+    candidate = _renamed_page(tmp_path, keep_route=False)
+    assert apply_workspace_upgrade(source=PackSource(directory=candidate), roots=roots).status == "applied"
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+
+
+def test_an_app_registration_keeps_a_renamed_page_resolved(tmp_path):
+    roots = _install(tmp_path)
+    (roots.app_root / "ui/index.js").write_text(
+        "import Page from './pages/custom/stock.jsx';\n"
+        "export function register(registerComponent) {\n  registerComponent('StockLedgerPage', Page);\n}\n",
+        encoding="utf-8",
+    )
+    candidate = _renamed_page(tmp_path, keep_route=True)
+    assert apply_workspace_upgrade(source=PackSource(directory=candidate), roots=roots).status == "applied"
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+    # Dropping that registration leaves the library's own route without a component.
+    (roots.app_root / "ui/index.js").unlink()
+    [report] = verify_installed_components(roots=roots)["packs"]
+    assert [(row["kind"], row["key"]) for row in report["findings"]] == [("unresolved_component_reference", "StockLedgerPage")]
+
+
+def test_an_upgrade_that_drops_a_module_cannot_orphan_its_routes(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    apply_component_install(source=PackSource(directory=_page_pack(tmp_path, "alpha")), roots=roots)
+    _add_route(roots, "alpha:DashboardPage")
+    candidate = _capability_pack(tmp_path / "v2", "alpha")
+    _edit(candidate / "context.yaml", "version: 1.0.0", "version: 2.0.0")
+    with pytest.raises(CommunityComponentConflictError, match="unresolved_component_reference"):
+        apply_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+
+
+def test_a_library_route_must_name_a_component_someone_registers(tmp_path):
+    source = PackSource(directory=_page_pack(tmp_path, "alpha", component="MissingPage"))
+    roots = _ordinary_app(tmp_path / "shop")
+    plan = plan_component_install(source=source, roots=roots)
+    assert [(row["kind"], row["key"]) for row in plan.conflicts] == [("unresolved_component_reference", "MissingPage")]
+    # The app may supply it, including through a registration that cannot be read statically.
+    (roots.app_root / "ui/index.js").write_text(
+        "import * as pages from './pages/custom/all.jsx';\n"
+        "export function register(registerComponent) {\n"
+        "  Object.entries(pages).forEach(([name, page]) => registerComponent(name, page));\n}\n",
+        encoding="utf-8",
+    )
+    assert plan_component_install(source=source, roots=roots).status == "ready"
+
+
+def test_an_ambiguous_star_export_orphans_its_route(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _page_pack(tmp_path, "alpha")
+    ui = pack / "templates/modules/alpha/ui"
+    (ui / "Other.jsx").write_text("export const DashboardPage = () => null;\n", encoding="utf-8")
+    (ui / "DashboardPage.jsx").write_text("export function DashboardPage() { return null; }\n", encoding="utf-8")
+    (ui / "index.js").write_text("export * from './DashboardPage.jsx';\nexport * from './Other.jsx';\n", encoding="utf-8")
+    plan = plan_component_install(source=PackSource(directory=pack), roots=roots)
+    assert [(row["kind"], row["key"]) for row in plan.conflicts] == [("unresolved_component_reference", "DashboardPage")]
+
+
+def test_a_generator_pack_upgrade_cannot_orphan_a_component_reference(tmp_path):
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        install_verified_local_pack,
+    )
+    from tests.test_community_component_lifecycle import (
+        GREETINGS,
+        _greetings_v2,
+        _write_app_root_from_pack,
+    )
+
+    roots = _ordinary_app(tmp_path / "shop")
+    original = tmp_path / "greetings_v1"
+    shutil.copytree(GREETINGS, original)
+    barrel = original / "templates/modules/greetings/ui/index.js"
+    barrel.parent.mkdir(parents=True, exist_ok=True)
+    barrel.write_text("export const HelloPanel = () => null;\n", encoding="utf-8")
+    install_verified_local_pack(pack_source_path=original, build_context_root=roots.build_context_root)
+    _write_app_root_from_pack(roots.app_root, original, "greetings")
+    panel = roots.app_root / "modules/orders/contracts/admin.yaml"
+    panel.parent.mkdir(parents=True)
+    panel.write_text("panels:\n  - id: hello\n    component: HelloPanel\n", encoding="utf-8")
+    candidate = _greetings_v2(tmp_path)
+    renamed = candidate / "templates/modules/greetings/ui/index.js"
+    renamed.parent.mkdir(parents=True, exist_ok=True)
+    renamed.write_text("export const OtherPanel = () => null;\n", encoding="utf-8")
+    before = _tree(tmp_path / "shop")
+    plan = plan_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+    assert plan.status == "blocked"
+    assert [(row["kind"], row["key"]) for row in plan.conflicts] == [("unresolved_component_reference", "HelloPanel")]
+    with pytest.raises(CommunityComponentConflictError):
+        apply_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+    assert _tree(tmp_path / "shop") == before
+    renamed.write_text("export const HelloPanel = () => null;\n", encoding="utf-8")
+    assert apply_workspace_upgrade(source=PackSource(directory=candidate), roots=roots).status == "applied"
