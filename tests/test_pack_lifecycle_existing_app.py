@@ -2245,3 +2245,152 @@ def test_checking_a_library_module_never_runs_its_code(tmp_path):
     assert not marker.exists()
     assert sys.path == path
     assert not [name for name in set(sys.modules) - modules if name.startswith(("modules", "services", "mozaiks_runtime_module_"))]
+
+
+@pytest.mark.parametrize("path", ["/chat/*", "/app/*"])
+def test_a_library_route_cannot_take_a_core_shell_route(tmp_path, path):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    _edit(pack / "templates/ui/route_manifest.json", '"/stock"', f'"{path}"')
+    plan = plan_component_install(source=PackSource(directory=pack), roots=roots)
+    assert _route_conflicts(plan) == [("route_path_conflict", path)]
+
+
+def test_the_core_shell_routes_match_the_shell_source():
+    import re
+
+    from mozaiksai.hosts.shell_config import CORE_SHELL_ROUTES
+
+    source = (Path(workspace_module.__file__).parents[4] / "chat-ui/src/navigation/shellRoutes.js").read_text(encoding="utf-8")
+    declared = re.search(r"const CORE_ROUTES = \[(.*?)\n\];", source, flags=re.DOTALL)
+    assert declared is not None
+    rows = re.findall(r"\{ path: '([^']+)', component: '([^']+)'", declared.group(1))
+    assert len(rows) == declared.group(1).count("path:")
+    # The shell gives up only "/" to an app page, and drops an app page at any other core path.
+    assert "route.path !== '/' || !hasDeclaredRoot" in source
+    assert "!corePaths.has(page.path)" in source
+    assert [(route["path"], route["component"]) for route in CORE_SHELL_ROUTES] == [row for row in rows if row[0] != "/"]
+
+
+def _workflow_ui(folder: Path, barrel: str) -> None:
+    (folder / "ui").mkdir(parents=True, exist_ok=True)
+    (folder / "ui/index.js").write_text(barrel, encoding="utf-8")
+
+
+WORKFLOW_PAGE = "export const StockLedgerPage = () => null;\n"
+
+
+@pytest.mark.parametrize("owner", ["pack-workflow", "app-workflow", "inherited-workflow", "default-object"])
+def test_a_workflow_export_cannot_replace_a_module_page(tmp_path, monkeypatch, owner):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    if owner == "pack-workflow":
+        _workflow_ui(pack / "workflows/StockReview", WORKFLOW_PAGE)
+    elif owner == "default-object":
+        _workflow_ui(pack / "workflows/StockReview", "const StockLedgerPage = () => null;\nexport default { StockLedgerPage };\n")
+    elif owner == "app-workflow":
+        _entrypoint(roots, "/own")
+        _workflow_ui(roots.workflows_root / "Own", WORKFLOW_PAGE)
+    else:
+        inherited = {"Shipped/orchestrator.yaml": "", "Shipped/ui/index.js": WORKFLOW_PAGE}
+        monkeypatch.setattr(workspace_module, "_inherited_workflow_ui_files", lambda root: inherited)
+    before = _tree(tmp_path / "shop")
+    plan = plan_component_install(source=PackSource(directory=pack), roots=roots)
+    assert [(row["kind"], row["key"]) for row in plan.conflicts] == [("ambiguous_module_component", "StockLedgerPage")]
+    with pytest.raises(CommunityComponentConflictError):
+        apply_component_install(source=PackSource(directory=pack), roots=roots)
+    assert _tree(tmp_path / "shop") == before
+    # A namespaced reference names the module page whatever a workflow exports.
+    _edit(pack / "templates/ui/route_manifest.json", '"StockLedgerPage"', '"stock_ledger:StockLedgerPage"')
+    assert plan_component_install(source=PackSource(directory=pack), roots=roots).conflicts == []
+
+
+def test_a_library_workflow_cannot_replace_an_app_page(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    (roots.app_root / "ui/index.js").write_text(
+        "import HomePage from './pages/custom/home.jsx';\n"
+        "export function register(registerComponent) {\n  registerComponent('HomePage', HomePage);\n}\n",
+        encoding="utf-8",
+    )
+    pack = _pack(tmp_path)
+    _workflow_ui(pack / "workflows/StockReview", "export const HomePage = () => null;\n")
+    plan = plan_component_install(source=PackSource(directory=pack), roots=roots)
+    assert [(row["kind"], row["key"]) for row in plan.conflicts] == [("ambiguous_module_component", "HomePage")]
+    assert "workflow:StockReview" in plan.conflicts[0]["detail"]
+
+
+def test_verify_reports_a_workflow_that_replaces_a_library_page(tmp_path):
+    roots = _install(tmp_path)
+    folder = roots.workflows_root / "Own"
+    _workflow_ui(folder, WORKFLOW_PAGE)
+    # A folder without an orchestrator is not a workflow, so the shell loads no UI from it.
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+    (folder / "orchestrator.yaml").write_text("workflow_name: Own\n", encoding="utf-8")
+    [report] = verify_installed_components(roots=roots)["packs"]
+    assert [(row["kind"], row["key"]) for row in report["findings"]] == [("ambiguous_module_component", "StockLedgerPage")]
+    registry = roots.workflows_root / "extended_orchestration/extension_registry.json"
+    document = json.loads(registry.read_text(encoding="utf-8"))
+    document["workflows"].append({"id": "Own", "remove": True})
+    registry.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+
+
+def test_workflow_exports_nothing_else_uses_do_not_block(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    _entrypoint(roots, "/own")
+    _workflow_ui(roots.workflows_root / "Own", "export { default as Approval } from '../../_shared/ui/Approval.jsx';\n")
+    shared = roots.workflows_root / "_shared/ui/Approval.jsx"
+    shared.parent.mkdir(parents=True)
+    shared.write_text("export default function Approval() { return null; }\n", encoding="utf-8")
+    pack = _pack(tmp_path)
+    # One implementation that two workflows register is one component.
+    _workflow_ui(pack / "workflows/StockReview", "export { default as Approval } from '../../_shared/ui/Approval.jsx';\n")
+    panel = roots.app_root / "modules/orders/contracts/admin.yaml"
+    panel.parent.mkdir(parents=True)
+    panel.write_text("panels:\n  - id: approvals\n    component: Approval\n", encoding="utf-8")
+    plan = plan_component_install(source=PackSource(directory=pack), roots=roots)
+    assert [row for row in plan.conflicts if row["kind"] != "app_contract_error"] == []
+
+
+def test_a_library_workflow_barrel_that_does_not_resolve_is_refused(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    _workflow_ui(pack / "workflows/StockReview", "export { Missing } from './gone.jsx';\n")
+    plan = plan_component_install(source=PackSource(directory=pack), roots=roots)
+    assert [(row["kind"], row["key"]) for row in plan.conflicts] == [("invalid_workflow_ui_barrel", "StockReview")]
+
+
+def _own_admin_route(pack: Path) -> str:
+    registry = yaml.safe_load((pack / "templates/admin/admin_registry.yaml").read_text(encoding="utf-8"))
+    path = registry["pages"][0]["path"]
+    _edit(pack / "templates/ui/route_manifest.json", '"/stock"', f'"{path}"')
+    return path
+
+
+def test_an_untouched_install_of_a_routed_admin_page_verifies_clean(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    path = _own_admin_route(pack)
+    apply_component_install(source=PackSource(directory=pack), roots=roots)
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+    # An upgrade may change the pair, which is still the library's own.
+    candidate = _version_two(tmp_path)
+    assert _own_admin_route(candidate) == path
+    _edit(candidate / "templates/ui/route_manifest.json", '"title": "Stock"', '"title": "Stock", "label": "Stock"')
+    assert apply_workspace_upgrade(source=PackSource(directory=candidate), roots=roots).status == "applied"
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+    # Anything else at that path is still reported.
+    _schema_page(roots, "intruder", path)
+    [report] = verify_installed_components(roots=roots)["packs"]
+    assert [(row["kind"], row["key"]) for row in report["findings"]] == [("route_path_conflict", path)]
+
+
+def test_verify_reports_an_app_route_over_a_library_admin_page(tmp_path):
+    roots = _install(tmp_path)
+    registry = yaml.safe_load((roots.app_root / "admin/admin_registry.yaml").read_text(encoding="utf-8"))
+    path = next(page["path"] for page in registry["pages"] if page["id"] != "orders_admin")
+    home = '{ "id": "home"'
+    route = json.dumps({"id": "mine", "path": path, "component": "HomePage"})
+    _edit(roots.app_root / "ui/route_manifest.json", home, f"{route},\n        {home}")
+    [report] = verify_installed_components(roots=roots)["packs"]
+    assert [(row["kind"], row["key"]) for row in report["findings"]] == [("route_path_conflict", path)]

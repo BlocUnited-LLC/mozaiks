@@ -729,7 +729,9 @@ When several modules export one name, the plain name belongs to whichever module
 the shell scans first. If an app declaration's `component` uses that plain name,
 install and upgrade block with `ambiguous_module_component`, and `verify` reports
 it, unless the app registers the name itself with a literal `registerComponent`
-call. References written as `<module_id>:<Export>` are never ambiguous. A pack
+call. Workflow UI registers last and replaces whoever held a plain name, so a
+used name that an effective workflow also exports blocks even over an app
+registration. References written as `<module_id>:<Export>` are never ambiguous. A pack
 whose module barrel does not resolve blocks with `invalid_module_ui_barrel`.
 Exports resolve as ECMAScript resolves them: a name two `export *` sources bind
 differently is not exported.
@@ -745,7 +747,7 @@ on what it introduces:
 
 | Conflict | Meaning |
 | --- | --- |
-| `route_path_conflict` | Two pages claim one path on one surface: route manifest, `ui/pages` schemas, workflow entrypoints, admin pages and the shell's profile pages. A pack may route its own admin page. |
+| `route_path_conflict` | Two pages claim one path on one surface: route manifest, `ui/pages` schemas, workflow entrypoints, admin pages, and the shell's core chat and profile routes. A pack may route its own admin page. |
 | `app_contract_error` | A new error from the shared app contract and functional checks, such as a page that calls a module action the upgrade removes. |
 | `invalid_module` | The runtime would refuse to load one of the pack's modules. Its declarations are read with the runtime's own rules and its handler source is parsed; no pack code runs. |
 

@@ -26,6 +26,7 @@ from collections import Counter
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,7 @@ from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
     module_ui_components,
     module_ui_registrations,
     registered_component_names,
+    workflow_ui_components,
 )
 
 from .community_component_composition import (
@@ -119,6 +121,7 @@ _PROVENANCE_SCHEMA_VERSION = "mozaiks.pack_provenance.v1"
 _LOCK_PATH = ".mozaiks/lifecycle.lock"
 _DATA_CONTRACT_PATH = "data/contract.json"
 _ROUTE_MANIFEST_PATH = "ui/route_manifest.json"
+_ADMIN_REGISTRY_PATH = "admin/admin_registry.yaml"
 _ROOTS_BY_PATH: dict[str, KeyedRoot] = {root.path: root for root in KEYED_ROOTS}
 # Hand-written registration code cannot be merged safely; library UI registers through module barrels.
 _UNSUPPORTED_UI_BARRELS = frozenset({"ui/index.js"})
@@ -791,10 +794,13 @@ def _check_dependent_host_requirements(
 
 @dataclass(frozen=True)
 class _ProspectiveApp:
-    """The app's text files by bundle-relative path, and its workflow registry, after the planned writes."""
+    """The app's text files by bundle-relative path, and its workflows, after the planned writes."""
 
     texts: dict[str, str]
     registry: str | None
+    # The inherited and then the local workflow root, each with what web_shell/workflowUi.js reads of it.
+    workflow_roots: list[tuple[str, dict[str, str]]]
+    removed_workflows: list[str]
 
 
 def _prospective_app(roots: WorkspaceRoots, writes: Mapping[Path, str | None]) -> _ProspectiveApp:
@@ -814,7 +820,55 @@ def _prospective_app(roots: WorkspaceRoots, writes: Mapping[Path, str | None]) -
         if isinstance(text, str):
             texts[relative] = text
     registry = _planned_text(_destination(roots.workflows_root, WORKFLOW_REGISTRY_PATH), writes)
-    return _ProspectiveApp(texts, registry if isinstance(registry, str) else None)
+    registry = registry if isinstance(registry, str) else None
+    workflow_roots = [("workflows", _workflow_ui_files(roots, writes))]
+    removed: list[str] = []
+    if registry is not None:
+        from mozaiksai.core.workflow.pack.config import _resolve_default_registry_path
+
+        try:
+            document = parse_document(registry, "json")
+            base = _resolve_default_registry_path(_destination(roots.workflows_root, WORKFLOW_REGISTRY_PATH), document)
+        except (ValueError, OSError, CompositionFormatError):
+            # The registry checks report it.
+            document, base = {}, None
+        if base is not None and base.parent.parent.resolve() != roots.workflows_root:
+            workflow_roots.insert(0, ("inherited", _inherited_workflow_ui_files(base.parent.parent)))
+        removed = [
+            str(row.get("id")) for row in document.get("workflows") or [] if isinstance(row, dict) and row.get("remove") is True
+        ]
+    return _ProspectiveApp(texts, registry, workflow_roots, removed)
+
+
+def _is_workflow_ui_file(relative: str) -> bool:
+    return relative.endswith((".js", ".jsx")) or (relative.endswith("/orchestrator.yaml") and relative.count("/") == 1)
+
+
+def _workflow_ui_files(roots: WorkspaceRoots, writes: Mapping[Path, str | None]) -> dict[str, str]:
+    root = roots.workflows_root
+    paths = {path for path in root.rglob("*") if path.is_file()} if root.is_dir() else set()
+    paths.update(path for path in writes if path.is_relative_to(root))
+    files: dict[str, str] = {}
+    for path in paths:
+        relative = path.relative_to(root).as_posix()
+        if not _is_workflow_ui_file(relative):
+            continue
+        try:
+            validate_portable_path(relative)
+        except PortablePathError:
+            continue
+        text = _planned_text(_destination(root, relative), writes)
+        if isinstance(text, str):
+            files[relative] = text
+    return files
+
+
+@lru_cache(maxsize=4)
+def _inherited_workflow_ui_files(root: Path) -> dict[str, str]:
+    """The packaged default workflow root, which no pack operation writes."""
+    files = {path.relative_to(root).as_posix(): path for path in root.rglob("*") if path.is_file()}
+    texts = {relative: _read_text(path) for relative, path in files.items() if _is_workflow_ui_file(relative)}
+    return {relative: text for relative, text in texts.items() if isinstance(text, str)}
 
 
 def _component_references(document: Any) -> set[str]:
@@ -833,12 +887,14 @@ class _ComponentState:
     registered: set[str] = field(default_factory=set)
     # The app registers some names in a way that cannot be read statically.
     dynamic: bool = False
-    # Plain name -> the modules that export it and the declarations that use it.
+    # Plain name -> its providers (module ids, "workflow:<name>", "app", "shell") and the declarations that use it.
     ambiguous: dict[str, tuple[list[str], list[str]]] = field(default_factory=dict)
     # Name no one registers -> the declarations that use it.
     unresolved: dict[str, list[str]] = field(default_factory=dict)
     # Module id -> why its barrel does not resolve.
     barrel_errors: dict[str, str] = field(default_factory=dict)
+    # Workflow name -> why its barrel does not resolve.
+    workflow_barrel_errors: dict[str, str] = field(default_factory=dict)
 
 
 def _component_state(app: _ProspectiveApp) -> _ComponentState:
@@ -846,7 +902,8 @@ def _component_state(app: _ProspectiveApp) -> _ComponentState:
 
     The shell gives a plain name to whichever module it scans first. A name the
     app registers itself is the app's, and a ``<module_id>:<Export>`` reference
-    is never ambiguous.
+    is never ambiguous. Workflow UI registers last and replaces whoever held a
+    name, so a name a workflow shares with anyone else is ambiguous.
     """
     state = _ComponentState()
     sources = {path: text for path, text in app.texts.items() if _UI_SOURCE.fullmatch(path)}
@@ -867,7 +924,14 @@ def _component_state(app: _ProspectiveApp) -> _ComponentState:
         state.dynamic = True
     components, state.barrel_errors = module_ui_components(sources)
     registrations = module_ui_registrations(components, app_components)
-    state.registered = {*registrations, *app_components, *SHELL_CORE_COMPONENTS, *APP_AUTH_COMPONENTS}
+    shell_components = SHELL_CORE_COMPONENTS | APP_AUTH_COMPONENTS
+    workflows, state.workflow_barrel_errors = workflow_ui_components(app.workflow_roots, app.removed_workflows)
+    by_workflow: dict[str, dict[str, str]] = {}
+    for workflow, exports in workflows.items():
+        for name, file in exports.items():
+            by_workflow.setdefault(name, {})[f"workflow:{workflow}"] = file
+            by_workflow.setdefault(f"{workflow}:{name}", {})[f"workflow:{workflow}"] = file
+    state.registered = {*registrations, *app_components, *shell_components, *by_workflow}
     declarations = {path: text for path, text in app.texts.items() if path.endswith((".json", ".yaml", ".yml"))}
     if app.registry is not None:
         declarations[f"workflows/{WORKFLOW_REGISTRY_PATH}"] = app.registry
@@ -879,8 +943,14 @@ def _component_state(app: _ProspectiveApp) -> _ComponentState:
         except (ValueError, yaml.YAMLError):
             continue
         for name in sorted(_component_references(document)):
-            providers = registrations.get(name, {})
-            if len(providers) > 1:
+            providers = dict(registrations.get(name, {}))
+            if name in by_workflow:
+                providers.update(by_workflow[name])
+                providers.update({
+                    owner: owner for owner, names in (("app", app_components), ("shell", shell_components)) if name in names
+                })
+            # Workflows may share one implementation file.
+            if len(set(providers.values())) > 1:
                 state.ambiguous.setdefault(name, (sorted(providers), []))[1].append(path)
             elif name not in state.registered:
                 state.unresolved.setdefault(name, []).append(path)
@@ -893,12 +963,15 @@ def _module_component_conflicts(
 ) -> None:
     """Report what involves this pack's modules and routes, or (against ``before``) what the plan breaks."""
     modules = {path.split("/")[1] for path in owned_paths if path.startswith("modules/")}
+    workflows = {path.split("/")[1] for path in owned_paths if path.startswith("workflows/")}
+    own_providers = modules | {f"workflow:{workflow}" for workflow in workflows}
     for name, (providers, paths) in sorted(state.ambiguous.items()):
-        if modules.intersection(providers) or (before is not None and before.ambiguous.get(name) != (providers, paths)):
+        if own_providers.intersection(providers) or (before is not None and before.ambiguous.get(name) != (providers, paths)):
             plan.conflicts.append({
                 "kind": "ambiguous_module_component", "key": name, "path": paths[0],
-                "detail": f"modules {providers} export {name!r}, used in {paths}; name one as '<module_id>:{name}' "
-                          "or register the app's own component",
+                "detail": f"{providers} provide {name!r}, used in {paths}; name one as '<module_id>:{name}'"
+                          + ("" if any(provider.startswith("workflow:") for provider in providers)
+                             else " or register the app's own component"),
             })
     for name, paths in sorted(state.unresolved.items()):
         lost = before is not None and name in before.registered
@@ -913,10 +986,19 @@ def _module_component_conflicts(
         {"kind": "invalid_module_ui_barrel", "key": module_id, "detail": reason}
         for module_id, reason in sorted(state.barrel_errors.items()) if module_id in modules
     )
+    plan.conflicts.extend(
+        {"kind": "invalid_workflow_ui_barrel", "key": workflow, "detail": reason}
+        for workflow, reason in sorted(state.workflow_barrel_errors.items()) if workflow in workflows
+    )
+
+
+def _is_own_admin_route(pages: list[str], path: str, own_paths: set[str]) -> bool:
+    """Whether the only pages at a path are one pack's admin page and the custom route it gives that page."""
+    return path in own_paths and sorted(page.split(" ", 1)[0] for page in pages) == ["admin_page", "route_manifest"]
 
 
 def _check_prospective_app(
-    owned_paths: set[str], routes: set[str], roots: WorkspaceRoots, plan: LifecyclePlan,
+    owned_paths: set[str], routes: set[str], own_admin_routes: set[str], roots: WorkspaceRoots, plan: LifecyclePlan,
     writes: Mapping[Path, str | None], *, complete: bool,
 ) -> None:
     """Block what the plan would break in the resulting app.
@@ -928,17 +1010,14 @@ def _check_prospective_app(
     app = _prospective_app(roots, writes)
     before = _prospective_app(roots, {})
     state = _component_state(app)
-    if state.ambiguous or state.unresolved or state.barrel_errors:
+    if state.ambiguous or state.unresolved or state.barrel_errors or state.workflow_barrel_errors:
         _module_component_conflicts(owned_paths, routes, state, plan, before=_component_state(before))
     collisions = _shell_path_collisions(app, roots)
     if collisions:
         known_pages = _shell_path_collisions(before, roots)
-        existing = {page["path"] for source, page in _shell_inventory(before, roots) if source != "shell"}
         for path, pages in sorted(collisions.items()):
             introduced = Counter(pages) - Counter(known_pages.get(path, []))
-            # One library may give its own admin page a custom route.
-            own_pair = path not in existing and sorted(page.split(" ", 1)[0] for page in pages) == ["admin_page", "route_manifest"]
-            if introduced and not own_pair:
+            if introduced and not _is_own_admin_route(pages, path, own_admin_routes):
                 plan.conflicts.append({
                     "kind": "route_path_conflict", "root": _ROUTE_MANIFEST_PATH, "key": path, "detail": "; ".join(pages),
                 })
@@ -1036,30 +1115,26 @@ def _shell_path_collisions(app: _ProspectiveApp, roots: WorkspaceRoots) -> dict[
     return shell_path_collisions(_shell_inventory(app, roots))
 
 
-def _contributed_route_components(rendered: _RenderedPack) -> set[str]:
+def _contributed_values(rendered: _RenderedPack, root_path: str, key: str) -> set[str]:
     return {
-        entry["component"] for entry in rendered.contributions.get(_ROUTE_MANIFEST_PATH, {}).values()
-        if isinstance(entry, dict) and isinstance(entry.get("component"), str)
+        entry[key] for entry in rendered.contributions.get(root_path, {}).values()
+        if isinstance(entry, dict) and isinstance(entry.get(key), str)
     }
 
 
-def _recorded_route_components(recorded: _Recorded, roots: WorkspaceRoots) -> set[str]:
-    return _recorded_route_values(recorded, roots, "component")
-
-
-def _recorded_route_values(recorded: _Recorded, roots: WorkspaceRoots, key: str) -> set[str]:
-    """A field of the pack's recorded routes, as the app's current manifest holds them."""
-    text = _read_text(_destination(roots.app_root, _ROUTE_MANIFEST_PATH))
-    addresses = recorded.entries.get(_ROUTE_MANIFEST_PATH, {})
+def _recorded_values(recorded: _Recorded, roots: WorkspaceRoots, root_path: str, key: str) -> set[str]:
+    """A field of the pack's recorded entries, as the app's current shared file holds them."""
+    text = _read_text(_destination(roots.app_root, root_path))
+    addresses = recorded.entries.get(root_path, {})
     if not addresses or not isinstance(text, str):
         return set()
-    root = _ROOTS_BY_PATH[_ROUTE_MANIFEST_PATH]
+    root = _ROOTS_BY_PATH[root_path]
     try:
         entries = keyed_entries(parse_document(text, root.fmt), root)
     except CompositionFormatError:
         return set()
-    routes = [entries[address] for address in addresses if address in entries]
-    return {route[key] for route in routes if isinstance(route.get(key), str)}
+    owned = [entries[address] for address in addresses if address in entries]
+    return {entry[key] for entry in owned if isinstance(entry.get(key), str)}
 
 
 # --------------------------------------------------------------------------------------
@@ -1724,8 +1799,11 @@ def _plan_workspace_change(
     _check_dependent_host_requirements(rendered, installed, roots, outcome)
     _check_prospective_app(
         # An upgrade also answers for the modules its previous version owned.
-        {*rendered.owned, *rendered.seeds, *recorded.owned}, _contributed_route_components(rendered), roots, plan, outcome.writes,
-        complete=complete,
+        {*rendered.owned, *rendered.seeds, *recorded.owned,
+         *(f"workflows/{path}" for path in (*rendered.workflow_files, *recorded.workflow))},
+        _contributed_values(rendered, _ROUTE_MANIFEST_PATH, "component"),
+        _contributed_values(rendered, _ROUTE_MANIFEST_PATH, "path") & _contributed_values(rendered, _ADMIN_REGISTRY_PATH, "path"),
+        roots, plan, outcome.writes, complete=complete,
     )
     if plan.conflicts:
         plan.status = "blocked"
@@ -1912,7 +1990,7 @@ def _generator_upgrade_plan(candidate: _Candidate, roots: WorkspaceRoots, *, app
             for path in preview.added_files + preview.changed_files + preview.removed_files
         }
         owned = {*files, *_recorded(_provenance(roots.app_root), candidate.pack_id).owned}
-        _check_prospective_app(owned, set(), roots, plan, writes, complete=not plan.conflicts)
+        _check_prospective_app(owned, set(), set(), roots, plan, writes, complete=not plan.conflicts)
         if plan.conflicts:
             plan.status = "blocked"
         if not apply:
@@ -1989,8 +2067,11 @@ def verify_installed_components(*, roots: WorkspaceRoots) -> dict[str, Any]:
                     _workflow_registry_conflicts(registry_document, roots, checked)
                 except CompositionFormatError as exc:
                     checked.conflicts.append({"kind": "invalid_workflow_registry", "detail": str(exc)})
+        route_paths = _recorded_values(recorded, roots, _ROUTE_MANIFEST_PATH, "path")
+        admin_paths = _recorded_values(recorded, roots, _ADMIN_REGISTRY_PATH, "path")
         _module_component_conflicts(
-            {*recorded.owned, *recorded.seeds}, _recorded_route_components(recorded, roots), components, checked,
+            {*recorded.owned, *recorded.seeds, *(f"workflows/{path}" for path in recorded.workflow)},
+            _recorded_values(recorded, roots, _ROUTE_MANIFEST_PATH, "component"), components, checked,
         )
         checked.conflicts.extend(_module_declaration_conflicts(app, {*recorded.owned, *recorded.seeds}))
         modules = {path.split("/")[1] for path in recorded.owned if path.startswith("modules/")}
@@ -2000,7 +2081,8 @@ def verify_installed_components(*, roots: WorkspaceRoots) -> dict[str, Any]:
         )
         checked.conflicts.extend(
             {"kind": "route_path_conflict", "root": _ROUTE_MANIFEST_PATH, "key": path, "detail": "; ".join(collisions[path])}
-            for path in sorted(_recorded_route_values(recorded, roots, "path") & collisions.keys())
+            for path in sorted((route_paths | admin_paths) & collisions.keys())
+            if not _is_own_admin_route(collisions[path], path, route_paths & admin_paths)
         )
         findings.extend(checked.conflicts)
         for path, digest in sorted(recorded.owned.items()):

@@ -191,6 +191,12 @@ def _title_from_id(value: str) -> str:
 
 
 SHELL_SURFACES = ("platform", "studio", "user")
+# The core routes chat-ui/src/navigation/shellRoutes.js keeps whatever an app declares; it drops
+# an app page at one of these paths. An app may declare "/", the remaining core route.
+CORE_SHELL_ROUTES = (
+    {"path": "/chat/*", "component": "ChatPage", "label": "Chat"},
+    {"path": "/app/*", "component": "ChatPage", "label": "Chat"},
+)
 
 
 def _normalize_shell_surface(surface: str | None) -> str:
@@ -774,7 +780,7 @@ def declared_shell_pages(app_root: Path, workflow_graph: Any = None) -> list[tup
         inventory.extend(("workflow_entrypoint", page) for page in _workflow_entrypoint_pages(workflow_graph))
     inventory.extend(
         ("shell", {key: route[key] for key in ("path", "component", "label")})
-        for route in (PROFILE_SHELL_ROUTE, PUBLIC_PROFILE_SHELL_ROUTE)
+        for route in (PROFILE_SHELL_ROUTE, PUBLIC_PROFILE_SHELL_ROUTE, *CORE_SHELL_ROUTES)
     )
     inventory.extend(
         ("admin_page", {"path": route["path"], "label": route["label"], "meta": {"surfaces": route["surfaces"]}})

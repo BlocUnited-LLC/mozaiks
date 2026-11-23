@@ -11,7 +11,7 @@ import json
 import logging
 import posixpath
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -532,6 +532,73 @@ def module_ui_components(files: Mapping[str, str]) -> tuple[dict[str, dict[str, 
             errors[module_id] = f"{paths[0]}: {exc}"
             continue
         components[module_id] = {name: file for name, file in exports.items() if name != "default"}
+    return components, errors
+
+
+def _workflow_exports(path: str, files: dict[str, str]) -> dict[str, str]:
+    """The names one workflow UI barrel registers: its default export's keys, or else its named exports."""
+    default = next((
+        node for node in _children(_parse(files[path], path))
+        if node.type == "export_statement" and any(child.type == "default" for child in node.children)
+    ), None)
+    if default is None:
+        exports = _component_exports(path, files)
+        if "default" in exports:
+            raise ValueError(f"{path}: a re-exported default cannot be read; export each component by name")
+        return exports
+    value = default.child_by_field_name("value")
+    if value is None or value.type in {"function_expression", "arrow_function", "class"}:
+        # The shell registers nothing from a default export that is not an object.
+        return {}
+    if value.type == "identifier":
+        name = _text(value)
+        value = next((
+            child.child_by_field_name("value")
+            for node in _children(_parse(files[path], path)) if node.type in {"lexical_declaration", "variable_declaration"}
+            for child in _children(node) if _text(child.child_by_field_name("name")) == name
+        ), None)
+    if value is None or value.type != "object":
+        raise ValueError(f"{path}: the default export cannot be read; export each component by name")
+    names: dict[str, str] = {}
+    for member in _children(value):
+        key = member.child_by_field_name("key") if member.type == "pair" else member
+        if member.type not in {"pair", "shorthand_property_identifier"} or key.type == "computed_property_name":
+            raise ValueError(f"{path}: the default export cannot be read; export each component by name")
+        names[_string(key) if key.type == "string" else _text(key)] = path
+    return names
+
+
+def workflow_ui_components(
+    roots: Iterable[tuple[str, Mapping[str, str]]], removed: Collection[str] = (),
+) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
+    """The names effective workflow UI barrels register, and the barrels that do not resolve.
+
+    Mirrors ``web_shell/workflowUi.js``: ``roots`` are the inherited and then the
+    local workflow root, each a label and its files; a local workflow replaces the
+    inherited one, including having no UI, and the registry may remove one.
+    """
+    workflows: dict[str, tuple[str, str, Mapping[str, str], list[str]]] = {}
+    for label, files in roots:
+        for name in sorted({path.split("/", 1)[0] for path in files if "/" in path}):
+            if name.startswith(".") or (name != "extended_orchestration" and f"{name}/orchestrator.yaml" not in files):
+                continue
+            barrels = [path for path in (f"{name}/ui/index.js", f"{name}/ui/index.jsx") if path in files]
+            if barrels or name != "extended_orchestration":
+                workflows[name.lower()] = (name, label, files, barrels)
+    for name in removed:
+        workflows.pop(name.lower(), None)
+    components: dict[str, dict[str, str]] = {}
+    errors: dict[str, str] = {}
+    for name, label, files, barrels in workflows.values():
+        if len(barrels) > 1:
+            errors[name] = f"Workflow {name} declares multiple UI barrels: {barrels}"
+        elif barrels:
+            try:
+                components[name] = {
+                    export: f"{label}:{file}" for export, file in _workflow_exports(barrels[0], dict(files)).items()
+                }
+            except ValueError as exc:
+                errors[name] = f"{barrels[0]}: {exc}"
     return components, errors
 
 
