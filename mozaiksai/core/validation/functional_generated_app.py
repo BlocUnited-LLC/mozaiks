@@ -374,12 +374,42 @@ def _registered_components(files: dict[str, str]) -> set[str]:
     return registered
 
 
+def _validate_journey_routes(
+    files: dict[str, str],
+    pages: list[dict[str, Any]],
+    diagnostics: list[FunctionalGeneratedAppDiagnostic],
+) -> None:
+    path = "config/journeys.json"
+    content = files.get(path)
+    if content is None:
+        return
+    from mozaiksai.core.app_context.journeys import AppJourneyCatalog
+
+    try:
+        catalog = AppJourneyCatalog.model_validate_json(content)
+    except ValueError:
+        diagnostics.append(_diag("INVALID_JOURNEY_CATALOG", "Invalid app journey declaration.", path=path))
+        return
+    routes = {
+        route for page in pages
+        if isinstance(route := page.get("path") or page.get("route"), str)
+    }
+    for journey in catalog.journeys:
+        if journey.start_route and journey.start_route not in routes:
+            diagnostics.append(_diag(
+                "MISSING_JOURNEY_ROUTE",
+                f"Journey {journey.journey_id!r} start route {journey.start_route!r} is absent from the route manifest.",
+                path=path,
+            ))
+
+
 def _validate_routes(
     files: dict[str, str],
     diagnostics: list[FunctionalGeneratedAppDiagnostic],
     inherited_components: frozenset[str] = frozenset(),
 ) -> None:
     pages = _route_manifest_pages(files, diagnostics)
+    _validate_journey_routes(files, pages, diagnostics)
     if not pages:
         return
     schemas = _page_schema_index(files, diagnostics)
