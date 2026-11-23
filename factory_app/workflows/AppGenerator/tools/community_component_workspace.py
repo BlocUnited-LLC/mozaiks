@@ -30,7 +30,7 @@ from typing import Any
 import yaml
 
 from mozaiksai.core.runtime.app.provenance import resolve_build_timestamp
-from mozaiksai.core.semantics.portable_path import PortablePathError, validate_portable_path
+from mozaiksai.core.semantics.portable_path import PortablePathError, detect_collisions, validate_portable_path
 from mozaiksai.core.session.build_context import (
     BuildContextError,
     iter_context_assets,
@@ -1378,6 +1378,9 @@ def _plan_workspace_change(
         {"kind": "ui_barrel_contribution_unsupported", "path": path} for path in sorted(rendered.ui_barrels)
     )
     _check_dependencies(rendered, installed, plan, current=current if operation == "upgrade" else None)
+    if _destination_collisions(rendered, roots, plan):
+        plan.status = "blocked"
+        return outcome, rendered, manifest
     _plan_owned_files(outcome, rendered, recorded, roots, other_files, adopt=adopt)
     _plan_workflow_files(outcome, rendered, recorded, roots, other_workflow_files, adopt=adopt)
     _plan_entries(outcome, rendered, recorded, roots, other_entries, adopt=adopt)
@@ -1386,6 +1389,27 @@ def _plan_workspace_change(
     if plan.conflicts:
         plan.status = "blocked"
     return outcome, rendered, manifest
+
+
+def _destination_collisions(rendered: _RenderedPack, roots: WorkspaceRoots, plan: LifecyclePlan) -> bool:
+    """Two rendered outputs (``x`` and ``X.j2``, or a file and a folder) cannot share one destination on every host."""
+    for base, prefix, paths in (
+        (roots.app_root, "", [
+            *rendered.owned, *rendered.seeds, *rendered.ui_barrels,
+            *(path for path in rendered.contributions if _ROOTS_BY_PATH[path].base == "app"),
+        ]),
+        (roots.workflows_root, "workflows/", [
+            *rendered.workflow_files,
+            *(path for path in rendered.contributions if _ROOTS_BY_PATH[path].base == "workflows"),
+        ]),
+    ):
+        for path in paths:
+            _destination(base, path)
+        try:
+            detect_collisions(paths)
+        except PortablePathError as exc:
+            plan.conflicts.append({"kind": "colliding_template_destination", "path": f"{prefix}{exc.path}", "detail": exc.reason})
+    return any(conflict["kind"] == "colliding_template_destination" for conflict in plan.conflicts)
 
 
 def _source_binding_writes(

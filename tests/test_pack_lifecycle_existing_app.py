@@ -1573,3 +1573,31 @@ def test_generator_upgrade_keeps_another_packs_workflow_registry_ownership(tmp_p
     registry.write_text(original, encoding="utf-8")
     assert apply_workspace_upgrade(source=PackSource(directory=_version_two(tmp_path)), roots=roots).status == "applied"
     assert verify_installed_components(roots=roots)["status"] == "clean"
+
+
+@pytest.mark.parametrize(
+    ("templates", "path"),
+    [
+        ({"config/probe.txt": "lower\n", "config/PROBE.txt.j2": "upper\n"}, "config/PROBE.txt"),
+        ({"config/probe.j2": "file\n", "config/probe/inner.txt": "folder\n"}, "config/probe"),
+    ],
+    ids=["case-fold-duplicate", "file-folder-prefix"],
+)
+def test_template_outputs_sharing_a_destination_block_before_any_write(tmp_path, templates, path):
+    # Both spellings exist side by side in the pack on every host; only their rendered outputs collide.
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    for name, content in templates.items():
+        target = pack / "templates" / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    before = _tree(tmp_path / "shop")
+    plan = plan_component_install(source=PackSource(directory=pack), roots=roots)
+    assert plan.status == "blocked"
+    assert [row["kind"] for row in plan.conflicts] == ["colliding_template_destination"]
+    assert plan.conflicts[0]["path"] in {path, *templates}
+    assert plan.files["write"] == []
+    with pytest.raises(CommunityComponentConflictError):
+        apply_component_install(source=PackSource(directory=pack), roots=roots)
+    assert _tree(tmp_path / "shop") == before
+    assert not roots.build_context_root.exists()
