@@ -762,7 +762,9 @@ records `sha256` per owned file, `materialized_workflow_files`, and an
 `entries` list per composed root (`composed_workflow_outputs` for the workflow
 registry). Upgrade and verify compare against these hashes, so they never
 re-read an old source. Provenance that AppGenerator wrote has no such marker
-and keeps the upgrade path described above, from a directory source.
+and keeps the upgrade path described above, from a directory source; that
+upgrade keeps every other pack's recorded entries, including workflow registry
+entries.
 
 The workspace pin, its source sidecar, the provenance and the app's files are
 written as one transaction. Each file is replaced atomically; a failure attempts
@@ -776,6 +778,9 @@ by blob exactly as the repository stores it, so the digest is the same on
 every OS and checkout. Links, submodules and names that are not portable are
 refused before anything is written: a backslash, a drive prefix, a Windows
 device name, a trailing dot or space, or two names that differ only in case.
+Rendered template outputs follow the same rule: two templates that render to
+names differing only in case, or a file and a folder at one destination
+(`config/x.j2` beside `config/x/`), block the plan before anything is written.
 The pin records `git+<origin>@<commit>#<folder>`, with any credentials in the
 origin URL removed.
 
