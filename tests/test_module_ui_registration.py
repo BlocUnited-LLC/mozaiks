@@ -9,6 +9,8 @@ the app's own barrel.
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 
 import pytest
 
@@ -112,6 +114,101 @@ def test_a_jsx_barrel_resolves() -> None:
 )
 def test_a_component_no_module_barrel_exports_stays_unresolved(changes: dict[str, str | None]) -> None:
     assert _verdicts(_files(**changes)) == _all(False)
+
+
+STAR_BOTH = "export * from './a.jsx';\nexport * from './b.jsx';\n"
+LEFT = "export function StockPage() { return null; }\n"
+RIGHT = "export const StockPage = () => null;\n"
+
+
+def _star_files(barrel: str = STAR_BOTH, **sources: str) -> dict[str, str]:
+    return _files(**{INDEX: barrel, **{f"modules/stock/ui/{name}.jsx": text for name, text in sources.items()}})
+
+
+# Each case is (files, whether the module namespace exports StockPage).
+STAR_CASES = {
+    "two-bindings": (_star_files(a=LEFT, b=RIGHT), False),
+    "nested-two-bindings": (_star_files(a="export * from './c.jsx';\n", b="export * from './d.jsx';\n", c=LEFT, d=RIGHT), False),
+    "ambiguity-inside-one-source": (
+        _star_files("export * from './a.jsx';\n", a="export * from './c.jsx';\nexport * from './d.jsx';\n", c=LEFT, d=RIGHT), False,
+    ),
+    "a-value-and-a-component": (_star_files(a=LEFT, b="export const StockPage = 'title';\n"), False),
+    "two-packages": (
+        _star_files(a="export { StockPage } from 'one';\n", b="export { StockPage } from 'two';\n"), False,
+    ),
+    "same-file-different-binding": (
+        _star_files(
+            a="export { One as StockPage } from './c.jsx';\n", b="export { Two as StockPage } from './c.jsx';\n",
+            c="export const One = () => null;\nexport const Two = () => null;\n",
+        ), False,
+    ),
+    "shadowed-by-a-value": (_star_files(STAR_BOTH + "export const StockPage = 'title';\n", a=LEFT, b=LEFT), False),
+    "same-binding": (
+        _star_files(a="export { StockPage } from './c.jsx';\n", b="export * from './c.jsx';\n", c=LEFT), True,
+    ),
+    "same-binding-under-two-names": (
+        _star_files(
+            a="export { Page as StockPage } from './c.jsx';\n", b="export { StockPage } from './c.jsx';\n",
+            c="function Page() { return null; }\nexport { Page, Page as StockPage };\n",
+        ), True,
+    ),
+    "same-binding-through-an-import": (
+        _star_files(
+            a="import { StockPage } from './c.jsx';\nexport { StockPage };\n", b="export { StockPage } from './c.jsx';\n", c=LEFT,
+        ), True,
+    ),
+    "same-package-binding": (
+        _star_files(a="export { StockPage } from 'one';\n", b="export { StockPage } from 'one';\n"), True,
+    ),
+    "resolved-by-a-named-export": (_star_files(STAR_BOTH + "export { StockPage } from './a.jsx';\n", a=LEFT, b=RIGHT), True),
+    "resolved-by-a-local-export": (_star_files(STAR_BOTH + "export const StockPage = () => null;\n", a=LEFT, b=RIGHT), True),
+    "one-source-only": (_star_files(a=LEFT, b="export const Other = () => null;\n"), True),
+    "default-is-not-forwarded": (_star_files(a="export default function StockPage() { return null; }\n", b="export const Other = 1;\n"), False),
+    "cycle": (_star_files(a="export * from './index.js';\n" + LEFT, b="export { StockPage } from './index.js';\n"), True),
+}
+
+
+@pytest.mark.parametrize("case", STAR_CASES)
+def test_star_exports_follow_ecmascript_resolution(case: str) -> None:
+    files, exported = STAR_CASES[case]
+    components, errors = module_ui_components(files)
+    assert ("StockPage" in components.get("stock", {})) is exported, (components, errors)
+    assert _verdicts(files) == _all(exported)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
+def test_star_export_cases_match_what_node_links(tmp_path) -> None:
+    """Every case above without a package import agrees with a real ECMAScript loader."""
+    for case, (files, exported) in STAR_CASES.items():
+        if any("'one'" in text for text in files.values()):
+            continue
+        root = tmp_path / case
+        for path, text in files.items():
+            if path.startswith("modules/stock/ui/"):
+                target = root / path.removeprefix("modules/stock/ui/").replace(".jsx", ".mjs").replace(".js", ".mjs")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(text.replace(".jsx'", ".mjs'").replace(".js'", ".mjs'"), encoding="utf-8")
+        script = "import('./index.mjs').then(m => console.log(typeof m.StockPage === 'function'))"
+        result = subprocess.run(["node", "-e", script], cwd=root, capture_output=True, text=True, check=False)
+        assert result.stdout.strip() == str(exported).lower(), (case, result.stdout, result.stderr)
+
+
+@pytest.mark.parametrize(
+    "barrel",
+    [
+        "export { Other as Extra } from './StockPage.jsx';\n",
+        "import { Other } from './StockPage.jsx';\nexport { Other };\n",
+        "export { Undeclared };\n",
+        "export * from './extra.jsx';\n",
+    ],
+    ids=["re-export", "imported", "undeclared", "behind-a-star"],
+)
+def test_an_export_its_source_does_not_provide_fails_the_whole_barrel(barrel: str) -> None:
+    # The module does not link, so every export of the barrel is gone, not only the missing one.
+    files = _files(**{INDEX: BARREL + barrel, "modules/stock/ui/extra.jsx": "export { Gone } from './StockPage.jsx';\n"})
+    components, errors = module_ui_components(files)
+    assert "stock" not in components and "stock" in errors
+    assert _verdicts(files) == _all(False)
 
 
 def test_a_module_barrel_cannot_supply_shell_owned_names() -> None:

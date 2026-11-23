@@ -13,7 +13,7 @@ import posixpath
 import re
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from mozaiksai.core.app_context.context_graph import _tree_sitter_parser
 from mozaiksai.core.runtime.app.auth_contract import APP_AUTH_COMPONENTS
@@ -312,57 +312,92 @@ _MODULE_UI_BARREL = re.compile(r"^modules/([^/._][^/]*)/ui/index\.jsx?$")
 _NON_COMPONENT_VALUES = frozenset({"string", "template_string", "number", "true", "false", "null", "undefined"})
 
 
-def _declared_components(declaration: Any, path: str) -> dict[str, str]:
+@dataclass(frozen=True)
+class _Binding:
+    """The binding an export resolves to; two exports are the same only if they share it."""
+
+    path: str
+    name: str
+    component: bool
+
+
+@dataclass
+class _ModuleExports:
+    """One module's own export entries, as ECMAScript separates them."""
+
+    # Export name -> the local binding, or the imported (source, name) whose value it copies.
+    local: dict[str, tuple[str, bool | tuple[str, str]]]
+    # Export name -> (source, imported name); "*" names the source's namespace object.
+    indirect: dict[str, tuple[str, str]]
+    stars: list[str]
+
+
+def _pattern_names(node: Any) -> list[str]:
+    if node.type in {"identifier", "shorthand_property_identifier_pattern"}:
+        return [_text(node)]
+    if node.type == "pair_pattern":
+        return _pattern_names(node.child_by_field_name("value"))
+    if node.type in {"assignment_pattern", "object_assignment_pattern"}:
+        return _pattern_names(node.child_by_field_name("left"))
+    if node.type in {"object_pattern", "array_pattern", "rest_pattern"}:
+        return [name for child in _children(node) for name in _pattern_names(child)]
+    return []
+
+
+def _declared_bindings(declaration: Any) -> dict[str, bool]:
+    """The names a declaration binds, and whether each can be a component."""
     if declaration.type not in {"lexical_declaration", "variable_declaration"}:
         name = _text(declaration.child_by_field_name("name"))
-        return {name: path} if name else {}
-    found: dict[str, str] = {}
+        return {name: True} if name and declaration.type.endswith("_declaration") else {}
+    found: dict[str, bool] = {}
     for child in _children(declaration):
         target, value = child.child_by_field_name("name"), child.child_by_field_name("value")
-        if target is None or target.type != "identifier":
-            raise ValueError(f"{path}: destructured UI exports are unsupported; export each component by name")
-        if value is not None and value.type not in _NON_COMPONENT_VALUES:
-            found[_text(target)] = path
+        if target is not None:
+            component = value is not None and value.type not in _NON_COMPONENT_VALUES
+            found.update(dict.fromkeys(_pattern_names(target), component))
     return found
 
 
-def _component_exports(path: str, files: dict[str, str], active: frozenset[str] = frozenset()) -> dict[str, str]:
-    """Each component one module UI file exports, with the file that implements it."""
-    if path in active:
-        raise ValueError(f"Cyclic UI export: {path}")
-    active = active | {path}
+def _import_entries(statement: Any) -> dict[str, tuple[str, str]]:
+    """Local name -> (source, imported name) for one import statement."""
+    clause = next((child for child in _children(statement) if child.type == "import_clause"), None)
+    if clause is None:
+        return {}
+    source = _string(statement.child_by_field_name("source"))
+    entries: dict[str, tuple[str, str]] = {}
+    for child in _children(clause):
+        if child.type == "identifier":
+            entries[_text(child)] = (source, "default")
+        elif child.type == "namespace_import":
+            entries[_text(_children(child)[0])] = (source, "*")
+        elif child.type == "named_imports":
+            for specifier in _children(child):
+                name = _text(specifier.child_by_field_name("name"))
+                entries[_text(specifier.child_by_field_name("alias")) or name] = (source, name)
+    return entries
+
+
+def _module_exports(path: str, files: dict[str, str]) -> _ModuleExports:
     statements = _children(_parse(files[path], path))
+    declared: dict[str, bool] = {}
+    imported: dict[str, tuple[str, str]] = {}
+    for statement in statements:
+        if statement.type == "import_statement":
+            imported.update(_import_entries(statement))
+            continue
+        declaration = statement.child_by_field_name("declaration") if statement.type == "export_statement" else statement
+        if declaration is not None:
+            declared.update(_declared_bindings(declaration))
+    exports = _ModuleExports({}, {}, [])
 
-    def target_exports(source: str) -> dict[str, str]:
-        return _component_exports(_target(source, path, files), files, active)
+    def export_local(exported: str, name: str) -> None:
+        if name in imported:
+            exports.indirect[exported] = imported[name]
+        elif name in declared:
+            exports.local[exported] = (name, declared[name])
+        else:
+            raise ValueError(f"{path}: exports {name!r}, which it does not declare")
 
-    def local_binding(binding: str) -> str | None:
-        for statement in statements:
-            if statement.type == "import_statement":
-                clause = next((child for child in _children(statement) if child.type == "import_clause"), None)
-                # A namespace or side-effect import binds no component.
-                if clause is None or any(child.type == "namespace_import" for child in _children(clause)):
-                    continue
-                original = _import_names(statement).get(binding)
-                if original is not None:
-                    source = _string(statement.child_by_field_name("source"))
-                    # A package component has no local file; the importing file provides it.
-                    return target_exports(source).get(original) if source.startswith(".") else path
-                continue
-            declaration = statement.child_by_field_name("declaration") if statement.type == "export_statement" else statement
-            if declaration is None or not declaration.type.endswith("_declaration"):
-                continue
-            if declaration.type in {"lexical_declaration", "variable_declaration"}:
-                for child in _children(declaration):
-                    value = child.child_by_field_name("value")
-                    if _text(child.child_by_field_name("name")) == binding:
-                        return None if value is None or value.type in _NON_COMPONENT_VALUES else path
-            elif _text(declaration.child_by_field_name("name")) == binding:
-                return path
-        return None
-
-    exported: dict[str, str] = {}
-    starred: dict[str, str] = {}
     for node in statements:
         if node.type != "export_statement":
             continue
@@ -370,29 +405,106 @@ def _component_exports(path: str, files: dict[str, str], active: frozenset[str] 
         source_node = node.child_by_field_name("source")
         source = _string(source_node) if source_node is not None else None
         clause = next((child for child in _children(node) if child.type == "export_clause"), None)
-        found: str | None
+        namespace = next((child for child in _children(node) if child.type == "namespace_export"), None)
         if any(child.type == "default" for child in node.children):
-            found = local_binding(_text(value)) if value is not None and value.type == "identifier" else path
-            if found is not None and (value is None or value.type not in _NON_COMPONENT_VALUES):
-                exported["default"] = found
+            if declaration is not None and (names := list(_declared_bindings(declaration))):
+                exports.local["default"] = (names[0], True)
+            elif value is not None and value.type == "identifier":
+                name = _text(value)
+                # `export default Name` makes a new binding that copies the value.
+                exports.local["default"] = ("*default*", imported[name] if name in imported else declared.get(name, True))
+            else:
+                exports.local["default"] = ("*default*", value is None or value.type not in _NON_COMPONENT_VALUES)
         elif declaration is not None:
-            exported.update(_declared_components(declaration, path))
+            exports.local.update({name: (name, component) for name, component in _declared_bindings(declaration).items()})
         elif clause is not None:
-            available = target_exports(source) if source is not None and source.startswith(".") else None
             for specifier in _children(clause):
-                original = _text(specifier.child_by_field_name("name"))
+                name = _text(specifier.child_by_field_name("name"))
                 # tree-sitter exposes the keyword `default` as an unnamed child.
-                if not original and any(child.type == "default" for child in specifier.children):
-                    original = "default"
-                found = local_binding(original) if source is None else path if available is None else available.get(original)
-                if found is not None:
-                    exported[_text(specifier.child_by_field_name("alias")) or original] = found
-        elif source is not None and not any(child.type == "namespace_export" for child in _children(node)):
-            # `export * as Name` is skipped: a namespace object is not a page component.
+                if not name and any(child.type == "default" for child in specifier.children):
+                    name = "default"
+                exported = _text(specifier.child_by_field_name("alias")) or name
+                if source is None:
+                    export_local(exported, name)
+                else:
+                    exports.indirect[exported] = (source, name)
+        elif namespace is not None and source is not None:
+            exports.indirect[_text(_children(namespace)[0])] = (source, "*")
+        elif source is not None:
             if not source.startswith("."):
                 raise ValueError(f"{path}: export-star forwarding from a package is unsupported; export each component by name")
-            starred.update((name, file) for name, file in target_exports(source).items() if name != "default")
-    return {**starred, **exported}
+            exports.stars.append(source)
+    return exports
+
+
+def _component_exports(path: str, files: dict[str, str]) -> dict[str, str]:
+    """Each component one module UI file exports, with the file that implements it.
+
+    Follows ECMAScript export resolution: a module's own export wins over
+    ``export *``; a name two ``export *`` sources bind differently is absent
+    from the namespace; an explicit export of a name its source does not
+    provide fails, as the module fails to link.
+    """
+    modules: dict[str, _ModuleExports] = {}
+
+    def exports_of(module: str) -> _ModuleExports:
+        if module not in modules:
+            modules[module] = _module_exports(module, files)
+        return modules[module]
+
+    def imported(module: str, source: str, name: str, seen: set[tuple[str, str]]) -> _Binding | Literal["ambiguous"] | None:
+        if not source.startswith("."):
+            # A package has no local file; the importing file provides it.
+            return _Binding(f"package:{source}", name, name != "*")
+        target = _target(source, module, files)
+        return _Binding(target, "*", False) if name == "*" else resolve(target, name, seen)
+
+    def resolve(module: str, name: str, seen: set[tuple[str, str]]) -> _Binding | Literal["ambiguous"] | None:
+        if (module, name) in seen:
+            return None
+        seen.add((module, name))
+        exports = exports_of(module)
+        if name in exports.local:
+            local, component = exports.local[name]
+            if isinstance(component, tuple):
+                copied = imported(module, *component, set())
+                component = isinstance(copied, _Binding) and copied.component
+            return _Binding(module, local, component)
+        if name in exports.indirect:
+            return imported(module, *exports.indirect[name], seen)
+        found: _Binding | None = None
+        for source in exports.stars if name != "default" else ():
+            binding = resolve(_target(source, module, files), name, seen)
+            if binding == "ambiguous":
+                return "ambiguous"
+            if isinstance(binding, _Binding):
+                if found is not None and (found.path, found.name) != (binding.path, binding.name):
+                    return "ambiguous"
+                found = binding
+        return found
+
+    def names_of(module: str, seen: set[str]) -> set[str]:
+        if module in seen:
+            return set()
+        seen.add(module)
+        exports = exports_of(module)
+        starred = (names_of(_target(source, module, files), seen) - {"default"} for source in exports.stars)
+        return {*exports.local, *exports.indirect}.union(*starred)
+
+    names = names_of(path, set())
+    result: dict[str, str] = {}
+    for name in names:
+        binding = resolve(path, name, set())
+        if isinstance(binding, _Binding) and binding.component:
+            result[name] = path if binding.path.startswith("package:") else binding.path
+    checked: set[str] = set()
+    while pending := sorted(modules.keys() - checked):
+        for module in pending:
+            checked.add(module)
+            for name, (source, original) in sorted(modules[module].indirect.items()):
+                if not isinstance(imported(module, source, original, set()), _Binding):
+                    raise ValueError(f"{module}: exports {name!r}, which {source!r} does not provide")
+    return result
 
 
 def module_ui_components(files: Mapping[str, str]) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
