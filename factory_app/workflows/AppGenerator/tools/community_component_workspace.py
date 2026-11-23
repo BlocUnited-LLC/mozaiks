@@ -967,6 +967,23 @@ def _workflow_registry_conflicts(
         })
 
 
+def _app_registry_conflicts(roots: WorkspaceRoots, plan: LifecyclePlan, writes: Mapping[Path, str | None]) -> None:
+    """Validate an existing registry the pack does not compose against the planned workflow files."""
+    text = _read_text(_destination(roots.workflows_root, WORKFLOW_REGISTRY_PATH))
+    if text is None:
+        return
+    label = f"workflows/{WORKFLOW_REGISTRY_PATH}"
+    if not isinstance(text, str):
+        plan.conflicts.append({"kind": "composed_output_conflict", "root": label})
+        return
+    try:
+        document = parse_document(text, "json")
+    except CompositionFormatError as exc:
+        plan.conflicts.append({"kind": "invalid_workflow_registry", "root": label, "detail": str(exc)})
+        return
+    _workflow_registry_conflicts(document, roots, plan, writes)
+
+
 def _splice(text: str, root: KeyedRoot, upserts: dict[tuple[str, str], Any], removals: set[tuple[str, str]]) -> str:
     crlf = "\r\n" in text
     result = splice_document(text.replace("\r\n", "\n"), root, upserts=upserts, removals=removals)
@@ -982,6 +999,9 @@ def _plan_entries(
         new_entries = rendered.contributions.get(root.path, {})
         old_hashes = recorded.entries.get(root.path, {})
         if not new_entries and not old_hashes:
+            if root.path == WORKFLOW_REGISTRY_PATH and (plan.workflow_files["write"] or plan.workflow_files["remove"]):
+                # App-owned registry entries may name the pack's workflow folders.
+                _app_registry_conflicts(roots, plan, outcome.writes)
             continue
         label = root.path if root.base == "app" else f"workflows/{root.path}"
         target = _destination(roots.base(root.base), root.path)

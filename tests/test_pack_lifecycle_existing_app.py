@@ -1490,3 +1490,28 @@ def test_registry_source_closure_preserves_packaged_default_workflows(tmp_path):
     registry.write_text(json.dumps(doc), encoding="utf-8")
     assert apply_component_install(source=PackSource(directory=pack), roots=roots).status == "applied"
     assert verify_installed_components(roots=roots)["status"] == "clean"
+
+
+def test_upgrade_checks_app_owned_registry_references_to_pack_workflows(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    # The pack ships the workflow folder; the app owns every registry entry naming it.
+    (pack / "workflows/extended_orchestration/extension_registry.json").unlink()
+    apply_component_install(source=PackSource(directory=pack), roots=roots)
+    registry = roots.workflows_root / "extended_orchestration/extension_registry.json"
+    doc = json.loads(registry.read_text(encoding="utf-8"))
+    doc["workflows"] = [{"id": "StockReview"}]
+    doc["entrypoints"] = [{"id": "app-review", "path": "/review", "workflow": "StockReview"}]
+    registry.write_text(json.dumps(doc), encoding="utf-8")
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+    candidate = _version_two(tmp_path)
+    (candidate / "workflows/extended_orchestration/extension_registry.json").unlink()
+    (candidate / "workflows/StockReview").rename(candidate / "workflows/StockReviewV2")
+    _edit(candidate / "workflows/StockReviewV2/orchestrator.yaml", "workflow_name: StockReview", "workflow_name: StockReviewV2")
+    before = _tree(tmp_path / "shop")
+    plan = plan_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+    assert plan.status == "blocked"
+    assert {"kind": "missing_workflow_source", "root": "workflows/StockReview/orchestrator.yaml", "key": "StockReview"} in plan.conflicts
+    with pytest.raises(CommunityComponentConflictError):
+        apply_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+    assert _tree(tmp_path / "shop") == before
