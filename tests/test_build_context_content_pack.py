@@ -27,6 +27,7 @@ from mozaiksai.core.workflow.context.authority import build_context_authority_po
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_owned_output_paths,
 )
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 PACK = ROOT / "factory_app/build_context/content"
@@ -48,7 +49,7 @@ def _registered_context(workflow: str, build_context_root: Path) -> dict:
 
 
 @pytest.mark.parametrize("workflow", ["DesignDocs", "AppGenerator"])
-def test_content_registers_through_the_workflows_actual_trusted_context(workflow, tmp_path):
+def test_content_registers_through_the_workflows_actual_trusted_context(workflow, tmp_path, monkeypatch):
     """A declared named context supplies descriptors and contracts, including their real source."""
     root = tmp_path / "build_context"
     copied = root / "content"
@@ -67,8 +68,13 @@ def test_content_registers_through_the_workflows_actual_trusted_context(workflow
     assert {key: value for key, value in contract.items() if key != "source_path"} == _yaml(PACK / "contract.yaml")
 
     if workflow == "AppGenerator":
+        monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(root))
         agent = SimpleNamespace(name="AppPlanAgent", context_variables=projected, system_message="Build the approved app.")
         agent.update_system_message = lambda message: setattr(agent, "system_message", message)
+        inject_managed_capabilities_context(agent, [])
+        assert all(capability["capability_id"] not in agent.system_message for capability in descriptor["capabilities"])
+        assert all(output["path"] not in agent.system_message for output in contract["required_outputs"])
+        agent.context_variables = reviewed_pack_fixture(projected, ["content"])
         inject_managed_capabilities_context(agent, [])
         for capability in descriptor["capabilities"]:
             assert capability["capability_id"] in agent.system_message
@@ -116,7 +122,9 @@ def test_content_capabilities_and_handlers_close_against_the_loaded_manifest(ren
 
 
 def test_content_implementation_is_released_from_model_tasks(rendered):
-    context = {"capability_packs": [{"id": "content", "pack_source_path": str(PACK)}]}
+    available = {"capability_packs": [{"id": "content", "pack_source_path": str(PACK)}]}
+    assert not pack_owned_output_paths(available)
+    context = reviewed_pack_fixture(available, ["content"])
     declared = resolve_declared_pack_output_paths(context["capability_packs"], context_variables=context)
     owned = pack_owned_output_paths(context)
     assert {path for path in rendered if path.startswith("modules/content/")} <= owned

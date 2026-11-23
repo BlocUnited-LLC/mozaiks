@@ -61,7 +61,7 @@ async def test_platform_app_exposes_console_routes_only_on_studio_surface(monkey
     assert console_pages["/apps/:appId/overview"]["component"] == "AppOverviewPage"
     assert console_pages["/apps/:appId/health"]["component"] == "AppHealthPage"
     assert console_pages["/apps/:appId/support"]["component"] == "AppSupportPage"
-    assert console_pages["/apps/:appId/overview"]["meta"]["requiresRole"] == "admin"
+    assert "requiresRole" not in console_pages["/apps/:appId/overview"]["meta"]
     assert "/apps/:appId/overview" not in platform_paths
     assert "/apps/:appId/health" not in platform_paths
     assert '_inject_header_page(result, path="/apps/:appId/overview"' not in platform_source
@@ -102,7 +102,8 @@ def test_app_shell_uses_same_origin_api_base_when_vite_api_url_is_unset() -> Non
     settings_source = _read("chat-ui/src/admin/pages/SettingsSection.jsx")
     assert "'http://localhost:8000'" not in admin_source
     assert "'http://localhost:8000'" not in settings_source
-    assert "same-origin" in settings_source
+    # With no API URL configured the page says so in plain words, not a default host.
+    assert 'emptyLabel="Same address as this site"' in settings_source
 
 
 def test_app_overview_page_fetches_summary_endpoint() -> None:

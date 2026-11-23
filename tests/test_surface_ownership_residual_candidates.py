@@ -7,8 +7,13 @@ from pathlib import Path
 import pytest
 import yaml
 
+from factory_app.workflows._shared.pack_selection import pin_pack_choices
 from factory_app.workflows._shared.surface_ownership import normalize_surface_ownership
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    PackIntegrityError,
+)
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.context.frozen import detach
 
 
 @pytest.fixture(autouse=True)
@@ -42,7 +47,8 @@ def _context(facade_id="billing_portal", *, ownership_rules=(), platform_hints=(
         "projections": {"context_variables": {"capability_packs": {"from": "capability_packs"}}},
     }), encoding="utf-8")
     (root / "contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
-    return ContextVariablesBridge({
+    context = ContextVariablesBridge({
+        "workflow_name": "DesignDocs",
         "capability_packs": [{
             "id": "managed_billing", "capability_source": "managed_capability", "version": "1.0.0",
             "pack_source_path": str(root),
@@ -50,6 +56,8 @@ def _context(facade_id="billing_portal", *, ownership_rules=(), platform_hints=(
         "operator_contracts": [contract],
         "concept_blueprint": {"surface_candidate_hints": list(platform_hints)},
     })
+    context.set("pack_selection", pin_pack_choices(context, ["managed_billing"]))
+    return context
 
 
 def _surface(surface_id, *, owner="app", actions=()):
@@ -117,21 +125,31 @@ def test_live_facade_exclusion_loads_selected_pack_contract_from_source_path():
     _assert_task_split(surface_map, data_contract, "preferences")
 
 
-@pytest.mark.parametrize("fault", ["unregistered", "id_only"])
+@pytest.mark.parametrize("fault", ["unregistered", "changed_pin"])
 def test_an_unverifiable_selected_managed_pack_refuses_normalization(monkeypatch, fault):
     """A managed selection the resolver cannot verify is never silently omitted, or replaced by its projection."""
     context = _context()
     if fault == "unregistered":
         monkeypatch.delenv("MOZAIKS_BUILD_CONTEXT_PATH")
     else:
-        context.set("capability_packs", [{"id": "managed_billing", "capability_source": "managed_capability"}])
+        pins = detach(context.get("pack_selection"))
+        pins[0]["digest"] = "sha256:" + "0" * 64
+        context.set("pack_selection", pins)
     surface_map, data_contract = _design(_surface("tasks"), _surface("billing_portal", actions=["read_billing"]))
     submitted = deepcopy((surface_map, data_contract))
 
-    with pytest.raises(ValueError, match="Selected managed pack 'managed_billing' cannot be verified"):
+    with pytest.raises((ValueError, PackIntegrityError), match="no longer available|changed"):
         normalize_surface_ownership(surface_map, context_variables=context, data_contract=data_contract)
 
     assert (surface_map, data_contract) == submitted
+
+
+def test_verified_candidate_does_not_need_an_inline_source_path():
+    context = _context()
+    context.set("capability_packs", [{"id": "managed_billing", "capability_source": "managed_capability"}])
+    surface_map, data_contract = _design(_surface("tasks"), _surface("billing_portal", actions=["read_billing"]))
+    normalize_surface_ownership(surface_map, context_variables=context, data_contract=data_contract)
+    _assert_task_split(surface_map, data_contract, "preferences")
 
 
 def test_live_two_domain_modules_still_reject_residual_ownership_atomically():

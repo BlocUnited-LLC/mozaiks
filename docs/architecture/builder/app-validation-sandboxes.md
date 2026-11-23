@@ -284,6 +284,8 @@ docker build -f infra/docker/Dockerfile.preview -t mozaiks-sandbox:local .
 
 The image includes the installed OSS runtime, frontend dependencies, and Mongo.
 Generated `requirements.txt` installs against the image's dependency constraints.
+The requirements scanner maps `bson` imports to `pymongo`, which supplies the
+MongoDB driver's BSON implementation.
 The install runs in the sandbox user's site directory with pip's
 `--break-system-packages` option because the disposable image uses Debian's
 externally managed Python. It does not install into the operator's Python.
@@ -326,27 +328,74 @@ Tracked links are rejected. Uncommitted changes or untracked files require a
 fresh clean checkout before the paid build. Dry-run mode does not stage or
 upload files.
 
-Only explicitly configured `MOZAIKS_PREVIEW_ENV_<NAME>` values become preview
-environment variables. Factory API keys, credentials, and database URLs are not
-inherited. The manager also supplies the canonical image's three nonsecret
+Use `MOZAIKS_PREVIEW_ENV_<NAME>` to configure the interactive preview
+environment. Factory API keys, credentials, and database URLs stay in Studio.
+The manager also supplies the canonical image's three nonsecret
 frontend/Factory resource paths, because E2B template-build ENV is not retained
-as session environment. Public apps may declare `authRequired: false`; authenticated apps
-cannot silently disable authentication. Configure their existing OIDC provider
-and register each target app client with the published preview callback origin.
-For local JWT validation, a typical explicit configuration is:
+as session environment. Public apps may declare `authRequired: false`.
+Authenticated apps require a configured OIDC provider.
+
+### Studio-managed Keycloak clients
+
+For local Docker previews, Studio can create a public OIDC client for each
+authenticated preview. Configure Studio with the native Keycloak adapter and
+create a dedicated confidential service-account client in the same realm.
+Grant the account the realm's `realm-management` client role `manage-clients`
+for registration and cleanup. Disable browser and password flows on this
+service account.
+
+Set `MOZAIKS_KEYCLOAK_PREVIEW_REGISTRAR_CLIENT_ID` and
+`MOZAIKS_KEYCLOAK_PREVIEW_REGISTRAR_CLIENT_SECRET` in the Studio host environment.
+Keep both values in Studio's configuration outside `MOZAIKS_PREVIEW_ENV_*`.
+If the public Keycloak URL is unreachable from Docker, set
+`MOZAIKS_PREVIEW_ENV_AUTH_JWKS_URL` to the same realm's container-reachable
+signing keys endpoint.
+
+Studio registers the exact Docker loopback origin and callback path declared
+in the app's auth contract. Each preview client requires PKCE and receives its
+own API audience and target app identity. The browser can reuse the Studio
+realm session. Studio revokes the client when the preview stops, expires, or
+fails to start. Keep the registrar configuration available until managed
+previews are cleaned up. Studio retains the cleanup record if revocation fails.
+Use the realm's standard `basic`, `profile`, and `email` client scopes with
+their standard mappers. These scopes must keep the Studio API audience out of
+preview tokens.
+
+With registration enabled, local Docker allocations give Studio two extra
+minutes to revoke the callback while Docker still owns the port. The app
+runtime keeps the original preview expiry. A Docker stop outside Studio or an
+outage longer than this grace period can leave a callback registered after the
+port is released. Studio retries revocation when it can reach Keycloak again.
+
+### Manually configured OIDC clients
+
+For other preview configurations, register the app's browser client with the
+published preview callback origin. One local JWT configuration is shown below.
 
 ```dotenv
 MOZAIKS_PREVIEW_ENV_AUTH_PROVIDER=jwt
 MOZAIKS_PREVIEW_ENV_AUTH_ISSUER=http://localhost:8080/realms/local-preview
 MOZAIKS_PREVIEW_ENV_AUTH_JWKS_URL=http://host.docker.internal:8080/realms/local-preview/protocol/openid-connect/certs
 MOZAIKS_PREVIEW_ENV_VITE_OIDC_AUTHORITY=http://localhost:8080/realms/local-preview
+MOZAIKS_PREVIEW_ENV_AUTH_AUDIENCE=my-app-preview-api
+MOZAIKS_PREVIEW_ENV_VITE_OIDC_CLIENT_ID=my-app-preview
 ```
 
-These are example addresses, not provisioned services. Audience and frontend
-client ID are the generated app ID; callback paths follow its auth contract.
-Additional claims and app-owned AI credentials must be explicitly configured
-for the chosen provider and app. Test data survives a runtime restart within
-one session, but is discarded when that sandbox stops or expires.
+When Studio resolves to the native Keycloak adapter and the preview's
+`AUTH_ISSUER` and `VITE_OIDC_AUTHORITY` match that realm,
+the interactive preview automatically validates Keycloak's signed `typ=Bearer`
+claim. The preview API audience must differ from the preview browser client ID
+and the Studio API audience. Register the dedicated preview client and its exact
+callback URI in Keycloak, and configure its audience mapper so preview tokens
+exclude the Studio API audience. The callback path follows the app's auth
+contract. The browser can reuse the realm session to obtain a preview access
+token through OIDC. An explicitly configured token-type claim or value takes
+precedence over automatic configuration. Newly created previews pick up these
+settings.
+
+Configure additional claims and app-owned AI credentials for the chosen provider
+and app. Test data survives a runtime restart within one session and is discarded
+when that sandbox stops or expires.
 
 For a provider whose JWT carries permissions in the space-delimited `scope`
 claim, set `MOZAIKS_PREVIEW_ENV_AUTH_SCOPES_CLAIM=scope`; the generic JWT
@@ -468,7 +517,9 @@ artifact storage, provider limits, and expected traffic before broad rollout.
 | `SANDBOX_TEMPLATE` | provider default | artifact preview-session e2b template |
 | `MOZAIKS_PREVIEW_PROVIDER` | auto | `docker` (default) or explicit `e2b`; a key alone never selects E2B |
 | `SANDBOX_WORKDIR` | `/home/user/app` | e2b workspace root; Docker uses `/workspace` |
-| `MOZAIKS_PREVIEW_ENV_<NAME>` | unset | explicit preview-only environment, never implicit host inheritance |
+| `MOZAIKS_KEYCLOAK_PREVIEW_REGISTRAR_CLIENT_ID` | unset | Studio-only client ID for managed Keycloak registration in Docker previews |
+| `MOZAIKS_KEYCLOAK_PREVIEW_REGISTRAR_CLIENT_SECRET` | unset | Studio-only registrar secret, configured with the client ID |
+| `MOZAIKS_PREVIEW_ENV_<NAME>` | unset | explicit interactive preview environment, with signed token-type defaults for the shared Studio Keycloak realm as described above |
 | `APP_VALIDATION_BUILD_OUTPUT_MAX_CHARS` | `20000` | persisted build-output trim |
 
 ## Hosted provider boundary

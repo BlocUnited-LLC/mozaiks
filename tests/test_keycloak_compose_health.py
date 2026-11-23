@@ -24,6 +24,22 @@ def test_keycloak_health_matches_enabled_management_interface(name):
     assert all("9000" not in str(port) for port in service.get("ports", []))
 
 
+def test_production_compose_publishes_its_database_on_loopback_only():
+    # The bundled MongoDB starts without credentials, so a port published on
+    # every interface would hand the whole database to the network.
+    compose = REPO_ROOT / "infra" / "compose" / "docker-compose.prod.yml"
+    mongo = yaml.safe_load(compose.read_text(encoding="utf-8"))["services"]["mongo"]
+
+    def host_ip(port):
+        if isinstance(port, dict):
+            return port.get("host_ip")
+        parts = str(port).split(":")
+        return parts[0] if len(parts) == 3 else None
+
+    assert mongo["ports"], "the guide tells operators to reach MongoDB on this machine"
+    assert [host_ip(port) for port in mongo["ports"]] == ["127.0.0.1"] * len(mongo["ports"])
+
+
 def test_production_compose_requires_separate_operator_realm():
     compose_dir = REPO_ROOT / "infra" / "compose"
     prod = yaml.safe_load((compose_dir / "docker-compose.prod.yml").read_text(encoding="utf-8"))[

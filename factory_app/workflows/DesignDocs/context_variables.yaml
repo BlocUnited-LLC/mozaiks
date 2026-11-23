@@ -1,4 +1,48 @@
 definitions:
+  pack_selection_outcome:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: blocked}
+  pack_selection_attempts:
+    type: integer
+    authority_class: closed_writer_quality_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: 0}
+  pack_selection_feedback:
+    type: string
+    authority_class: derived_information
+    authorization: false
+    writer_ids: [deterministic_tool]
+    persisted: true
+    source: {type: state, default: null}
+  design_docs_failure_feedback:
+    type: string
+    authority_class: derived_information
+    authorization: false
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Latest selection or design rejection for the workflow failure display. Each rejection boundary writes its own diagnostic; this is not design or selection authority.
+    source: {type: state, default: ""}
+  pack_selection:
+    type: array
+    authority_class: derived_information
+    authorization: false
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: Verified candidate pack identity pins written by select_capability_packs; not owner approval. Null requires explicit selection before saving, [] selects none.
+    source: {type: state, default: null}
+  design_docs_review_requested_changes:
+    type: boolean
+    authority_class: closed_writer_routing_state
+    authorization: false
+    model_visible: false
+    writer_ids: [deterministic_tool]
+    persisted: true
+    description: The owner requested a revised proposal. Require a fresh review until the approved replacement is saved.
+    source: {type: state, default: false}
   access_policy:
     type: object
     authority_class: tool_only_information
@@ -8,15 +52,15 @@ definitions:
     source: {type: computed, default: null}
   operator_capabilities:
     type: array
-    description: Trusted operator-selected pack identifiers resolved against installed public build-context declarations.
+    description: Trusted operator-enabled offerings resolved against installed public build-context declarations; not the current build selection.
     source: {type: build_context, default: []}
   capability_packs:
     type: array
-    description: Trusted selected pack descriptors used to enforce facade ownership before saving design surfaces.
+    description: Trusted available offering descriptors. The explicit pack_selection candidate and owner-reviewed artifact determine this build’s reusable packs.
     source: {type: build_context, default: []}
   operator_contracts:
     type: array
-    description: Declared contracts of selected packs, including exact surface ownership boundaries.
+    description: Declared contracts of available offerings; selected-source contracts are freshly resolved from the explicit candidate or reviewed artifact.
     source: {type: build_context, default: []}
   design_docs_save_outcome:
     type: string
@@ -407,8 +451,23 @@ definitions:
       type: state
       default: null
 agents:
+  DesignPackSelectionAgent:
+    variables:
+    - pack_selection
+    - pack_selection_feedback
+    - design_docs_save_feedback
+    - concept_overview
+    - concept_blueprint
+    - monetization_enabled
+    - build_mode
+    - revision_scope
+    - refinement_request
+    - brownfield_build_path
+    - adoption_plan
+    - ownership_boundary
   DesignDocsAgent:
     variables:
+    - pack_selection
     - design_docs_save_feedback
     - build_mode
     - workflow_sequence

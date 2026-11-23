@@ -1065,6 +1065,19 @@ class AG2PersistenceManager:
             logger.error("Failed to mark chat %s as %s: %s", chat_id, status, e, exc_info=True)
             raise
 
+    async def fetch_owned_workflow_artifact(
+        self, *, app_id: str, user_id: str, workflow_name: str, chat_id: str,
+    ) -> dict[str, Any] | None:
+        """Read the latest persisted UI artifact of the authenticated actor's exact workflow."""
+        if not all(isinstance(value, str) and value.strip() for value in (app_id, user_id, workflow_name, chat_id)):
+            return None
+        coll = await self._coll()
+        doc = await coll.find_one(
+            {"_id": chat_id, "user_id": user_id, "workflow_name": workflow_name, **build_app_scope_filter(app_id)},
+            {"_id": 0, "workflow_ui_state.last_artifact": 1},
+        )
+        return extract_last_artifact(doc)
+
     async def update_last_artifact(
         self,
         *,

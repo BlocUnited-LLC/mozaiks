@@ -208,6 +208,12 @@ Default placement policy:
 - mobile footer: `hidden`
 - mobile bottom bar max: `5`
 
+At 768 px and wider, the header shows the configured global pages. On narrower
+screens, routes with a mobile bottom bar use its navigation. When a route shows
+the header without a bottom bar, including workflow chat, the header keeps
+its global pages beside the brand mark. The same visibility rules apply at
+every width.
+
 ## Shortcuts
 
 `shortcuts` are the compact authoring layer for common shell chrome. The backend

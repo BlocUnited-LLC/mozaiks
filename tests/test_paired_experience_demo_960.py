@@ -50,6 +50,7 @@ from mozaiksai.core.workflow.generator_support.module_write_actions import (
     materialize_module_write_implementations,
 )
 from scripts.appgenerator_fixture_replay import execute_file_replay
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 BOARD_SOURCE = ROOT / "tests/fixtures/experience_demo_960/PlanningBoard.jsx"
@@ -354,7 +355,7 @@ def _pack_receipt(files, context):
         "pack_provenance": provenance,
         "compiled_data_contract_sha256": hashlib.sha256(files["data/contract.json"].encode("utf-8")).hexdigest(),
         "design_source": {
-            "kind": "scripted_paired_fixture", "design_docs_present": False,
+            "kind": "scripted_paired_fixture", "design_docs_present": bool(context.get("design_docs_artifact")),
             "authored_paths": sorted(path for path in files if path in {
                 "ui/pages/projects.yaml", "ui/pages/tasks.yaml", "ui/pages/custom/board.jsx",
             }),
@@ -373,12 +374,6 @@ async def _scripted_replay(presentation, *, build_context_root=None):
     contract = compile_data_contract(_domain_contract(), context_variables=selected)
     candidates = _candidate_files(presentation)
     candidates["data/contract.json"] = json.dumps(contract, indent=2, ensure_ascii=False)
-    if selected:
-        # This fixture explicitly approves the selected participant-scoped
-        # Messaging feature before admission; materialization never grants it.
-        auth = yaml.safe_load(candidates["config/auth.yaml"])
-        auth["frontend"]["default_scopes"].extend(["messages.read", "messages.write"])
-        candidates["config/auth.yaml"] = yaml.safe_dump(auth, sort_keys=False)
     tasks = []
 
     def task(task_id, task_type, agent, owned, depends_on, *, module_id=None, surface_kind="module"):
@@ -441,6 +436,33 @@ async def _scripted_replay(presentation, *, build_context_root=None):
         "data_contract": contract,
         "generated_files": {"config/auth.yaml": candidates["config/auth.yaml"]},
     })
+    if selected:
+        from factory_app.workflows._shared.pack_selection import pin_pack_choices
+        from mozaiksai.core.workflow.generator_support.module_role_grants import (
+            verified_pack_authorization,
+        )
+
+        authorization = verified_pack_authorization(context,
+            selection=pin_pack_choices(context, ["messaging"]))
+        reviewed_data = compile_data_contract(contract, pack_data_contracts=list(authorization.data_contracts))
+        context.set("data_contract", reviewed_data)
+        context.set("design_surface_map", {"surfaces": [
+            {"surface_id": surface["surface_id"], "surface_kind": "module", "owner": "app",
+             "primary_entities": [collection["entity"] for collection in surface["collections"]],
+             "owned_mutations": ["create_thread", "send_message", "mark_thread_read"] if surface["surface_id"] == "messages" else [],
+             "custom_reads": ["get_thread", "list_threads"] if surface["surface_id"] == "messages" else []}
+            for surface in reviewed_data["surfaces"] if surface["surface_kind"] == "module"
+        ]})
+        # Reuse the standard authenticated user role. This fixture does not
+        # assign membership or inject protected action scopes at login.
+        role_policy = {"roles": [{"role_id": "user", "label": "User", "description": "Authenticated user."}],
+                       "grants": [
+                           {"role_id": "user", "collection": "threads", "actions": ["create_thread", "get_thread", "list_threads"]},
+                           {"role_id": "user", "collection": "messages", "actions": ["send_message"]},
+                           {"role_id": "user", "collection": "thread_reads", "actions": ["mark_thread_read"]},
+                       ]}
+        context = ContextVariablesBridge(reviewed_pack_fixture(context.snapshot(), ["messaging"], access_policy=role_policy))
+        plan["roles"] = ["user"]
     app_build_plan(AppBuildPlan=plan, context_variables=context)
     replay_context = context.snapshot()
     # The scripted worker files are precompiled from the canonical module
@@ -561,12 +583,15 @@ async def test_paired_messaging_is_selected_before_admission_and_preserves_domai
         receipt = _pack_receipt(files, context)
         assert receipt["selected_pack_ids"] == ["messaging"]
         assert set(yaml.safe_load(files["config/auth.yaml"])["frontend"]["default_scopes"]) == {
-            "openid", "profile", "email", "messages.read", "messages.write",
+            "openid", "profile", "email",
         }
+        assert yaml.safe_load(files["config/auth.yaml"])["authorization"]["roles"] == [
+            {"id": "user", "permissions": ["messages.read", "messages.write"]},
+        ]
         plan = detach(context.get("app_build_plan"))
         assert any(pack["capability_pack_id"] == "messaging" for pack in plan["capability_packs"])
         assert {surface["surface_id"] for surface in detach(context.get("data_contract"))["surfaces"]} == {
-            "projects", "tasks",
+            "projects", "tasks", "messages",
         }
         assert {surface["surface_id"] for surface in json.loads(files["data/contract.json"])["surfaces"]} == {
             "projects", "tasks", "messages",
@@ -581,7 +606,8 @@ async def test_paired_messaging_is_selected_before_admission_and_preserves_domai
         assert "modules/messages/backend/service.py" in files
         registry, errors = resolve_registered_component_files(files, source_label=f"paired {presentation}")
         assert not errors
-        assert {"Messages", "MessagingProfileTab"} <= set(registry)
+        assert "MessagingProfileTab" in registry
+        assert "Messages" not in registry
         if presentation == "B":
             assert "PlanningBoard" in registry
             assert files["ui/pages/custom/board.jsx"] == BOARD_SOURCE.read_text(encoding="utf-8")

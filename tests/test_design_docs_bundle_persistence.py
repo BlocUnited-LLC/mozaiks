@@ -14,7 +14,7 @@ design_docs_module = import_module_directly(
 
 
 def _context(initial=None):
-    return ContextVariablesBridge(factory_context(initial))
+    return ContextVariablesBridge(factory_context({"workflow_name": "DesignDocs", "pack_selection": [], **(initial or {})}))
 
 
 class _FakeCursor:

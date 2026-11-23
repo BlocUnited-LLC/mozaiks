@@ -478,17 +478,20 @@ layers:
           - event: hosted.billing.subscription.cancelled
             reaction: revoke gated capabilities
         operator_pack_note: >
-          When the build resolves monetization_provider=mozaiks_pay — the
-          default for SaaS builds unless the user explicitly selects the
-          self-managed OSS path — and the managed mozaikspay pack is available
-          in capability_packs, use it as the SaaS monetization provider.
-          Generate only the app-owned
-          billing_portal facade, MozaiksPay client, subscriptions.yaml plan contract,
-          pricing/billing/usage pages, and entitlement gates. The generated app calls
+          Use the managed mozaikspay pack only when its exact identity appears
+          in the owner-reviewed DesignDocs selection and the later required
+          subscription contract resolves monetization_provider=mozaiks_pay.
+          Availability alone cannot select or activate a provider.
+          Consume verified pack outputs for the billing_portal facade, MozaiksPay
+          client and pricing/billing/usage pages. Canonical subscription assembly
+          owns subscriptions.yaml and entitlement gates. Plan only additional
+          app-owned work outside the closed ownership manifest; do not schedule
+          model tasks for these template-owned outputs. The generated app calls
           the hosted MozaiksPay API for subscription status and billing portal sessions.
           Do not regenerate checkout, webhook handlers, invoice logic, customer/payment
           provider mapping, refunds, wallet, payout, or provider credential handling.
-          If the user selects the self-managed OSS path, use entitlement_dispatch.
+          Use entitlement_dispatch for the self-managed OSS path only when its
+          exact identity was selected and owner-reviewed in DesignDocs.
           Do not emit decorative custom provider ids for subscription assignment.
 
       - revenue_model: usage_based
@@ -570,14 +573,15 @@ layers:
         5. Set or preserve subscription_contract.contract_required independently:
            true only for subscriptions, plan gates, seats, quotas, credits, token
            allowances, or usage budgets that need the OSS subscription runtime.
-        6. If the operator pack is not available in context capability_packs,
-           declare the app-specific module as custom_owned with the same
-           interface contract instead of inventing provider internals.
-        7. For SaaS subscriptions, paid tiers, seats, credits, usage limits, or
-           billing portal requests, default to the managed mozaikspay capability
-           pack when the user has not selected another path. Set
-           AppBuildPlan.monetization_provider=mozaiks_pay. Use
-           entitlement_dispatch only for an explicit self-managed OSS choice.
+        6. When the approved design requires a reusable provider or assignment
+           writer, a missing selection requires renewed DesignDocs selection/review.
+           Do not substitute a custom provider or infer selection from inventory.
+           Separately approved app-owned capabilities retain their own module
+           contracts when no reusable pack is required; never invent provider internals.
+        7. For SaaS subscriptions, paid tiers, seats, credits, usage limits or
+           billing portals, preserve the exact reviewed writer and later required
+           subscription contract. Set monetization_provider only from those
+           approved inputs; neither mozaikspay nor entitlement_dispatch is a default.
       Never generate payment provider, payment provider internals, or raw payment credentials
       as module business logic. Payment provider mechanics belong in operator packs
       or app/services/adapters/payments/ (hosted product only).

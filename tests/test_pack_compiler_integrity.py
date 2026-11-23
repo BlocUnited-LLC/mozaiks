@@ -26,6 +26,7 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.outcome_feedback import WorkflowFeedbackEvidence
 from tests.appgenerator_subscription_fixture import subscription_contract
 from tests.factory_context import factory_context
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -60,16 +61,17 @@ def _context(pack_id, *, subscription=None):
                             "record_checkout_result", "update_order_status"],
         "custom_reads": ["list_products", "get_product", "get_cart", "list_orders", "get_order"],
     }]} if pack_id == "commerce" else None
-    return Context(factory_context({
+    return Context(reviewed_pack_fixture(factory_context({
         "app_id": "pack-compiler-proof", "capability_packs": [row], "data_contract": contract,
         "app_build_plan": {"capability_packs": [{"capability_pack_id": pack_id,
-                            "capability_source": "generated_module", "primary_entities": entities}]},
+                            "capability_source": "generated_module", "primary_entities": entities,
+                            **{key: row[key] for key in ("pack_source_path", "version", "digest")}}]},
         "subscription_contract": subscription,
         "design_surface_map": design,
         "generated_files": {"data/contract.json": json.dumps(contract),
                             "app.json": json.dumps({"appId": "pack-compiler-proof", "appName": "Pack proof", "authRequired": True})},
         "build_timestamp": "2026-11-08T00:00:00Z",
-    }))
+    }), [pack_id]))
 
 
 async def _assemble(context):

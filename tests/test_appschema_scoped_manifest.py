@@ -371,7 +371,10 @@ def test_pack_filter_preserves_shared_registration_barrel(pack_paths):
 
 
 @pytest.mark.parametrize("claim_pack_page", [False, True])
-def test_filtered_custom_bundle_composes_with_verified_pack_or_rejects_competing_claim(schema_model, claim_pack_page):
+def test_filtered_custom_bundle_composes_with_verified_pack_or_rejects_competing_claim(
+    schema_model, claim_pack_page, tmp_path, monkeypatch,
+):
+    from factory_app.workflows._shared.pack_selection import selected_pack_rows
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         resolve_managed_capability_templates,
     )
@@ -381,12 +384,15 @@ def test_filtered_custom_bundle_composes_with_verified_pack_or_rejects_competing
     from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
         compose_ui_registry,
     )
-    from tests.test_messaging_pack_persistence_composition import _context
+    from tests.reviewed_pack_fixture import reviewed_pack_fixture
+    from tests.test_ui_registry_revision_semantics import make_route_ownership_pack
 
-    context = _context()
+    make_route_ownership_pack(tmp_path / "messaging")
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(tmp_path))
+    context = reviewed_pack_fixture({}, ["messaging"])
     pack_contributions = []
     templates = {entry["filename"]: entry["content"] for entry in resolve_managed_capability_templates(
-        context["capability_packs"], context_variables=context, ui_contributions=pack_contributions,
+        selected_pack_rows(context), context_variables=context, ui_contributions=pack_contributions,
     )}
     typed, _, _ = _planned_custom_candidate(schema_model)
     if claim_pack_page:

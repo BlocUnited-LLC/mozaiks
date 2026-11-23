@@ -185,7 +185,7 @@ async def register_build(
     for path, source_text in files.items():
         destination = workspace / path
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(source_text, encoding="utf-8")
+        destination.write_bytes(source_text.encode("utf-8"))
     bundle_name = f"fixture_{marker}"
     archive = workspace.parent / f"{bundle_name}.zip"
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
@@ -320,6 +320,16 @@ async def test_factory_build_and_repeated_refinements_use_exact_graph_prompts(cy
                     assert provenance["app_id"] == record.app_id
                     assert provenance["verified"] is True
                     assert provenance["bundle_digest"] == f"sha256:{resolve_canonical_bundle_entry(record).sha256}"
+        else:
+            for call, record, source in zip(calls, (original, child_b), (SOURCE_A, SOURCE_B), strict=True):
+                payload = call["payload"]
+                context = payload["refinement_context"]
+                assert payload["input_files"] == {TARGET: source}
+                assert context["get_revision_context"]["current_build_record"]["build_record_id"] == record.id
+                assert "tracked_build_records" not in context["get_revision_context"]
+                assert "semantic_annotation_request" not in context["get_context_graph_scope"]
+                assert "source_context_catalog" not in context["search_app_source_context"]
+                assert len(call["user"].encode("utf-8")) < 32_000
         assert all(graph["app_id"] == "target" for graph in graphs)
         assert graphs[0]["graph_hash"] != graphs[1]["graph_hash"]
         assert (TARGET, OLD) in {(edge["source_path"], edge["target_path"]) for edge in graphs[0]["dependencies"]}

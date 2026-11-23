@@ -43,17 +43,28 @@ from mozaiksai.core.workflow.task_batches import (
     _validation_feedback,
 )
 from tests.factory_context import factory_context
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 MOZAIKSPAY_PACK = ROOT / "factory_app" / "build_context" / "mozaikspay"
 
 
-def _bridge(initial=None):
+@pytest.fixture(autouse=True)
+def registered_provider(tmp_path, monkeypatch):
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
+
+
+def _bridge(initial=None, *, reviewed_pack_ids=None):
     config = load_context_variables_config(yaml.safe_load(
         (ROOT / "factory_app/workflows/AppGenerator/context_variables.yaml").read_text(encoding="utf-8"),
     ))
     policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=config.definitions)
-    bridge = ContextVariablesBridge(factory_context(initial), authority_policy=policy)
+    values = factory_context(initial)
+    if reviewed_pack_ids is not None:
+        values = reviewed_pack_fixture(values, reviewed_pack_ids)
+    bridge = ContextVariablesBridge(values, authority_policy=policy)
     bridge._bind_run(("AppGenerator", "page-binding-app", "9f1a2f0e-2f41-4d54-9b83-0a7f6d8c1a11"), policy)
     return bridge
 
@@ -400,7 +411,7 @@ def test_a_worker_copy_of_a_pack_template_page_is_discarded_not_validated():
     context = _bridge({
         "capability_packs": packs,
         "app_build_plan": {"pages": [{"name": "Billing", "route": "/billing"}], "capability_packs": []},
-    })
+    }, reviewed_pack_ids=["mozaikspay"])
     pack_paths = pack_owned_output_paths(context)
     assert {"ui/pages/billing.yaml", "ui/pages/usage.yaml", "ui/pages/pricing.yaml",
             "modules/billing_portal/module.yaml"} <= pack_paths
@@ -438,13 +449,13 @@ def test_unreachable_gated_action_is_attributed_to_the_authored_page_that_reads_
         "error": "Gated user-facing action 'task_management/update_task' (task.edit) has no reachable page binding.",
         "fix_suggestion": "Bind the action to a page read or typed submit/delete action.",
     }]}
-    errors = _wiring_repair_errors(wiring, files, {"capability_packs": packs})
+    errors = _wiring_repair_errors(wiring, files, _bridge({"capability_packs": packs}, reviewed_pack_ids=["mozaikspay"]))
     assert len(errors) == 1
     # billing.yaml reads the module but is template-owned; tasks.yaml is the authored reader.
     assert errors[0].startswith("ui/pages/tasks.yaml: Gated user-facing action")
     assert "route_manifest" not in errors[0]
     without_reader = {path: content for path, content in files.items() if path != "ui/pages/tasks.yaml"}
-    assert _wiring_repair_errors(wiring, without_reader, {"capability_packs": packs})[0].startswith("ui/pages/dashboard.yaml:")
+    assert _wiring_repair_errors(wiring, without_reader, _bridge({"capability_packs": packs}, reviewed_pack_ids=["mozaikspay"]))[0].startswith("ui/pages/dashboard.yaml:")
 
 
 def test_constructed_modal_form_survives_the_runtime_page_contract():
@@ -572,7 +583,7 @@ def test_an_authored_page_binds_a_facade_action_against_the_pack_template_contra
     context = _bridge({
         "capability_packs": packs,
         "app_build_plan": {"pages": [{"name": "Dashboard", "route": "/dashboard"}], "capability_packs": []},
-    })
+    }, reviewed_pack_ids=["mozaikspay"])
     compiled = _compile({"ui/pages/dashboard.yaml": yaml.safe_dump(page)}, context)
     assert compiled["ui/pages/dashboard.yaml"]["sections"][0]["config"]["api_endpoint"] == "/api/modules/billing_portal/get_token_status"
     # A field the template contract does not return is still the author's binding error.
@@ -586,13 +597,13 @@ def test_packs_selected_by_id_resolve_through_the_projected_operator_contracts()
     context = _bridge({
         "app_build_plan": {"pages": [], "capability_packs": [{"capability_pack_id": "mozaikspay"}]},
         "operator_contracts": [{**contract, "contract_id": "mozaikspay"}],
-    })
+    }, reviewed_pack_ids=["mozaikspay"])
     assert {"ui/pages/billing.yaml", "ui/pages/usage.yaml", "ui/pages/pricing.yaml"} <= pack_owned_output_paths(context)
     # Facade page routes alone do not make a page pack-owned.
     assert pack_owned_output_paths(_bridge({"operator_contracts": [{
         "contract_id": "cloud", "required_outputs": [{"path": "services/integrations/cloud_client.py"}],
         "facades": [{"module_id": "cloud", "pages": [{"name": "Deployments", "route": "/deployments"}]}],
-    }], "capability_packs": [{"id": "cloud"}]})) == frozenset({"services/integrations/cloud_client.py"})
+    }], "capability_packs": [{"id": "cloud"}]})) == frozenset()
 
 
 def test_the_validation_feedback_carries_a_whole_multi_page_rejection():
@@ -671,14 +682,14 @@ def test_pack_owned_outputs_are_template_outputs_and_genesis_workspace_templates
         ],
     }]})
     # Selected by id alone the pack's templates are unknown, so a workspace output stays authorable.
-    assert pack_owned_output_paths(context) == frozenset({"ui/pages/products.yaml", "ui/pages/checkout.yaml"})
+    assert pack_owned_output_paths(context) == frozenset()
     packs = [{"id": "mozaikspay", "capability_source": "managed_capability", "status": "active",
               "pack_source_path": str(MOZAIKSPAY_PACK)}]
     handler = "modules/billing_portal/backend/handler.py"  # owner: workspace, shipped as a template
-    assert handler in pack_owned_output_paths(_bridge({"capability_packs": packs}))
+    assert handler in pack_owned_output_paths(_bridge({"capability_packs": packs}, reviewed_pack_ids=["mozaikspay"]))
     binding = RunBuildBinding(target_app_id="generated-app", build_id="build-test",
                               build_registry_id="registry-test", phase="refinement").model_dump()
-    refinement = _bridge({"capability_packs": packs, "run_build_binding": binding})
+    refinement = _bridge({"capability_packs": packs, "run_build_binding": binding}, reviewed_pack_ids=["mozaikspay"])
     assert handler not in pack_owned_output_paths(refinement)
     assert "modules/billing_portal/module.yaml" in pack_owned_output_paths(refinement)
 
@@ -1103,13 +1114,13 @@ def test_an_unreachable_canonical_write_listed_only_by_a_template_page_goes_to_a
                  "but page 'billing' lists its collection 'tasks'.",
         "fix_suggestion": "Give the 'tasks' table on page 'billing' a toolbar action.",
     }
-    errors = _wiring_repair_errors({"passed": False, "failed_tests": [failure]}, files, {"capability_packs": packs})
+    errors = _wiring_repair_errors({"passed": False, "failed_tests": [failure]}, files, _bridge({"capability_packs": packs}, reviewed_pack_ids=["mozaikspay"]))
     # billing.yaml is a pack template page and cannot be repaired; the authored reader of the module can.
     assert len(errors) == 1 and errors[0].startswith("ui/pages/dashboard.yaml: Canonical create action")
     # An authored listing page is the target itself.
     failure = {**failure, "page": "tasks", "pages": ["billing", "tasks"]}
     files["ui/pages/tasks.yaml"] = files["ui/pages/billing.yaml"].replace("name: billing", "name: tasks")
-    errors = _wiring_repair_errors({"passed": False, "failed_tests": [failure]}, files, {"capability_packs": packs})
+    errors = _wiring_repair_errors({"passed": False, "failed_tests": [failure]}, files, _bridge({"capability_packs": packs}, reviewed_pack_ids=["mozaikspay"]))
     assert errors[0].startswith("ui/pages/tasks.yaml: Canonical create action")
 
 

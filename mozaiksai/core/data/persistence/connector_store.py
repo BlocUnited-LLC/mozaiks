@@ -221,10 +221,13 @@ class ConnectorStore:
         expires_at: str | None = None,
         public_config: dict[str, Any] | None = None,
         required_fields: Sequence[dict[str, Any]] | None = None,
+        create_if_missing: bool = False,
     ) -> dict[str, Any] | None:
+        normalized_service = normalize_connector_service(service)
+        if create_if_missing and not normalized_service:
+            raise ValueError("service is required")
         await self._ensure_indexes()
         coll = await self._collection()
-        normalized_service = normalize_connector_service(service)
         update_fields: dict[str, Any] = {"updated_at": datetime.now(UTC)}
         if user_id:
             update_fields["updated_by_user_id"] = str(user_id)
@@ -241,11 +244,25 @@ class ConnectorStore:
         if required_fields is not None:
             update_fields["required_fields"] = [dict(field) for field in required_fields if isinstance(field, dict)]
 
-        if len(update_fields) == 1:
+        if len(update_fields) == 1 and not create_if_missing:
             return await self.get(scope=scope, scope_id=scope_id, service=normalized_service)
 
         filter_doc = {"scope": str(scope), "scope_id": str(scope_id), "service": normalized_service}
-        await coll.update_one(filter_doc, {"$set": update_fields}, upsert=False)
+        update = {"$set": update_fields}
+        if create_if_missing:
+            defaults = {
+                "display_name": normalized_service.replace("_", " ").title(),
+                "kind": "api_key",
+                "status": "metadata_only",
+                "secret_storage": "unmanaged",
+                "secret_available": False,
+                "key_length": 0,
+                "created_at": update_fields["updated_at"],
+                "created_by_user_id": user_id,
+                "status_reason": "Created manually from the integrations surface.",
+            }
+            update["$setOnInsert"] = {key: value for key, value in defaults.items() if key not in update_fields}
+        await coll.update_one(filter_doc, update, upsert=create_if_missing)
         return await self.get(scope=scope, scope_id=scope_id, service=normalized_service)
 
     async def update_health(
@@ -271,9 +288,11 @@ class ConnectorStore:
             "last_checked_at": last_checked_at or datetime.now(UTC).isoformat(),
             "checked_by": str(checked_by or "manual"),
             "health_details": _redact_public_config(health_details or {}) or {},
+            # Every field here describes this check. A check that reports no
+            # error clears the code an earlier check left, or the record would
+            # pair a new status with an old failure.
+            "health_error_code": str(error_code) if error_code else None,
         }
-        if error_code:
-            update_fields["health_error_code"] = str(error_code)
 
         filter_doc = {"scope": str(scope), "scope_id": str(scope_id), "service": normalized_service}
         await coll.update_one(filter_doc, {"$set": update_fields}, upsert=False)

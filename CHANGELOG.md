@@ -15,16 +15,79 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- A generated app's admin portal shows real numbers. Overview, Usage, and
+  Operations read token and cost totals from the usage ledger instead of fields
+  no endpoint returned (they showed 0 and `$0.0000`), a failed run is listed as
+  failed instead of running, and a page with nothing on it says so instead of
+  rendering blank. A run whose models have no price shows no dollar figure
+  instead of `$0.00`.
+- Admin panels that a connected app backend declares appear on the admin page
+  they name. Before, only panels for Access were shown. Module and backend
+  panels are shown in their declared `order`.
+- Studio's workspace Integrations page sends the signed-in session with every
+  request; it failed with 401 whenever sign-in was on. It also reports a save
+  or delete the server refused, and links "Get API key" to the provider's page
+  instead of a Studio path that does not exist.
+- A saved integration key that fails its check with the provider is listed
+  under Needs attention as "Check failed", not under Connected, and so is a
+  service saved with only some of the values it needs. After a save the page
+  waits for that check and, if it fails, keeps the setup panel open with the
+  provider's reason. Once the values are corrected the service reads Connected
+  again: a connector's stored health no longer keeps the error code of an
+  earlier check after a check that reports none. An app's Integrations page
+  gives the same verdict as its Health page, and "Check status" says what the
+  check found.
+- Studio's AI models page is in the workspace menu, and says why it cannot be
+  changed when sign-in is off.
+- Studio's app Health page lists specific problems (latest build validation,
+  failed runs, integrations missing a credential or failing their check)
+  instead of a fixed score and figures that could not change. Its average run
+  time counts only runs that have ended.
+- The Studio menu and the dashboard manifest declare the same pages; a test now
+  runs the route validator on the real files.
+- Studio owners can open Revenue and manage connections for the app they select in My Apps, including in hosts with a separate dashboard app ID.
+- Factory distinguishes available pack offerings from the explicit, versioned
+  pack selection in the owner-reviewed DesignDocs artifact. Planning, template
+  composition and saved-bundle replay preserve that selection; changed sources
+  and late unreviewed billing providers require renewed review.
+- Approved-compilation validation preserves verified plan inputs and reports
+  revoked or changed pack sources as failed validation before runtime execution.
+- Explicitly selected Support packs expose their verified actions and support
+  surface boundaries to DesignDocs before generation, alongside Messaging.
+
+- Profile support tickets and app support inboxes keep reply fields usable on narrow mobile screens.
+
+- Signed-in Studio builders can open App Dashboard from their account menu and resolve the current build through its owner-scoped saved app binding.
+
+- Authenticated draft previews retain the customer login for inspection before
+  explicit sign-in, including when an app session already exists. Artifact
+  controls switch between login and app views without changing authorization.
+- ChatUI artifacts expose expand and return controls through existing workspace
+  view state, preserving the conversation and mounted preview.
+
+- Factory compiles selected-pack action permissions only from owner-reviewed
+  role grants and the exact verified pack identities and action requirements.
+- Generated messaging uses the profile workspace for conversation creation and replies. App-owned support connects the widget, requester profile, and authorized Admin inbox through module manifests.
+- Generated app requirements resolve BSON imports to PyMongo, preserving the MongoDB driver's bundled BSON implementation.
+- AppGenerator resolves explicitly selected managed packs without requiring an
+  operator-selected pack projection, preserving verified facade planning and
+  template assembly for paid builds while free builds keep their own surfaces.
+
 - Retried friendship acceptance replays its stored event identity and returns the accepting user’s view. Default notification storage keeps one alert per scoped source event across retries.
 
 - Social friendships derive from atomic request states, fencing competing accept, decline, withdrawal, and removal actions. Profile tabs expose friend requests and messaging, with nullable pagination cursors and failed message sends preserving drafts.
 
+- Local journey evidence deduplicates scoped usage receipts and can reconcile
+  them against a bounded OpenAI provider journal. An isolated Windows harness
+  stops the Studio, driver and gateway process trees on exit or timeout.
 - Generated task-based apps retain admin registries, app-owned assistant settings,
   brand identity and approved signup intent; app menus show one authorized Admin entry.
 - App role projection uses backend-authorized grants, and generated owner bootstrap
   uses trusted profile identity while preserving existing grants during refinement.
 - Standalone app administration uses the shared core renderer, authenticated configuration reads, and module panels on the overview.
 - App profile menus offer the declared app home, floating assistants follow app AI configuration, and chat surfaces use the app brand.
+- Existing-app design guidance avoids an unsupported surface owner for
+  protected discovered sources.
 
 
 ### Added
@@ -112,6 +175,19 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- One catalog of standard admin pages
+  (`overview | access | usage | billing | activity | operations | settings | integrations | support`)
+  lives in `mozaiksai.core.admin.contract`. App-backend admin panels may name
+  `activity`. AppGenerator declares Overview, Usage, Operations, and Settings
+  for every app, Access for an app with sign-in, and any other admin page only
+  when a panel renders on it.
+- `GET /api/admin/stats` returns `failed_chats`. `GET /api/admin/runs` and
+  `/api/admin/sessions` give a failed session its end time, and their
+  timestamps carry a UTC offset (they were read as local time in the browser).
+- Factory design agents receive verified selected-pack capabilities, actions and
+  ownership boundaries while retaining app-specific design intent. The shipped
+  catalog no longer selects unrequested packs. Social 0.1.18 and Messaging
+  0.1.17 support DesignDocs; older pinned identities require review and update.
 - Notification `source_event: reference` also stores `actor: null`, retaining
   the minimal origin reference without changing the original attributed event.
   Existing records are not rewritten; envelope-mode retention stays unchanged.
@@ -781,6 +857,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Removed
 
+- Studio's workspace Users page and app Access page. Neither had a data source,
+  so both could only show zeros. User counts remain on Performance and on each
+  app's Users page.
 - Acceptance without an authorized transition: AppGenerator no longer saves
   an app's first build as current, and the staged-refinement acceptance no
   longer credits the acceptance to the staged review record's reviewer.
@@ -830,6 +909,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- Generated app container images now serve as an unprivileged `mozaiks` user
+  (uid 10001) that owns `/app`, instead of as root, and write their logs under
+  `/app/logs`. The generated `docker-compose.yml` also drops the obsolete
+  `version` key that Compose v2 warns about.
+- The production Compose file (`infra/compose/docker-compose.prod.yml`)
+  publishes its bundled MongoDB, which has no authentication, on `127.0.0.1`
+  only instead of on every network interface.
 - Generated media ignores provider-supplied publication authority. Public reads
   require server-owned public visibility, and explicit promotion records that
   visibility. Private/backer-only visibility overrides old promotion metadata;
@@ -938,6 +1024,10 @@ This project follows a practical pre-1.0 changelog format:
   with the same version, repair older empty secret contracts and missing app IDs,
   restore a missing refinement regeneration profile, and configure local-only
   Studio access.
+- `mozaiks serve` no longer tells first-run users to fill in `OPENAI_API_KEY`
+  when it creates `.env`: it points to the model provider key and `MONGO_URI`
+  that the file lists. The self-hosting guide states that the production
+  Compose file uses its bundled MongoDB and does not read `MONGO_URI`.
 
 
 ## 0.2.0 - 2026-10-17

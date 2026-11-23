@@ -53,7 +53,10 @@ actions:
                       type: boolean
               setup_url:
                 type: string
-                description: Setup path, present only when status is missing.
+                description: Studio setup path, present only when status is missing. Not a link to the provider.
+              provider_setup_url:
+                type: string
+                description: The provider's own page where the key is created, when the catalog entry declares one.
               setup_steps:
                 type: array
                 items:

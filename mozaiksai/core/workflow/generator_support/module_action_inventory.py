@@ -6,7 +6,7 @@ import logging
 import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 import yaml
 
@@ -19,7 +19,6 @@ from mozaiksai.core.session.build_context import (
     resolve_context_asset_path,
 )
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.resources import resolve_factory_app_root
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +26,9 @@ logger = logging.getLogger(__name__)
 # they cannot exclusively own a worker's contribution at the same path.
 SHARED_UI_OUTPUT_PATHS = frozenset({"ui/index.js", "ui/route_manifest.json"})
 SHARED_PACK_OUTPUT_PATHS = SHARED_UI_OUTPUT_PATHS | {"data/contract.json"}
+TEMPLATE_BACKEND_FILES = (
+    "module.yaml", "backend/service.py", "backend/repo.py", "backend/policy.py", "backend/schemas.py",
+)
 
 
 def _bundle_relative_path(raw: Any) -> str | None:
@@ -224,6 +226,50 @@ def unapproved_module_actions_error(
     )
 
 
+ModuleActionIndex = dict[str, dict[str, dict[str, Any]]]
+
+
+def scoped_module_implementation_sources(files: Mapping[str, str], owned_paths: Iterable[str]) -> dict[str, str]:
+    """Only manifests with an owned handler/service/repo may trigger implementation generation."""
+    manifests = {
+        f"modules/{match[1]}/module.yaml" for path in owned_paths
+        if (match := re.fullmatch(r"modules/([^/]+)/backend/(?:handler|service|repo)\.py", path))
+    }
+    if not manifests:
+        return {}
+    # Keep companion inputs such as events and service hooks even when another task owns them.
+    return {
+        path: source for path, source in files.items()
+        if path in manifests or not re.fullmatch(r"modules/[^/]+/module\.yaml", path)
+    }
+
+
+def module_action_index(file_map: dict[str, str], *, http_only: bool = True) -> ModuleActionIndex:
+    """Index declared module actions, including their exact schemas; page callers see HTTP actions."""
+    index: ModuleActionIndex = {}
+    for path, content in (file_map or {}).items():
+        if not str(path).replace("\\", "/").endswith("/module.yaml"):
+            continue
+        try:
+            document = yaml.safe_load(content)
+        except yaml.YAMLError:
+            continue
+        if not isinstance(document, dict):
+            continue
+        module = document.get("module")
+        module_id = str((module or {}).get("id") or "").strip() if isinstance(module, dict) else ""
+        if not module_id:
+            continue
+        actions = document.get("actions")
+        index[module_id] = {
+            str(action.get("id")).strip(): action
+            for action in (actions if isinstance(actions, list) else [])
+            if isinstance(action, dict) and str(action.get("id") or "").strip()
+            and (not http_only or action.get("api_surface") not in {"internal", "admin_internal"})
+        }
+    return index
+
+
 def approved_workflow_surface_ids(context_variables: Any) -> list[str]:
     """Return selectable app workflow surfaces when the concept has agentic capabilities."""
     if context_variables is None:
@@ -244,38 +290,10 @@ def approved_workflow_surface_ids(context_variables: Any) -> list[str]:
 
 
 def managed_pack_contracts(context_variables: Any) -> list[dict[str, Any]]:
-    """The contract declarations of the selected managed packs, read only from verified sources.
+    """Read managed ownership only from the selected, verified pack sources."""
+    from factory_app.workflows._shared.pack_selection import selected_pack_rows
 
-    Each selected row (and each managed pack a design surface references from
-    the installed factory catalog without selecting it) goes through the
-    canonical resolver first (:func:`_verified_pack_entry`: pins compared,
-    authority recorded). A resolved pack is managed when its own context
-    declares ``managed_capability``, whatever the row claims, as the bundle
-    scanner decides, and its declarations come from the verified source's
-    declared contract assets. A row that claims ``managed_capability`` always
-    claims a pack, so it either verifies or refuses.
-    A row's own inline ``facades`` are never read. Its consumers enforce what
-    a managed pack owns (surface ownership, managed data owners, facade
-    actions), so a row claiming ``managed_capability`` that the resolver refuses is never silently
-    omitted: this raises ``ValueError`` with the resolver's diagnostic.
-    """
-    if context_variables is None:
-        return []
-    packs = [dict(pack) for pack in detach(context_variables.get("capability_packs")) or [] if isinstance(pack, Mapping)]
-    surface_map = detach(context_variables.get("design_surface_map")) or {}
-    referenced = {
-        pack_id for surface in surface_map.get("surfaces") or []
-        for pack_id in surface.get("source_capability_packs") or []
-    }
-    selected = {_row_pack_id(pack) for pack in packs}
-    factory_root = resolve_factory_app_root()
-    for pack_id in referenced - selected:
-        if not isinstance(pack_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", pack_id) or factory_root is None:
-            continue
-        registry = factory_root / "build_context" / pack_id / "context.yaml"
-        if registry.is_file():
-            config = load_build_context(registry)
-            packs.append({**config.get("pack", {}), "pack_source_path": str(registry.parent)})
+    packs = selected_pack_rows(context_variables)
     result: list[dict[str, Any]] = []
     for pack in packs:
         if pack.get("status", "active") != "active":
@@ -352,35 +370,20 @@ def _verified_pack_entry(pack: Mapping[str, Any], context_variables: Any) -> tup
 
 
 def _selected_packs(context_variables: Any) -> list[_SelectedPack]:
-    """Every selected pack whose templates assembly applies, with its contract declarations.
-
-    Assembly reads the selected packs from ``capability_packs`` and falls back to
-    the approved plan's packs, and resolves and verifies each row with its
-    canonical pack resolver (:func:`_verified_pack_entry`): the row's own source
-    path, the workspace's installed component, or, for an id-only row that
-    claims a pack (such as the default MozaiksPay row of an OSS SaaS plan), the
-    installed factory catalog. A verified pack is read from its verified
-    source, and its own ``context.yaml`` says whether it is active. A row the
-    resolver refuses contributes nothing: no unverified source or contract
-    stands in for it. A row that selects no pack is read from the
-    ``operator_contracts`` the build context projected.
-    """
+    """Read contracts from the same reviewed sources that assembly applies."""
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         pack_identity,
     )
 
     if context_variables is None:
         return []
-    packs = detach(context_variables.get("capability_packs")) or []
-    if not packs:
-        plan = detach(context_variables.get("app_build_plan")) or {}
-        packs = plan.get("capability_packs") or [] if isinstance(plan, Mapping) else []
-    projected = detach(context_variables.get("operator_contracts")) or []
+    from factory_app.workflows._shared.pack_selection import selected_pack_rows
+
+    packs = selected_pack_rows(context_variables)
     result: list[_SelectedPack] = []
     for pack in packs:
         if not isinstance(pack, Mapping):
             continue
-        pack_id = _row_pack_id(pack)
         entry, refusal = _verified_pack_entry(pack, context_variables)
         if refusal is not None:
             continue
@@ -399,13 +402,6 @@ def _selected_packs(context_variables: Any) -> list[_SelectedPack]:
                 # Assembly reports an unusable pack; nothing unverified stands in for it.
                 logger.warning("selected pack %s could not be read: %s", root, exc)
             continue
-        result.append(_SelectedPack(pack_id, None, None, [
-            dict(contract) for contract in projected
-            if isinstance(contract, Mapping) and pack_id and (
-                contract.get("contract_id") == pack_id
-                or (contract.get("canonical_provider") or {}).get("provider_pack_id") == pack_id
-            )
-        ]))
     return result
 
 
@@ -528,25 +524,66 @@ def pack_facade_directories(context_variables: Any) -> list[PackFacadeDirectory]
     ]
 
 
-def pack_template_module_contracts(context_variables: Any) -> dict[str, str]:
-    """``module.yaml`` contracts the selected packs' templates provide, by bundle path.
+class PackModuleTemplate(NamedTuple):
+    source: str
+    # Applies to template-owned generated modules. Managed facades and
+    # workspace-owned seeds retain their existing action authority.
+    action_source: Literal["template", "compiler"] | None
 
-    No task authors a pack-owned module, so pages that bind its actions compile
-    against the template contract, the same one assembly applies.
-    """
-    files: dict[str, str] = {}
+
+def pack_module_templates(context_variables: Any) -> dict[str, PackModuleTemplate]:
+    """Read selected static module manifests and identify who completes their action contracts."""
+    files: dict[str, PackModuleTemplate] = {}
     for pack in _selected_packs(context_variables):
         if pack.root is None or pack.config is None:
             continue
+        root, config = pack.root, pack.config
+        owned = {
+            _bundle_relative_path(entry.get("path"))
+            for contract in pack.contracts for entry in contract.get("required_outputs") or []
+            if isinstance(entry, Mapping) and (entry.get("owner") or "templates") == "templates"
+        }
         for contract in pack.contracts:
             for entry in contract.get("required_outputs") or []:
                 path = _bundle_relative_path(entry.get("path") if isinstance(entry, Mapping) else entry)
                 if not path or not re.fullmatch(r"modules/[^/]+/module\.yaml", path):
                     continue
-                template = _pack_template_file(pack.root, pack.config, path)
-                if template is not None and template.suffix != ".j2":
-                    files[path] = template.read_text(encoding="utf-8")
+                template = _pack_template_file(root, config, path)
+                if template is None or template.suffix == ".j2":
+                    continue
+                action_source: Literal["template", "compiler"] | None = None
+                if path in owned and config["pack"].get("capability_source") == "generated_module":
+                    prefix = path.removesuffix("module.yaml")
+                    complete = all(
+                        prefix + name in owned and _pack_template_file(root, config, prefix + name) is not None
+                        for name in TEMPLATE_BACKEND_FILES
+                    )
+                    action_source = "template" if complete else "compiler"
+                files[path] = PackModuleTemplate(template.read_text(encoding="utf-8"), action_source)
     return files
+
+
+def pack_template_module_contracts(context_variables: Any) -> dict[str, str]:
+    """Return the selected static manifests used by the design prompts."""
+    return {path: template.source for path, template in pack_module_templates(context_variables).items()}
+
+
+def approved_manifest_action_ids(
+    context: Any, design_actions: dict[str, list[str]], *, http_only: bool = False,
+    templates: dict[str, PackModuleTemplate] | None = None,
+) -> dict[str, list[str]]:
+    """Complete backends supply exact IDs. Partial modules still compile actions from approved design and data."""
+    if not design_actions:
+        return {}
+    if templates is None:
+        templates = pack_module_templates(context)
+    stock = module_action_index({
+        path: template.source for path, template in templates.items() if template.action_source == "template"
+    }, http_only=http_only)
+    return {
+        module_id: sorted(stock[module_id]) if module_id in stock else actions
+        for module_id, actions in design_actions.items()
+    }
 
 
 def ungated_module_actions(context_variables: Any) -> dict[str, list[str]]:

@@ -965,6 +965,7 @@ export function getStudioDemoAnalyticsPortfolio(periodId = '30d') {
   const portfolioBase = buildDemoPortfolioBase()
   const apps = DEMO_APPS.map((app) => ({
     app_id: app.app_id,
+    dashboard_app_id: app.app_id,
     name: app.name,
     lifecycle_state: app.status,
     metrics: buildDemoMetricValues(DEMO_ANALYTICS_BY_APP[app.app_id]),

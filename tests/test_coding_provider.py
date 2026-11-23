@@ -12,6 +12,7 @@ changes as a provider-neutral ``StagedPatchProposal``. These tests pin:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -142,6 +143,40 @@ def _request(**overrides: Any) -> CodingWorkerRequest:
     }
     payload.update(overrides)
     return CodingWorkerRequest(**payload)
+
+
+def test_coding_prompt_presents_unicode_and_preserves_source_escapes():
+    source = r"const label = 'café · 星'; const separator = '\u0000';"
+    request = _request(files={_SCOPED_PATH: source})
+    prompt = StructuredOutputCodingProvider._build_user_prompt(request=request, control_plane_context={})
+    assert "café · 星" in prompt
+    payload, _ = json.JSONDecoder().raw_decode(prompt.split("payload_json:\n", 1)[1])
+    assert payload["input_files"] == request.files
+
+
+def test_coding_prompt_excludes_runtime_state_and_keeps_edit_inputs():
+    request = _request(validation_strategy="docker", start_preview=True)
+    refinement_request = {"extra": {"files_manifest": ["unrelated.py"] * 1000}}
+    routed = request.model_copy(update={
+        "context_seed": {
+            "refinement_request": refinement_request,
+            "routing_decision": {"context_seed": {"refinement_request": refinement_request}},
+        },
+        "metadata": {"scope_proposal": {"selected_paths": [_SCOPED_PATH]}},
+    })
+    evidence = {"get_artifact_workspace_scope": {"selected_file_contracts": {_SCOPED_PATH: {"kind": "page"}}}}
+    prompt = StructuredOutputCodingProvider._build_user_prompt(request=routed, control_plane_context=evidence)
+    assert prompt == StructuredOutputCodingProvider._build_user_prompt(request=request, control_plane_context=evidence)
+    payload, _ = json.JSONDecoder().raw_decode(prompt.split("payload_json:\n", 1)[1])
+    assert payload["request"] == request.raw_user_request
+    assert payload["build_record_id"] == request.build_record_id
+    assert payload["file_paths"] == [_SCOPED_PATH]
+    assert payload["input_files"] == request.files
+    assert payload["refinement_context"] == evidence
+    assert payload["validation_strategy"] == "docker"
+    assert payload["start_preview_requested"] is True
+    assert "context_seed" not in payload
+    assert "metadata" not in payload
 
 
 def _provider(plan: CodingWorkerPlan) -> StructuredOutputCodingProvider:

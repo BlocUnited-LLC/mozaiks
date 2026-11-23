@@ -19,7 +19,6 @@
       "order": 3,
       "meta": {
         "surfaces": ["studio"],
-        "requiresRole": "admin",
         "title": "Create App",
         "appShell": true,
         "ai_context": "The user is on the Create App page, where they can generate a new AI-powered app using the Studio builder.",
@@ -32,14 +31,13 @@
     {
       "path": "/apps",
       "component": "AppsPage",
-      "label": "Apps",
+      "label": "My Apps",
       "order": 4,
       "meta": {
         "surfaces": ["studio"],
-        "requiresRole": "admin",
-        "title": "Apps",
+        "title": "My Apps",
         "appShell": true,
-        "ai_context": "The user is on the Apps page, showing all apps in this workspace. Each app can be clicked to open App Studio for configuration, usage, and health details.",
+        "ai_context": "The user is on My Apps in Studio, showing the apps they manage. Each app can be clicked to open App Studio for configuration, usage, and health details.",
         "navigation": {
           "group": "workspace-studio",
           "scope": "local",
@@ -54,7 +52,7 @@
       "order": 5,
       "meta": {
         "surfaces": ["studio"],
-        "requiresRole": "admin",
+        "requiresAuth": true,
         "title": "Performance",
         "appShell": true,
         "ai_context": "The user is on the Performance page, the portfolio command center. It shows revenue and user metrics across all their apps, a portfolio trend, deterministic attention insights, and a comparable applications table. Clicking an app drills into that app's analytics.",
@@ -84,24 +82,6 @@
       }
     },
     {
-      "path": "/users",
-      "component": "WorkspaceUsersPage",
-      "label": "Users",
-      "order": 7,
-      "meta": {
-        "surfaces": ["studio"],
-        "requiresRole": "admin",
-        "title": "Users",
-        "appShell": true,
-        "ai_context": "The user is on the Workspace Users page. It shows total, active, and new user counts across all apps with a per-app breakdown. Clicking an app row navigates to the app access page for the full user list.",
-        "navigation": {
-          "group": "workspace-studio",
-          "scope": "local",
-          "icon": "users"
-        }
-      }
-    },
-    {
       "path": "/integrations",
       "component": "WorkspaceIntegrationsPage",
       "label": "Integrations",
@@ -116,6 +96,24 @@
           "group": "workspace-studio",
           "scope": "local",
           "icon": "plug"
+        }
+      }
+    },
+    {
+      "path": "/settings/ai-models",
+      "component": "WorkspaceAIModelsPage",
+      "label": "AI models",
+      "order": 10,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "AI models",
+        "appShell": true,
+        "ai_context": "The user is on the workspace AI models page. It sets which AI model Factory builds and refinements use by default, and which models may be chosen.",
+        "navigation": {
+          "group": "workspace-studio",
+          "scope": "local",
+          "icon": "settings"
         }
       }
     },
@@ -152,7 +150,6 @@
       "order": 19,
       "meta": {
         "surfaces": ["studio"],
-        "requiresRole": "admin",
         "title": "App Studio",
         "appShell": true,
         "ai_context": "The user is in App Studio, the management interface for a specific app. They can review build status, configure workflows, and manage the app lifecycle.",
@@ -169,7 +166,6 @@
       "order": 20,
       "meta": {
         "surfaces": ["studio"],
-        "requiresRole": "admin",
         "title": "App Overview",
         "appShell": true,
         "ai_context": "The user is on the App Overview page in App Studio. It shows the app's identity, top-level KPIs, build state, and recent activity.",
@@ -187,7 +183,6 @@
       "order": 21,
       "meta": {
         "surfaces": ["studio"],
-        "requiresRole": "admin",
         "title": "App Revenue",
         "appShell": true,
         "ai_context": "The user is on the App Revenue page. It shows recurring-revenue metrics (MRR, ARR, growth, NRR, ARPPU), one revenue trend, and an MRR movement bridge explaining why revenue changed. Every metric can be clicked for deeper detail.",
@@ -205,7 +200,6 @@
       "order": 22,
       "meta": {
         "surfaces": ["studio"],
-        "requiresRole": "admin",
         "title": "App User Analytics",
         "appShell": true,
         "ai_context": "The user is on the App Users analytics page. It shows acquisition, engagement, conversion, and retention metrics, one user trend, and the app's configurable lifecycle funnel with stage-to-stage conversion. Every metric can be clicked for deeper detail.",
@@ -223,7 +217,6 @@
       "order": 23,
       "meta": {
         "surfaces": ["studio"],
-        "requiresRole": "admin",
         "title": "Building",
         "appShell": true,
         "ai_context": "The user is on the App Building portal. It renders dashboard.yaml build panels for build requests, artifact versions, approval state, and workflow launch actions.",
@@ -235,31 +228,12 @@
       }
     },
     {
-      "path": "/apps/:appId/access",
-      "component": "AppAccessPage",
-      "label": "Access",
-      "order": 24,
-      "meta": {
-        "surfaces": ["studio"],
-        "requiresRole": "admin",
-        "title": "App Access",
-        "appShell": true,
-        "ai_context": "The user is on the App Access page. It shows accounts, access status, subscription plan assignment, and last-activity for this app's users.",
-        "navigation": {
-          "group": "app-studio",
-          "scope": "local",
-          "icon": "users"
-        }
-      }
-    },
-    {
       "path": "/apps/:appId/usage",
       "component": "AppUsagePage",
       "label": "Token Usage",
       "order": 25,
       "meta": {
         "surfaces": ["studio"],
-        "requiresRole": "admin",
         "title": "Token Usage",
         "appShell": true,
         "ai_context": "The user is on the App Token Usage page. It shows LLM token consumption, cost estimates, and per-workflow chat breakdowns for this specific app.",
@@ -277,10 +251,9 @@
       "order": 26,
       "meta": {
         "surfaces": ["studio"],
-        "requiresRole": "admin",
         "title": "App Health",
         "appShell": true,
-        "ai_context": "The user is on the App Health page. It shows runtime signals, connector status, and any warnings or errors for this app.",
+        "ai_context": "The user is on the App Health page. It lists what needs attention for this app: the latest build's validation result, runs that failed, and integrations still missing a credential.",
         "navigation": {
           "group": "app-studio",
           "scope": "local",
@@ -291,17 +264,16 @@
     {
       "path": "/apps/:appId/integrations",
       "component": "AppIntegrationsPage",
-      "label": "App Integrations",
+      "label": "Integrations",
       "order": 26,
       "meta": {
         "surfaces": ["studio"],
-        "requiresRole": "admin",
         "title": "App Integrations",
+        "requiresAuth": true,
         "appShell": true,
-        "ai_context": "The user is on the App Integrations page. It shows required, optional, and app-specific services for one app, with live workspace setup status overlaid.",
+        "ai_context": "The user is on the App Integrations page. The owner manages this app’s connections, credentials and build requirements here.",
         "navigation": {
           "group": "app-studio",
-          "include": false,
           "scope": "local",
           "icon": "plug"
         }
@@ -314,7 +286,6 @@
       "order": 27,
       "meta": {
         "surfaces": ["studio"],
-        "requiresRole": "admin",
         "title": "App Support",
         "appShell": true,
         "ai_context": "The user is on the App Support page. It shows support chats for one app using a simple support taxonomy: Needs reply, Responded, and Resolved.",
@@ -332,7 +303,6 @@
       "order": 26,
       "meta": {
         "surfaces": ["studio"],
-        "requiresRole": "admin",
         "title": "Build Review",
         "appShell": true,
         "ai_context": "The user is on the App Build Review page. It shows artifact versions, validation state, review actions, and staged output for this app.",

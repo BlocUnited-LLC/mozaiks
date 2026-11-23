@@ -18,6 +18,7 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_owned_output_paths,
 )
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_continuous_deterministic_materialization import _load_models, _plan_payload
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,7 +26,10 @@ PACK_ROOT = ROOT / "factory_app/build_context/mozaikspay"
 
 
 @pytest.fixture(autouse=True)
-def _load_factory_contracts():
+def _load_factory_contracts(monkeypatch, tmp_path):
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
     _load_models()
 
 
@@ -138,7 +142,7 @@ def _plan_and_context(*, monetized=True, collapsed=True):
             ], dependencies=["3", "4", "2"]),
         ]
     plan["generation_order"] = [task["task_id"] for task in plan["build_tasks"]]
-    context = ContextVariablesBridge({
+    values = {
         "build_mode": "initial", "app_plan_attempts": 0, "app_plan_outcome": "blocked",
         "monetization_enabled": monetized, "design_surface_map": {"surfaces": surfaces},
         "experience_spec": {"pages": pages},
@@ -147,7 +151,8 @@ def _plan_and_context(*, monetized=True, collapsed=True):
             "contract_required": True,
             "subscription_config_file": {"plans": [{"plan_id": "free"}, {"plan_id": "pro"}]},
         } if monetized else None,
-    })
+    }
+    context = ContextVariablesBridge(reviewed_pack_fixture(values, ["mozaikspay"] if monetized else []))
     return plan, context
 
 
@@ -257,6 +262,7 @@ def test_separately_approved_billing_module_is_preserved():
         "primary_entities": [], "owned_pages": [],
     })
     context.set("design_surface_map", design)
+    context = ContextVariablesBridge(reviewed_pack_fixture(context.snapshot(), ["mozaikspay"]))
     cached = _assert_reviewed_facade(plan, context)
     other_after = next(pack for pack in cached["capability_packs"] if pack["capability_pack_id"] == "billing_module")
     assert other_after["operations"] == ["list_invoices"]
@@ -366,6 +372,7 @@ def test_same_surface_alias_with_independently_approved_identity_is_not_consolid
         "primary_entities": [], "owned_pages": [],
     })
     context.set("design_surface_map", design)
+    context = ContextVariablesBridge(reviewed_pack_fixture(context.snapshot(), ["mozaikspay"]))
     before = deepcopy(alias)
 
     _repair_managed_facade_capabilities(plan, context)

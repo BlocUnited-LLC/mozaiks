@@ -37,7 +37,38 @@ required_outputs:
   owner: templates
 - path: modules/content/contracts/fixtures.yaml
   owner: generator
-  notes: App-owned smoke inputs with exact approved editor roles, valid create inputs and observed entry identifiers. These test inputs never grant runtime permissions.
+  smoke_fixtures:
+    schema_version: mozaiks.module_smoke_fixtures.v1
+    fixtures:
+    - action: create_entry
+      roles: []
+      setup: []
+      params:
+      - {field: title, source: literal, value_json: '"Observer content entry"'}
+    - action: update_entry
+      roles: []
+      setup:
+      - id: entry
+        module: content
+        action: create_entry
+        roles: []
+        params:
+        - {field: title, source: literal, value_json: '"Observer mutation target"'}
+      params:
+      - {field: entry_id, source: response, step_id: entry, response_path: [entry, entry_id]}
+      - {field: title, source: literal, value_json: '"Observer revised content entry"'}
+      - {field: status, source: literal, value_json: '"published"'}
+    - action: archive_entry
+      roles: []
+      setup:
+      - id: entry
+        module: content
+        action: create_entry
+        roles: []
+        params:
+        - {field: title, source: literal, value_json: '"Observer mutation target"'}
+      params:
+      - {field: entry_id, source: response, step_id: entry, response_path: [entry, entry_id]}
 - path: modules/content/module.yaml
   owner: templates
 forbidden_outputs:
@@ -78,7 +109,7 @@ runtime_boundaries:
     Apps start with no entries. Agents or authorized editors create actual app content
     through declared actions; migration only ensures collections and indexes.
 - id: app_owned_acceptance
-  rule: Plan contracts/fixtures.yaml from the app's approved auth grants through the canonical module_smoke_fixtures contract. Include create, update and archive positive probes with valid inputs and observed record identifiers; setup may create a draft. Do not invent a role or copy a test-suite role name into an app. Fixture inputs do not replace anonymous visibility and unauthorized-write checks.
+  rule: Bind the stock create, update and archive smoke inputs to the app's reviewed action grants. Setup creates disposable draft entries and passes their returned identifiers into the target actions. Smoke inputs never grant permissions or seed app data.
 - id: local_cost
   rule: Requires the existing local Mongo persistence foundation only. No cloud provider,
     external API, paid infrastructure, background worker or runtime model call is

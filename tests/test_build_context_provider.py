@@ -123,6 +123,15 @@ def test_existing_context_cannot_override_trusted_build_context(tmp_path: Path) 
         )
 
 
+def test_shipped_root_does_not_project_unselected_packs_into_agentgenerator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory = Path(__file__).resolve().parents[1] / "factory_app"
+    monkeypatch.setenv("MOZAIKS_FACTORY_APP_PATH", str(factory))
+    context = merge_build_context(workflow_id="AgentGenerator", build_context_root=factory / "build_context")
+    assert not context.get("capability_packs")
+
+
 def test_merge_build_context_rejects_missing_explicit_root(tmp_path: Path) -> None:
     with pytest.raises(BuildContextError, match="existing directory"):
         merge_build_context(

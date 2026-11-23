@@ -49,6 +49,7 @@ _IMPORT_TO_PYPI: dict[str, str] = {
     "boto3":        "boto3",
     "botocore":     "botocore",
     "pymongo":      "pymongo",
+    "bson":         "pymongo",
     "motor":        "motor",
     "pydantic":     "pydantic",
     "fastapi":      "fastapi",

@@ -8,7 +8,10 @@ def actor_id(ctx) -> str:
 
 
 def subject_app_id(ctx, value: str | None = None) -> str:
-    return str(value or getattr(ctx, "app_id", None) or "default").strip() or "default"
+    app_id = str(getattr(ctx, "app_id", None) or "default").strip()
+    if value is not None and str(value).strip() != app_id:
+        raise PermissionError("support request belongs to another app")
+    return app_id
 
 
 def actor_permissions(ctx) -> list[str] | None:
@@ -44,10 +47,8 @@ def support_request_query(
     query: dict[str, Any] = {}
     if scope == "user":
         query["requester_id"] = actor_id(ctx)
-    if scope == "app":
-        query["subject_app_id"] = subject_app_id(ctx, app_id)
-    elif scope == "workspace" and app_id:
-        query["subject_app_id"] = subject_app_id(ctx, app_id)
+    if app_id is not None:
+        subject_app_id(ctx, app_id)
     if status and status != "all":
         query["status"] = status
     return query

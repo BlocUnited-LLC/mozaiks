@@ -1669,12 +1669,19 @@ def test_studio_route_match_survives_a_wrapper_without_functools_wraps() -> None
 
 def test_every_studio_route_refuses_an_anonymous_visitor(monkeypatch) -> None:
     """Request-level refusal, for a Studio composed without its lifespan."""
+    from fastapi.dependencies.models import Dependant
     from fastapi.routing import APIRoute
 
     from mozaiksai.core.auth import optional_user, require_any_auth, require_user_scope
     from mozaiksai.hosts import studio
 
     principal_dependencies = {require_user, require_user_scope, require_any_auth, optional_user}
+
+    def requires_studio_user(dependency: Dependant) -> bool:
+        return dependency.call is studio.require_studio_user or any(
+            requires_studio_user(child) for child in dependency.dependencies
+        )
+
     defined: set[tuple[tuple[str, ...], str]] = set()
     guarded: set[tuple[tuple[str, ...], str]] = set()
     for route in studio.app.routes:
@@ -1682,7 +1689,7 @@ def test_every_studio_route_refuses_an_anonymous_visitor(monkeypatch) -> None:
             continue
         key = (tuple(sorted(route.methods)), route.path)
         calls = {dependency.call for dependency in route.dependant.dependencies}
-        if studio.require_studio_user in calls:
+        if requires_studio_user(route.dependant):
             guarded.add(key)
         if not _defined_in_studio(route.endpoint):
             continue
@@ -1700,6 +1707,9 @@ def test_every_studio_route_refuses_an_anonymous_visitor(monkeypatch) -> None:
         ("POST", "/api/studio/apps"),
         ("GET", "/api/studio/build/history"),
         ("POST", "/api/studio/build/restore"),
+        ("GET", "/api/studio/refinement/models"),
+        ("GET", "/api/studio/settings/ai-models"),
+        ("PUT", "/api/studio/settings/ai-models"),
     ):
         response = visitor.request(method, path, json={})
         assert (response.status_code, response.json()["detail"]) == (403, STUDIO_PUBLIC_MESSAGE)
@@ -1736,11 +1746,6 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
     owned_app_routes = {
         "GET /api/studio/dashboard",
         "GET /api/studio/integrations",
-        "GET /api/studio/integrations/connectors",
-        "POST /api/studio/integrations/connectors",
-        "PATCH /api/studio/integrations/connectors/{service}",
-        "POST /api/studio/integrations/connectors/{service}/health-check",
-        "DELETE /api/studio/integrations/connectors/{service}",
         "GET /api/studio/apps/{app_id}/context",
         "POST /api/studio/apps/{app_id}/context/app-intelligence/index",
         "POST /api/studio/apps/{app_id}/context/source-import",
@@ -1752,17 +1757,28 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
         "POST /api/studio/apps/{app_id}/context/refresh-complete",
         "POST /api/studio/apps/{app_id}/context/override",
     }
+    connector_routes = {
+        "GET /api/studio/integrations/connectors",
+        "POST /api/studio/integrations/connectors",
+        "PATCH /api/studio/integrations/connectors/{service}",
+        "POST /api/studio/integrations/connectors/{service}/health-check",
+        "DELETE /api/studio/integrations/connectors/{service}",
+    }
+    analytics_app_routes = {
+        "GET /api/studio/analytics/apps/{app_id}",
+        "GET /api/studio/analytics/apps/{app_id}/metrics/{metric_id}",
+    }
     existing_registry_gates = {
+        "GET /api/studio/build/dashboard-link": "get_app_record",
         "GET /api/studio/overview": "get_app_record",
         "GET /api/studio/build": "get_app_record",
-        "GET /api/studio/analytics/apps/{app_id}": "_get_owned_app_record",
-        "GET /api/studio/analytics/apps/{app_id}/metrics/{metric_id}": "_get_owned_app_record",
         "GET /api/studio/build/artifacts/{artifact_version_id}/download": "_resolve_studio_artifact_scope",
         "GET /api/studio/build/history": "_resolve_studio_artifact_scope",
         "GET /api/studio/build/artifacts/{artifact_version_id}/bundle": "_resolve_studio_artifact_scope",
         "GET /api/studio/build/artifacts/{artifact_version_id}/review": "_resolve_studio_artifact_scope",
         "POST /api/studio/build/artifacts/{artifact_version_id}/accept-genesis": "_resolve_studio_artifact_scope",
         "POST /api/studio/build/artifacts/{artifact_version_id}/accept": "_resolve_studio_artifact_scope",
+        "POST /api/studio/build/artifacts/{artifact_version_id}/revalidate": "_resolve_studio_artifact_scope",
         "POST /api/studio/build/artifacts/{artifact_version_id}/reject": "_resolve_studio_artifact_scope",
         "POST /api/studio/build/artifacts/{artifact_version_id}/promote": "_resolve_studio_artifact_scope",
         "POST /api/studio/build/restore": "_resolve_studio_artifact_scope",
@@ -1779,6 +1795,11 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
     execution_host_routes = {
         "POST /api/workflows/trigger": "_resolve_studio_scope",
     }
+    workspace_model_policy_routes = {
+        "GET /api/studio/refinement/models": (studio.require_studio_user, "studio_model_options"),
+        "GET /api/studio/settings/ai-models": (studio.require_studio_model_admin, "studio_model_options"),
+        "PUT /api/studio/settings/ai-models": (studio.require_studio_model_admin, "save_studio_model_policy"),
+    }
     routes_without_app_scope = {"GET /api/shell-config"}
 
     direct_route_list = [
@@ -1791,21 +1812,40 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
     }
     classified = (
         owned_app_routes
+        | connector_routes
+        | analytics_app_routes
         | existing_registry_gates.keys()
         | owner_scoped_registry_operations.keys()
         | execution_host_routes.keys()
+        | workspace_model_policy_routes.keys()
         | routes_without_app_scope
     )
-    assert len(direct_route_list) == len(direct_routes) == 37
+    assert len(direct_route_list) == len(direct_routes) == 42
     assert direct_routes.keys() == classified
-    assert len(owned_app_routes) == 17
+    assert len(owned_app_routes) == 12
     for key in owned_app_routes:
         assert "_resolve_owned_app_scope" in named_calls(direct_routes[key].endpoint, awaited_only=True), key
+    for key in connector_routes:
+        assert "_connector_scope" in named_calls(direct_routes[key].endpoint, awaited_only=True), key
+    assert {"_resolve_owned_app_scope", "_get_owned_dashboard_app_record"} <= named_calls(
+        studio._connector_scope, awaited_only=True,
+    )
+    for key in analytics_app_routes:
+        assert {"_get_owned_app_record", "_get_owned_dashboard_app_record"} <= named_calls(
+            direct_routes[key].endpoint, awaited_only=True,
+        ), key
     for gates in (existing_registry_gates, owner_scoped_registry_operations):
         for key, expected_call in gates.items():
             assert expected_call in named_calls(direct_routes[key].endpoint, awaited_only=True), key
+    assert "get_owned_chat_binding" in named_calls(
+        direct_routes["GET /api/studio/build/dashboard-link"].endpoint, awaited_only=True,
+    )
     for key, expected_call in execution_host_routes.items():
         assert expected_call in named_calls(direct_routes[key].endpoint, awaited_only=False), key
+    for key, (guard, expected_call) in workspace_model_policy_routes.items():
+        route = direct_routes[key]
+        assert guard in {dependency.call for dependency in route.dependant.dependencies}, key
+        assert expected_call in named_calls(route.endpoint, awaited_only=True), key
 
 
 def test_studio_preview_routes_refuse_an_anonymous_visitor(monkeypatch) -> None:

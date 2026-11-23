@@ -1069,6 +1069,38 @@ class BuildRecordStore:
         )
         return await self.get_build_record(app_id=app_id, build_record_id=build_record_id)
 
+    async def record_draft_revalidation(
+        self, *, record: BuildRecord, validation: dict[str, Any],
+    ) -> bool:
+        """Save validator evidence only if the reviewed draft has not changed."""
+        build = validation["app_validation_result"]
+        acceptance = validation["app_bundle_acceptance_result"]
+        status = ArtifactValidationStatus(validation["validation_status"])
+        versions = await self._coll("ArtifactVersions")
+        result = await versions.update_one(
+            {
+                "_id": record.id,
+                **build_app_scope_filter(record.app_id),
+                "lifecycle_status": ArtifactLifecycleStatus.DRAFT.value,
+                "validation_status": record.validation_status.value,
+                "updated_at": record.updated_at,
+                "files_manifest": [entry.model_dump(mode="python") for entry in record.files_manifest],
+                "commit_metadata.metadata.bundle_mode": "staged_refinement_bundle",
+            },
+            {"$set": {
+                "validation_status": status.value,
+                "app_validation_status": build.get("validation_status"),
+                "app_validation_strategy": build.get("validation_strategy"),
+                "commit_metadata.metadata.validation_status": status.value,
+                "commit_metadata.metadata.validation_result": validation,
+                "commit_metadata.metadata.app_bundle_acceptance": acceptance,
+                "commit_metadata.metadata.validation_evidence": acceptance.get("validation_evidence"),
+                "commit_metadata.metadata.app_validation_result": build,
+                "updated_at": _utc_now(),
+            }},
+        )
+        return bool(result.modified_count)
+
     async def set_validation_status_for_build_record(
         self,
         *,

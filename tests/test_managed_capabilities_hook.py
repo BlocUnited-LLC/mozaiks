@@ -11,6 +11,8 @@ import yaml
 
 from mozaiksai.core.session.build_context import build_provider_values, load_build_context
 from mozaiksai.core.session.build_context_schema import VALID_CAPABILITY_SOURCES
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
+from tests.test_factory_pack_selection import _enable_managed
 
 _APPGEN_DIR = (
     Path(__file__).parent.parent
@@ -32,7 +34,23 @@ def _pack_context(*pack_ids: str) -> dict[str, Any]:
         values = build_provider_values(root=root, config=load_build_context(root / "context.yaml"))
         for key in context:
             context[key].extend(values[key])
-    return context
+    return reviewed_pack_fixture(context, list(pack_ids))
+
+
+@pytest.fixture(autouse=True)
+def _factory_registry(monkeypatch, tmp_path):
+    factory_root = _BUILD_CONTEXT.parent
+    monkeypatch.setenv("MOZAIKS_FACTORY_APP_PATH", str(factory_root))
+    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(factory_root / "workflows"))
+    root = tmp_path / "empty-registry"
+    root.mkdir()
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(root))
+
+
+@pytest.fixture
+def managed_context(tmp_path, monkeypatch):
+    _enable_managed(tmp_path, monkeypatch)
+    return _pack_context("mozaikspay")
 
 
 class _FakeAgent:
@@ -62,28 +80,17 @@ def hook(_import_hook):
 
 
 # ---------------------------------------------------------------------------
-# OSS no-op behaviour
+# Behavior without a reviewed pack selection
 # ---------------------------------------------------------------------------
 
-class TestOSSNoOp:
-    def test_noop_when_null(self, hook):
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": None,
-        })
+class TestEmptySelection:
+    @pytest.mark.parametrize("context", [{}, {"capability_packs": None}, {"capability_packs": []}])
+    def test_empty_selection_is_explicit(self, hook, context):
+        agent = _FakeAgent("AppPlanAgent", context_variables=context)
         hook.inject_managed_capabilities_context(agent, [])
-        assert agent.system_message == ""
-
-    def test_noop_when_empty_list(self, hook):
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [],
-        })
-        hook.inject_managed_capabilities_context(agent, [])
-        assert agent.system_message == ""
-
-    def test_noop_when_context_vars_absent(self, hook):
-        agent = _FakeAgent("AppPlanAgent", context_variables={})
-        hook.inject_managed_capabilities_context(agent, [])
-        assert agent.system_message == ""
+        assert "[REVIEWED PACK SELECTION]" in agent.system_message
+        assert "Authorized reusable packs: []" in agent.system_message
+        assert "[MANAGED CAPABILITIES CONTEXT]" not in agent.system_message
 
     def test_noop_for_wrong_agent(self, hook):
         agent = _FakeAgent("InterviewAgent", context_variables={
@@ -102,8 +109,7 @@ class TestOSSNoOp:
         )
 
     def test_oss_default_context_does_not_mention_mozaikspay_or_managed_capabilities(self):
-        # When running in OSS mode the injected context must be empty — no
-        # mention of proprietary managed capabilities.
+        # The explicit empty selection carries no provider guidance.
         agent = _FakeAgent("AppPlanAgent", context_variables={})
         import hook_managed_capabilities_context as m
         m.inject_managed_capabilities_context(agent, [])
@@ -119,74 +125,47 @@ class TestOSSNoOp:
 # ---------------------------------------------------------------------------
 
 class TestHostedInjection:
-    def test_injects_header_when_capability_packs_present(self, hook):
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [
-                {"id": "managed_wallet", "display_name": "Managed Wallet"},
-            ],
-        })
+    def test_injects_header_for_reviewed_pack(self, hook, managed_context):
+        agent = _FakeAgent("AppPlanAgent", managed_context)
         hook.inject_managed_capabilities_context(agent, [])
         assert "[MANAGED CAPABILITIES CONTEXT]" in agent.system_message
-        assert "managed_wallet" in agent.system_message
+        assert "mozaikspay.billing_portal" in agent.system_message
+        assert '"pack_id":"mozaikspay"' in agent.system_message
 
-    def test_injects_packs_as_string_list(self, hook):
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": ["wallet", "investor_marketplace"],
-        })
+    @pytest.mark.parametrize("raw", [["mozaikspay"], [{"id": "mozaikspay"}]])
+    def test_raw_registered_pack_inventory_does_not_select_it(self, hook, managed_context, raw):
+        unreviewed = {"capability_packs": raw, "operator_contracts": managed_context["operator_contracts"]}
+        agent = _FakeAgent("AppPlanAgent", unreviewed)
         hook.inject_managed_capabilities_context(agent, [])
         msg = agent.system_message
-        assert "[MANAGED CAPABILITIES CONTEXT]" in msg
-        assert "wallet" in msg
-        assert "investor_marketplace" in msg
+        assert "Authorized reusable packs: []" in msg
+        assert "[MANAGED CAPABILITIES CONTEXT]" not in msg
+        assert "mozaikspay" not in msg
 
-    def test_injects_packs_as_dict_list(self, hook):
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [
-                {
-                    "id": "wallet",
-                    "display_name": "Wallet",
-                    "description": "Hosted wallet for payouts.",
-                    "capabilities": [
-                        {"capability_id": "wallet.view"},
-                        {"capability_id": "wallet.payout"},
-                    ],
-                },
-                {
-                    "id": "investor_marketplace",
-                    "display_name": "Investor Marketplace",
-                },
-            ],
-        })
-        hook.inject_managed_capabilities_context(agent, [])
-        msg = agent.system_message
-        assert "wallet" in msg
-        assert "investor_marketplace" in msg
-        assert "wallet.view" in msg
-
-    def test_pack_source_path_does_not_appear_in_injected_context(self, hook):
+    def test_pack_source_path_does_not_appear_in_injected_context(self, hook, managed_context):
         """pack_source_path is an internal resolver field — not exposed to the agent."""
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [
-                {
-                    "id": "wallet",
-                    "display_name": "Wallet",
-                    "capability_source": "managed_capability",
-                    "pack_source_path": "/build_context/wallet",
-                }
-            ],
-        })
+        agent = _FakeAgent("AppPlanAgent", managed_context)
         hook.inject_managed_capabilities_context(agent, [])
         msg = agent.system_message
         assert "[MANAGED CAPABILITIES CONTEXT]" in msg
-        assert "wallet" in msg
-        # Internal resolver path is not surfaced in the agent prompt
-        assert "/build_context/wallet" not in msg
+        assert "mozaikspay" in msg
+        assert managed_context["capability_packs"][0]["pack_source_path"] not in msg
+        assert managed_context["operator_contracts"][0]["source_path"] not in msg
 
-    @pytest.mark.parametrize("source", sorted(VALID_CAPABILITY_SOURCES | {"host_universal"}))
-    def test_source_guidance_is_scoped_to_the_supplied_origins(self, hook, source):
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [{"id": "example_pack", "capability_source": source}],
-        })
+    @pytest.mark.parametrize("source", sorted(VALID_CAPABILITY_SOURCES))
+    def test_source_guidance_is_scoped_to_reviewed_origin(self, hook, source, tmp_path, monkeypatch):
+        registry = tmp_path / "registry"
+        root = registry / "example_pack"
+        root.mkdir(parents=True)
+        (root / "context.yaml").write_text(yaml.safe_dump({
+            "context_id": "example_pack",
+            "applies_to_workflows": ["AppGenerator"],
+            "assets": [],
+            "pack": {"id": "example_pack", "version": "1.0.0", "capability_source": source},
+            "projections": {"context_variables": {"capability_packs": {"from": "capability_packs"}}},
+        }), encoding="utf-8")
+        monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(registry))
+        agent = _FakeAgent("AppPlanAgent", reviewed_pack_fixture({}, ["example_pack"]))
         hook.inject_managed_capabilities_context(agent, [])
         msg = agent.system_message
         assert hook._CAPABILITY_SOURCE_GUIDANCE[source] in msg
@@ -194,47 +173,38 @@ class TestHostedInjection:
             if other != source:
                 assert guidance not in msg
 
-    def test_managed_capability_planning_rule_injected(self, hook):
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [{"id": "wallet"}],
-        })
+    def test_managed_capability_planning_rule_injected(self, hook, managed_context):
+        agent = _FakeAgent("AppPlanAgent", managed_context)
         hook.inject_managed_capabilities_context(agent, [])
         msg = agent.system_message
         assert "module_contract" in msg
         assert "external_integration" in msg
 
-    def test_is_idempotent(self, hook):
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [{"id": "managed_wallet"}],
-        })
+    def test_is_idempotent(self, hook, managed_context):
+        agent = _FakeAgent("AppPlanAgent", managed_context)
         hook.inject_managed_capabilities_context(agent, [])
+        original = agent.system_message
         hook.inject_managed_capabilities_context(agent, [])
+        assert agent.system_message == original
         assert agent.system_message.count("[MANAGED CAPABILITIES CONTEXT]") == 1
 
     def test_generated_module_pack_renders_actual_capability_source(self, hook):
         """generated_module packs must not be labeled as managed_capability in the prompt."""
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [
-                {
-                    "id": "entitlement_dispatch",
-                    "capability_source": "generated_module",
-                }
-            ],
-        })
+        agent = _FakeAgent("AppPlanAgent", _pack_context("entitlement_dispatch"))
         hook.inject_managed_capabilities_context(agent, [])
         msg = agent.system_message
         assert "entitlement_dispatch" in msg
         assert "capability_source: generated_module" in msg
 
-    def test_pack_without_capability_source_defaults_to_managed(self, hook):
-        """Packs with no capability_source fall back to managed_capability."""
+    def test_unreviewed_row_has_no_default_origin(self, hook):
         agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [{"id": "legacy_pack"}],
+            "capability_packs": [{"id": "unreviewed_pack"}],
         })
         hook.inject_managed_capabilities_context(agent, [])
         msg = agent.system_message
-        assert "legacy_pack" in msg
-        assert "capability_source: managed_capability" in msg
+        assert "Authorized reusable packs: []" in msg
+        assert "unreviewed_pack" not in msg
+        assert "capability_source: managed_capability" not in msg
 
 
 class TestDeclaredPackOwnership:
@@ -260,7 +230,8 @@ class TestDeclaredPackOwnership:
         hook.inject_managed_capabilities_context(agent, [])
         assert agent.system_message == before
 
-    def test_content_and_managed_pack_keep_distinct_origins_and_facade_boundaries(self, hook):
+    def test_content_and_managed_pack_keep_distinct_origins_and_facade_boundaries(self, hook, tmp_path, monkeypatch):
+        _enable_managed(tmp_path, monkeypatch)
         context = _pack_context("content", "mozaikspay")
         agent = _FakeAgent("AppPlanAgent", context)
         hook.inject_managed_capabilities_context(agent, [])

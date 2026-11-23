@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from tests.factory_context import factory_context
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 
@@ -28,8 +29,10 @@ def _load_resolver():
 
 
 class _Ctx:
-    def __init__(self, data: dict[str, Any]) -> None:
+    def __init__(self, data: dict[str, Any], *, reviewed_pack_ids=None) -> None:
         self.data = factory_context(data)
+        if reviewed_pack_ids is not None:
+            self.data = reviewed_pack_fixture(self.data, reviewed_pack_ids)
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.data.get(key, default)
@@ -167,12 +170,18 @@ def test_selected_pack_ignores_cache_and_bytecode_files(resolver, tmp_path: Path
 
 
 @pytest.mark.asyncio
-async def test_assemble_app_tasks_overlays_selected_pack_template(tmp_path: Path) -> None:
+async def test_assemble_app_tasks_overlays_selected_pack_template(tmp_path: Path, monkeypatch) -> None:
     pack_root = _write_pack(
         tmp_path,
         "wallet",
         {"services/integrations/wallet_client.py": "# deterministic wallet client\n"},
     )
+    manifest = pack_root / "context.yaml"
+    config = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    config["projections"] = {"context_variables": {"capability_packs": {"from": "capability_packs"}}}
+    manifest.write_text(yaml.safe_dump(config), encoding="utf-8")
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(tmp_path))
+    selection = _pinned(pack_root, "wallet", capability_source="managed_capability")
     from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
 
     ctx = _Ctx(
@@ -180,11 +189,12 @@ async def test_assemble_app_tasks_overlays_selected_pack_template(tmp_path: Path
             "app_id": "app_template_overlay",
             "app_build_plan": {
                 "capability_packs": [
-                    {"capability_pack_id": "wallet", "capability_source": "managed_capability"}
+                    {"capability_pack_id": "wallet", "capability_source": "managed_capability",
+                     **{key: selection[key] for key in ("pack_source_path", "version", "digest")}}
                 ],
                 "build_tasks": [{"task_id": "wallet_adapter"}],
             },
-            "capability_packs": [_pinned(pack_root, "wallet", capability_source="managed_capability")],
+            "capability_packs": [selection],
             "app_task_batch_results": {
                 "wallet_adapter": {
                     "code_files": [
@@ -195,7 +205,7 @@ async def test_assemble_app_tasks_overlays_selected_pack_template(tmp_path: Path
                     ]
                 }
             },
-        }
+        }, reviewed_pack_ids=["wallet"],
     )
 
     result = await assemble_app_tasks(context_variables=ctx)

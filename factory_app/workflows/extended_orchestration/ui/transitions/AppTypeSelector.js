@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { studioFetch } from '../../../../app/admin/pages/studioApi.js';
 import brownfieldImage from '../../../../app/brand/assets/brownfield.jpg';
 import greenfieldImage from '../../../../app/brand/assets/greenfield.jpg';
@@ -64,10 +64,26 @@ export default function AppTypeSelector({ transition, onResolve, overlayTitleId,
   const [monetizationSelected, setMonetizationSelected] = useState(transition?.context?.monetization_enabled === true);
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState(null);
+  const [models, setModels] = useState([]);
+  const [refinementModel, setRefinementModel] = useState('');
   const openingRef = useRef(false);
   const registryRef = useRef(transition?.context?.build_registry_id || null);
   const motion = useTransitionMotion();
   const resolveContext = buildResolveContext(monetizationSelected);
+  useEffect(() => {
+    const controller = new AbortController();
+    studioFetch('/api/studio/refinement/models', { signal: controller.signal })
+      .then(response => response.ok ? response.json() : null)
+      .then(policy => {
+        if (!policy || controller.signal.aborted) return;
+        const available = Array.isArray(policy.models) ? policy.models : [];
+        setModels(available);
+        setRefinementModel(available.some(model => model.id === policy.default)
+          ? policy.default : available[0]?.id || '');
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
   const startJourney = async (optionId) => {
     if (openingRef.current) return;
     openingRef.current = true;
@@ -84,7 +100,10 @@ export default function AppTypeSelector({ transition, onResolve, overlayTitleId,
         }
         registryRef.current = result.app.build_registry_id;
       }
-      await onResolve(optionId, resolveContext, { build_registry_id: registryRef.current });
+      await onResolve(optionId, resolveContext, {
+        build_registry_id: registryRef.current,
+        ...(refinementModel ? { refinement_model: refinementModel } : {}),
+      });
     } catch (err) {
       setError(err.message || 'Your app could not be opened. Please try again.');
     } finally {
@@ -137,6 +156,20 @@ export default function AppTypeSelector({ transition, onResolve, overlayTitleId,
         </button>
       </div>
       </div>
+      {models.length > 0 && (
+        <label className="mx-auto flex w-full max-w-3xl items-center justify-between gap-4 text-sm text-foreground">
+          <span>AI model</span>
+          <select
+            aria-label="AI model"
+            className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+            disabled={opening}
+            value={refinementModel}
+            onChange={event => setRefinementModel(event.target.value)}
+          >
+            {models.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
+          </select>
+        </label>
+      )}
       {error && <p role="alert" className="w-full text-sm text-destructive">{error}</p>}
       {opening && <p role="status" className="w-full text-sm text-muted-foreground">Opening your app workspace…</p>}
       {options.map((option, index) => {

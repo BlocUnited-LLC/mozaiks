@@ -17,6 +17,12 @@ change is a design decision. Every fixture pins its outcome: saved, with the
 ownership and field normalizations the save recorded, or a named judgment
 rejection whose message says exactly what to change.
 
+Reusable-pack selection is now explicit. These archived outputs did not choose
+or review a provider, so this replay selects no packs; it does not backfill
+owner consent. Thirty-one formerly implicit-provider successes now require an
+app design decision (29 missing Pricing inventories, two ambiguous ownerships).
+Their recorded bodies remain unchanged; ADR 0026 lists the expectation migration.
+
 An intended change in outcome is accepted by regenerating the expectations and
 explaining every changed fixture in the pull request::
 
@@ -48,6 +54,16 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = Path(__file__).parent / "fixtures" / "designdocs_corpus.json"
 # A judgment is a design decision the save cannot make; its message names the choices.
 JUDGMENTS = {
+    "missing_reviewed_subscription_pages": (
+        "Monetized design is missing required pages",
+        "Design them in experience_spec.pages",
+        "Subscription design and app planning must preserve this approved page inventory.",
+    ),
+    "ambiguous_app_subscription_projection": (
+        "Ambiguous app ownership for collection 'users'",
+        "expected one app module",
+        "subscription_status",
+    ),
     "records_on_ui_only_surface": (
         "which holds no durable records. Move",
         "make {surface} a module surface",
@@ -59,7 +75,8 @@ _MARKDOWN = {
     "backend_markdown": "# Backend Design\nRecorded output.",
     "database_markdown": "# Database Design\nRecorded output.",
 }
-_SAVE_SEED = {"design_docs_save_outcome": "blocked", "design_docs_save_attempts": 0, "design_docs_save_feedback": ""}
+# Archived recordings did not select reusable packs; replay explicitly selects none.
+_SAVE_SEED = {"workflow_name": "DesignDocs", "pack_selection": [], "design_docs_save_outcome": "blocked", "design_docs_save_attempts": 0, "design_docs_save_feedback": ""}
 
 
 def _corpus() -> dict[str, Any]:
@@ -129,7 +146,7 @@ def test_the_corpus_saves_all_but_its_judgment_cases():
     outcomes = [entry["expected"] for entry in CORPUS["fixtures"]]
     saved = [expected for expected in outcomes if expected["outcome"] == "saved"]
     judged = [expected for expected in outcomes if expected["outcome"] != "saved"]
-    assert len(saved) >= 89
+    assert (len(saved), len(judged)) == (58, 33)
     assert all(expected["outcome"] == "revise" and expected["judgment"] in JUDGMENTS for expected in judged)
 
 
@@ -144,7 +161,8 @@ def test_recorded_output_saves_or_names_its_judgment(entry):
         return
     assert actual["outcome"] == "revise", actual
     assert actual["error"] == expected["error"]
-    surface = actual["error"].split("surface ", 1)[1].split(",", 1)[0]
+    surface = (actual["error"].split("surface ", 1)[1].split(",", 1)[0]
+               if expected["judgment"] == "records_on_ui_only_surface" else "")
     for phrase in JUDGMENTS[expected["judgment"]]:
         assert phrase.format(surface=surface) in actual["error"], phrase
 

@@ -1232,7 +1232,12 @@ result = await reply.content()
 - `MemoryStream` — captures the full conversation for observability.
 
 `FileUpdate`, shared by `CodingWorkerPlan` and `SurfaceRegenerationResponse`,
-requires concrete `.yaml` and `.yml` contents to parse with the safe YAML loader
+requires source text free of raw NUL characters. Both coding paths preserve
+Unicode characters when presenting the input files to the model. A generated
+NUL and its character offset trigger normal AG2 schema correction. Literal
+source escapes such as `\u0000` remain available to code authors.
+
+Concrete `.yaml` and `.yml` contents must also parse with the safe YAML loader
 (extensions are case-insensitive). Malformed YAML, including raw forbidden
 control characters, raises a Pydantic validation error with the relative path,
 parser error class, and location. The parser message does not echo file contents.
@@ -1240,8 +1245,8 @@ AG2's existing `reply.content(retries=2)` schema correction receives the rejecte
 response and validation feedback within the original scoped conversation; an
 unchanged invalid response exhausts that bound. No Mozaiks repair loop is added.
 
-The `path`/`content` wire fields and valid content bytes are unchanged. Non-YAML
-files and template suffixes such as `.yaml.j2` are unaffected. Quoted YAML escape
+The `path`/`content` wire fields and valid content bytes are unchanged. YAML
+parsing applies only to concrete YAML files. Quoted YAML escape
 sequences remain valid; raw forbidden control characters do not. Parseability
 does not admit a page schema, widen selected file scope, or grant promotion:
 the existing full candidate and runtime checks still decide acceptance. Staged

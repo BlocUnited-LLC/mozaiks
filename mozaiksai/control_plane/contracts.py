@@ -7,6 +7,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from mozaiksai.control_plane.config import RefinementModel
 from mozaiksai.core.session.build_binding import BuildIdentity, RunBuildBinding
 from mozaiksai.core.usage.context import AuxiliaryUsageContext
 
@@ -247,6 +248,7 @@ def acceptance_evidence_names(record: Any, evidence: Any) -> bool:
 
 
 class CodingWorkerRequest(BaseModel):
+    refinement_model: RefinementModel | None = None
     model_config = ConfigDict(extra="forbid")
 
     app_id: str
@@ -503,10 +505,13 @@ class FileUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     path: str
-    content: str = Field(description="Full file contents; concrete .yaml/.yml files must be valid YAML.")
+    content: str = Field(description="Full source text without raw NUL characters; concrete .yaml/.yml files must be valid YAML.")
 
     @model_validator(mode="after")
-    def _validate_yaml_content(self) -> FileUpdate:
+    def _validate_source_content(self) -> FileUpdate:
+        nul = self.content.find("\x00")
+        if nul != -1:
+            raise ValueError(f"Generated source contains a raw NUL at character {nul}. Preserve the intended source text.")
         if PurePosixPath(self.path.replace("\\", "/")).suffix.lower() not in {".yaml", ".yml"}:
             return self
         try:

@@ -356,9 +356,19 @@ def merge_build_context(
         if key not in trusted or merged[key] != trusted[key]:
             raise BuildContextError(f"Untrusted override of protected build-context key {key!r}")
 
+    from mozaiksai.resources import resolve_factory_app_root
+
+    factory_root = resolve_factory_app_root()
+    shipped_root = factory_root is not None and (factory_root / "build_context").resolve() == root.resolve()
+    selected = trusted.get("operator_capabilities", [])
     for context_path in discover_build_context_files(root.resolve(), workflow_id):
         context_root = context_path.parent.resolve()
         config = load_build_context(context_path)
+        pack = config.get("pack")
+        if shipped_root and isinstance(pack, Mapping) and (
+            pack.get("id") not in selected or pack.get("status", "active") != "active"
+        ):
+            continue
         provider_values = build_provider_values(root=context_root, config=config)
         projected = project_build_context(
             workflow_id=workflow_id,
@@ -440,11 +450,19 @@ def load_trusted_build_context(
     root = resolve_build_context_root(build_context_root=build_context_root, workspace_path=workspace_path)
     if root is None or not root.exists():
         return {}
+    from mozaiksai.resources import resolve_factory_app_root
+
+    factory_root = resolve_factory_app_root()
+    shipped_root = factory_root is not None and (factory_root / "build_context").resolve() == root.resolve()
     projected: dict[str, Any] = {}
     workspace_pack_ids: set[str] = set()
+    shipped_packs: list[tuple[Path, dict[str, Any]]] = []
     for context_path in discover_build_context_files(root, policy.workflow_name):
         config = load_build_context(context_path)
         if isinstance(config.get("pack"), Mapping):
+            if shipped_root:
+                shipped_packs.append((context_path, config))
+                continue
             workspace_pack_ids.add(config["pack"]["id"])
         _merge_trusted_projection(projected, _trusted_projection(policy, context_path, config))
 
@@ -453,11 +471,14 @@ def load_trusted_build_context(
     selected = projected.get("operator_capabilities", [])
     if not isinstance(selected, list) or any(not isinstance(item, str) for item in selected):
         raise BuildContextError("operator_capabilities must contain canonical capability IDs")
+    # Pack declarations in the shipped catalog are available, not selected.
+    # Workspace registrations retain their existing operator-owned semantics.
+    for context_path, config in shipped_packs:
+        pack = config["pack"]
+        if pack.get("id") in selected and pack.get("status", "active") == "active":
+            _merge_trusted_projection(projected, _trusted_projection(policy, context_path, config))
     if selected and "capability_packs" in policy.build_context_keys:
-        from mozaiksai.resources import resolve_factory_app_root
-
-        factory_root = resolve_factory_app_root()
-        if factory_root is not None and (factory_root / "build_context").resolve() != root.resolve():
+        if factory_root is not None and not shipped_root:
             for context_path in discover_build_context_files(factory_root / "build_context", policy.workflow_name):
                 config = load_build_context(context_path)
                 pack = config.get("pack") or {}

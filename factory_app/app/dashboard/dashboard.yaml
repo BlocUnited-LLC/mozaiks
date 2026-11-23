@@ -4,11 +4,16 @@ extends: default
 # Factory app intentionally uses the canonical Workspace Dashboard + App
 # Dashboard lanes. App Zero and customer app workspaces can overlay individual
 # portals by id without replacing the whole default contract.
+#
+# Every enabled portal here has a mounted route in ui/route_manifest.json, and
+# every route shown in Studio navigation has an enabled portal here.
+# tests/test_dashboard_manifest.py runs validate_dashboard_manifest_routes on
+# this file and that manifest together.
 
 workspace:
   portals:
     - id: portfolio
-      label: Apps
+      label: My Apps
       route: /apps
       icon: apps
       order: 0
@@ -35,6 +40,20 @@ workspace:
       route: /integrations
       icon: plug
       order: 30
+
+    - id: support
+      label: Support
+      route: /support
+      icon: support
+      order: 40
+      description: Apps with support chats, each linking to that app's support inbox.
+
+    - id: ai-models
+      label: AI models
+      route: /settings/ai-models
+      icon: settings
+      order: 50
+      description: Default and allowed AI models for Factory builds and refinements.
 
 app:
   portals:
@@ -72,29 +91,11 @@ app:
       icon: hammer
       order: 10
 
-    - id: branding
-      label: Branding
-      route: /apps/:appId/branding
-      icon: palette
-      order: 20
-
-    - id: launch
-      label: Launch
-      route: /apps/:appId/launch
-      icon: rocket
-      order: 30
-
-    - id: growth
-      label: Growth
-      route: /apps/:appId/growth
-      icon: megaphone
-      order: 40
-
-    - id: users
-      label: Access
-      route: /apps/:appId/access
-      icon: users
-      order: 50
+    - id: integrations
+      label: Integrations
+      route: /apps/:appId/integrations
+      icon: plug
+      order: 26
 
     - id: usage
       label: Usage
@@ -102,14 +103,29 @@ app:
       icon: chart
       order: 60
 
+    - id: health
+      label: Health
+      route: /apps/:appId/health
+      icon: pulse
+      order: 65
+      description: What needs attention - build validation, failed runs, and integration credentials.
+
     - id: support
       label: Support
       route: /apps/:appId/support
       icon: support
       order: 70
 
+    # Default portals this Studio has no page for. They stay in the default
+    # contract for hosts that mount them; a portal without a route is disabled
+    # here rather than left pointing nowhere.
+    - id: branding
+      enabled: false
+    - id: launch
+      enabled: false
+    - id: growth
+      enabled: false
+    - id: users
+      enabled: false
     - id: settings
-      label: Settings
-      route: /apps/:appId/settings
-      icon: settings
-      order: 90
+      enabled: false

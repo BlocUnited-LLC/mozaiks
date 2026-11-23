@@ -18,12 +18,14 @@ import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from factory_app.workflows._shared.pack_selection import pin_pack_choices
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     verify_pack_integrity,
 )
 from factory_app.workflows.AppGenerator.tools.validate_wiring import validate_wiring
+from factory_app.workflows.DesignDocs.tools.save_design_doc import _compose_reviewed_pack_data
 from mozaiksai.core.auth import UserPrincipal, optional_user
 from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
@@ -33,6 +35,7 @@ from mozaiksai.core.runtime.persistence import collection_name_for
 from mozaiksai.core.validation import scan_functional_generated_app
 from mozaiksai.core.workflow.context.adapter import create_context_container
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.module_role_grants import verified_pack_authorization
 from mozaiksai.core.workflow.generator_support.module_smoke_fixtures import (
     load_module_smoke_fixtures,
 )
@@ -43,6 +46,7 @@ from mozaiksai.core.workflow.generator_support.page_plan_utils import (
 from mozaiksai.hosts.routers import modules, shell
 from tests.content_smoke_fixtures import content_smoke_fixtures
 from tests.factory_context import factory_context, planned_tasks
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_appgenerator_revision_baseline import _replace_archive
 from tests.test_appgenerator_revision_baseline import baseline as revision_baseline  # noqa: F401
 from tests.test_materialized_bundle_production_runtime import (
@@ -55,7 +59,7 @@ PAGE = "ui/pages/custom/Portfolio.jsx"
 APP_ID = "customer-app"
 EDITOR_ROLE = "content_editor"
 FIXTURES = "modules/content/contracts/fixtures.yaml"
-APPROVED_DATA = {"version": "1", "surfaces": [], "shared_collections": []}
+APPROVED_DATA = json.loads((PACK / "templates/data/contract.json").read_text(encoding="utf-8"))
 THEMES = {
     "editorial": {"theme": {"primary": "emerald", "font": "system", "font_heading": "system", "appearance": "light", "density": "spacious", "radius": "small"}},
     "catalogue": {"theme": {"primary": "rose", "font": "system", "font_heading": "system", "appearance": "dark", "density": "compact", "radius": "none"}},
@@ -103,7 +107,9 @@ def _entries_page():
 
 
 def _plan():
-    return {"capability_packs": [{"capability_pack_id": "content", "capability_source": "generated_module"}],
+    selection = _selection()
+    return {"capability_packs": [{"capability_pack_id": "content", "capability_source": "generated_module",
+                                  **{key: selection[key] for key in ("pack_source_path", "version", "digest")}}],
             "pages": [{"name": "portfolio", "route": "/", "ui_surface": "custom_react_page"},
                       {"name": "entries", "route": "/entries", "ui_surface": "declarative_page"}]}
 
@@ -113,9 +119,17 @@ def _context(variant):
     auth["authorization"] = {"roles": [{"id": EDITOR_ROLE, "permissions": ["content.manage"]}]}
     plan = _plan()
     plan["build_tasks"] = [{"task_id": "content_smoke", "task_type": "module_contract", "owned_paths": [FIXTURES]}]
-    return create_context_container(initial=factory_context({
-        "app_id": APP_ID, "capability_packs": [_selection()], "app_build_plan": plan,
-        "data_contract": deepcopy(APPROVED_DATA), "captured_theme_config": deepcopy(THEMES[variant]),
+    selection = _selection()
+    offerings = {"capability_packs": [selection]}
+    authorization = verified_pack_authorization(offerings, selection=pin_pack_choices(offerings, ["content"]))
+    surface_map = {"surfaces": [{"surface_id": "portfolio", "surface_kind": "ui_only", "owner": "app"}]}
+    data_contract = _compose_reviewed_pack_data(
+        {"version": "1", "surfaces": [], "shared_collections": []}, surface_map, authorization,
+    )
+    values = factory_context({
+        "app_id": APP_ID, **offerings, "app_build_plan": plan,
+        "data_contract": data_contract, "captured_theme_config": deepcopy(THEMES[variant]),
+        "design_surface_map": surface_map,
         "app_task_batch_items": planned_tasks("content_smoke"),
         "app_task_batch_results": {"content_smoke": {"code_files": [{"filename": FIXTURES, "content": content_smoke_fixtures(EDITOR_ROLE)}]}},
         "build_timestamp": "2026-11-13T00:00:00+00:00", "generated_files": {
@@ -130,18 +144,77 @@ def _context(variant):
                 {"id": "entries", "path": "/entries", "component": "SchemaPage", "schema": "entries"},
             ]}),
         },
-    }))
+    })
+    return _reviewed_content_context(values)
+
+
+def _reviewed_content_context(values):
+    policy = {"roles": [{"role_id": EDITOR_ROLE, "label": "Content editor", "description": "Maintains content."}],
+              "grants": [{"role_id": EDITOR_ROLE, "collection": "entries",
+                          "actions": ["create_entry", "update_entry", "archive_entry"]}]}
+    return create_context_container(initial=reviewed_pack_fixture(values, ["content"], access_policy=policy))
 
 
 async def _assemble(context):
     result = await assemble_app_tasks(context_variables=context)
     assert result["success"], result
-    return {file["filename"]: file["content"] for file in result["code_files"]}
+    files = {file["filename"]: file["content"] for file in result["code_files"]}
+    assert yaml.safe_load(files["config/auth.yaml"])["authorization"]["roles"] == [
+        {"id": EDITOR_ROLE, "permissions": ["content.manage"]},
+    ]
+    return files
 
 
 def _scan(files, context):
     return scan_generated_bundle(files, capability_packs=detach(context.get("capability_packs")),
                                  planned_data_contract=APPROVED_DATA, context_variables=context)
+
+
+@pytest.mark.asyncio
+async def test_page_retry_and_scoped_save_use_assembled_content_only_as_a_binding_source():
+    from factory_app.workflows.AppGenerator.tools.code_file_utils import save_generated_code
+    from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+    from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
+    from mozaiksai.core.workflow.task_batches import execute_task_batches_for_trigger
+    from tests.test_appschema_scoped_manifest import _batch_config, _output, _task
+
+    context = _context("editorial")
+    baseline = await _assemble(context)
+    path = "ui/pages/entries.yaml"
+    task = _task("entries")
+    plan = {**detach(context.get("app_build_plan")), "build_tasks": [task]}
+    values = {**context.snapshot(), "generated_files": baseline, "app_build_plan": plan,
+              "app_task_batch_items": [task], "app_task_batch_results": {}, "code_files": []}
+    page = _entries_page()
+    page["title"] = "Content collection"
+    table = page["sections"][0]["config"]
+    del table["api_endpoint"]
+    table["data_source"] = {"module_id": "content", "action_id": "list_entries"}
+
+    class Worker:
+        async def ask(self, message, **kwargs):
+            return SimpleNamespace(body=json.dumps(_output(page)))
+
+    await execute_task_batches_for_trigger(
+        workflow_name="AppGenerator", trigger_agent="AppPlanAgent", batches_config=_batch_config(),
+        agents={"WorkerAgent": Worker()}, context_variables=values, fresh_agents_per_task=False,
+    )
+    assert values["app_task_batch_status"] == "completed", values["app_task_batch_results"]
+    files = values["app_task_batch_results"]["entries"]["code_files"]
+    assert [entry["filename"] for entry in files] == [path]
+
+    # Bundle repair uses a separate save path. Both stages receive the stock backend among their inputs.
+    bridge = ContextVariablesBridge({**values, "current_build_task": task, "bundle_repair_result": {"active": {
+        "task_id": "entries", "target_agent": "WorkerAgent", "allowed_paths": [path],
+        "request_id": "scoped-page", "status": "selected",
+    }}})
+    candidate = {"code_files": [{"filename": path, "content": yaml.safe_dump(page)}]}
+    saved = save_generated_code(StructuredOutputOverlay(bridge, candidate))
+    assert saved["saved_files"] == [path], saved
+    assert bridge.get("bundle_repair_result")["active"]["status"] == "responded"
+    saved_page = yaml.safe_load(bridge.get("code_files")[0]["content"])
+    assert saved_page["sections"][0]["config"]["api_endpoint"] == "/api/modules/content/list_entries"
+    assert detach(bridge.get("generated_files")) == baseline
 
 
 class _ReadCollection:
@@ -273,8 +346,10 @@ async def test_content_starter_scoped_ui_revision_preserves_backend_and_branding
     revised_page = original[PAGE].replace("Selected projects", "Research and selected projects")
     plan = _plan()
     plan["build_tasks"] = [{"task_id": "portfolio", "task_type": "custom_route_bundle", "owned_paths": [PAGE]}]
-    context = create_context_container(initial={
+    context = _reviewed_content_context({
         **saved.context, "app_build_plan": plan, "capability_packs": [_selection()],
+        **{key: detach(original_context.get(key)) for key in
+           ("design_surface_map",)},
         "data_contract": deepcopy(APPROVED_DATA), "build_timestamp": "2026-11-13T00:00:00+00:00",
         "app_task_batch_items": planned_tasks("portfolio"),
         "app_task_batch_results": {"portfolio": {"code_files": [{"filename": PAGE, "content": revised_page}]}},

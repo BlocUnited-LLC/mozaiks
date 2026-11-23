@@ -2421,26 +2421,11 @@ def _scan_owned_collection_auth(files_map: dict[str, str]) -> list[str]:
     return []
 
 
-class _ResolvedPackContext:
-    """Read-only view of a caller context whose pack selection is the scan's resolved rows."""
-
-    def __init__(self, base: Any, capability_packs: list[dict[str, Any]]) -> None:
-        self._base = base
-        self._capability_packs = capability_packs
-
-    def get(self, key: str, default: Any = None) -> Any:
-        if key == "capability_packs":
-            return self._capability_packs
-        return self._base.get(key, default)
-
-
 def _resolved_pack_context(context_variables: Any, resolved_rows: list[dict[str, Any]]) -> Any:
     """The caller's context with its pack selection replaced by the resolved, verified rows."""
-    if context_variables is None:
-        return {"capability_packs": resolved_rows}
-    if isinstance(context_variables, dict):
-        return {**context_variables, "capability_packs": resolved_rows}
-    return _ResolvedPackContext(context_variables, resolved_rows)
+    from factory_app.workflows._shared.pack_selection import PhysicalPackContext
+
+    return PhysicalPackContext._from_verified_scan(context_variables, resolved_rows)
 
 
 def _context_pack_selection(context_variables: Any) -> list[dict[str, Any]]:

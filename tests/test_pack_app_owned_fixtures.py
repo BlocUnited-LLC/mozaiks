@@ -25,6 +25,7 @@ from mozaiksai.core.workflow.generator_support.module_smoke_fixtures import (
     load_module_smoke_fixtures,
 )
 from tests.factory_context import factory_context
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 PACK = ROOT / "factory_app/build_context/content"
@@ -61,21 +62,29 @@ def _context():
     auth["authorization"] = {"roles": [{"id": EDITOR, "permissions": ["content.manage"]}]}
     task = {"task_id": "fixtures", "task_type": "module_contract", "surface_kind": "module",
             "capability_pack_id": "content", "initial_agent": "ConfigMiddlewareAgent", "owned_paths": [FIXTURE]}
-    return create_context_container(initial=factory_context({
+    selection = _selection()
+    policy = {"roles": [{"role_id": EDITOR, "label": "Content editor", "description": "Maintains content."}],
+              "grants": [{"role_id": EDITOR, "collection": "entries",
+                          "actions": ["create_entry", "update_entry", "archive_entry"]}]}
+    return create_context_container(initial=reviewed_pack_fixture(factory_context({
         "app_id": "app-fixture-proof", "capability_packs": [_selection()],
-        "data_contract": {"version": "1", "surfaces": [], "shared_collections": []},
+        "data_contract": json.loads((PACK / "templates/data/contract.json").read_text(encoding="utf-8")),
+        "design_surface_map": {"surfaces": [{"surface_id": "content", "surface_kind": "module", "owner": "app",
+            "primary_entities": ["ContentEntry"], "owned_mutations": ["create_entry", "update_entry", "archive_entry"],
+            "custom_reads": ["get_entry", "list_entries"]}]},
         "build_timestamp": "2026-11-13T00:00:00+00:00",
         "generated_files": {
             "app.json": json.dumps({"appId": "app-fixture-proof", "appName": "Fixture proof", "authRequired": True}),
             "config/auth.yaml": yaml.safe_dump(auth),
         },
         "app_build_plan": {
-            "capability_packs": [{"capability_pack_id": "content", "capability_source": "generated_module"}],
+            "capability_packs": [{"capability_pack_id": "content", "capability_source": "generated_module",
+                                  **{key: selection[key] for key in ("pack_source_path", "version", "digest")}}],
             "build_tasks": [task],
         },
         "app_task_batch_items": [deepcopy(task)],
         "app_task_batch_results": {"fixtures": {"module_contract": {"module_id": "content", "fixtures_yaml": _fixture()}}},
-    }))
+    }), ["content"], access_policy=policy))
 
 
 @pytest.fixture

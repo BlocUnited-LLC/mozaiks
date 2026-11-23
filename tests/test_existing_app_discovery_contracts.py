@@ -570,7 +570,6 @@ def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
     assert "setCurrentArtifactMessages((prev) =>" in source
     assert "storedPanelOpen === false && hadStoredArtifact" in source
     assert "setLayoutMode('split')" in source
-    assert "cacheServerLastArtifact(data.last_artifact, {" in source
     assert "chatId: metaChatId" in source
     assert "cacheServerLastArtifact(metaData.last_artifact, {" in source
     assert "cacheServerLastArtifact(meta.last_artifact, {" in source

@@ -2,12 +2,16 @@ import { useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   RiAppsFill,
+  RiCustomerServiceFill,
   RiDashboardFill,
   RiFileList3Fill,
+  RiHammerFill,
+  RiHistoryFill,
   RiMoneyDollarCircleFill,
   RiPlugLine,
   RiPulseLine,
   RiServerFill,
+  RiSettings3Fill,
   RiUser3Fill,
 } from 'react-icons/ri'
 import { useNavigation } from '../providers/NavigationProvider.jsx'
@@ -15,14 +19,20 @@ import { useChatUI } from '../context/ChatUIContext.jsx'
 import { getUserRoles, isShellItemVisible } from '../navigation/shellActions.js'
 import { groupItemsIntoSections, resolveSectionLabel } from '../navigation/navSections.js'
 
+// Every icon hint a Studio route declares has an entry here; an unknown hint
+// falls back to the dashboard icon, which made unrelated menu items look alike.
 const ICON_MAP = {
   apps: RiAppsFill,
   dashboard: RiDashboardFill,
   chart: RiFileList3Fill,
   billing: RiMoneyDollarCircleFill,
+  hammer: RiHammerFill,
+  history: RiHistoryFill,
   plug: RiPlugLine,
   pulse: RiPulseLine,
   server: RiServerFill,
+  settings: RiSettings3Fill,
+  support: RiCustomerServiceFill,
   users: RiUser3Fill,
 }
 
@@ -250,11 +260,11 @@ function WorkspaceMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio', shellLa
 export function WorkspaceLayout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
-  const { pages, appName } = useNavigation()
+  const { pages, appName, surface } = useNavigation()
   const { user } = useChatUI()
   const userRoles = useMemo(() => getUserRoles(user), [user])
   const appId = resolveAppId(location.pathname)
-  const shellLabel = resolveShellLabel(appName, appId)
+  const shellLabel = surface === 'studio' && !appId ? 'Studio' : resolveShellLabel(appName, appId)
   const shellSubtext = resolveShellSubtext(appId)
   const navGroups = useMemo(() => buildNavGroupsFromPages(pages, appId, userRoles), [pages, appId, userRoles])
   const activeNav = useMemo(() => getActiveNavItem(navGroups, location), [navGroups, location])

@@ -135,7 +135,7 @@ class SurfaceRegenerationWorker:
                 },
             )
 
-        llm_config = self._load_config().resolve_contract_surface_regeneration_llm_config()
+        llm_config = self._load_config().for_refinement_model(refinement_request.refinement_model).resolve_contract_surface_regeneration_llm_config()
         system_prompt = self._load_system_prompt()
 
         accumulated: dict[str, str] = {}
@@ -394,7 +394,7 @@ class SurfaceRegenerationWorker:
             "Apply a targeted Mozaiks contract surface update.",
             "Return JSON only.",
             "payload_json:",
-            json.dumps(payload, indent=2, sort_keys=True, default=str),
+            json.dumps(payload, indent=2, sort_keys=True, default=str, ensure_ascii=False),
             "",
             "Return a JSON object with this exact shape:",
             json.dumps(

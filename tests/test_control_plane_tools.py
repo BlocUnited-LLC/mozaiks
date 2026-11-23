@@ -577,23 +577,35 @@ async def test_app_intelligence_tool_summarizes_artifact_zip(tmp_path: Path) -> 
                 },
             )
 
-    intelligence = await get_app_intelligence_context(
-        context=ControlPlaneToolContext(
-            checkpoint="scope_requested",
-            app_id="app_1",
-            build_family="app_bundle",
-            build_key="app_bundle",
-            build_record_id="av_intelligence_1",
-            raw_user_request="Update reports email export",
-        ),
-        artifact_store=_ZipArtifactStore(),
+    context = ControlPlaneToolContext(
+        checkpoint="scope_requested",
+        app_id="app_1",
+        build_family="app_bundle",
+        build_key="app_bundle",
+        build_record_id="av_intelligence_1",
+        raw_user_request="Update reports email export",
     )
+    store = _ZipArtifactStore()
+    intelligence = await get_app_intelligence_context(context=context, artifact_store=store)
 
     assert intelligence["present"] is True
     assert intelligence["source"] == "artifact_zip"
     assert intelligence["app_intelligence_catalog"]["coverage"]["file_count"] == 3
     assert intelligence["app_intelligence_catalog"]["architecture"]["module_roots"][0]["module_id"] == "reports"
     assert any(result["section"] == "capabilities" for result in intelligence["results"])
+
+    coding = await get_app_intelligence_context(
+        context=context.model_copy(update={
+            "checkpoint": "coding_requested",
+            "extra": {"selected_file_paths": ["app/modules/reports/backend/handler.py"]},
+        }),
+        artifact_store=store,
+    )
+    catalog = coding["app_intelligence_catalog"]
+    assert catalog["graph_hash"] == intelligence["app_intelligence_catalog"]["graph_hash"]
+    assert set(catalog["architecture"]) == {"frameworks"}
+    assert "ownership" not in catalog
+    assert coding["results"] == intelligence["results"][:4]
 
 
 @pytest.mark.asyncio
@@ -657,8 +669,11 @@ async def test_context_graph_scope_tool_returns_symbols_and_related_imports(
     assert scope["present"] is True
     assert [symbol["label"] for symbol in scope["selected_scope"]["src/App.jsx"]["symbols"]] == ["App"]
     assert "src/Header.jsx" in scope["related_file_paths"]
-    assert any(edge["edge_type"] == "imports" for edge in scope["related_edges"])
-    assert scope["semantic_annotation_request"]["schema_version"] == "mozaiks.context_graph.semantic_annotations.v1"
+    assert {"source_path": "src/App.jsx", "target_path": "src/Header.jsx", "edge_type": "imports"} in scope["related_edges"]
+    assert scope["build_record_id"] == "av_graph_2"
+    assert scope["graph_hash"]
+    assert "semantic_annotation_request" not in scope
+    assert "excerpt" not in scope["selected_scope"]["src/App.jsx"]
 
 
 @pytest.mark.asyncio
@@ -707,6 +722,21 @@ async def test_source_context_tools_search_read_and_related_files_from_artifact_
     assert search["present"] is True
     assert search["source"] == "artifact_zip"
     assert any(result["path"] == "src/pages/Dashboard.jsx" for result in search["results"])
+    assert "source_context_catalog" not in search
+
+    discovery = await search_app_source_context(
+        context=context.model_copy(update={"checkpoint": "scope_requested"}),
+        artifact_store=store,
+    )
+    assert "source_context_catalog" in discovery
+    assert search["results"] == discovery["results"][:4]
+
+    missing_query = await search_app_source_context(
+        context=context.model_copy(update={"raw_user_request": ""}),
+        artifact_store=store,
+    )
+    assert missing_query["reason"] == "missing_query"
+    assert "bundle" not in missing_query
 
     read = await read_app_source_file(
         path="src/pages/Dashboard.jsx",

@@ -35,7 +35,13 @@ contracts are copied into app runtime paths.
    `capability_pack_id: content` and `capability_source: generated_module`.
    Retain the verified version and digest with the build's selected source.
 3. Use the module's declared action and response schemas to plan app-owned
-   pages. The existing pack inventory excludes supplied backend files from model
+   pages. Once the Content pack is reviewed, the planner and page compiler read
+   the HTTP action IDs from its verified module manifest. An editor can bind
+   create, update (including publish), and archive controls to those actions.
+   Assembly checks the complete Content manifest against that same version of
+   the pack. The reviewed grants and runtime permission checks govern who can
+   use each action. Subscription gates require separately approved features.
+   The existing pack inventory excludes supplied backend files from model
    tasks. Do not ask an agent to rewrite the publishing service for each app.
 4. Carry the app's approved composition and brand through `ExperienceSpec`, page
    intent, theme capture and task acceptance criteria. Use declarative pages
@@ -43,6 +49,16 @@ contracts are copied into app runtime paths.
    for a concrete composition or interaction gap. Keep semantic theme tokens.
 5. Assemble, validate references and ownership, then execute the relevant user
    journeys. Promote only through the normal validation/review path.
+
+For an editable portfolio, the reviewed design can bind `content.archive_entry`
+to a submit control on `/editor`. AppGenerator carries the action ID into that
+page's task. The agent can put Archive on the selected row or in a confirmation
+modal opened with that row's entry ID. The editor must offer a reachable control that
+invokes the action. A table that only reads entries, or an Archive control on
+another route, leaves the editor task incomplete. Plan that editable page
+in its own page task so Factory can send the rejected output and missing
+action back to its owner and reuse the accepted portfolio and data results.
+Final acceptance checks the same requirement against the exported page.
 
 The descriptor is available through trusted build-context discovery. A workspace
 using operator selection can select the canonical `content` ID from the installed
@@ -109,18 +125,22 @@ replaced from the verified pack source. The workspace-owned `backend/handler.py`
 is seeded once as a thin subclass and preserved from the admitted app source.
 App-owned pages and branding are separate from the pack's implementation.
 
-The app also authors `modules/content/contracts/fixtures.yaml` through the
-existing typed smoke-fixture contract. It names valid test inputs and the app's
-actual approved editor role, including prerequisite creates and returned record
-IDs where needed. It grants no runtime permission. This one declared
-`owner: generator` companion can coexist with the exact pack backend; arbitrary
-module helpers, service replacements and additional ownership exceptions cannot.
+Content 0.2.0 declares reusable smoke inputs on the generator-owned
+`modules/content/contracts/fixtures.yaml` entry in its build-context contract.
+For a selected pack and approved action grants, AppGenerator binds the recipe's
+empty role lists to the app's reviewed roles. The recipe covers create, update
+and archive. Each mutation that needs an existing entry first creates a
+disposable draft and reads its identifier from the response. These inputs only
+execute during a smoke run. An installed app still starts with no entries.
 
-The existing structural task gate treats module companion manifests as optional;
-backend certification alone therefore does not prove that fixtures were supplied.
-Keep explicit fixture tasks and successful positive runtime probes in acceptance.
-A fixture file, or an unauthorized-request test by itself, is not proof that an
-authorized editor can complete an action.
+The recipe changes the pack digest. A design pinned to an earlier Content
+version needs a new review before it can use the new version. Page layouts,
+branding and workspace handler extensions retain their existing owners.
+
+During acceptance, exercise each write over HTTP as an approved role and check
+that a caller without a grant is denied. Verify public list and detail
+visibility separately, including the empty state and visibility of draft and
+archived entries.
 
 For a page/brand change, refine those declared app files and preserve unrelated
 backend bytes. For an authorized handler customization, use the existing scoped

@@ -211,9 +211,9 @@ def check_studio_apps(base: str, shell: dict, log_path: Path) -> None:
     if len(matches) != 1 or matches[0].get("component") != "AppsPage":
         raise SmokeFailure("[studio] shell-config must declare /apps with AppsPage")
     meta = matches[0].get("meta")
-    if not isinstance(meta, dict) or meta.get("requiresRole") != "admin":
-        raise SmokeFailure("[studio] /apps must require the admin role")
-    print("  OK [studio] shell-config declares /apps -> AppsPage (admin)")
+    if not isinstance(meta, dict) or meta.get("requiresRole"):
+        raise SmokeFailure("[studio] /apps must be available without a global role requirement")
+    print("  OK [studio] shell-config declares /apps -> AppsPage for builders")
 
     url = f"{base}/api/studio/apps"
     try:

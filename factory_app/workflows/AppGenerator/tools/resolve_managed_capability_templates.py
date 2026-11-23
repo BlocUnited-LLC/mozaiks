@@ -27,6 +27,7 @@ from mozaiksai.core.session.build_context_schema import validate_pack_context
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     SHARED_PACK_OUTPUT_PATHS,
+    TEMPLATE_BACKEND_FILES,
 )
 from mozaiksai.resources import resolve_factory_app_root
 
@@ -694,6 +695,16 @@ def verify_pack_integrity(pack_source_path: Path, pack_id: str) -> dict[str, Any
         if not isinstance(contract_data, dict):
             raise PackIntegrityError(f"Contract asset must be a YAML mapping: {path}")
         _validate_pack_contract_schema(context_root, contract_data)
+        for output in contract_data.get("required_outputs") or []:
+            if isinstance(output, dict) and "smoke_fixtures" in output:
+                from mozaiksai.core.workflow.generator_support.module_smoke_fixtures import (
+                    parse_pack_smoke_recipe,
+                )
+
+                try:
+                    parse_pack_smoke_recipe(output)
+                except ValueError as exc:
+                    raise PackIntegrityError(f"invalid smoke_fixtures for {output.get('path')}: {exc}") from exc
     return {
         "pack_id": pack_id,
         "version": version,
@@ -1193,10 +1204,13 @@ def _resolve_selected_pack_source(
        directly under the trusted workspace build-context root (selected with
        its registered version); any other directory needs matching
        ``version`` and ``digest`` pins (:func:`_explicit_source`).
-    2. ``installed``: the workspace's installed component with the row's id,
+    2. A pathless selection with version and digest pins checks the current
+       trusted catalog by ID, unless the caller explicitly scoped an installed
+       component to a different root. The resolved source must match both pins.
+    3. ``installed``: the workspace's installed component with the row's id,
        under ``build_context_root``, whose source workspace state verified
        against its pinned version and digest.
-    3. ``factory_build_context``: for a row that :func:`claims_pack`, the
+    4. ``factory_build_context``: for a row that :func:`claims_pack`, the
        installed package's shipped catalog,
        ``resolve_factory_app_root()/build_context/<id>``, when the id is a safe
        identifier and that context exists.
@@ -1221,6 +1235,23 @@ def _resolve_selected_pack_source(
             workspace_root=_workspace_build_context_root(context_variables),
         )
     installed = _installed_descriptor(pack_id, build_context_root)
+    if (_is_safe_identifier(pack_id) and all(_has_value(pack.get(key)) for key in ("version", "digest"))
+        and (installed is None or build_context_root == _workspace_build_context_root(None))):
+        from factory_app.workflows._shared.pack_selection import catalog_pack_sources
+
+        try:
+            source = catalog_pack_sources(resolve_factory_app_root(), pack_ids={pack_id}).get(pack_id)
+        except (BuildContextError, ValueError) as exc:
+            raise PackIntegrityError(f"Pack {pack_id!r} catalog could not be verified: {exc}") from exc
+        if source and (catalog_path := source.get("pack_source_path")):
+            if Path(catalog_path).resolve() == _factory_catalog_source(pack_id):
+                return _ResolvedSource(catalog_path, RESOLUTION_FACTORY_BUILD_CONTEXT, AUTHORITY_FACTORY_BUILD_CONTEXT)
+            catalog_root = _workspace_build_context_root(None)
+            resolved = _explicit_source(pack, catalog_path, pack_id=pack_id,
+                                        build_context_root=catalog_root, workspace_root=catalog_root)
+            if resolved.authority == AUTHORITY_INSTALLED:
+                resolved.resolution = RESOLUTION_INSTALLED
+            return resolved
     if installed is not None:
         return _ResolvedSource(
             str(installed["pack_source_path"]), RESOLUTION_INSTALLED, AUTHORITY_INSTALLED, _installed_pins(installed),
@@ -1547,14 +1578,13 @@ def verified_template_module_ids(files: dict[str, str], inventory: list[dict[str
     before execution. Neither grants ownership to backend implementation files.
     """
     result = set()
-    required = {"module.yaml", "backend/service.py", "backend/repo.py", "backend/policy.py", "backend/schemas.py"}
     for pack in inventory:
         owners = pack["owner_map"]
         rendered = {entry["filename"]: entry["content"] for entry in pack["files"]}
         modules = {path.split("/")[1] for path in rendered if path.startswith("modules/")}
         for module_id in modules:
             prefix = f"modules/{module_id}/"
-            if not all(owners.get(prefix + path) == "templates" and prefix + path in rendered for path in required):
+            if not all(owners.get(prefix + path) == "templates" and prefix + path in rendered for path in TEMPLATE_BACKEND_FILES):
                 continue
             if pack.get("authority") not in PACK_AUTHORITIES:
                 raise PackIntegrityError(

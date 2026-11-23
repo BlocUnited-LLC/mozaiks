@@ -28,6 +28,8 @@ from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.adapter import _RuntimeContextVariables
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
+from tests.test_factory_pack_selection import _enable_managed
 
 BINDING = {"build_registry_id": "br_1", "target_app_id": "app_1", "build_id": "b_1", "phase": "genesis"}
 BASE_PROMPT = "BASE PROMPT"
@@ -90,37 +92,37 @@ def test_context_graph_hook_formats_the_pack_instead_of_dumping_its_repr() -> No
     assert "mappingproxy(" not in prompt, "the formatter took the str() fallback on a frozen pack"
 
 
-def test_managed_capabilities_hook_renders_each_pack_and_its_facades() -> None:
+def test_managed_capabilities_hook_renders_each_pack_and_its_facades(tmp_path, monkeypatch) -> None:
+    from factory_app.workflows._shared.pack_selection import available_pack_rows
     from factory_app.workflows.AppGenerator.tools.hook_managed_capabilities_context import (
         inject_managed_capabilities_context,
     )
 
-    pack = {
-        "id": "mozaikspay", "display_name": "MozaiksPay", "capability_source": "managed_capability",
-        "capabilities": [{"capability_id": "mozaikspay.billing_portal"}],
-        "facades": [{"module_id": "billing_portal", "provider_module": "mozaikspay",
-                     "provider_actions": ["billing_portal"], "pages": [{"name": "Billing", "route": "/billing"}]}],
-        "pack_source_path": "C:/somewhere/local",
-    }
-    prompt = _run_hook(inject_managed_capabilities_context, "AppPlanAgent",
-                       {"capability_packs": [pack], "operator_contracts": []})
+    _enable_managed(tmp_path, monkeypatch)
+    seed = reviewed_pack_fixture({}, ["mozaikspay"])
+    source_path = available_pack_rows({}, pack_ids={"mozaikspay"})["mozaikspay"]["pack_source_path"]
+    prompt = _run_hook(inject_managed_capabilities_context, "AppPlanAgent", seed)
 
     assert "[capability_pack_id: mozaikspay; capability_source: managed_capability]" in prompt
     assert "billing_portal" in prompt and "/billing" in prompt, "facade guidance is only rendered for dict packs"
     assert "mappingproxy(" not in prompt
     assert "pack_source_path" not in prompt, "a raw repr leaks the operator's filesystem path into the prompt"
+    assert source_path not in prompt
 
 
-def test_managed_capabilities_hook_stays_silent_without_packs() -> None:
-    """`capability_packs: []` is the declared default; a frozen tuple is not 'empty' to `isinstance(.., list)`."""
+def test_managed_capabilities_hook_renders_explicit_empty_review() -> None:
+    """The empty review remains authoritative when the bridge freezes its reads."""
     from factory_app.workflows.AppGenerator.tools.hook_managed_capabilities_context import (
         inject_managed_capabilities_context,
     )
 
-    prompt = _run_hook(inject_managed_capabilities_context, "AppPlanAgent",
-                       {"capability_packs": [], "operator_contracts": []})
+    seed = reviewed_pack_fixture({"capability_packs": [], "operator_contracts": []}, [])
+    prompt = _run_hook(inject_managed_capabilities_context, "AppPlanAgent", seed)
 
-    assert prompt == BASE_PROMPT
+    assert prompt.startswith(BASE_PROMPT)
+    assert "[REVIEWED PACK SELECTION]" in prompt
+    assert "Authorized reusable packs: []" in prompt
+    assert "[MANAGED CAPABILITIES CONTEXT]" not in prompt
 
 
 _INTEGRATION = {

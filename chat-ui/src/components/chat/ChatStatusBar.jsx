@@ -6,7 +6,7 @@ const PHASES = {
   error: { label: 'Needs attention', color: 'var(--color-error)' },
 };
 
-export default function ChatStatusBar({ chatStatus, connectionStatus }) {
+export default function ChatStatusBar({ chatStatus, connectionStatus, onRetry }) {
   if (!chatStatus) return null;
 
   const connectionPhase = connectionStatus === 'error' || connectionStatus === 'disconnected'
@@ -38,6 +38,9 @@ export default function ChatStatusBar({ chatStatus, connectionStatus }) {
           </span>}
         </div>
       </div>
+      {onRetry && (connectionStatus === 'error' || connectionStatus === 'disconnected') && (
+        <button type="button" className="underline" onClick={onRetry}>Reconnect</button>
+      )}
       {showTokens && (
         <span className="flex-shrink-0 whitespace-nowrap text-[var(--color-text-secondary)]" aria-label={`Run tokens: ${totalTokens.toLocaleString()}`}>
           Run tokens <span className="tabular-nums font-medium text-[var(--color-text-primary)]">{totalTokens.toLocaleString()}</span>

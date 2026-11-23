@@ -328,10 +328,10 @@ export default function UserSupportPanel({ page, data, onNewSupport }) {
   }
 
   return (
-    <div className="flex overflow-hidden rounded-2xl border border-border/30 bg-card/20" style={{ minHeight: 440 }}>
+    <div className="flex flex-col md:flex-row overflow-hidden rounded-2xl border border-border/30 bg-card/20" style={{ minHeight: 440 }}>
 
       {/* Left: app-grouped ticket list */}
-      <div className="w-60 shrink-0 border-r border-border/20 flex flex-col bg-card/30">
+      <div className="w-full md:w-60 shrink-0 border-b md:border-b-0 md:border-r border-border/20 flex flex-col bg-card/30">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/15">
           <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Support</span>
           {onNewSupport && (
@@ -345,7 +345,7 @@ export default function UserSupportPanel({ page, data, onNewSupport }) {
           )}
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="max-h-60 md:max-h-none flex-1 overflow-y-auto">
           {groups.map(group => (
             <div key={group.appId}>
               <AppGroupHeader
@@ -370,7 +370,7 @@ export default function UserSupportPanel({ page, data, onNewSupport }) {
       {/* Right: thread */}
       {selected && (
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-warning/20 bg-warning/[0.04]">
+          <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-warning/20 bg-warning/[0.04]">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-warning/15 text-warning ring-1 ring-warning/20 text-xs font-bold">?</span>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap mb-0.5">

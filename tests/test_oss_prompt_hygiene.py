@@ -6,8 +6,8 @@ Verifies that base OSS generator prompts are host-agnostic:
 1. hook_universal_prompts.py has no proprietary product names (MozaiksPay, etc.).
 2. AppGenerator agents.yaml does not use MANAGED_WALLET_URL as the primary generic example.
 3. Generic managed capability adapter acceptance criteria do not say "payment provider" in non-wallet-scoped templates.
-4. OSS mode: hook_managed_capabilities_context is a no-op when no managed context is supplied.
-5. When typed operator contracts are supplied, the hook renders them.
+4. The managed capability hook makes an empty reviewed selection explicit and ignores unreviewed inventory.
+5. The hook renders typed contracts from reviewed pack sources.
 6. MozaiksPay does not appear anywhere in OSS default prompts or hooks.
 """
 from __future__ import annotations
@@ -19,6 +19,8 @@ from typing import Any
 
 import pytest
 import yaml
+
+from tests.reviewed_pack_fixture import registered_pack_fixture, reviewed_pack_fixture
 
 _WORKSPACE = Path(__file__).resolve().parents[1]
 _AGENTGEN_TOOLS = _WORKSPACE / "factory_app" / "workflows" / "AgentGenerator" / "tools"
@@ -279,7 +281,7 @@ class TestAppGeneratorAgentsYamlHostAgnostic:
 
 
 # ---------------------------------------------------------------------------
-# 3. hook_managed_capabilities_context.py — OSS no-op + typed contract rendering
+# 3. hook_managed_capabilities_context.py — reviewed selection and typed contract rendering
 # ---------------------------------------------------------------------------
 
 
@@ -287,113 +289,127 @@ class TestManagedCapabilitiesHook:
     def _load_hook(self):
         return _load_module(_MANAGED_CAPS_PATH, f"test_managed_caps.{id(object())}")
 
-    def test_hook_is_noop_in_oss_mode(self) -> None:
-        """When no managed context is supplied, the hook must not modify system_message."""
+    def test_hook_keeps_empty_review_explicit(self) -> None:
         mod = self._load_hook()
-        agent = _FakeAgent(name="AppPlanAgent", context_variables={})
+        agent = _FakeAgent(name="AppPlanAgent", context_variables=reviewed_pack_fixture({}, []))
         agent.system_message = "base prompt"
         mod.inject_managed_capabilities_context(agent, [])
-        assert agent.system_message == "base prompt", (
-            "inject_managed_capabilities_context must be a no-op in OSS mode "
-            "(no capability_packs supplied)."
-        )
+        assert agent.system_message.startswith("base prompt")
+        assert "[REVIEWED PACK SELECTION]" in agent.system_message
+        assert "Authorized reusable packs: []" in agent.system_message
+        assert "[MANAGED CAPABILITIES CONTEXT]" not in agent.system_message
 
-    def test_hook_injects_when_managed_capabilities_present(self) -> None:
-        """When managed capabilities are supplied, the hook must inject [MANAGED CAPABILITIES CONTEXT]."""
+    def test_hook_injects_when_managed_capabilities_are_reviewed(self, tmp_path, monkeypatch) -> None:
+        registered_pack_fixture(tmp_path, monkeypatch, "wallet", "managed_capability")
         mod = self._load_hook()
         agent = _FakeAgent(
             name="AppPlanAgent",
-            context_variables={
-                "capability_packs": [
-                    {"id": "wallet", "label": "Wallet", "capability_source": "managed_capability"}
-                ]
-            },
+            context_variables=reviewed_pack_fixture({}, ["wallet"]),
         )
         mod.inject_managed_capabilities_context(agent, [])
-        assert "[MANAGED CAPABILITIES CONTEXT]" in agent.system_message, (
-            "inject_managed_capabilities_context must inject the context block when "
-            "capability_packs is non-empty."
-        )
+        assert "[MANAGED CAPABILITIES CONTEXT]" in agent.system_message
+        assert 'Authorized reusable packs: [{"pack_id":"wallet",' in agent.system_message
 
-    def test_pack_descriptor_rules_are_not_a_prompt_instruction_channel(self) -> None:
-        """Pack descriptors list availability; typed operator_contracts carry rules."""
+    def test_pack_descriptor_rules_are_not_a_prompt_instruction_channel(self, tmp_path, monkeypatch) -> None:
+        pack = registered_pack_fixture(tmp_path, monkeypatch, "wallet", "managed_capability")
         mod = self._load_hook()
         agent = _FakeAgent(
             name="AppPlanAgent",
             context_variables={
-                "capability_packs": [
-                    {
-                        "id": "wallet",
-                        "label": "Wallet",
-                        "capability_source": "managed_capability",
-                        "generation_rules": ["legacy rule that must not render"],
-                    }
-                ]
-            },
-        )
-        mod.inject_managed_capabilities_context(agent, [])
-        assert "legacy rule that must not render" not in agent.system_message
-        assert "Operator-provided generation rules" not in agent.system_message
-
-    def test_typed_operator_contracts_are_rendered_when_supplied(self) -> None:
-        mod = self._load_hook()
-        agent = _FakeAgent(
-            name="AppPlanAgent",
-            context_variables={
-                "capability_packs": [
-                    {"id": "testpay", "label": "TestPay", "capability_source": "managed_capability"}
-                ],
+                "capability_packs": [{**pack, "generation_rules": ["legacy rule that must not render"]}],
                 "operator_contracts": [
                     {
-                        "contract_id": "testpay",
+                        "contract_id": "wallet",
                         "contract_type": "build_pack_instructions",
-                        "selection_rules": [
-                            {
-                                "id": "select_for_saas_billing",
-                                "when": {"intent_any": ["saas billing"]},
-                                "action": "select_pack",
-                            }
-                        ],
-                        "required_outputs": [
-                            {"path": "services/integrations/testpay_client.py", "owner": "templates"}
-                        ],
-                        "forbidden_outputs": [{"path_prefix": "modules/testpay/"}],
-                        "runtime_boundaries": [
-                            {
-                                "id": "usage_runtime",
-                                "rule": "Use the OSS token wallet ledger for balances.",
-                            }
-                        ],
-                        "facades": [
-                            {
-                                "module_id": "billing_portal",
-                                "provider_module": "testpay",
-                                "pages": [{"route": "/billing", "primary_actions": ["open_billing_portal"]}],
-                            }
-                        ],
+                        "runtime_boundaries": [{"id": "unreviewed", "rule": "unreviewed rule that must not render"}],
                     }
                 ],
             },
+        )
+        mod.inject_managed_capabilities_context(agent, [])
+        assert "Authorized reusable packs: []" in agent.system_message
+        assert "[MANAGED CAPABILITIES CONTEXT]" not in agent.system_message
+        assert "legacy rule that must not render" not in agent.system_message
+        assert "unreviewed rule that must not render" not in agent.system_message
+        assert "Operator-provided generation rules" not in agent.system_message
+
+    def test_typed_operator_contracts_are_rendered_from_reviewed_sources(self, tmp_path, monkeypatch) -> None:
+        pack = registered_pack_fixture(
+            tmp_path,
+            monkeypatch,
+            "testpay",
+            "managed_capability",
+            facades=[
+                {
+                    "module_id": "billing_portal",
+                    "provider_module": "testpay",
+                    "pages": [{"route": "/billing", "primary_actions": ["open_billing_portal"]}],
+                }
+            ],
+        )
+        pack_root = Path(pack["pack_source_path"])
+        output_path = "services/integrations/testpay_client.py"
+        template_path = pack_root / "templates" / output_path
+        template_path.parent.mkdir(parents=True)
+        template_path.write_text("# Rendered client fixture\n", encoding="utf-8")
+        config_path = pack_root / "context.yaml"
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        config["assets"].append({"path": "templates", "kind": "templates"})
+        config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+        contract_path = pack_root / "contract.yaml"
+        contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+        contract.update(
+            selection_rules=[
+                {
+                    "id": "select_for_saas_billing",
+                    "when": {"intent_any": ["saas billing"]},
+                    "action": "select_pack",
+                }
+            ],
+            required_outputs=[{"path": output_path, "owner": "templates"}],
+            forbidden_outputs=[{"path_prefix": "modules/testpay/"}],
+            runtime_boundaries=[{"id": "usage_runtime", "rule": "Use the OSS token wallet ledger for balances."}],
+        )
+        contract_path.write_text(yaml.safe_dump(contract), encoding="utf-8")
+
+        mod = self._load_hook()
+        agent = _FakeAgent(
+            name="AppPlanAgent",
+            context_variables=reviewed_pack_fixture(
+                {
+                    "operator_contracts": [
+                        {
+                            "contract_id": "testpay",
+                            "contract_type": "build_pack_instructions",
+                            "runtime_boundaries": [{"id": "unreviewed", "rule": "unreviewed rule that must not render"}],
+                        }
+                    ],
+                },
+                ["testpay"],
+            ),
         )
         mod.inject_managed_capabilities_context(agent, [])
         msg = agent.system_message
         assert "Operator build-pack contracts" in msg
         assert "select_for_saas_billing" in msg
-        assert "services/integrations/testpay_client.py" in msg
+        assert output_path in msg
         assert "modules/testpay/" in msg
         assert "Use the OSS token wallet ledger for balances." in msg
         assert "billing_portal wraps testpay" in msg
+        assert "unreviewed rule that must not render" not in msg
+        assert "pack_source_path" not in msg
+        assert str(pack_root) not in msg
 
     def test_typed_contracts_only_from_runtime_context_not_oss_defaults(self) -> None:
         """
         The base hook code must not contain any hardcoded MozaiksPay rules.
-        Rules are supplied at runtime via typed operator_contracts.
+        Rules are supplied at runtime via reviewed pack source contracts.
         """
         source = _MANAGED_CAPS_PATH.read_text(encoding="utf-8")
         for name in _PROPRIETARY_NAMES:
             assert name not in source, (
                 f"Proprietary product name {name!r} found in hook_managed_capabilities_context.py. "
-                "Host-specific rules must be supplied at runtime via typed operator_contracts, "
+                "Host-specific rules must come from reviewed pack source contracts, "
                 "not hardcoded in OSS base hooks."
             )
 

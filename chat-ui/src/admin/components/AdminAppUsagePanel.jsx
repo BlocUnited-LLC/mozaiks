@@ -6,20 +6,22 @@
  * Fetches from /api/admin/usage (admin-gated OSS endpoint) and renders
  * per-wallet balance totals sourced from the runtime token wallet ledger.
  *
- * Panel props: { panel, apiBaseUrl, auth }
+ * Panel props: { panel, apiBaseUrl }
  */
 
 import { useState, useEffect, useCallback } from 'react'
+import { authFetch } from '../../adapters/api.js'
+import { USAGE_ENDPOINT, summarizeUsage } from '../adminUsage.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-async function fetchWithAuth(url, auth) {
-  const token = await auth?.getToken?.()
-  const headers = {}
-  if (token) headers['Authorization'] = `Bearer ${token}`
-  const res = await fetch(url, { headers })
+// authFetch resolves the platform backend and attaches the current session
+// token. (The `auth` prop is the auth adapter; it has no `getToken`, so reading
+// the token from it sent every request without credentials.)
+async function fetchJson(url) {
+  const res = await authFetch(url)
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
   return res.json()
 }
@@ -55,9 +57,16 @@ function WalletTotalRow({ wallet }) {
 function UsageSummary({ usage }) {
   if (!usage) return null
   const totalTokens = usage.totals?.total_tokens
-  const totalCalls = usage.totals?.total_calls ?? usage.totals?.event_count
+  // The usage ledger names the call count `llm_calls`.
+  const totalCalls = usage.totals?.llm_calls
   if (!totalTokens && !totalCalls) return null
+  // At the endpoint's limit these are the latest calls, not a lifetime total.
+  const summary = summarizeUsage(usage)
   return (
+    <>
+    {summary?.capped ? (
+      <p className="mb-2 text-xs text-muted-foreground">{summary.windowNote} only.</p>
+    ) : null}
     <div className="grid grid-cols-2 gap-3 mb-4">
       {totalTokens != null && (
         <div className="rounded-xl border border-border bg-card px-4 py-3 text-center">
@@ -72,6 +81,7 @@ function UsageSummary({ usage }) {
         </div>
       )}
     </div>
+    </>
   )
 }
 
@@ -95,7 +105,7 @@ function ErrorBox({ message }) {
 // Root
 // ---------------------------------------------------------------------------
 
-export default function AdminAppUsagePanel({ panel, apiBaseUrl = '', auth }) {
+export default function AdminAppUsagePanel({ panel, apiBaseUrl = '' }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -104,14 +114,16 @@ export default function AdminAppUsagePanel({ panel, apiBaseUrl = '', auth }) {
     setLoading(true)
     setError(null)
     try {
-      const body = await fetchWithAuth(`${apiBaseUrl}/api/admin/usage`, auth)
+      // The same request as the framework usage cards on this page, so the
+      // two never show different totals for the same app.
+      const body = await fetchJson(`${apiBaseUrl}${USAGE_ENDPOINT}`)
       setData(body)
     } catch (e) {
       setError(e.message)
     } finally {
       setLoading(false)
     }
-  }, [apiBaseUrl, auth])
+  }, [apiBaseUrl])
 
   useEffect(() => { load() }, [load])
 

@@ -596,12 +596,27 @@ async def create_agents(
     a2a_specs = load_a2a_agent_specs(workflow_config)
     local_agent_names = [n for n in agent_configs if n not in a2a_specs]
 
+    llm_overrides = {"cache_seed": cache_seed} if cache_seed is not None else {}
+    raw_binding = ctx_dict.get("run_build_binding")
+    if raw_binding is not None:
+        from mozaiksai.core.session.build_binding import RunBuildBinding, refinement_model_config
+
+        selected = RunBuildBinding.model_validate(raw_binding).refinement_model
+        if selected is not None:
+            from mozaiksai.core.adapters.llm_fallback import resolve_configured_provider_key
+
+            selected_config = refinement_model_config(selected)
+            key = resolve_configured_provider_key(selected_config["api_type"])
+            if not key:
+                raise ValueError("The selected refinement provider has no configured API key")
+            llm_overrides["config_list"] = [{**selected_config, "api_key": key}]
+
     base_llm_config: dict[str, Any] = {}
     if local_agent_names:
         try:
             from ..llm_config import get_llm_config as _get_base_llm_config
 
-            extra = {"cache_seed": cache_seed} if cache_seed is not None else None
+            extra = llm_overrides or None
             _, base_llm_config = await _get_base_llm_config(extra_config=extra)
         except Exception as err:
             logger.error("[AGENTS] Failed to load base LLM config: %s", err)
@@ -684,7 +699,7 @@ async def create_agents(
         try:
             from ..outputs.structured import get_llm_for_workflow as _get_structured_llm
 
-            extra = {"cache_seed": cache_seed} if cache_seed is not None else None
+            extra = llm_overrides or None
             _, llm_config_dict = await _get_structured_llm(
                 workflow_name, "base", agent_name=agent_name, extra_config=extra,
             )

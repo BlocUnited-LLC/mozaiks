@@ -28,6 +28,13 @@ from mozaiksai.core.auth.adapters.base import (
 )
 
 logger = get_core_logger("auth.keycloak")
+ACCESS_TOKEN_TYPE_CLAIM = "typ"
+ACCESS_TOKEN_TYPE_VALUE = "Bearer"
+
+
+def keycloak_issuer(server_url: str, realm: str) -> str:
+    """Return the issuer URL Keycloak uses for a realm."""
+    return f"{server_url.rstrip('/')}/realms/{realm}"
 
 
 def _claim_value(raw_claims: dict[str, Any], claim_name: str) -> str | None:
@@ -74,7 +81,7 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
         settings: Mapping[str, str] | None = None,
     ):
         super().__init__(settings)
-        self._keycloak_url = keycloak_url or self._setting("KEYCLOAK_URL")
+        self._keycloak_url = (keycloak_url or self._setting("KEYCLOAK_URL")).rstrip("/")
         self._realm = realm or self._setting("KEYCLOAK_REALM")
         self._client_id = client_id or self._setting("KEYCLOAK_CLIENT_ID")
         self._app_id_claim = self._setting("KEYCLOAK_APP_ID_CLAIM", "azp")
@@ -82,19 +89,15 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
         self._workspace_id_claim = self._setting("KEYCLOAK_WORKSPACE_ID_CLAIM", "workspace_id")
         self._jwks_client: PyJWKClient | None = None
 
-        # Clean URL (remove trailing slash)
-        if self._keycloak_url:
-            self._keycloak_url = self._keycloak_url.rstrip("/")
-
     @property
     def _jwks_url(self) -> str:
         """Construct JWKS URL from Keycloak config."""
-        return f"{self._keycloak_url}/realms/{self._realm}/protocol/openid-connect/certs"
+        return f"{self._issuer}/protocol/openid-connect/certs"
 
     @property
     def _issuer(self) -> str:
         """Expected issuer claim."""
-        return f"{self._keycloak_url}/realms/{self._realm}"
+        return keycloak_issuer(self._keycloak_url, self._realm)
 
     def _get_jwks_client(self) -> PyJWKClient:
         """Get or create JWKS client."""
@@ -160,7 +163,7 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
                 issuer=self._issuer,
                 options=decode_options,  # type: ignore[arg-type]
             )
-            if claims.get("typ") != "Bearer":
+            if claims.get(ACCESS_TOKEN_TYPE_CLAIM) != ACCESS_TOKEN_TYPE_VALUE:
                 raise AuthError("Token is not a Keycloak access token", 401, self.name)
         except jwt.PyJWKClientError as e:
             logger.warning("JWKS error: %s", e)

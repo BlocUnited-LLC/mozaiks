@@ -7,19 +7,83 @@ import { build } from "esbuild";
 import { chromium, expect } from "@playwright/test";
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ui = path.resolve(shell, "../chat-ui/src");
+
+// Runtime admin config: one declared custom page, and module panels declared
+// out of order so the shell's sort is observable.
+const adminConfig = {
+  pages: [{ id: "notes", label: "Note Administration" }],
+  module_panels: [
+    { id: "notes-second", label: "Second notes panel", page: "notes", order: 20 },
+    { id: "notes-first", label: "First notes panel", page: "notes", order: 10 },
+    { id: "overview-panel", label: "Overview notes panel", page: "overview" },
+  ],
+};
+
+// What the connected app backend answers for GET /backend/api/admin/config.
+const backendPanels = {
+  schema_version: "mozaiks.admin.app_backend.v1",
+  panels: [
+    {
+      id: "billing.later",
+      label: "Invoices",
+      section: "billing",
+      order: 20,
+      renderer: "schema",
+      sections: [{ id: "invoices", primitive: "DataTable", config: { api_endpoint: "/api/admin/invoices" } }],
+    },
+    {
+      id: "billing.first",
+      label: "Plans",
+      section: "billing",
+      order: 10,
+      renderer: "schema",
+      sections: [{ id: "plans", primitive: "DataTable", config: { api_endpoint: "/api/admin/plans" } }],
+    },
+    { id: "members", label: "Members", section: "access", renderer: "custom_component", component: "MembersPanel" },
+  ],
+};
+
 test("admin pages use declared metadata and preserve Studio section routing", async (t) => {
   const stubs = {
-    "../context/ChatUIContext": `const useChatUI = () => ({ user: { roles: ["admin"] } });
+    "../context/ChatUIContext": `const useChatUI = () => ({
+  // ?as=visitor signs in someone without the admin role.
+  user: { roles: new URLSearchParams(location.search).get("as") === "visitor" ? ["user"] : ["admin"] },
+  config: { appBackendUrl: location.origin + "/backend" },
+  auth: null,
+});
 export {
   useChatUI
 };
 `,
     "../admin/components/AdminPrimitives.jsx": `import React from "react";
-const useAdminFetch = () => ({ data: { pages: [{ id: "notes", label: "Note Administration" }], module_panels: [{ id: "notes-panel", label: "Notes panel", page: "notes" }, { id: "overview-panel", label: "Overview notes panel", page: "overview" }] } });
-const AdminExtensionPanels = ({ panels }) => <div>{panels.map((panel) => <p key={panel.id}>{panel.label}</p>)}</div>;
+const useAdminFetch = () => ({ data: ${JSON.stringify(adminConfig)}, loading: false, error: null });
+const AdminExtensionPanels = ({ panels }) => <div>{panels.map((panel) => <p key={panel.id} data-module-panel>{panel.label}</p>)}</div>;
+const EmptyState = ({ children }) => <p data-empty>{children}</p>;
+const ErrorBox = ({ message }) => <p role="alert">{message}</p>;
+const Spinner = () => <p>Loading</p>;
+const SectionHeading = ({ children }) => <h2>{children}</h2>;
+const MissingPanelComponent = ({ componentName }) => <p data-missing>{componentName}</p>;
+const StatCard = () => null;
+const Badge = () => null;
 export {
   AdminExtensionPanels,
+  Badge,
+  EmptyState,
+  ErrorBox,
+  MissingPanelComponent,
+  SectionHeading,
+  Spinner,
+  StatCard,
   useAdminFetch
+};
+`,
+    "../admin/components/AdminSchemaPanel.jsx": `import React from "react";
+const AdminSchemaPanel = ({ panel }) => <p data-schema-panel>{panel.sections[0].config.api_endpoint}</p>;
+export default AdminSchemaPanel;
+`,
+    "../registry/componentRegistry": `const getComponent = () => null;
+export {
+  getComponent
 };
 `,
     "../admin/components/AdminWorkspaceLayout.jsx": `const AdminWorkspaceLayout = ({ children }) => children;
@@ -29,17 +93,15 @@ export {
 `
   };
   const sections = `import React from "react";
-const OverviewSection = () => <h1>Overview</h1>;
-const UsersSection = () => <h1>Users</h1>;
-const UsageSection = () => <h1>Usage</h1>;
-const OperationsSection = () => <h1>Operations</h1>;
-const SettingsSection = () => <h1>Settings</h1>;
+const OverviewSection = () => <p data-framework>overview content</p>;
+const UsageSection = () => <p data-framework>usage content</p>;
+const OperationsSection = () => <p data-framework>operations content</p>;
+const SettingsSection = () => <p data-framework>settings content</p>;
 export {
   OperationsSection,
   OverviewSection,
   SettingsSection,
-  UsageSection,
-  UsersSection
+  UsageSection
 };
 `;
   const bundle = await build({
@@ -54,6 +116,7 @@ createRoot(document.getElementById("root")).render(<BrowserRouter><AdminPage rou
     write: false,
     format: "esm",
     jsx: "automatic",
+    define: { "process.env.NODE_ENV": '"production"' },
     alias: { react: path.join(shell, "node_modules/react"), "react-dom": path.join(shell, "node_modules/react-dom"), "react-router-dom": path.join(shell, "node_modules/react-router-dom") },
     plugins: [{ name: "admin-fixtures", setup(builder) {
       builder.onResolve({ filter: /.*/ }, (args) => args.path in stubs ? { path: args.path, namespace: "fixture" } : args.path.startsWith("../admin/pages/") ? { path: args.path, namespace: "section" } : null);
@@ -61,7 +124,17 @@ createRoot(document.getElementById("root")).render(<BrowserRouter><AdminPage rou
       builder.onLoad({ filter: /.*/, namespace: "section" }, () => ({ contents: sections, loader: "jsx", resolveDir: shell }));
     } }]
   });
+  // "panels" serves the config, "missing" has no admin route, "broken" fails.
+  let backendMode = "panels";
+  let backendRequests = 0;
   const server = http.createServer((req, res) => {
+    if (req.url === "/backend/api/admin/config") {
+      backendRequests += 1;
+      res.statusCode = backendMode === "panels" ? 200 : backendMode === "missing" ? 404 : 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(backendMode === "panels" ? JSON.stringify(backendPanels) : "{}");
+      return;
+    }
     const script = req.url === "/fixture.js";
     res.setHeader("Content-Type", script ? "text/javascript" : "text/html");
     res.end(script ? bundle.outputFiles[0].text : '<div id="root"></div><script type="module" src="/fixture.js"><\/script>');
@@ -71,15 +144,74 @@ createRoot(document.getElementById("root")).render(<BrowserRouter><AdminPage rou
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage();
-  await page.goto(`http://127.0.0.1:${server.address().port}/admin/notes`);
-  await expect(page.getByRole("heading", { name: "Note Administration", exact: true })).toBeVisible();
-  await expect(page.getByText("Notes panel", { exact: true })).toBeVisible();
-  assert.equal(await page.getByRole("heading", { name: "Overview", exact: true }).count(), 0);
-  await expect(page.getByText("Overview notes panel", { exact: true })).toHaveCount(0);
-  await page.goto(`http://127.0.0.1:${server.address().port}/admin`);
-  await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
-  await expect(page.getByText("Overview notes panel", { exact: true })).toBeVisible();
-  await expect(page.getByText("Notes panel", { exact: true })).toHaveCount(0);
-  await page.goto(`http://127.0.0.1:${server.address().port}/apps/customer/usage`);
-  await expect(page.getByRole("heading", { name: "Usage", exact: true })).toBeVisible();
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const heading = (name) => page.getByRole("heading", { name, exact: true, level: 1 });
+  const modulePanels = () => page.locator("[data-module-panel]").allTextContents();
+
+  // A page the registry declares under its own id: registry label, its panels in `order`.
+  await page.goto(`${origin}/admin/notes`);
+  await expect(heading("Note Administration")).toBeVisible();
+  await expect(page.getByText("First notes panel", { exact: true })).toBeVisible();
+  assert.deepEqual(await modulePanels(), ["First notes panel", "Second notes panel"]);
+  assert.equal(await heading("Overview").count(), 0);
+  assert.equal(await page.locator("[data-framework]").count(), 0);
+  assert.equal(await page.locator("[data-empty]").count(), 0);
+
+  // Overview: framework content plus the panels that name it.
+  await page.goto(`${origin}/admin`);
+  await expect(heading("Overview")).toBeVisible();
+  await expect(page.locator("[data-framework]")).toHaveText("overview content");
+  assert.deepEqual(await modulePanels(), ["Overview notes panel"]);
+  await expect(page.getByText("How your app is doing right now.", { exact: true })).toBeVisible();
+
+  // Studio-style section routing still selects the page from the URL suffix.
+  await page.goto(`${origin}/apps/customer/usage`);
+  await expect(heading("Usage")).toBeVisible();
+  await expect(page.locator("[data-framework]")).toHaveText("usage content");
+
+  // App-backend panels render on the page their `section` names, in `order`.
+  await page.goto(`${origin}/apps/customer/billing`);
+  await expect(heading("Billing")).toBeVisible();
+  await expect(page.locator("[data-schema-panel]")).toHaveText(["/api/admin/plans", "/api/admin/invoices"].map((endpoint) => `${origin}/backend${endpoint}`));
+  await expect(page.getByRole("heading", { level: 2 })).toHaveText(["Plans", "Invoices"]);
+  assert.equal(await page.locator("[data-empty]").count(), 0);
+
+  // A custom panel whose component is not registered says so.
+  await page.goto(`${origin}/apps/customer/access`);
+  await expect(page.locator("[data-missing]")).toHaveText("MembersPanel");
+  assert.equal(await page.locator("[data-empty]").count(), 0);
+
+  // A standard page with nothing on it says so instead of rendering blank.
+  await page.goto(`${origin}/apps/customer/support`);
+  await expect(heading("Support")).toBeVisible();
+  await expect(page.locator("[data-empty]")).toContainText("Nothing has been added to Support yet.");
+  assert.equal(await page.getByRole("alert").count(), 0);
+
+  // A backend with no admin config route contributes no panels and no error.
+  backendMode = "missing";
+  await page.goto(`${origin}/apps/customer/billing`);
+  await expect(page.locator("[data-empty]")).toContainText("Nothing has been added to Billing yet.");
+  assert.equal(await page.getByRole("alert").count(), 0);
+  await page.goto(`${origin}/apps/customer/access`);
+  await expect(page.locator("[data-empty]")).toContainText("sign-in provider");
+
+  // A backend that fails is reported, on a framework page too.
+  backendMode = "broken";
+  await page.goto(`${origin}/admin`);
+  await expect(page.getByRole("alert")).toContainText("Panels from the connected backend could not be loaded: 500");
+  await expect(page.locator("[data-framework]")).toHaveText("overview content");
+
+  // A signed-in visitor without the admin role is refused, and the shell asks
+  // the connected backend for nothing on their behalf.
+  backendMode = "panels";
+  backendRequests = 0;
+  await page.goto(`${origin}/admin?as=visitor`);
+  await expect(page.getByText("Admin role required.", { exact: true })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  assert.equal(backendRequests, 0);
+  assert.equal(await page.locator("[data-framework]").count(), 0);
+  // The same page for an admin does ask.
+  await page.goto(`${origin}/admin`);
+  await expect(heading("Overview")).toBeVisible();
+  await expect.poll(() => backendRequests).toBeGreaterThan(0);
 });

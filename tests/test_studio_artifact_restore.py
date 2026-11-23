@@ -1018,3 +1018,63 @@ def test_promote_endpoint_source_does_not_call_workflow_or_llm_paths() -> None:
     assert "launch_prepared_workflow" not in source
     assert "AppGenerator" not in source
 
+
+@pytest.mark.asyncio
+async def test_revalidate_saved_refinement_uses_verified_archive(tmp_path, monkeypatch):
+    from mozaiksai.core.validation import compilation_inputs, generated_app
+    from mozaiksai.hosts import studio
+
+    archive = tmp_path / "GeneratedApp.zip"
+    _write_bundle_zip(archive, {"GeneratedApp/app.json": '{"appId":"app_1"}'})
+    draft = _version(
+        artifact_version_id="draft_1",
+        zip_path=archive,
+        lifecycle_status=ArtifactLifecycleStatus.DRAFT,
+        validation_status=ArtifactValidationStatus.PENDING,
+        commit_metadata_extra={"bundle_mode": "staged_refinement_bundle"},
+    )
+    draft = draft.model_copy(update={"parent_build_record_id": "parent_1"})
+    owner = draft.commit_metadata.author_user_id
+    session = _session(artifact_version_id=draft.id, status=RefinementSessionStatus.FAILED)
+    session.metadata["coding_worker"] = {
+        "validation_result": {"validation_status": "failed"},
+    }
+    store = _PromoteStore(draft, sessions=[session])
+
+    async def write_validation(*, record, validation):
+        store.version = record.model_copy(update={
+            "validation_status": ArtifactValidationStatus.PASSED,
+            "commit_metadata": record.commit_metadata.model_copy(update={
+                "metadata": {**record.commit_metadata.metadata, "validation_result": validation},
+            }),
+        })
+        return True
+
+    store.record_draft_revalidation = AsyncMock(side_effect=write_validation)
+    monkeypatch.setattr(studio, "get_artifact_store", lambda: store)
+    monkeypatch.setattr(studio, "_resolve_studio_artifact_scope", AsyncMock(return_value=("app_1", owner)))
+    monkeypatch.setattr(studio, "_require_current_build_in_lineage", AsyncMock())
+    monkeypatch.setattr(compilation_inputs, "resolve_app_compilation_inputs", AsyncMock(return_value=None))
+    validation = {
+        "validation_status": "passed",
+        "app_bundle_acceptance_result": {"passed": True},
+        "app_validation_result": {"validation_status": "passed"},
+    }
+    validator = AsyncMock(return_value=validation)
+    monkeypatch.setattr(generated_app, "validate_generated_app_candidate", validator)
+
+    result = await studio.revalidate_refinement_draft("draft_1", "appreg_1", object())
+
+    assert result["validation_status"] == "passed"
+    assert result["review"]["review_status"] == "validated"
+    assert result["review"]["can_accept"] is True
+    assert result["review"]["can_revalidate"] is False
+    assert result["review"]["validation_result"] == validation
+    assert result["refinement_session"]["status"] == "failed"
+    assert validator.call_args.kwargs["files"] == {"app.json": '{"appId":"app_1"}'}
+    store.record_draft_revalidation.assert_awaited_once_with(record=draft, validation=validation)
+    store.version = draft
+    archive.write_bytes(b"changed")
+    with pytest.raises(studio.HTTPException, match="archive identity"):
+        await studio.revalidate_refinement_draft("draft_1", "appreg_1", object())
+    assert validator.await_count == 1

@@ -63,7 +63,7 @@ class E2BSandboxAdapter:
     ) -> SandboxSessionInfo:
         info = dict(metadata or {})
         host = getattr(sandbox, "sandbox_domain", None)
-        if host and info.get("purpose") != _SEALED_PURPOSE:
+        if host and info.get("purpose") != _SEALED_PURPOSE and info.get("preview_mode") != "document":
             info.setdefault("sandbox_domain", host)
         return SandboxSessionInfo(
             session_id=str(getattr(sandbox, "sandbox_id", "") or ""),
@@ -76,10 +76,11 @@ class E2BSandboxAdapter:
         details = await asyncio.to_thread(sandbox.get_info)
         metadata = getattr(details, "metadata", None)
         # Unknown provider metadata must not reveal a sealed session host.
-        purpose = metadata.get("purpose") if isinstance(metadata, dict) else None
-        return self._session_info(
-            sandbox, metadata=None if purpose in _ORDINARY_PURPOSES else {"purpose": _SEALED_PURPOSE},
-        )
+        if not isinstance(metadata, dict) or metadata.get("purpose") not in _ORDINARY_PURPOSES:
+            return self._session_info(sandbox, metadata={"purpose": _SEALED_PURPOSE})
+        if metadata.get("preview_mode") == "document":
+            return self._session_info(sandbox, metadata={"preview_mode": "document"})
+        return self._session_info(sandbox)
 
     async def _connect_sandbox(self, session_id: str, timeout_seconds: int | None = None):
         if session_id in self._sessions:
@@ -124,6 +125,7 @@ class E2BSandboxAdapter:
         if purpose not in _ORDINARY_PURPOSES and purpose != _SEALED_PURPOSE:
             raise ValueError("Unsupported E2B sandbox purpose")
         sealed = purpose == _SEALED_PURPOSE
+        document_only = purpose == "artifact_preview" and request_metadata.get("preview_mode") == "document"
         if sealed:
             if not template or not _PINNED_BUILD_REF.fullmatch(template):
                 raise ValueError("Sealed E2B preview requires an exact template build reference")
@@ -135,7 +137,7 @@ class E2BSandboxAdapter:
                 "network": {"allow_public_traffic": False},
                 "lifecycle": {"on_timeout": "kill", "auto_resume": False},
             }
-            if sealed else {}
+            if sealed or document_only else {}
         )
         creation = asyncio.create_task(asyncio.to_thread(
             sandbox_cls.create,
@@ -154,7 +156,7 @@ class E2BSandboxAdapter:
             except Exception as exc:
                 logger.error("cancelled_sandbox_cleanup_failed exception=%s", type(exc).__name__)
             raise
-        if sealed:
+        if sealed or document_only:
             try:
                 details = await asyncio.to_thread(sandbox.get_info)
                 network = getattr(details, "network", None)
@@ -165,14 +167,17 @@ class E2BSandboxAdapter:
                     or not isinstance(lifecycle, dict)
                     or lifecycle.get("on_timeout") != "kill"
                     or lifecycle.get("auto_resume") is not False
-                    or getattr(details, "metadata", {}).get("purpose") != _SEALED_PURPOSE
+                    or getattr(details, "metadata", {}).get("purpose") != purpose
+                    or (document_only and getattr(details, "metadata", {}).get("preview_mode") != "document")
                     or not getattr(details, "template_id", None)
                 ):
-                    raise RuntimeError("E2B did not confirm sealed preview isolation")
+                    raise RuntimeError("E2B did not confirm sealed preview isolation" if sealed else "E2B did not confirm private document isolation")
             except (Exception, asyncio.CancelledError):
                 await asyncio.to_thread(sandbox.kill)
                 raise
-            session_metadata = {"purpose": _SEALED_PURPOSE, "template_id": details.template_id}
+            session_metadata = {"purpose": purpose, "template_id": details.template_id}
+            if document_only:
+                session_metadata["preview_mode"] = "document"
         else:
             session_metadata = {}
         self._sessions[sandbox.sandbox_id] = sandbox
@@ -276,7 +281,7 @@ class E2BSandboxAdapter:
         details = await asyncio.to_thread(sandbox.get_info)
         metadata = getattr(details, "metadata", None)
         network = getattr(details, "network", None)
-        if not isinstance(metadata, dict) or metadata.get("purpose") not in _ORDINARY_PURPOSES or (
+        if not isinstance(metadata, dict) or metadata.get("preview_mode") == "document" or metadata.get("purpose") not in _ORDINARY_PURPOSES or (
             network is not None and _public_traffic_allowed(network) is False
         ):
             return None

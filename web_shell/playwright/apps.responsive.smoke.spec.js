@@ -54,7 +54,7 @@ const dashboardPayload = {
     portals: [
       {
         id: 'portfolio',
-        label: 'Apps',
+        label: 'My Apps',
         route: '/apps',
         enabled: true,
       },
@@ -156,7 +156,14 @@ function buildAppStudioPayload(appId = APP_ID) {
       },
     },
     stats: {
+      // What GET /api/admin/stats returns: conversation counts by outcome.
+      active_chats: 1,
       tracked_chats: 14,
+      completed_chats: 11,
+      failed_chats: 2,
+      telemetry_source: 'ag2_opentelemetry',
+      // The server does not return the fields below. They remain only for
+      // pages that have not been moved off them yet.
       total_cost: 242.5,
       total_errors: 2,
       total_tool_calls: 5,
@@ -169,6 +176,9 @@ function buildAppStudioPayload(appId = APP_ID) {
         {
           chat_id: 'run-1',
           workflow_name: 'RevisionOrchestrator',
+          // status is what GET /api/admin/runs returns: 1 completed, 0 in progress.
+          status: 1,
+          agent_turns: 6,
           errors: 2,
           tool_calls: 3,
           cost: 123.4,
@@ -182,6 +192,8 @@ function buildAppStudioPayload(appId = APP_ID) {
         {
           chat_id: 'run-2',
           workflow_name: 'DeployGuard',
+          status: 0,
+          agent_turns: 3,
           errors: 0,
           tool_calls: 2,
           cost: 89.1,
@@ -662,26 +674,6 @@ function buildWorkspaceSupportPayload() {
   };
 }
 
-function buildWorkspaceUsersPayload() {
-  return {
-    total_users: 184,
-    active_users: 136,
-    new_users: 12,
-    by_app: {
-      [APP_ID]: {
-        total_users: 118,
-        active_users: 91,
-        new_users: 8,
-      },
-      'partner-delivery-studio': {
-        total_users: 66,
-        active_users: 45,
-        new_users: 4,
-      },
-    },
-  };
-}
-
 function buildOnboardingStatusPayload({ dismissed = false, progress = 0, steps = {} } = {}) {
   const defaultSteps = {
     create_app: { completed: false, completed_at: null },
@@ -789,6 +781,7 @@ function analyticsSeries(start, end, days = 14) {
 function buildPortfolioAnalyticsPayload() {
   const apps = Object.entries(ANALYTICS_BASES).map(([appId, base]) => ({
     app_id: appId,
+    dashboard_app_id: appId === 'member-growth-studio' ? 'dashboard-member-growth' : null,
     name: appsPayload.apps.find((app) => app.app_id === appId)?.name || appId,
     lifecycle_state: 'active',
     metrics: analyticsMetricSet(base),
@@ -1013,14 +1006,6 @@ async function mockStudioApis(page) {
     });
   });
 
-  await page.route('**/api/admin/users', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(buildWorkspaceUsersPayload()),
-    });
-  });
-
   await page.route('**/api/studio/dashboard**', async (route) => {
     await route.fulfill({
       status: 200,
@@ -1149,19 +1134,41 @@ async function mockStudioApis(page) {
     });
   });
 
-  await page.route('**/api/modules/workspace_integrations/list_app_integration_needs**', async (route) => {
-    let appId = APP_ID;
-    try {
-      const body = route.request().postDataJSON();
-      if (body?.app_id) appId = body.app_id;
-    } catch {
-      // Keep default app id for malformed test requests.
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(buildAppIntegrationDeclarationsPayload(appId)),
-    });
+  await page.route('**/api/studio/integrations/connectors?**', async (route) => {
+    const appId = new URL(route.request().url()).searchParams.get('dashboard_app_id');
+    expect(appId).toBe(APP_ID);
+    await route.fulfill({ json: {
+      app_id: appId,
+      connectors: [
+        { service: 'mozaikspay', display_name: 'Payments connection', ready: true, secret_available: true,
+          status: 'active', lifecycle_status: 'active',
+          health: { status: 'pending_validation', health_check_supported: true } },
+        // A connection record saved without a credential.
+        { service: 'custom_search', display_name: 'Search connection', ready: false, secret_available: false,
+          status: 'metadata_only', lifecycle_status: 'metadata_only',
+          health: { status: 'unknown', health_check_supported: false } },
+        { service: 'old_crm', display_name: 'Expired connection', ready: false, secret_available: true,
+          status: 'active', lifecycle_status: 'expired',
+          health: { status: 'unknown', health_check_supported: false } },
+        // Its values are stored (ready), and the provider refused them.
+        { service: 'refused_mail', display_name: 'Refused connection', ready: true, secret_available: true,
+          lifecycle_status: 'active',
+          health: { status: 'unhealthy', message: 'Credential is invalid.', error_code: 'auth_failed', health_check_supported: true } },
+        // Saved with one of the values it needs. The server keeps it ready and
+        // reports the missing values only through error_code.
+        { service: 'partial_sms', display_name: 'Partial connection', ready: true, secret_available: true,
+          lifecycle_status: 'active',
+          health: {
+            status: 'pending_validation',
+            message: 'Connector has required configuration; run its provider health check before use.',
+            error_code: 'missing_credentials',
+            health_check_supported: true,
+          } },
+      ],
+      declarations: buildAppIntegrationDeclarationsPayload(appId).declarations,
+      catalog: [{ id: 'postmark', name: 'Postmark', category: 'email' }],
+      credential_storage_available: true,
+    } });
   });
 
   await page.route('**/api/modules/workspace_integrations/delete_app_integration_need**', async (route) => {
@@ -1571,7 +1578,7 @@ test('apps route stays responsive across desktop and mobile widths', async ({ pa
   await page.goto('/apps');
   const main = page.locator('main');
 
-  await expect(page.getByRole('heading', { name: 'Apps' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'My Apps', exact: true })).toBeVisible();
   await expect(page.locator('header').getByRole('button', { name: 'Create App' })).toBeVisible();
   await expect(main.getByRole('button', { name: 'Create App' })).toHaveCount(0);
   await expect(main.getByRole('button', { name: 'Import App' })).toHaveCount(0);
@@ -1624,7 +1631,7 @@ test('create app transition overlay can return to Apps', async ({ page, isMobile
   await closeBtn.click();
 
   await expect(page).toHaveURL(/\/apps$/);
-  await expect(page.locator('main').getByRole('heading', { name: 'Apps', exact: true })).toBeVisible();
+  await expect(page.locator('main').getByRole('heading', { name: 'My Apps', exact: true })).toBeVisible();
 });
 
 test('workspace usage route stays responsive across desktop and mobile widths', async ({ page }) => {
@@ -1647,32 +1654,6 @@ test('workspace usage route stays responsive across desktop and mobile widths', 
     await expect(main.getByRole('columnheader', { name: 'App' })).toBeVisible();
     await expect(main.getByRole('columnheader', { name: 'Input tok.' })).toBeVisible();
     await expect(main.getByRole('row', { name: /Campaign Revision Workbench/i }).first()).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
-  }
-});
-
-test('workspace users route stays responsive across desktop and mobile widths', async ({ page }) => {
-  await page.goto('/users');
-  const main = page.locator('main');
-
-  await expect(main.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
-  await expect(main.getByPlaceholder('Search apps...')).toBeVisible();
-  const summaryMetrics = main.getByLabel('Summary metrics');
-  await expect(summaryMetrics.getByText('Total users')).toBeVisible();
-  await expect(summaryMetrics.getByText('Active users')).toBeVisible();
-  await expect(summaryMetrics.getByText('Apps with users')).toBeVisible();
-  await expectNoHorizontalOverflow(page);
-
-  const viewport = page.viewportSize();
-  expect(viewport).not.toBeNull();
-
-  if (viewport.width < 768) {
-    await expect(main.locator('article').filter({ hasText: 'Campaign Revision Workbench' }).first()).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
-  } else {
-    await expect(main.getByRole('row', { name: /Campaign Revision Workbench/i }).first()).toBeVisible();
-    await expect(main.getByRole('columnheader', { name: 'Total users' })).toBeVisible();
-    await expect(main.getByRole('columnheader', { name: 'Active' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
   }
 });
@@ -1720,6 +1701,124 @@ test('workspace integrations route stays responsive across desktop and mobile wi
   } else {
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
   }
+});
+
+test('workspace integrations keeps the setup panel open when the provider refuses a saved key', async ({ page }) => {
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', async (route) => {
+    await route.fulfill({ json: buildOnboardingStatusPayload({ dismissed: true }) });
+  });
+  // The server's side of a save: the key is stored, the provider refuses it,
+  // and from then on the connector list carries that result.
+  const calls = [];
+  let saved = false;
+  const refused = {
+    status: 'unhealthy',
+    message: 'Slack bot token is invalid or revoked.',
+    error_code: 'auth_failed',
+    health_check_supported: true,
+  };
+  await page.route('**/api/modules/workspace_integrations/save_workspace_connector**', async (route) => {
+    calls.push('save');
+    saved = true;
+    await route.fulfill({ json: { success: true, health_check_supported: true, connector: { service: 'slack', ready: true } } });
+  });
+  await page.route('**/api/modules/workspace_integrations/check_workspace_connector_health**', async (route) => {
+    calls.push('check');
+    await route.fulfill({ json: refused });
+  });
+  await page.route('**/api/modules/workspace_integrations/list_workspace_connectors**', async (route) => {
+    const payload = buildWorkspaceConnectorsPayload();
+    if (saved) {
+      calls.push('list');
+      payload.connectors.push({
+        service: 'slack',
+        display_name: 'Slack',
+        secret_available: true,
+        configured: true,
+        ready: true,
+        lifecycle_status: 'active',
+        health: refused,
+      });
+    }
+    await route.fulfill({ json: payload });
+  });
+
+  await page.goto('/integrations');
+  const main = page.locator('main');
+  await expect(main.getByRole('heading', { name: 'Available' })).toBeVisible();
+
+  // Slack has no connector yet, so its card offers Connect.
+  await main.getByRole('button', { name: 'Connect', exact: true }).click();
+  const drawer = page.getByRole('dialog', { name: 'Slack' });
+  await expect(drawer.getByText('Available', { exact: true }).first()).toBeVisible();
+  await drawer.locator('input[type="password"]').fill('not-a-real-token');
+  await drawer.getByRole('button', { name: 'Save & connect' }).click();
+
+  // The panel stays open, says what the provider said, and shows the new
+  // status, not the "Available" it opened with.
+  await expect(
+    drawer.getByText('The key was saved, but the check with Slack failed: Slack bot token is invalid or revoked.', { exact: true }),
+  ).toBeVisible();
+  await expect(drawer.getByText('Check failed', { exact: true }).first()).toBeVisible();
+  await expect(drawer.getByText('Available', { exact: true })).toHaveCount(0);
+  // What was typed is still there for a correction: the reload did not rebuild the panel.
+  await expect(drawer.locator('input[type="password"]')).toHaveValue('not-a-real-token');
+  // The provider was asked before the list was read again.
+  expect(calls.slice(0, 3)).toEqual(['save', 'check', 'list']);
+
+  // In the list, the service needs attention; it is not connected.
+  await drawer.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(main.getByText('Check failed', { exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Replace key', exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Connect', exact: true })).toHaveCount(0);
+
+  // Closing the panel cleared its message: another service's panel opens without it.
+  await main.getByRole('button', { name: 'Manage' }).first().click();
+  const other = page.getByRole('dialog', { name: 'Mozaiks Pay' });
+  await expect(other.getByText('Credential source')).toBeVisible();
+  await expect(other.getByText(/The key was saved, but/)).toHaveCount(0);
+});
+
+test('workspace AI models route stays responsive across desktop and mobile widths', async ({ page }) => {
+  await page.route('**/api/studio/settings/ai-models', async route => {
+    await route.fulfill({
+      json: {
+        default: 'gemini',
+        allowed: ['gemini', 'openai'],
+        models: [
+          { id: 'gemini', label: 'Gemini 3.8 Flash', configured: true },
+          { id: 'openai', label: 'GPT-5 Nano', configured: false },
+        ],
+      },
+    });
+  });
+  await page.goto('/settings/ai-models');
+  await expect(page.getByRole('heading', { name: 'AI models', exact: true })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Default model' })).toHaveValue('gemini');
+  await expect(page.getByText('Provider key missing', { exact: true })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  // The page is in the workspace menu, not reachable only by typing its address.
+  // (The mobile menu is covered by the mobile workspace navigation test.)
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+  if (viewport.width >= 768) {
+    const navigation = page.getByRole('navigation', { name: 'Workspace navigation' });
+    await expect(navigation.locator('a[href="/settings/ai-models"]')).toBeVisible();
+    await expect(navigation.locator('a[href="/settings/ai-models"]')).toHaveAttribute('aria-current', 'page');
+    // Pages with no data source behind them are not offered.
+    await expect(navigation.locator('a[href="/users"]')).toHaveCount(0);
+  }
+});
+
+test('workspace AI models route explains itself when sign-in is off', async ({ page }) => {
+  await page.route('**/api/studio/settings/ai-models', async route => {
+    await route.fulfill({ status: 403, json: { detail: 'Workspace administrator access required.' } });
+  });
+  await page.goto('/settings/ai-models');
+  await expect(page.getByRole('alert')).toHaveText(
+    'AI model settings can be changed only by a signed-in workspace administrator.',
+  );
 });
 
 test('workspace support route stays responsive across desktop and mobile widths', async ({ page }) => {
@@ -2002,42 +2101,77 @@ test('app integrations route stays responsive across desktop and mobile widths',
   });
 
   await page.goto(`/apps/${APP_ID}/integrations`);
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
   const main = page.locator('main');
 
-  await expect(main.getByRole('heading', { name: 'App Integrations', exact: true })).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Workspace integrations' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Required' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Optional' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'App-specific' })).toBeVisible();
-  await expect(main.getByText('Mozaiks Pay').first()).toBeVisible();
-  await expect(main.getByText('Postmark').first()).toBeVisible();
-  await expect(main.getByText('Internal Search API').first()).toBeVisible();
-  await expect(main.getByText('Ready').first()).toBeVisible();
-  await expect(main.getByText('Partial setup').first()).toBeVisible();
-  await expect(main.getByText('Configure in app environment').first()).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Remove from app' }).first()).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Integrations', exact: true })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'App connections' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Build requirements' })).toBeVisible();
+  for (const name of ['Mozaiks Pay', 'Postmark', 'Internal Search API', 'Payments connection']) {
+    await expect(main.getByRole('heading', { name, exact: true })).toBeVisible();
+  }
+  await expect(main.getByText('Ready', { exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Remove requirement' })).toBeVisible();
+  const connections = main.getByRole('listitem');
+  await expect(connections.filter({ hasText: 'Payments connection' }).getByRole('button', { name: 'Check status' })).toBeVisible();
+  await expect(connections.filter({ hasText: 'Search connection' }).getByRole('button', { name: 'Check status' })).toHaveCount(0);
+  // Each connection shows the verdict the app Health page gives it.
+  await expect(connections.filter({ hasText: 'Search connection' }).getByText('Needs secret', { exact: true })).toBeVisible();
+  await expect(connections.filter({ hasText: 'Expired connection' }).getByText('Expired', { exact: true })).toBeVisible();
+  // A connector the provider refused, or whose check found values missing,
+  // is not shown as ready.
+  for (const name of ['Refused connection', 'Partial connection']) {
+    const row = connections.filter({ hasText: name });
+    await expect(row.getByText('Check failed', { exact: true })).toBeVisible();
+    await expect(row.getByText('Ready', { exact: true })).toHaveCount(0);
+  }
+  await expect(connections.filter({ hasText: 'Partial connection' }).getByText('Health · failed', { exact: true })).toBeVisible();
+
+  // Check status says what the check found.
+  await page.route('**/api/studio/integrations/connectors/refused_mail/health-check**', async (route) => {
+    await route.fulfill({ json: {
+      app_id: APP_ID,
+      service: 'refused_mail',
+      health: { status: 'unhealthy', message: 'Credential is invalid.', error_code: 'auth_failed', health_check_supported: true },
+    } });
+  });
+  await connections.filter({ hasText: 'Refused connection' }).getByRole('button', { name: 'Check status' }).click();
+  await expect(main.getByRole('alert')).toHaveText('The check with Refused connection failed: Credential is invalid.');
   await expect(main.getByText(SECRET_SENTINEL)).toHaveCount(0);
-  await expect(main.getByRole('button', { name: 'Add Integration' })).toHaveCount(0);
-  await expect(main.getByRole('button', { name: 'Check now' })).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
   expect(providerUrlRequests).toHaveLength(0);
 
   await captureIntegrationsQa(page, testInfo, 'initial', {
     shell_layout: 'rendered',
     app_declarations_visible: true,
-    credential_crud_visible: false,
+    app_connection_editor_available: true,
     provider_url_requests: providerUrlRequests,
     secret_values_visible: false,
     console_messages: consoleMessages,
     response_findings: responseFindings,
   });
 
+  await main.getByRole('button', { name: 'Add integration' }).click();
+  await expect(page.getByLabel('Service ID')).toBeVisible();
+  const serviceId = page.getByLabel('Service ID');
+  for (const invalid of ['.', 'calendar..sync']) {
+    await serviceId.fill(invalid);
+    expect(await serviceId.evaluate(input => input.validity.patternMismatch)).toBe(true);
+  }
+  await serviceId.fill('calendar.sync');
+  expect(await serviceId.evaluate(input => input.validity.valid)).toBe(true);
+  await expect(page.getByLabel('API key or secret')).toHaveValue('');
+  await expectNoHorizontalOverflow(page);
+  await captureIntegrationsQa(page, testInfo, 'add-integration-overlay', { shell_layout: 'rendered', overlay: 'open' });
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByLabel('Service ID')).toHaveCount(0);
   await writeIntegrationsQaArtifact(`${testInfo.project.name.replace(/[^a-z0-9_-]+/gi, '-').toLowerCase()}-report.json`, {
     page: `/apps/${APP_ID}/integrations`,
-    states_verified: ['initial'],
+    states_verified: ['initial', 'add-integration-overlay'],
     provider_url_requests: providerUrlRequests,
     secret_values_visible: false,
-    credential_crud_visible: false,
+    app_connection_editor_available: true,
     console_messages: consoleMessages,
     response_findings: responseFindings,
   });
@@ -2051,13 +2185,6 @@ test('app integrations route stays responsive across desktop and mobile widths',
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
   }
 
-  await captureIntegrationsQa(page, testInfo, 'add-integration-overlay', {
-    shell_layout: 'rendered',
-    overlay: 'not rendered',
-    secret_values_visible: false,
-    console_messages: consoleMessages,
-    response_findings: responseFindings,
-  });
 });
 
 test('app usage route stays responsive across desktop and mobile widths', async ({ page }) => {
@@ -2083,6 +2210,8 @@ test('app usage route stays responsive across desktop and mobile widths', async 
 
 test('workspace performance route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.goto('/performance');
+  await page.getByRole('dialog', { name: /Onboarding step 1 of 3/i })
+    .getByRole('button', { name: 'Skip tour' }).click();
   const main = page.locator('main');
 
   await expect(main.getByRole('heading', { name: 'Performance', exact: true })).toBeVisible();
@@ -2098,20 +2227,22 @@ test('workspace performance route stays responsive across desktop and mobile wid
   await expect(main.getByRole('heading', { name: 'Applications' })).toBeVisible();
   // Deterministic insight text, not an opaque generated summary.
   await expect(main.getByText('Campaign Revision Workbench MRR declined 8.6%')).toBeVisible();
+  await expect(main.getByText('Dashboard unavailable').filter({ visible: true }).first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
   expect(viewport).not.toBeNull();
 
   if (viewport.width < 768) {
-    await expect(main.locator('article').filter({ hasText: 'Member Growth Studio' }).first()).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
+    await main.locator('article').filter({ hasText: 'Member Growth Studio' }).first().click();
   } else {
-    await expect(main.getByRole('row', { name: /Member Growth Studio/i }).first()).toBeVisible();
     await expect(main.getByRole('columnheader', { name: 'MRR' })).toBeVisible();
     await expect(main.getByRole('columnheader', { name: 'Conversion' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
+    await main.getByRole('row', { name: /Member Growth Studio/i }).click();
   }
+  await expect(page).toHaveURL(/\/apps\/dashboard-member-growth\/overview$/);
 });
 
 test('app revenue route stays responsive across desktop and mobile widths', async ({ page }) => {
@@ -2167,6 +2298,17 @@ test('app health route stays responsive across desktop and mobile widths', async
   await expect(main.getByRole('heading', { name: 'Current app health' })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Workflow reliability' })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Integration posture' })).toBeVisible();
+  // The numbers come from what the endpoints return: failed_chats and
+  // tracked_chats from stats, finished runs from runs, and each connector's
+  // credential and last check.
+  await expect(main.getByText('2 of 14 runs ended with an error.', { exact: true })).toBeVisible();
+  await expect(main.getByText('1 integration is not working.', { exact: true })).toBeVisible();
+  await expect(main.getByText('2 integrations are not set up yet.', { exact: true })).toBeVisible();
+  // run-2 is still in progress, so only run-1 (18 s) is averaged.
+  // The summary strip hides its detail line on narrow screens; the panel's metric always shows it.
+  await expect(main.getByText('Across the 1 most recent finished run', { exact: true }).last()).toBeVisible();
+  await expect(main.getByText('Manual review required before workflow use.', { exact: true })).toBeVisible();
+  await expect(main.getByText('Check failed', { exact: true })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -2200,27 +2342,6 @@ test('app support route stays responsive across desktop and mobile widths', asyn
   await expect(main.getByText('Responded').first()).toBeVisible();
   await expect(main.getByText('Running')).toHaveCount(0);
   expect(supportModuleRequests.some(({ postData }) => postData.includes(`"subject_app_id":"${APP_ID}"`))).toBeTruthy();
-  await expectNoHorizontalOverflow(page);
-
-  const viewport = page.viewportSize();
-  expect(viewport).not.toBeNull();
-
-  if (viewport.width < 768) {
-    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
-  } else {
-    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
-  }
-});
-
-test('app access route stays responsive across desktop and mobile widths', async ({ page }) => {
-  await page.goto(`/apps/${APP_ID}/access`);
-  const main = page.locator('main');
-
-  await expect(main.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Account management' })).toBeVisible();
-  await expect(main.getByPlaceholder('Search by name, email, status, or plan')).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Export' }).first()).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Access state' })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -2564,9 +2685,9 @@ test('mobile app Studio navigation keeps route transitions stable', async ({ pag
       detail: async () => expect(main.getByRole('heading', { name: 'Workflow breakdown' })).toBeVisible(),
     },
     {
-      href: `/apps/${APP_ID}/access`,
-      heading: 'Users',
-      detail: async () => expect(main.getByRole('heading', { name: 'Account management' })).toBeVisible(),
+      href: `/apps/${APP_ID}/health`,
+      heading: 'Health',
+      detail: async () => expect(main.getByRole('heading', { name: 'Current app health' })).toBeVisible(),
     },
   ];
 
@@ -2596,6 +2717,15 @@ test('mobile workspace Studio navigation keeps route transitions stable', async 
       body: JSON.stringify(buildOnboardingStatusPayload({ dismissed: true })),
     });
   });
+  await page.route('**/api/studio/settings/ai-models', async (route) => {
+    await route.fulfill({
+      json: {
+        default: 'gemini',
+        allowed: ['gemini'],
+        models: [{ id: 'gemini', label: 'Gemini 3.8 Flash', configured: true }],
+      },
+    });
+  });
 
   await page.goto('/apps');
   const main = page.locator('main');
@@ -2621,8 +2751,13 @@ test('mobile workspace Studio navigation keeps route transitions stable', async 
       },
     },
     {
+      href: '/settings/ai-models',
+      heading: 'AI models',
+      detail: async () => expect(page.getByRole('combobox', { name: 'Default model' })).toHaveValue('gemini'),
+    },
+    {
       href: '/apps',
-      heading: 'Apps',
+      heading: 'My Apps',
       detail: async () => {
         await expect(page.locator('header').getByRole('button', { name: 'Create App' })).toBeVisible();
         await expect(main.getByRole('button', { name: 'Create App' })).toHaveCount(0);
@@ -2693,7 +2828,7 @@ test('onboarding tour does not appear for a dismissed user', async ({ page }) =>
   });
 
   await page.goto('/apps');
-  await expect(page.locator('main').getByRole('heading', { name: 'Apps' })).toBeVisible();
+  await expect(page.locator('main').getByRole('heading', { name: 'My Apps', exact: true })).toBeVisible();
 
   await page.waitForTimeout(1000);
   await expect(page.getByRole('dialog', { name: /Onboarding step/i })).toHaveCount(0);
@@ -2714,7 +2849,7 @@ test('onboarding tour does not appear for a completed user', async ({ page }) =>
   });
 
   await page.goto('/apps');
-  await expect(page.locator('main').getByRole('heading', { name: 'Apps' })).toBeVisible();
+  await expect(page.locator('main').getByRole('heading', { name: 'My Apps', exact: true })).toBeVisible();
 
   await page.waitForTimeout(1000);
   await expect(page.getByRole('dialog', { name: /Onboarding step/i })).toHaveCount(0);

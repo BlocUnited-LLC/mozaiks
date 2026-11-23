@@ -11,14 +11,17 @@ from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templat
     resolve_templates_for_pack,
 )
 from tests.factory_context import factory_context
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 OPERATOR_READINESS_PACK_ROOT = WORKSPACE / "factory_app" / "build_context" / "operator_readiness"
 
 
 class _Ctx:
-    def __init__(self, data: dict[str, Any]) -> None:
+    def __init__(self, data: dict[str, Any], *, reviewed_pack_ids=None) -> None:
         self.data = factory_context(data)
+        if reviewed_pack_ids is not None:
+            self.data = reviewed_pack_fixture(self.data, reviewed_pack_ids)
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.data.get(key, default)
@@ -75,7 +78,7 @@ async def test_operator_readiness_pack_materializes_rendered_outputs_end_to_end(
                     ]
                 }
             },
-        }
+        }, reviewed_pack_ids=["operator_readiness"],
     )
 
     result = await assemble_app_tasks(context_variables=ctx)

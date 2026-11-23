@@ -10,7 +10,7 @@ Routes:
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, get_args
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
@@ -23,6 +23,7 @@ from mozaiksai.core.auth.dependencies import (
 )
 from mozaiksai.core.chat_attachments.attachments import handle_chat_upload
 from mozaiksai.core.multitenant import build_app_scope_filter
+from mozaiksai.core.session.build_binding import RefinementModel
 from mozaiksai.core.transport.ui_tools import project_ui_tool_response_state
 from mozaiksai.hosts import runtime as runtime_app
 
@@ -226,7 +227,14 @@ async def chat_meta(
         has_children = False
 
         coll = await runtime_app._chat_coll()
-        projection = {"cache_seed": 1, "workflow_ui_state.last_artifact": 1, "status": 1, "_id": 1, "workflow_name": 1}
+        projection = {
+            "cache_seed": 1,
+            "workflow_ui_state.last_artifact": 1,
+            "run_build_binding.refinement_model": 1,
+            "status": 1,
+            "_id": 1,
+            "workflow_name": 1,
+        }
         failure_key = get_workflow_manager().get_config(workflow_name).get("failure_message_key")
         if isinstance(failure_key, str) and failure_key:
             projection[failure_key] = 1
@@ -236,6 +244,9 @@ async def chat_meta(
         doc = await coll.find_one(query, projection)
         if not doc:
             return {"exists": False}
+
+        binding = doc.get("run_build_binding")
+        refinement_model = binding.get("refinement_model") if isinstance(binding, dict) else None
 
         failure_message = doc.get(failure_key) if isinstance(failure_key, str) and doc.get("status") == 2 else None
         if not isinstance(failure_message, str) or not failure_message.strip():
@@ -269,6 +280,7 @@ async def chat_meta(
             "cache_seed": doc.get("cache_seed"),
             "status": doc.get("status"),
             "failure_message": failure_message,
+            **({"refinement_model": refinement_model} if refinement_model in get_args(RefinementModel) else {}),
             "run_history_count": run_history_count,
             "last_artifact": project_ui_tool_response_state(
                 extract_last_artifact(doc), chat_id=chat_id, transport=runtime_app.simple_transport,

@@ -138,7 +138,7 @@ async function metadataHarness() {
     chatMetaHydrationInFlightRef: { current: new Map() },
     chatMetaHydrationMissedAtRef: { current: new Map() },
     observeSessionMeta: meta => observed.push(meta), isFailedWorkflowSession: status => status === 2,
-    setLoading() {}, setCacheSeed() {}, setStoredChatCacheSeed() {}, setChatExists() {},
+    setLoading() {}, setCacheSeed() {}, setStoredChatCacheSeed() {}, setChatExists() {}, setBoundChatModels() {},
     logChatPersistence() {}, cacheServerLastArtifact: () => true,
     console: { warn() {} },
   };

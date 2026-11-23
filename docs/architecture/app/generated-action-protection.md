@@ -45,7 +45,7 @@ approved action ids: canonical create/update/delete, exact collection list/get,
 and declared custom mutations or reads. Nonempty grants require the existing UI approval tool
 to return approval for that policy. AppGenerator resolves the persisted,
 bound review receipt, then code derives `{collection}.{action_id}` permissions
-on module actions and auth role entries. A role-managed collection must cover
+on authored module actions and auth role entries. A role-managed authored collection must cover
 all canonical writes explicitly. Validation reports missing grants for every
 incomplete role-managed collection together, so a single repair can address
 the complete omission without changing the policy automatically.
@@ -67,6 +67,29 @@ produces `get_project_updates`, `list_project_updates`, `create_project_update`,
 `update_project_update`, and `delete_project_update`.
 Candidate tasks cannot edit auth or use
 their own role declarations as authorization.
+
+Selected packs keep their verified module implementations and exact data
+contributions. A pack grant names actions declared by the module that owns its
+collection. In `access_policy.grants[].collection`, use the bare name when the
+collection has one owner. If every owner of a shared name is a selected
+verified pack module, qualify it as `module.collection`. The Support and Social
+packs both supply `requests`. Use `support.requests` for a support request
+action and `friends.requests` for a friend request action. A grant targeting a
+shared name with an app-authored owner fails validation because authored
+permission IDs derive from the bare collection name. Give new app-authored
+data a distinct name in that case. All roles granting the same module action
+use the same anchor, including actions that work with several collections.
+
+A role receives a pack permission only when that role's reviewed grants cover
+every verified module action that consumes it, including when an authored
+action would derive the same permission id. Assembly refuses unreviewed modules
+that consume such a permission. The review receipt binds the selected pack ids,
+versions and source digests, and a changed selection or source requires a new
+design review. Pack permissions are never added to default scopes.
+
+This closure covers manifest dispatch prerequisites. Pack business code may
+also apply its own record, participant, or permission checks; those remain
+independent runtime responsibilities and are not proved by action inventory.
 
 An approved concept that explicitly requires a named role must keep that role
 in the design, even when `member` is the only role. Authentication and ownership

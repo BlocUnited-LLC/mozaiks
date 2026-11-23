@@ -17,6 +17,7 @@ from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
     resolve_design_access_policy,
+    resolve_reviewed_pack_selection,
 )
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
@@ -85,7 +86,9 @@ async def _summary(store: Any, *, app_id: str, owner_user_id: str, family: str, 
     return record, payload, digest
 
 
-async def _context_from_inputs(inputs: _CompilerInputs, *, store: Any, owner_user_id: str) -> dict[str, Any]:
+async def _context_from_inputs(
+    inputs: _CompilerInputs, *, store: Any, owner_user_id: str, capability_packs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     from factory_app.workflows.AppGenerator.tools.task_integrity import settled_task_snapshot
 
     design, payload, digest = await _summary(
@@ -104,9 +107,19 @@ async def _context_from_inputs(inputs: _CompilerInputs, *, store: Any, owner_use
         "design_surface_map": deepcopy(payload.get("surface_map")),
         "design_docs_artifact": design.model_dump(mode="json", by_alias=True),
     }
+    if capability_packs is not None:
+        context["capability_packs"] = deepcopy(capability_packs)
     settled_task_snapshot(context)
     # The existing owner verifies policy review and exact design/data identity.
     resolve_design_access_policy(context)
+    from factory_app.workflows._shared.pack_selection import (
+        validate_reviewed_pack_choices,
+        validate_subscription_write_path,
+    )
+
+    validate_reviewed_pack_choices(context, inputs.app_build_plan.get("capability_packs") or [])
+    if capability_packs is not None:
+        validate_reviewed_pack_choices(context, capability_packs, recorded=True)
     if inputs.subscription_contract is not None:
         _, contract, digest = await _summary(
             store, app_id=inputs.binding.target_app_id, owner_user_id=owner_user_id,
@@ -115,6 +128,7 @@ async def _context_from_inputs(inputs: _CompilerInputs, *, store: Any, owner_use
         if digest != inputs.subscription_contract.sha256:
             raise ValueError("Approved compilation subscription identity changed")
         context["subscription_contract"] = contract
+    validate_subscription_write_path(context, context.get("subscription_contract"))
     return context
 
 
@@ -140,8 +154,8 @@ async def capture_app_compilation_inputs(
     page_review = isinstance(summary, dict) and isinstance(summary.get("access_policy_review"), dict) and bool(
         isinstance(experience, dict) and experience.get("pages")
     )
-    pack_inputs = bool(plan.get("capability_packs")) and (
-        context.get("data_contract") is not None or contract is not None
+    pack_inputs = (context.get("data_contract") is not None or contract is not None) and bool(
+        plan.get("capability_packs") or resolve_reviewed_pack_selection(context)
     )
     if not pack_inputs and not page_review:
         return None
@@ -180,7 +194,14 @@ async def capture_app_compilation_inputs(
         app_task_batch_items=task_items, app_task_batch_results=task_results,
         design_docs=_InputReference(record_id=design.id, sha256=digest), subscription_contract=subscription,
     )
-    await _context_from_inputs(inputs, store=artifact_store, owner_user_id=owner_user_id)
+    from factory_app.workflows.AppGenerator.tools.generate_and_download import (
+        _selected_capability_packs,
+    )
+
+    await _context_from_inputs(
+        inputs, store=artifact_store, owner_user_id=owner_user_id,
+        capability_packs=_selected_capability_packs(context),
+    )
     return _CompilationBinding(
         archive_sha256=archive_sha256, inputs=inputs, inputs_sha256=_digest(inputs.model_dump(mode="json")),
     ).model_dump(mode="json")
@@ -226,8 +247,13 @@ async def resolve_app_compilation_inputs(
 
     The host supplies authenticated ownership and registry scope. Returning
     None leaves old/unbound bundles on strict static-template validation.
+    Unverifiable reviewed sources are invalid compilation inputs.
     """
     from factory_app.workflows._shared.artifact_bundle import APP_BUNDLE_MAX_TOTAL_BYTES
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        ManagedCapabilityTemplateError,
+    )
+    from mozaiksai.core.session.build_context import BuildContextError
 
     store = artifact_store or get_artifact_store()
     record: BuildRecord | None = await store.get_build_record(app_id=app_id, build_record_id=build_record_id)
@@ -270,9 +296,14 @@ async def resolve_app_compilation_inputs(
         if saved.parent_record_id is None:
             if record.source_workflow != "AppGenerator" or saved.inputs.binding != binding:
                 raise ValueError("Approved compilation origin is not the bound Factory save")
-            context = await _context_from_inputs(saved.inputs, store=store, owner_user_id=owner_user_id)
+            try:
+                context = await _context_from_inputs(
+                    saved.inputs, store=store, owner_user_id=owner_user_id,
+                    capability_packs=deepcopy(selected.commit_metadata.metadata.get("capability_packs") or []),
+                )
+            except (ManagedCapabilityTemplateError, BuildContextError) as exc:
+                raise ValueError("Approved compilation pack sources could not be verified. Renew DesignDocs review.") from exc
             await read_verified_artifact_bundle(selected, max_bytes=APP_BUNDLE_MAX_TOTAL_BYTES)
-            context["capability_packs"] = deepcopy(selected.commit_metadata.metadata.get("capability_packs") or [])
             return ApprovedAppCompilation(key=_RESOLVER_KEY, context=context, binding=first, record=selected)
         if saved.parent_record_id != record.parent_build_record_id:
             raise ValueError("Approved compilation parent differs from bundle lineage")

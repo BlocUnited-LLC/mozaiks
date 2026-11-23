@@ -53,7 +53,7 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     extract_code_file_map_from_payload as _base_extract,
 )
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
-    resolve_design_access_policy,
+    resolve_authored_module_access_policy,
 )
 from mozaiksai.core.workflow.generator_support.module_account_data import (
     materialize_task_module_account_handlers,
@@ -61,6 +61,7 @@ from mozaiksai.core.workflow.generator_support.module_account_data import (
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     SHARED_UI_OUTPUT_PATHS,
     pack_owned_output_paths,
+    scoped_module_implementation_sources,
 )
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
@@ -68,6 +69,10 @@ from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
 from mozaiksai.core.workflow.generator_support.module_policy import materialize_task_module_policies
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
     materialize_module_read_implementations,
+)
+from mozaiksai.core.workflow.generator_support.module_revision import (
+    scoped_service_revision_paths,
+    validate_scoped_service_repositories,
 )
 from mozaiksai.core.workflow.generator_support.module_write_actions import (
     close_module_actions,
@@ -262,7 +267,7 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
             app_build_plan=detach(context_variables.get("app_build_plan")),
             data_contract=detach(context_variables.get("data_contract")),
             design_surface_map=detach(context_variables.get("design_surface_map")),
-            access_policy=resolve_design_access_policy(context_variables),
+            access_policy=resolve_authored_module_access_policy(context_variables),
             subscription_contract=subscription_contract,
             companion_files=admitted_module_file_map(context_variables),
         )
@@ -303,17 +308,21 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
             app_build_plan=detach(context_variables.get("app_build_plan")), data_contract=contract,
         ))
         admitted = admitted_module_file_map(context_variables)
-        incoming.update(materialize_module_read_implementations(
-            {**admitted, **incoming}, app_build_plan=detach(context_variables.get("app_build_plan")),
-            data_contract=contract, owned_paths=owned_paths or [],
-            subscription_contract=subscription_contract,
-        ))
-        incoming.update(materialize_module_write_implementations(
-            {**admitted, **incoming}, app_build_plan=detach(context_variables.get("app_build_plan")),
-            data_contract=contract, owned_paths=owned_paths or [], subscription_contract=subscription_contract,
-            access_policy=resolve_design_access_policy(context_variables),
-            design_surface_map=detach(context_variables.get("design_surface_map")),
-        ))
+        revision_paths = scoped_service_revision_paths(context_variables, detach(context_variables.get("generated_files")) or {})
+        if revision_paths:
+            validate_scoped_service_repositories({**admitted, **incoming}, revision_paths.intersection(incoming))
+        elif sources := scoped_module_implementation_sources({**admitted, **incoming}, owned_paths or []):
+            reads = materialize_module_read_implementations(
+                sources, app_build_plan=detach(context_variables.get("app_build_plan")),
+                data_contract=contract, owned_paths=owned_paths or [], subscription_contract=subscription_contract,
+            )
+            incoming.update(reads)
+            incoming.update(materialize_module_write_implementations(
+                {**sources, **reads}, app_build_plan=detach(context_variables.get("app_build_plan")),
+                data_contract=contract, owned_paths=owned_paths or [], subscription_contract=subscription_contract,
+                access_policy=resolve_authored_module_access_policy(context_variables),
+                design_surface_map=detach(context_variables.get("design_surface_map")),
+            ))
         incoming.update({path: content for path, content in schemas.items() if admitted.get(path) != content})
         incoming.update({path: content for path, content in policies.items() if admitted.get(path) != content})
         incoming = {
@@ -382,6 +391,8 @@ def _assembled_data_contract(context_variables: Any, subscription_contract: Any)
     replaced it with a composition it checked against that source; assembly
     checks the source's copy again (carried_contracts) whenever it runs.
     """
+    from factory_app.workflows._shared.pack_selection import PhysicalPackContext
+
     from .resolve_managed_capability_templates import (
         ManagedCapabilityTemplateError,
         verified_pack_data_contracts,
@@ -390,8 +401,9 @@ def _assembled_data_contract(context_variables: Any, subscription_contract: Any)
 
     contract = detach(context_variables.get("data_contract"))
     try:
+        pack_context = PhysicalPackContext(context_variables)
         pack_data_contracts = verified_pack_data_contracts(
-            verified_pack_template_inventory(context_variables=context_variables),
+            verified_pack_template_inventory(context_variables=pack_context),
         )
     except ManagedCapabilityTemplateError as exc:
         raise ValueError(f"The selected capability packs' data contributions cannot be verified: {exc}") from exc
@@ -401,7 +413,7 @@ def _assembled_data_contract(context_variables: Any, subscription_contract: Any)
     if not isinstance(contract, dict):
         return contract
     compiled = compile_data_contract(
-        contract, subscription_contract=subscription_contract, context_variables=context_variables,
+        contract, subscription_contract=subscription_contract, context_variables=pack_context,
         pack_data_contracts=pack_data_contracts,
     )
     if pack_only_base:
@@ -416,12 +428,10 @@ def _assembled_data_contract(context_variables: Any, subscription_contract: Any)
 
 
 def selected_capability_packs(context_variables: Any) -> list[dict[str, Any]] | None:
-    """The run's selected pack descriptors, else the approved plan's."""
-    packs = detach(context_variables.get("capability_packs"))
-    if not packs:
-        plan = detach(context_variables.get("app_build_plan"))
-        packs = plan.get("capability_packs") if isinstance(plan, dict) else None
-    return packs if isinstance(packs, list) else None
+    """The exact reviewed selection, independent of available offerings."""
+    from factory_app.workflows._shared.pack_selection import selected_pack_rows
+
+    return selected_pack_rows(context_variables)
 
 
 def _provenance(files: dict[str, str]) -> dict[str, Any]:

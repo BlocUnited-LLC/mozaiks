@@ -92,7 +92,7 @@ export function useAppAnalytics(appId, period) {
           return
         }
         const response = await studioFetch(
-          `/api/studio/analytics/apps/${encodeURIComponent(appId)}?period=${encodeURIComponent(period)}`,
+          `/api/studio/analytics/apps/${encodeURIComponent(appId)}?period=${encodeURIComponent(period)}&reference=dashboard`,
         )
         if (!response.ok) throw new Error('App analytics unavailable.')
         const payload = await response.json()
@@ -127,13 +127,13 @@ export function useAppAnalytics(appId, period) {
 }
 
 /** Metric drill-down: /api/studio/analytics/apps/{appId}/metrics/{metricId} */
-export async function fetchMetricDetail(appId, metricId, period) {
+export async function fetchMetricDetail(appId, metricId, period, reference = 'target') {
   if (isStudioUsageDemoModeEnabled() && isStudioDemoApp(appId)) {
     return { payload: getStudioDemoMetricDetail(appId, metricId, period), dataMode: 'demo' }
   }
   try {
     const response = await studioFetch(
-      `/api/studio/analytics/apps/${encodeURIComponent(appId)}/metrics/${encodeURIComponent(metricId)}?period=${encodeURIComponent(period)}`,
+      `/api/studio/analytics/apps/${encodeURIComponent(appId)}/metrics/${encodeURIComponent(metricId)}?period=${encodeURIComponent(period)}&reference=${reference}`,
     )
     if (!response.ok) throw new Error('Metric detail unavailable.')
     return { payload: await response.json(), dataMode: 'live' }

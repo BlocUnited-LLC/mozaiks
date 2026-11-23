@@ -710,11 +710,17 @@ async def test_subscription_save_does_not_publish_success_after_dependency_failu
 
 
 def _generator_agent_stub(name: str, context: dict) -> SimpleNamespace:
-    return SimpleNamespace(
+    agent = SimpleNamespace(
         name=name,
         context_variables=SimpleNamespace(data=context),
         system_message="base",
     )
+
+    def update_system_message(message):
+        agent.system_message = message
+
+    agent.update_system_message = update_system_message
+    return agent
 
 
 def test_inject_subscription_contract_context_raises_on_unapproved_changes_requested() -> None:

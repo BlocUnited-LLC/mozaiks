@@ -22,6 +22,7 @@ import yaml
 
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from mozaiksai.core.workflow.context.frozen import detach
+from tests.reviewed_pack_fixture import registered_pack_fixture, reviewed_pack_fixture
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 _TOOLS_DIR = WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "tools"
@@ -62,6 +63,27 @@ class _Context:
 
     def __setitem__(self, key, value) -> None:
         self.data[key] = value
+
+
+@pytest.fixture
+def managed_pack_sources(tmp_path, monkeypatch):
+    """Register real test sources without selecting any of them."""
+    def source(pack_id, facades=()):
+        return registered_pack_fixture(tmp_path, monkeypatch, pack_id, "managed_capability", facades=facades)
+
+    return source
+
+
+@pytest.fixture
+def wallet_context(managed_pack_sources):
+    managed_pack_sources("wallet")
+    return _Context(**reviewed_pack_fixture({}, ["wallet"]))
+
+
+@pytest.fixture
+def marketplace_context(managed_pack_sources):
+    managed_pack_sources("investor_marketplace")
+    return _Context(**reviewed_pack_fixture({}, ["investor_marketplace"]))
 
 
 # ---------------------------------------------------------------------------
@@ -213,8 +235,8 @@ class TestAppBuildPlanManagedCapabilityNormalization:
             "tests.app_build_plan_managed_capability_safety",
         )
 
-    def test_managed_capability_capability_source_preserved(self):
-        ctx = _Context()
+    def test_managed_capability_capability_source_preserved(self, wallet_context):
+        ctx = wallet_context
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
@@ -225,38 +247,13 @@ class TestAppBuildPlanManagedCapabilityNormalization:
         cached = ctx.data["app_build_plan"]
         assert cached["capability_packs"][0]["capability_source"] == "managed_capability"
 
-    def test_context_selected_managed_capability_source_is_normalized(self):
-        ctx = _Context(
-            capability_packs=[
-                {
-                    "id": "mozaikspay",
-                    "display_name": "MozaiksPay",
-                    "capability_source": "managed_capability",
-                    "implementation_mode": "external_integration",
-                }
-            ],
-            available_managed_capabilities=[
-                {
-                    "id": "mozaikspay",
-                    "display_name": "MozaiksPay",
-                    "capability_source": "managed_capability",
-                    "implementation_mode": "external_integration",
-                }
-            ],
-        )
+    def test_context_selected_managed_capability_source_is_normalized(self, wallet_context):
+        ctx = wallet_context
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
                 "capability_packs": [
-                    {
-                        "capability_pack_id": "mozaikspay",
-                        "surface_id": "mozaikspay_surface",
-                        "surface_kind": "external_integration",
-                        "pack_type": "billing_pack",
-                        "label": "MozaiksPay",
-                        "summary": "Managed billing.",
-                        "implementation_mode": "external_integration",
-                    }
+                    {key: value for key, value in _MANAGED_CAPABILITY.items() if key != "capability_source"},
                 ],
             },
             context_variables=ctx,
@@ -265,9 +262,9 @@ class TestAppBuildPlanManagedCapabilityNormalization:
         assert normalized["capability_source"] == "managed_capability"
         assert normalized["implementation_mode"] == "external_integration"
 
-    def test_managed_capability_with_no_module_contract_task_is_accepted(self):
+    def test_managed_capability_with_no_module_contract_task_is_accepted(self, wallet_context):
         """A managed_capability entry with no build task at all must be accepted."""
-        ctx = _Context()
+        ctx = wallet_context
         result = self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
@@ -279,6 +276,19 @@ class TestAppBuildPlanManagedCapabilityNormalization:
         assert "Capability packs: 1" in result
         cached = ctx.data["app_build_plan"]
         assert cached["capability_packs"][0]["capability_pack_id"] == "wallet"
+
+    @pytest.mark.parametrize("reviewed_empty", [False, True])
+    def test_available_managed_capability_does_not_authorize_a_plan(self, managed_pack_sources, reviewed_empty):
+        wallet = managed_pack_sources("wallet")
+        inventory = {"capability_packs": [wallet], "available_managed_capabilities": [wallet]}
+        ctx = _Context(**(reviewed_pack_fixture(inventory, []) if reviewed_empty else inventory))
+        with pytest.raises(ValueError, match="selected pack identities differ from the owner-reviewed design"):
+            self.mod.app_build_plan(
+                AppBuildPlan={**_MINIMAL_PLAN_BASE, "capability_packs": [_MANAGED_CAPABILITY]},
+                context_variables=ctx,
+            )
+        assert not ctx.get("app_plan_ready")
+        assert not ctx.get("app_build_plan")
 
     def test_generated_module_pack_with_module_contract_is_accepted(self):
         """generated_module packs must still produce module_contract tasks normally."""
@@ -293,9 +303,9 @@ class TestAppBuildPlanManagedCapabilityNormalization:
         )
         assert "Build tasks: 1" in result
 
-    def test_mixed_managed_and_generated_packs_accepted_when_only_generated_has_task(self):
+    def test_mixed_managed_and_generated_packs_accepted_when_only_generated_has_task(self, wallet_context):
         """Wallet (managed) has no task; orders (generated_module) has module_contract — valid."""
-        ctx = _Context()
+        ctx = wallet_context
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
@@ -333,15 +343,15 @@ class TestAppBuildPlanManagedCapabilityNormalization:
         )
         assert ctx.data["app_build_plan"]["capability_packs"][0]["capability_pack_id"] == "crm"
 
-    def test_multi_managed_facades_depend_on_their_matching_adapters(self):
+    def test_multi_managed_facades_depend_on_their_matching_adapters(self, managed_pack_sources, tmp_path):
         """Multiple managed capabilities must wire each facade to its own adapter task."""
-        ctx = ContextVariablesBridge({"capability_packs": [
-            {
-                "id": provider, "capability_source": "managed_capability",
-                "facades": [{"module_id": facade, "provider_module": provider}],
-            }
-            for provider, facade in (("wallet", "wallet_dashboard"), ("notifications", "notification_center"))
-        ]})
+        for pack_id, facade_id in [("wallet", "wallet_dashboard"), ("notifications", "notification_center")]:
+            managed_pack_sources(pack_id, [{"module_id": facade_id, "provider_module": pack_id}])
+            contract_path = tmp_path / "pack-registry" / pack_id / "contract.yaml"
+            contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+            contract["required_outputs"] = [{"path": f"modules/{facade_id}/module.yaml", "owner": "generator"}]
+            contract_path.write_text(yaml.safe_dump(contract), encoding="utf-8")
+        ctx = ContextVariablesBridge(reviewed_pack_fixture({}, ["wallet", "notifications"]))
         notifications_pack = {
             **_MANAGED_CAPABILITY,
             "capability_pack_id": "notifications",
@@ -569,7 +579,7 @@ class TestAppBuildPlanManagedCapabilityModuleContractRejection:
             "tests.app_build_plan_managed_module_contract_guard",
         )
 
-    def test_rejects_module_contract_for_managed_capability(self):
+    def test_rejects_module_contract_for_managed_capability(self, wallet_context):
         with pytest.raises(ValueError, match="managed capability 'wallet'"):
             self.mod.app_build_plan(
                 AppBuildPlan={
@@ -577,10 +587,10 @@ class TestAppBuildPlanManagedCapabilityModuleContractRejection:
                     "capability_packs": [_MANAGED_CAPABILITY],
                     "build_tasks": [_MANAGED_CAPABILITY_MODULE_CONTRACT_TASK],
                 },
-                context_variables=_Context(),
+                context_variables=wallet_context,
             )
 
-    def test_error_message_mentions_external_integration(self):
+    def test_error_message_mentions_external_integration(self, wallet_context):
         with pytest.raises(ValueError, match="external_integration"):
             self.mod.app_build_plan(
                 AppBuildPlan={
@@ -588,10 +598,10 @@ class TestAppBuildPlanManagedCapabilityModuleContractRejection:
                     "capability_packs": [_MANAGED_CAPABILITY],
                     "build_tasks": [_MANAGED_CAPABILITY_MODULE_CONTRACT_TASK],
                 },
-                context_variables=_Context(),
+                context_variables=wallet_context,
             )
 
-    def test_rejects_investor_marketplace_managed_capability_module_contract(self):
+    def test_rejects_investor_marketplace_managed_capability_module_contract(self, marketplace_context):
         im_pack = {
             **_MANAGED_CAPABILITY,
             "capability_pack_id": "investor_marketplace",
@@ -610,12 +620,12 @@ class TestAppBuildPlanManagedCapabilityModuleContractRejection:
                     "capability_packs": [im_pack],
                     "build_tasks": [im_task],
                 },
-                context_variables=_Context(),
+                context_variables=marketplace_context,
             )
 
-    def test_generated_module_not_blocked(self):
+    def test_generated_module_not_blocked(self, wallet_context):
         """generated_module packs must not be blocked even if a managed_capability is also present."""
-        ctx = _Context()
+        ctx = wallet_context
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
@@ -666,9 +676,11 @@ class TestAgentsYamlManagedCapabilityRules:
         assert "[CAPABILITY DIRECTORY]" in self._text
         assert "{{CAPABILITY_DIRECTORY_CONTEXT}}" in self._text
 
-    def test_appplanagent_saas_prioritizes_mozaikspay_with_provider_alternatives(self):
-        assert "mozaikspay" in self._text
-        assert "hosted MozaiksPay API" in self._text
+    def test_appplanagent_saas_requires_an_owner_reviewed_provider(self):
+        assert "When the reviewed provider is MozaiksPay" in self._text
+        assert "Subscription assignment requires one owner-reviewed writer" in self._text
+        assert "Consume verified pack facade, client and page outputs" in self._text
+        assert "do not default or substitute a provider" in self._text
         assert "external_adapter" in self._text
 
 
@@ -701,25 +713,19 @@ class TestHookManagedCapabilityContextInjection:
     def _hook(self):
         self.hook = _load_hook()
 
-    def test_planning_rule_injected_when_managed_capabilities_present(self):
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [{"id": "wallet", "display_name": "Wallet"}],
-        })
+    def test_planning_rule_injected_when_managed_capabilities_present(self, wallet_context):
+        agent = _FakeAgent("AppPlanAgent", context_variables=wallet_context.data)
         self.hook.inject_managed_capabilities_context(agent, [])
         assert "module_contract" in agent.system_message
         assert "external_integration" in agent.system_message
 
-    def test_managed_capabilities_context_header_present(self):
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [{"id": "managed_wallet"}],
-        })
+    def test_managed_capabilities_context_header_present(self, wallet_context):
+        agent = _FakeAgent("AppPlanAgent", context_variables=wallet_context.data)
         self.hook.inject_managed_capabilities_context(agent, [])
         assert "[MANAGED CAPABILITIES CONTEXT]" in agent.system_message
 
-    def test_managed_guidance_keeps_the_provider_boundary_without_unrelated_source_rules(self):
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [{"id": "module_execution"}],
-        })
+    def test_managed_guidance_keeps_the_provider_boundary_without_unrelated_source_rules(self, wallet_context):
+        agent = _FakeAgent("AppPlanAgent", context_variables=wallet_context.data)
         self.hook.inject_managed_capabilities_context(agent, [])
         msg = agent.system_message
         assert "capability_source: managed_capability" in msg
@@ -729,21 +735,20 @@ class TestHookManagedCapabilityContextInjection:
         assert "framework_pack" not in msg
         assert "external_adapter" not in msg
 
-    def test_no_injection_in_oss_mode(self):
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": None,
-        })
+    @pytest.mark.parametrize("offered", [False, True])
+    def test_no_managed_guidance_without_a_reviewed_selection(self, managed_pack_sources, offered):
+        context = {"capability_packs": [managed_pack_sources("wallet")] if offered else None}
+        agent = _FakeAgent("AppPlanAgent", context_variables=context)
         self.hook.inject_managed_capabilities_context(agent, [])
-        assert agent.system_message == ""
+        assert "Authorized reusable packs: []" in agent.system_message
+        assert "[MANAGED CAPABILITIES CONTEXT]" not in agent.system_message
+        assert "wallet" not in agent.system_message
 
-    def test_pack_listed_in_injected_context(self):
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [
-                {"id": "wallet", "display_name": "Wallet",
-                 "capabilities": [{"capability_id": "wallet.view"}]},
-                {"id": "investor_marketplace", "display_name": "Investor Marketplace"},
-            ],
-        })
+    def test_pack_listed_in_injected_context(self, managed_pack_sources):
+        managed_pack_sources("wallet")
+        managed_pack_sources("investor_marketplace")
+        context = reviewed_pack_fixture({}, ["wallet", "investor_marketplace"])
+        agent = _FakeAgent("AppPlanAgent", context_variables=context)
         self.hook.inject_managed_capabilities_context(agent, [])
         assert "wallet" in agent.system_message
         assert "investor_marketplace" in agent.system_message
@@ -849,9 +854,9 @@ class TestManagedCapabilityAdapterTaskValidation:
             "tests.app_build_plan_managed_adapter_validation",
         )
 
-    def test_managed_capability_api_surface_adapter_task_accepted(self):
+    def test_managed_capability_api_surface_adapter_task_accepted(self, wallet_context):
         """managed_capability with api_surface task at services/integrations/ must be accepted."""
-        ctx = _Context()
+        ctx = wallet_context
         result = self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
@@ -864,9 +869,9 @@ class TestManagedCapabilityAdapterTaskValidation:
         cached = ctx.data["app_build_plan"]
         assert cached["build_tasks"][0]["task_id"] == "task_wallet_adapter"
 
-    def test_managed_capability_adapter_task_with_external_integration_surface_kind(self):
+    def test_managed_capability_adapter_task_with_external_integration_surface_kind(self, wallet_context):
         """surface_kind: external_integration on a managed capability adapter task is valid."""
-        ctx = _Context()
+        ctx = wallet_context
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
@@ -877,9 +882,9 @@ class TestManagedCapabilityAdapterTaskValidation:
         )
         assert ctx.data["app_plan_ready"] is True
 
-    def test_managed_capability_no_task_still_valid(self):
+    def test_managed_capability_no_task_still_valid(self, wallet_context):
         """A managed_capability with no build task at all must always be accepted."""
-        ctx = _Context()
+        ctx = wallet_context
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
@@ -890,9 +895,9 @@ class TestManagedCapabilityAdapterTaskValidation:
         )
         assert ctx.data["app_plan_ready"] is True
 
-    def test_managed_capability_and_generated_module_together(self):
+    def test_managed_capability_and_generated_module_together(self, wallet_context):
         """managed_capability adapter + generated_module contract simultaneously accepted."""
-        ctx = _Context()
+        ctx = wallet_context
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
@@ -903,7 +908,7 @@ class TestManagedCapabilityAdapterTaskValidation:
         )
         assert len(ctx.data["app_build_plan"]["build_tasks"]) == 2
 
-    def test_managed_capability_owned_path_in_modules_dir_rejected(self):
+    def test_managed_capability_owned_path_in_modules_dir_rejected(self, wallet_context):
         """adapter task owned_paths must not target modules/{managed_capability_id}/."""
         bad_task = {
             **_MANAGED_CAPABILITY_ADAPTER_TASK,
@@ -918,10 +923,10 @@ class TestManagedCapabilityAdapterTaskValidation:
                     "capability_packs": [_MANAGED_CAPABILITY],
                     "build_tasks": [bad_task],
                 },
-                context_variables=_Context(),
+                context_variables=wallet_context,
             )
 
-    def test_managed_capability_module_contract_still_rejected_with_adapter_present(self):
+    def test_managed_capability_module_contract_still_rejected_with_adapter_present(self, wallet_context):
         """Adding a valid adapter task does not allow the module_contract task."""
         with pytest.raises(ValueError, match="managed capability 'wallet'"):
             self.mod.app_build_plan(
@@ -930,10 +935,10 @@ class TestManagedCapabilityAdapterTaskValidation:
                     "capability_packs": [_MANAGED_CAPABILITY],
                     "build_tasks": [_MANAGED_CAPABILITY_ADAPTER_TASK, _MANAGED_CAPABILITY_MODULE_CONTRACT_TASK],
                 },
-                context_variables=_Context(),
+                context_variables=wallet_context,
             )
 
-    def test_investor_marketplace_managed_adapter_accepted(self):
+    def test_investor_marketplace_managed_adapter_accepted(self, marketplace_context):
         """investor_marketplace managed capability adapter is also valid."""
         im_pack = {**_MANAGED_CAPABILITY, "capability_pack_id": "investor_marketplace",
                    "label": "Investor Marketplace"}
@@ -941,7 +946,7 @@ class TestManagedCapabilityAdapterTaskValidation:
                       "task_id": "task_im_adapter",
                       "capability_pack_id": "investor_marketplace",
                       "owned_paths": ["services/integrations/investor_marketplace_client.py"]}
-        ctx = _Context()
+        ctx = marketplace_context
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
@@ -1024,7 +1029,7 @@ class TestManagedAdapterSurfaceKindValidation:
             "tests.app_build_plan_adapter_surface_kind",
         )
 
-    def test_adapter_task_with_wrong_surface_kind_rejected(self):
+    def test_adapter_task_with_wrong_surface_kind_rejected(self, wallet_context):
         """api_surface + managed_capability + services/integrations/ + surface_kind=module → rejected."""
         bad_task = {
             **_MANAGED_CAPABILITY_ADAPTER_TASK,
@@ -1037,10 +1042,10 @@ class TestManagedAdapterSurfaceKindValidation:
                     "capability_packs": [_MANAGED_CAPABILITY],
                     "build_tasks": [bad_task],
                 },
-                context_variables=_Context(),
+                context_variables=wallet_context,
             )
 
-    def test_adapter_task_wrong_surface_kind_error_mentions_external_integration(self):
+    def test_adapter_task_wrong_surface_kind_error_mentions_external_integration(self, wallet_context):
         bad_task = {**_MANAGED_CAPABILITY_ADAPTER_TASK, "surface_kind": "refinement"}
         with pytest.raises(ValueError, match="external_integration"):
             self.mod.app_build_plan(
@@ -1049,11 +1054,11 @@ class TestManagedAdapterSurfaceKindValidation:
                     "capability_packs": [_MANAGED_CAPABILITY],
                     "build_tasks": [bad_task],
                 },
-                context_variables=_Context(),
+                context_variables=wallet_context,
             )
 
-    def test_adapter_task_with_correct_surface_kind_accepted(self):
-        ctx = _Context()
+    def test_adapter_task_with_correct_surface_kind_accepted(self, wallet_context):
+        ctx = wallet_context
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
@@ -1064,11 +1069,11 @@ class TestManagedAdapterSurfaceKindValidation:
         )
         assert ctx.data["app_plan_ready"] is True
 
-    def test_adapter_task_with_no_surface_kind_accepted(self):
+    def test_adapter_task_with_no_surface_kind_accepted(self, wallet_context):
         """surface_kind absent (null) on adapter task is not enforced — graceful."""
         task_no_surface_kind = {k: v for k, v in _MANAGED_CAPABILITY_ADAPTER_TASK.items()
                                 if k != "surface_kind"}
-        ctx = _Context()
+        ctx = wallet_context
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,

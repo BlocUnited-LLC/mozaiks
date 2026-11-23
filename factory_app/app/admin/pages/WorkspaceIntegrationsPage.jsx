@@ -1,65 +1,37 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { PageHeader, SummaryStrip } from '@mozaiks/chat-ui/ui'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ActionButton,
-  API_BASE,
   StatusPill,
   StudioErrorState,
   StudioInlineEmptyState,
   StudioLoadingState,
   StudioSlideOver,
 } from '../../ui/components/StudioShared.jsx'
+import {
+  checkProblemMessage,
+  displayTone,
+  effectiveStatus,
+  failedCheckReason,
+  hasFailedCheck,
+  integrationGroup,
+  isExpired,
+  isExpiring,
+  isRejected,
+  lastCheckDisplay,
+  needsAttention,
+  saveAndCheckConnector,
+  statusLabel,
+  statusTone,
+  withConnectorOverlay,
+} from './connectorStatusModel.js'
+import { studioFetch } from './studioApi.js'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
-
-function statusTone(status) {
-  if (status === 'configured' || status === 'healthy') return 'success'
-  if (status === 'partial' || status === 'pending_validation' || status === 'expiring') return 'warning'
-  if (status === 'missing' || status === 'unhealthy' || status === 'not_configured' || status === 'expired') return 'destructive'
-  return 'default'
-}
-
-function statusLabel(status, item = null) {
-  const resolvedStatus = item?.display_status || status
-  if (resolvedStatus === 'configured') return 'Connected'
-  if (resolvedStatus === 'partial') return 'Needs setup'
-  if (resolvedStatus === 'missing' && Number(item?.app_usage_count || 0) > 0) return 'Needs setup'
-  return 'Available'
-}
-
-function displayTone(item) {
-  const resolvedStatus = item?.display_status || item?.status
-  if (resolvedStatus === 'missing' && Number(item?.app_usage_count || 0) === 0) return 'default'
-  return statusTone(resolvedStatus)
-}
-
-function withConnectorOverlay(item, connector) {
-  const lifecycle = connectorLifecycle(connector)
-  if (connector?.ready) {
-    return {
-      ...item,
-      display_status: lifecycle === 'expiring' ? 'expiring' : 'configured',
-      workspace_connector_status: lifecycle === 'expiring' ? 'expiring' : 'ready',
-      connector_lifecycle: lifecycle,
-      connector_days_until_expiry: connector?.days_until_expiry ?? null,
-    }
-  }
-  if (connector) {
-    return {
-      ...item,
-      workspace_connector_status: lifecycle === 'expired' ? 'expired' : 'partial',
-      connector_lifecycle: lifecycle,
-      connector_days_until_expiry: connector?.days_until_expiry ?? null,
-    }
-  }
-  return item
-}
-
-function effectiveStatus(item) {
-  return item?.display_status || item?.status
-}
+// How a service is classified (connected, needs attention, available) lives in
+// connectorStatusModel.js. The helpers here only choose wording.
 
 function humanize(key) {
   if (String(key || '').toLowerCase() === 'llms') return 'LLMs'
@@ -71,28 +43,6 @@ function appUsageLabel(item) {
   if (count === 1) return 'Used by 1 app'
   if (count > 1) return `Used by ${count} apps`
   return null
-}
-
-function connectorLifecycle(connector) {
-  return connector?.lifecycle_status || (connector?.ready ? 'active' : null)
-}
-
-function isExpired(connector) {
-  return connectorLifecycle(connector) === 'expired'
-}
-
-function isExpiring(connector) {
-  return connectorLifecycle(connector) === 'expiring'
-}
-
-function needsAttention(item, connector) {
-  const usedByApps = Number(item?.app_usage_count || 0) > 0
-  if (isExpired(connector)) return true
-  if (isExpiring(connector)) return true
-  // When connector is not passed, fall back to merged fields from withConnectorOverlay
-  const lifecycle = item?.connector_lifecycle
-  if (lifecycle === 'expired' || lifecycle === 'expiring') return true
-  return effectiveStatus(item) === 'partial' || (effectiveStatus(item) === 'missing' && usedByApps)
 }
 
 function connectorLabel(connector, item) {
@@ -110,6 +60,12 @@ function connectorLabel(connector, item) {
 function connectorDescription(connector, item) {
   if (isExpired(connector)) {
     return 'This connector has expired. Update the key to reconnect and restore app access to this service.'
+  }
+  if (hasFailedCheck(connector)) {
+    const reason = failedCheckReason(connector)
+    return reason
+      ? `A key is saved, but the last check of this connection failed: ${reason}`
+      : 'A key is saved, but the last check found that it cannot be used as saved. Use Test connection to see why.'
   }
   if (isExpiring(connector)) {
     const days = connector?.days_until_expiry
@@ -130,8 +86,18 @@ function connectorDescription(connector, item) {
   return 'This service is available for future apps. No app currently depends on it.'
 }
 
+// Tone of the "Workspace connector" pill: it names where the credential comes
+// from, and must not read as healthy when that credential does not work.
+function storedConnectorTone(connector) {
+  if (!connector?.service) return 'default'
+  if (isExpired(connector) || hasFailedCheck(connector)) return 'destructive'
+  if (isExpiring(connector)) return 'warning'
+  return 'success'
+}
+
 function actionLabel(item, connector) {
   if (isExpired(connector)) return 'Renew key'
+  if (isRejected(connector)) return 'Replace key'
   if (isExpiring(connector)) return 'Renew key'
   if (needsAttention(item, connector)) return 'Review setup'
   if (connector || effectiveStatus(item) === 'configured') return 'Manage'
@@ -219,64 +185,50 @@ function CategoryTabs({ categories, active, onChange }) {
 
 // ── API ───────────────────────────────────────────────────────────────────────
 
-async function fetchIntegrations() {
-  const res = await fetch(`${API_BASE}/api/modules/workspace_integrations/list_integrations`, {
+// Every call goes through studioFetch so it carries the signed-in session. A
+// bare fetch here sent no token and failed with 401 whenever sign-in was on.
+async function integrationsAction(action, input = {}) {
+  const res = await studioFetch(`/api/modules/workspace_integrations/${action}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
+    body: JSON.stringify(input),
   })
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
   return res.json()
 }
 
-async function fetchWorkspaceConnectors() {
-  const res = await fetch(`${API_BASE}/api/modules/workspace_integrations/list_workspace_connectors`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
-  })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.json()
+function fetchIntegrations() {
+  return integrationsAction('list_integrations')
 }
 
+function fetchWorkspaceConnectors() {
+  return integrationsAction('list_workspace_connectors')
+}
+
+// A save or delete the server refuses still answers 200, with the outcome in
+// the body. Treat a refusal as a failure instead of closing the panel on it.
 async function saveConnectorKey(service, secretValue, displayName) {
-  const res = await fetch(`${API_BASE}/api/modules/workspace_integrations/save_workspace_connector`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ service, secret_value: secretValue, display_name: displayName }),
+  const result = await integrationsAction('save_workspace_connector', {
+    service,
+    secret_value: secretValue,
+    display_name: displayName,
   })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.json()
+  if (result?.success === false) throw new Error(result.error || 'The key could not be stored.')
+  return result
 }
 
-async function saveNote(integrationId, note) {
-  const res = await fetch(`${API_BASE}/api/modules/workspace_integrations/set_integration_note`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ integration_id: integrationId, note }),
-  })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.json()
+function saveNote(integrationId, note) {
+  return integrationsAction('set_integration_note', { integration_id: integrationId, note })
 }
 
 async function deleteWorkspaceConnector(service) {
-  const res = await fetch(`${API_BASE}/api/modules/workspace_integrations/delete_workspace_connector`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ service }),
-  })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.json()
+  const result = await integrationsAction('delete_workspace_connector', { service })
+  if (result?.deleted === false) throw new Error(result.error || 'The connector could not be removed.')
+  return result
 }
 
-async function checkWorkspaceConnector(service) {
-  const res = await fetch(`${API_BASE}/api/modules/workspace_integrations/check_workspace_connector_health`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ service }),
-  })
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-  return res.json()
+function checkWorkspaceConnector(service) {
+  return integrationsAction('check_workspace_connector_health', { service })
 }
 
 // ── SetupSlideOver ────────────────────────────────────────────────────────────
@@ -301,13 +253,17 @@ function SetupSlideOver({
   const [copied, setCopied] = useState(null)
   const [keyVisible, setKeyVisible] = useState(false)
 
+  const itemId = item?.id ?? null
+  const savedNote = item?.note || ''
   useEffect(() => {
     if (open) {
-      setNote(item?.note || '')
       setApiKey('')
       setKeyVisible(false)
     }
-  }, [open, item])
+  }, [open, itemId])
+  useEffect(() => {
+    if (open) setNote(savedNote)
+  }, [open, itemId, savedNote])
 
   function copyToClipboard(text) {
     navigator.clipboard?.writeText(text).then(() => {
@@ -326,7 +282,9 @@ function SetupSlideOver({
   const isConnected = effectiveStatus(item) === 'configured' && !needsAttention(item, connector)
   // Primary secret key name for the inline connect form (first required secret)
   const primaryKeyName = secrets[0]?.name || item.connector_key || null
-  const setupUrl = item.setup_url || null
+  // The provider's own key page. The catalog row's `setup_url` is a Studio path, not this.
+  const setupUrl = item.provider_setup_url || null
+  const lastCheck = lastCheckDisplay(connector, { statusLabel: humanize })
 
   const footer = (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -406,7 +364,7 @@ function SetupSlideOver({
             Credential source
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <StatusPill tone={hasStoredConnector ? 'success' : 'default'}>
+            <StatusPill tone={storedConnectorTone(connector)}>
               {hasStoredConnector ? 'Workspace connector' : connectorLabel(connector, item)}
             </StatusPill>
           </div>
@@ -474,12 +432,10 @@ function SetupSlideOver({
               Last health check
             </div>
             <div className="flex items-center gap-2">
-              <StatusPill tone={statusTone(connector.health.status)}>
-                {humanize(connector.health.status)}
-              </StatusPill>
+              <StatusPill tone={lastCheck.tone}>{lastCheck.label}</StatusPill>
             </div>
-            {connector.health.message && (
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">{connector.health.message}</p>
+            {lastCheck.message && (
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">{lastCheck.message}</p>
             )}
           </div>
         )}
@@ -672,9 +628,18 @@ export default function WorkspaceIntegrationsPage() {
   const [checking, setChecking] = useState(false)
   const [actionError, setActionError] = useState(null)
   const [activeCategory, setActiveCategory] = useState(ALL_TAB)
+  // The service whose panel is open now. A save waits for the provider check,
+  // and the owner can close the panel or open another one meanwhile.
+  const activeItemId = useRef(null)
+  useEffect(() => {
+    activeItemId.current = activeItem?.id ?? null
+  }, [activeItem])
 
   async function load(preserveCategory = false) {
-    setLoading(true)
+    // Only the first load replaces the page with a loading state. A reload
+    // keeps the lists and the open panel on screen, so what the owner typed
+    // in the panel is still there when it returns.
+    if (!preserveCategory) setLoading(true)
     try {
       const payload = await fetchIntegrations()
       setData(payload)
@@ -710,17 +675,25 @@ export default function WorkspaceIntegrationsPage() {
     if (!keyValue?.trim()) return
     setSaving(true)
     setActionError(null)
+    // If the owner closes this panel or opens another before the check
+    // returns, the result is not theirs to see there: the reloaded list shows it.
+    const stillOpen = () => activeItemId.current === service
     try {
-      const saveResult = await saveConnectorKey(service, keyValue.trim(), displayName)
-      setActiveItem(null)
-      // Auto-validate immediately when a provider health check is available.
-      // Fire-and-forget: the health result updates the store; the reload picks it up.
-      if (saveResult?.health_check_supported) {
-        checkWorkspaceConnector(service).catch(() => {})
+      const { problem } = await saveAndCheckConnector({
+        save: () => saveConnectorKey(service, keyValue.trim(), displayName),
+        check: () => checkWorkspaceConnector(service),
+        reload: () => load(true),
+        displayName,
+      })
+      if (!stillOpen()) return
+      if (problem) {
+        // Keep the panel open so the owner can enter a working key.
+        setActionError(problem)
+      } else {
+        setActiveItem(null)
       }
-      await load(true)
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Key could not be saved.')
+      if (stillOpen()) setActionError(err instanceof Error ? err.message : 'Key could not be saved.')
     } finally {
       setSaving(false)
     }
@@ -764,10 +737,15 @@ export default function WorkspaceIntegrationsPage() {
     setChecking(true)
     setActionError(null)
     try {
-      await checkWorkspaceConnector(service)
+      const health = await checkWorkspaceConnector(service)
       await load(true)
+      // Say what the check found; the list only shows that it failed.
+      const problem = checkProblemMessage(health, connector.display_name || service, { afterSave: false })
+      if (problem && activeItemId.current === service) setActionError(problem)
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Health check could not run.')
+      if (activeItemId.current === service) {
+        setActionError(err instanceof Error ? err.message : 'Health check could not run.')
+      }
     } finally {
       setChecking(false)
     }
@@ -776,6 +754,12 @@ export default function WorkspaceIntegrationsPage() {
   function closeSlideOver() {
     setActiveItem(null)
     setActionError(null)
+  }
+
+  function openSlideOver(item) {
+    // An error belongs to the panel it happened in.
+    setActionError(null)
+    setActiveItem(item)
   }
 
   if (loading) return <StudioLoadingState label="Loading integrations..." />
@@ -789,12 +773,18 @@ export default function WorkspaceIntegrationsPage() {
   const integrations = rawIntegrations.map((item) =>
     withConnectorOverlay(item, connectorsByService.get(item.id)),
   )
+  // The open panel shows the service as it is now, not as it was when its
+  // card was clicked: a save or a check changes its status.
+  const activeIntegration = activeItem
+    ? integrations.find((item) => item.id === activeItem.id) || activeItem
+    : null
   const activeConnector = activeItem ? connectorsByService.get(activeItem.id) : null
 
+  const inGroup = (group) => (item) => integrationGroup(item) === group
   const sorted = [
-    ...integrations.filter(needsAttention),
-    ...integrations.filter((i) => effectiveStatus(i) === 'configured' && !needsAttention(i)),
-    ...integrations.filter((i) => !needsAttention(i) && effectiveStatus(i) !== 'configured'),
+    ...integrations.filter(inGroup('attention')),
+    ...integrations.filter(inGroup('connected')),
+    ...integrations.filter(inGroup('available')),
   ]
 
   const categories = [...new Set(sorted.map((i) => String(i.category || '').toLowerCase()).filter(Boolean))]
@@ -806,29 +796,27 @@ export default function WorkspaceIntegrationsPage() {
     {
       id: 'attention',
       title: 'Needs attention',
-      items: filtered.filter(needsAttention),
+      items: filtered.filter(inGroup('attention')),
     },
     {
       id: 'connected',
       title: 'Connected',
-      items: filtered.filter((i) => effectiveStatus(i) === 'configured' && !needsAttention(i)),
+      items: filtered.filter(inGroup('connected')),
     },
     {
       id: 'available',
       title: 'Available',
-      items: filtered.filter((i) => !needsAttention(i) && effectiveStatus(i) !== 'configured'),
+      items: filtered.filter(inGroup('available')),
     },
   ]
 
-  const attentionCount = integrations.filter(needsAttention).length
-  const connectedCount = integrations.filter(
-    (i) => effectiveStatus(i) === 'configured' && !needsAttention(i),
-  ).length
+  const attentionCount = integrations.filter(inGroup('attention')).length
+  const connectedCount = integrations.filter(inGroup('connected')).length
   const usedCount = integrations.filter((i) => Number(i.app_usage_count || 0) > 0).length
 
   const summaryItems = [
     { id: 'connected', label: 'Connected', value: connectedCount, detail: 'Ready for apps' },
-    { id: 'attention', label: 'Needs setup', value: attentionCount, detail: attentionCount > 0 ? 'Used by apps' : 'No blockers' },
+    { id: 'attention', label: 'Needs attention', value: attentionCount, detail: attentionCount > 0 ? 'Listed first below' : 'No blockers' },
     { id: 'used', label: 'Used by apps', value: summary.used ?? usedCount, detail: 'Declared by builds' },
   ]
 
@@ -870,7 +858,7 @@ export default function WorkspaceIntegrationsPage() {
                     title={group.title}
                     items={group.items}
                     connectorsByService={connectorsByService}
-                    onOpen={setActiveItem}
+                    onOpen={openSlideOver}
                   />
                 ))}
               </div>
@@ -880,7 +868,7 @@ export default function WorkspaceIntegrationsPage() {
 
         <SetupSlideOver
           open={Boolean(activeItem)}
-          item={activeItem}
+          item={activeIntegration}
           connector={activeConnector}
           connectorError={connectorError}
           onClose={closeSlideOver}

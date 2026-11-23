@@ -124,6 +124,7 @@ const GlobalChatWidgetWrapper = () => {
         pageContext={pageContext}
         pagePath={pagePath}
         freshStartPath={freshStartPath}
+        supportModule={navigation?.support_module ?? null}
       />
     </>
   );

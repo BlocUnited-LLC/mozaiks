@@ -70,6 +70,34 @@ def test_typed_only_output_reaches_persisted_files_and_keeps_deletion_semantics(
     assert "code_files" not in output
 
 
+@pytest.mark.parametrize("stale_companion", [False, True])
+def test_scoped_handler_compiles_with_its_admitted_companions_among_stock_modules(stale_companion):
+    from tests.test_appgenerator_module_write_actions import BACKEND, _closed, _contract, _plan
+    from tests.test_content_starter_materialization import APPROVED_DATA, PACK
+
+    files = extract_code_file_map_from_payload(_closed())
+    content_manifest = "modules/content/module.yaml"
+    files[content_manifest] = (PACK / "templates" / content_manifest).read_text(encoding="utf-8")
+    plan, contract = _plan(), _contract()
+    plan["capability_packs"].append({"capability_pack_id": "content", "capability_source": "generated_module"})
+    contract["surfaces"].extend(deepcopy(APPROVED_DATA["surfaces"]))
+    handler, service = f"{BACKEND}/handler.py", f"{BACKEND}/service.py"
+    if stale_companion:
+        files[service] = "from .schemas import MissingSchema\n"
+    context = ContextVariablesBridge({"app_build_plan": plan, "data_contract": contract, "generated_files": files,
+                                      "current_build_task": {"owned_paths": [handler]}})
+    request = StructuredOutputOverlay(context, {"python_files": [], "code_files": []})
+    if stale_companion:
+        with pytest.raises(ValueError, match="service.py:1: imports .*MissingSchema"):
+            save_generated_code(request)
+        assert not context.get("code_files")
+    else:
+        assert save_generated_code(request)["saved_files"] == [handler]
+        rendered = context.get("code_files")[0]["content"]
+        assert "async def list_tasks(" in rendered and "async def create_task(" in rendered
+    assert context.snapshot()["generated_files"] == files
+
+
 async def _admit_typed_service(monkeypatch, output):
     task = {
         "task_id": "report_services", "task_type": "business_services", "initial_agent": "ServiceAgent",

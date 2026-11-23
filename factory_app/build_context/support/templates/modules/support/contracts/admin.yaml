@@ -1,0 +1,8 @@
+schema_version: mozaiks.admin.v2
+panels:
+  - id: support-inbox
+    label: Support inbox
+    page: support
+    renderer: custom_component
+    component: SupportAdminPanel
+    permissions: [support.read]

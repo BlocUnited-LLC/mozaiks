@@ -14,6 +14,8 @@ from typing import Any
 
 import yaml
 
+from factory_app.workflows._shared.hook_utils import update_agent_section
+from factory_app.workflows._shared.pack_selection import subscription_assignment_writers
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionAssignmentStoreDef
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
@@ -267,13 +269,12 @@ def _trim_contract(contract: Mapping[str, Any]) -> dict[str, Any]:
         "module_contract_updates",
         "workflow_contract_updates",
         "page_surface_requirements",
-        "app_generator_instructions",
         "validation_notes",
     }
     return {key: contract.get(key) for key in allowed if key in contract}
 
 
-def _render_contract(contract: Mapping[str, Any]) -> str:
+def _render_contract(contract: Mapping[str, Any], *, assignment_writers: Mapping[str, str] | None = None) -> str:
     if not bool(contract.get("contract_required")):
         rationale = str(contract.get("rationale") or "No app-owned SaaS subscription contract is required.").strip()
         return "\n".join(
@@ -281,10 +282,24 @@ def _render_contract(contract: Mapping[str, Any]) -> str:
                 "[SUBSCRIPTION CONTRACT CONTEXT]",
                 "No app-owned SaaS subscription contract is required for this build.",
                 f"Rationale: {rationale}",
-                "Do not generate config/subscriptions.yaml, billing modules, token wallets, or metering declarations unless the current task explicitly changes monetization scope.",
+                "Do not generate config/subscriptions.yaml, billing modules, token wallets, or metering declarations. A monetization scope change requires renewed DesignDocs selection and subscription contract approval first.",
             ]
         )
 
+    writers = dict(assignment_writers or {})
+    if len(writers) > 1:
+        raise ValueError("Select exactly one reviewed subscription assignment writer")
+    writer_guidance = (
+        "Reviewed subscription assignment writer: " + next(iter(writers)) + ". "
+        "Its declared template outputs are deterministic assembly work. Do not create model-owned "
+        "data_migrations, module_contract or business_services tasks for pack-owned files. "
+        "Preserve workspace-owned outputs from the verified refinement source. "
+        "Do not introduce another assignment writer or provider."
+        if writers else
+        "No subscription assignment writer was selected and owner-reviewed. Return to DesignDocs "
+        "to select and review a writer before generation. The subscription contract does not choose "
+        "a default provider or authorize entitlement_dispatch tasks."
+    )
     body = yaml.safe_dump(
         _trim_contract(contract),
         sort_keys=False,
@@ -299,7 +314,7 @@ def _render_contract(contract: Mapping[str, Any]) -> str:
             "Do not add hosted-product provider behavior here; payment checkout, invoices, and settlement are app-owned or host-provided integration concerns.",
             "AppGenerator assembly writes config/subscriptions.yaml from this contract's subscription_config_file. No build task owns config/subscriptions.yaml, and no agent authors it.",
             "AppGenerator deterministically declares every assignment_store.data_alias, its local assignment collection, and lookup index in data/contract.json from this approved subscription contract, including product stores. This applies to managed and self-hosted writers. Managed billing facades still own no app collections; assignment storage belongs to the subscription_assignments app_policy surface. Do not declare aliases inside migrations or generate provider-owned plans and billing records.",
-            "This contract's subscription_config_file declares assignment_store. If the build does not include any managed capability pack that provides the subscription_write_path capability, AppBuildPlan must also include three entitlement_dispatch tasks: (1) one data_migrations task (capability_pack_id: 'entitlement_dispatch', owned_paths: ['data/migrations/001_entitlement_dispatch_collections.json'], initial_agent: 'DatabaseAgent') using the versioned pack template with operations: [] because data/contract.json owns assignment storage, (2) one module_contract task (capability_pack_id: 'entitlement_dispatch', owned_paths: ['modules/entitlement_dispatch/module.yaml'], initial_agent: 'ConfigMiddlewareAgent'), and (3) one business_services task (capability_pack_id: 'entitlement_dispatch', owned_paths: ['modules/entitlement_dispatch/backend/handler.py', 'modules/entitlement_dispatch/backend/service.py', 'modules/entitlement_dispatch/backend/repo.py'], initial_agent: 'ServiceAgent'). Any managed capability pack selected for this build that declares provides_capabilities: [subscription_write_path] in its contract is the write-path owner — entitlement_dispatch must not be included alongside it. The module writes the configured assignment_store.data_alias and is the write-side partner for ConfiguredEntitlementAdapter (the runtime read side). The bundle scanner rejects apps that declare assignment_store without either entitlement_dispatch or a managed assignment writer.",
+            writer_guidance,
             body,
         ]
     )
@@ -370,6 +385,11 @@ def inject_subscription_contract_context(agent: Any, messages: list[dict[str, An
     data = _context_data(agent)
     contract = resolve_subscription_contract(data)
     if not contract:
+        current = getattr(agent, "system_message", None) or getattr(agent, "_system_message", "") or ""
+        if "[SUBSCRIPTION CONTRACT CONTEXT]" in current:
+            update_agent_section(agent, "[SUBSCRIPTION CONTRACT CONTEXT]",
+                "No approved subscription contract is available. Do not generate assignment or billing files; obtain contract approval first.")
+            agent._mozaiks_base_system_message = getattr(agent, "system_message", None) or getattr(agent, "_system_message", "")
         # Say which source was consulted and what was there. This hook read an
         # attribute the live context container does not expose and so injected
         # nothing on every build until #718 -- silently, because it logged
@@ -397,8 +417,9 @@ def inject_subscription_contract_context(agent: Any, messages: list[dict[str, An
                 "revise and approve the contract before downstream generation."
             )
         return
-    rendered = _render_contract(contract)
-    _apply_text(agent, rendered)
+    rendered = _render_contract(contract, assignment_writers=subscription_assignment_writers(data))
+    update_agent_section(agent, "[SUBSCRIPTION CONTRACT CONTEXT]", rendered.split("\n", 1)[1])
+    agent._mozaiks_base_system_message = getattr(agent, "system_message", None) or getattr(agent, "_system_message", "")
     logger.info(
         "SUBSCRIPTION_CONTRACT_CONTEXT injected agent=%s contract_required=%s "
         "plans=%d chars=%d",

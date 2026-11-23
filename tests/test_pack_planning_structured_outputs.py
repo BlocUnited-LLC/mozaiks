@@ -16,18 +16,25 @@ import pytest
 import yaml
 
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    verified_pack_selection,
+)
 from mozaiksai.core.session.build_context import load_trusted_build_context
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge, _workflow_tool_invocation
 from mozaiksai.core.workflow.context.authority import build_context_authority_policy
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.context.schema import load_context_variables_config
 from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_reviewed_pack_selection,
+)
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_owned_output_paths,
 )
 from mozaiksai.core.workflow.outputs import structured
 from mozaiksai.core.workflow.outputs.runtime_validation import validate_agent_structured_output
 from tests.factory_context import factory_context
+from tests.reviewed_pack_fixture import reviewed_pack_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / "factory_app/workflows/AppGenerator"
@@ -63,7 +70,7 @@ def context(tmp_path, monkeypatch):
     policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=config.definitions)
     projected = load_trusted_build_context(policy, build_context_root=root)
     assert [pack["id"] for pack in projected["capability_packs"]] == ["content"]
-    bridge = ContextVariablesBridge(factory_context(projected), authority_policy=policy)
+    bridge = ContextVariablesBridge(reviewed_pack_fixture(factory_context(projected), ["content"]), authority_policy=policy)
     bridge._bind_run(("AppGenerator", "pack-planning-app", "882cbad6-4cf3-45fa-9aca-70a1c263f533"), policy)
     return bridge
 
@@ -163,8 +170,12 @@ def test_exact_app_plan_json_releases_pack_backend_and_preserves_app_work(regist
     assert not owned.intersection(path for task in tasks.values() for path in task["owned_paths"])
     [selected] = stored["capability_packs"]
     [admitted] = detach(context.get("capability_packs"))
-    for key in ("pack_source_path", "version"):
-        assert selected[key] == admitted[key]
+    [reviewed] = resolve_reviewed_pack_selection(context)
+    assert "pack_source_path" not in selected
+    assert (selected["version"], selected["digest"]) == (reviewed["version"], reviewed["digest"])
+    resolved = verified_pack_selection(selected, context_variables=context)
+    assert resolved is not None and resolved["source_path"] == admitted["pack_source_path"]
+    assert resolved["pack_id"] == reviewed["pack_id"]
     assert candidate == original
 
 

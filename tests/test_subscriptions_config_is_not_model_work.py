@@ -18,13 +18,14 @@ import inspect
 from copy import deepcopy
 from typing import Any
 
+import pytest
+
 from factory_app.workflows._shared.subscription_contract_context import _render_contract
 from factory_app.workflows.AppGenerator.tools import app_build_plan as cache_module
 from factory_app.workflows.AppGenerator.tools import app_plan_review
 from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _resolve_monetization_provider,
     _subscription_contract_required,
-    _validate_monetization_provider_selection,
     release_subscriptions_config,
 )
 from factory_app.workflows.AppGenerator.tools.app_plan_review import review_app_build_plan
@@ -39,6 +40,13 @@ CONTRACT = {
     "contract_required": True,
     "subscription_config_file": {"plans": [{"plan_id": "free"}, {"plan_id": "pro"}]},
 }
+
+
+@pytest.fixture(autouse=True)
+def registered_provider(tmp_path, monkeypatch):
+    from tests.test_factory_pack_selection import _enable_managed
+
+    _enable_managed(tmp_path, monkeypatch)
 
 
 def _plan_with(*tasks: dict[str, Any]) -> dict[str, Any]:
@@ -81,11 +89,10 @@ def test_the_27ebdedc_shape_passes_without_a_task() -> None:
         "subscription_contract_artifact": {"metadata": {"summary_payload": CONTRACT}},
     })
     assert _subscription_contract_required(context) is True
-    packs, provider = _resolve_monetization_provider(
-        [], contract_required=True, monetization_provider="mozaiks_pay", context_variables=context,
-    )
-    assert "mozaikspay" in [pack.get("capability_pack_id") for pack in packs]
-    _validate_monetization_provider_selection(packs, contract_required=True, monetization_provider=provider)
+    with pytest.raises(ValueError, match="owner-reviewed in DesignDocs"):
+        _resolve_monetization_provider(
+            [], contract_required=True, monetization_provider="mozaiks_pay", context_variables=context,
+        )
 
 
 def test_no_contract_means_no_subscription_build() -> None:

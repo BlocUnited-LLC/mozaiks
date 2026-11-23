@@ -39,6 +39,7 @@ export function ResourceList({
   renderMobileItem,
   empty = null,
   onRowClick,
+  isRowClickable,
   className = '',
   tableClassName = '',
 }) {
@@ -87,7 +88,7 @@ export function ResourceList({
           <tbody className="divide-y divide-border/28">
             {normalizedItems.map((item, index) => {
               const rowId = getItemId(item, index);
-              const clickable = typeof onRowClick === 'function';
+              const clickable = typeof onRowClick === 'function' && (!isRowClickable || isRowClickable(item, index));
               return (
                 <tr
                   key={rowId}

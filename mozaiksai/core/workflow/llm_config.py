@@ -289,8 +289,8 @@ async def get_llm_config(
             raise ValueError("LLM_MAX_TOKENS must be a positive integer")
     # Refresh raw providers before consulting derived variants so TTL and
     # explicit invalidation can replace a previously cached provider.
-    config_list = await _load_raw_config_list()
-    effective_list = extra_config.get("config_list") or config_list
+    config_list = extra_config.get("config_list") or await _load_raw_config_list()
+    effective_list = config_list
     thinking_level = os.getenv("LLM_GEMINI_THINKING_LEVEL", "").strip()
     if thinking_level and "thinking_level" not in extra_config:
         # Keep the provider-specific default attached to each eligible entry:

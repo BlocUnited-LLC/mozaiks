@@ -61,7 +61,7 @@ Runtime owners:
 Status mappings:
 
 - `factory_app/app/admin/pages/AppOverviewPage.jsx`
-- `chat-ui/src/admin/pages/ActivitySection.jsx`
+- `chat-ui/src/admin/pages/OperationsSection.jsx`
 
 The App Zero overview was inspected read-only: its app-local implementation
 uses commercial string statuses and does not contain the obsolete numeric

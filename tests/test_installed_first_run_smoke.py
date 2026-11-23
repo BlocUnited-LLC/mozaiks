@@ -14,7 +14,7 @@ from scripts import run_release_audit, smoke_installed_first_run
 def _studio_shell() -> dict:
     return {
         "pages": [
-            {"path": "/apps", "component": "AppsPage", "meta": {"requiresRole": "admin"}}
+            {"path": "/apps", "component": "AppsPage", "meta": {}}
         ]
     }
 
@@ -38,6 +38,8 @@ def test_smoke_checks_the_apps_page_and_backing_api(monkeypatch, tmp_path, capsy
     ("shell", "status", "message"),
     [
         ({"pages": []}, 200, "must declare /apps"),
+        ({"pages": [{"path": "/apps", "component": "AppsPage", "meta": {"requiresRole": "admin"}}]},
+         200, "without a global role requirement"),
         (_studio_shell(), 403, "/api/studio/apps returned 403"),
     ],
 )

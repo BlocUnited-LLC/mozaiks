@@ -13,6 +13,7 @@ import os
 import stat
 import zipfile
 from asyncio import CancelledError, Lock, to_thread
+from collections import Counter
 from collections.abc import Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from datetime import UTC, datetime
@@ -129,6 +130,7 @@ from mozaiksai.core.runtime.app.metrics_loader import (
     MetricsConfigLoadError,
     load_metrics_config,
 )
+from mozaiksai.core.runtime.app.module_permissions import resolve_module_permissions
 from mozaiksai.core.runtime.app.paths import app_bundle_workspace_path
 from mozaiksai.core.runtime.app.studio_summary import (
     build_app_overview_summary,
@@ -163,6 +165,8 @@ from mozaiksai.core.workflow.generator_support.connector_health import run_conne
 from mozaiksai.core.workflow.generator_support.connector_service import (
     compute_connector_health,
     delete_connector,
+    get_connector,
+    get_connector_backend_summary,
     list_connectors,
     patch_connector,
     save_connector,
@@ -178,6 +182,12 @@ from mozaiksai.hosts.runtime import register_app_lifespan
 from mozaiksai.hosts.source_path_policy import (
     authorize_http_workflow_source_paths,
     require_http_local_source_mode,
+)
+from mozaiksai.hosts.studio_model_policy import (
+    StudioModelPolicy,
+    save_studio_model_policy,
+    select_studio_model,
+    studio_model_options,
 )
 
 app = platform_app.app
@@ -677,21 +687,25 @@ async def _build_artifact_review_payload(
     refinement_metadata = _refinement_metadata_from_version(version)
     changed_files = _build_bundle_diff_summary(current_files=current_files, parent_files=parent_files)
     selected_paths = []
-    validation_result = None
+    validation_result = _version_metadata(version).get("validation_result")
     coding_summary = None
     if latest_session is not None and isinstance(latest_session.metadata, dict):
         worker_meta = latest_session.metadata.get("coding_worker") or {}
         if isinstance(worker_meta, dict):
             selected_paths = list(worker_meta.get("metadata", {}).get("selected_file_paths") or [])
-            validation_result = worker_meta.get("validation_result")
+            if validation_result is None:
+                validation_result = worker_meta.get("validation_result")
             coding_summary = (worker_meta.get("plan") or {}).get("summary")
     if not selected_paths:
         selected_paths = list((version.commit_metadata.metadata or {}).get("applied_paths") or [])
-    if validation_result is None:
-        validation_result = _version_metadata(version).get("validation_result")
 
     review_status = version.lifecycle_status.value
-    if latest_session is not None:
+    if (
+        _is_revalidatable_refinement_draft(version)
+        and version.validation_status == ArtifactValidationStatus.PASSED
+    ):
+        review_status = "validated"
+    elif latest_session is not None:
         review_status = latest_session.status.value
     elif version.lifecycle_status == ArtifactLifecycleStatus.DRAFT:
         review_status = "validated" if version.validation_status == ArtifactValidationStatus.PASSED else "needs_revision"
@@ -754,7 +768,11 @@ async def _build_artifact_review_payload(
         "parent_artifact_version": parent_version.model_dump(by_alias=False, mode="python") if parent_version else None,
         "change_request": change_request.model_dump(by_alias=False, mode="python") if change_request else None,
         "refinement_session": latest_session.model_dump(by_alias=False, mode="python") if latest_session else None,
-        "review": review_package.model_dump(mode="python"),
+        "review": {
+            **review_package.model_dump(mode="python"),
+            "can_revalidate": _is_revalidatable_refinement_draft(version)
+            and version.validation_status != ArtifactValidationStatus.PASSED,
+        },
     }
 
 configure_session_router(
@@ -852,9 +870,10 @@ async def get_studio_dashboard_config(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_studio_user),
 ):
-    # The manifest is a shared navigation contract when no app is selected.
-    # An explicit selection or app-bound token still needs the registry check.
-    if app_id or principal.app_id:
+    # The loaded Studio host's shared navigation manifest contains no app data.
+    # Explicit targets and customer-app token scopes retain registry checks.
+    host_app_id = getattr(app.state, "loaded_app_id", None)
+    if app_id or (principal.app_id and principal.app_id != host_app_id):
         resolved_app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
     else:
         resolved_app_id, _ = _resolve_studio_scope(principal)
@@ -867,6 +886,51 @@ async def get_studio_dashboard_config(
     if scope:
         payload["surface"] = manifest.surface_for_scope(scope).model_dump(mode="json")
     return payload
+
+
+@app.get("/api/studio/build/dashboard-link")
+async def get_build_dashboard_link(
+    request: Request,
+    chat_id: BuildIdentity | None = None,
+    principal: UserPrincipal = Depends(require_studio_user),
+):
+    """Resolve the owned build's dashboard from its server-persisted binding."""
+    fallback = {"path": "/apps"}
+    if chat_id is None:
+        return fallback
+    host_app_id, user_id = _resolve_studio_scope(principal)
+    registry = _get_app_registry_service()
+    saved = await registry.repo.get_owned_chat_binding(
+        app_id=host_app_id, owner_user_id=user_id, chat_id=chat_id,
+    )
+    if saved is None:
+        raise HTTPException(status_code=404, detail="Build context not found")
+    if not saved:
+        return fallback
+    try:
+        binding = RunBuildBinding.model_validate(saved)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Build context not found") from exc
+    record = (await registry.get_app_record(
+        build_registry_id=binding.build_registry_id, owner_user_id=user_id,
+    )).get("app")
+    if (not record or record.get("app_id") != binding.target_app_id
+            or record.get("chat_app_id") != host_app_id):
+        raise HTTPException(status_code=404, detail="Build context not found")
+    surface = load_dashboard_manifest(resolve_app_root()).surface_for_scope("app")
+    portal = next(portal for portal in surface.portals if portal.id == surface.default_portal and portal.enabled)
+    dashboard_app_id = binding.target_app_id
+    resolve_app_id = getattr(request.app.state, "resolve_studio_dashboard_app_id", None)
+    if resolve_app_id is not None:
+        mapped_id = await resolve_app_id(host_app_id=host_app_id, owner_user_id=user_id, binding=binding)
+        try:
+            dashboard_app_id = TypeAdapter(BuildIdentity).validate_python(mapped_id)
+        except ValidationError as exc:
+            raise HTTPException(status_code=404, detail="Build context not found") from exc
+    path = portal.route.replace(":appId", dashboard_app_id)
+    if not path.startswith("/") or path.startswith("//") or "\\" in path:
+        raise HTTPException(status_code=500, detail="App dashboard route is invalid")
+    return {"path": path}
 
 
 @app.get("/api/studio/overview")
@@ -1015,6 +1079,92 @@ async def _get_owned_app_record(app_id: str, user_id: str) -> dict[str, Any]:
     return record
 
 
+class StudioDashboardBinding(BaseModel):
+    """Host projection of an owned Factory app into the Studio dashboard."""
+
+    dashboard_app_id: BuildIdentity
+    build_registry_id: BuildIdentity
+    target_app_id: BuildIdentity
+
+
+def _dashboard_host_scope(principal: UserPrincipal) -> tuple[str, str]:
+    host_app_id = getattr(app.state, "loaded_app_id", None) or platform_app._resolve_default_app_id()
+    return _resolve_studio_scope(principal, app_id=host_app_id)
+
+
+async def _get_owned_dashboard_app_record(principal: UserPrincipal, dashboard_app_id: str) -> dict[str, Any]:
+    """Authorize the dashboard selection before using its Factory target for reads or writes."""
+    host_app_id, user_id = _dashboard_host_scope(principal)
+    bindings_for = getattr(app.state, "list_studio_app_bindings", None)
+    unavailable = HTTPException(status_code=404, detail="Dashboard app not found")
+    if bindings_for is None:
+        if getattr(app.state, "resolve_studio_dashboard_app_id", None) is not None:
+            raise unavailable
+        record = await _get_owned_app_record(dashboard_app_id, user_id)
+        # A local registration may describe the loaded host itself.
+        if (record.get("chat_app_id") or record.get("app_id")) != host_app_id:
+            raise unavailable
+        return record
+
+    rows = await bindings_for(host_app_id=host_app_id, owner_user_id=user_id, dashboard_app_id=dashboard_app_id)
+    if len(rows) != 1:
+        raise unavailable
+    try:
+        binding = StudioDashboardBinding.model_validate(rows[0])
+    except ValidationError as exc:
+        raise unavailable from exc
+    if binding.dashboard_app_id != dashboard_app_id:
+        raise unavailable
+    registry = _get_app_registry_service()
+    record = (await registry.get_app_record(build_registry_id=binding.build_registry_id, owner_user_id=user_id)).get("app")
+    if (
+        not isinstance(record, dict)
+        or record.get("build_registry_id") != binding.build_registry_id
+        or record.get("chat_app_id") != host_app_id
+        or record.get("app_id") != binding.target_app_id
+    ):
+        raise unavailable
+    return record
+
+
+async def _dashboard_ids_by_target(
+    principal: UserPrincipal, records: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Project links in one read, retaining metrics even when an older app has no portal."""
+    bindings_for = getattr(app.state, "list_studio_app_bindings", None)
+    host_app_id, user_id = _dashboard_host_scope(principal)
+    if bindings_for is None:
+        if getattr(app.state, "resolve_studio_dashboard_app_id", None) is not None:
+            return {}
+        return {
+            r["app_id"]: r["app_id"] for r in records
+            if (r.get("chat_app_id") or r.get("app_id")) == host_app_id
+        }
+    targets = {
+        r["build_registry_id"]: r["app_id"] for r in records
+        if r.get("chat_app_id") == host_app_id and r.get("build_registry_id")
+    }
+    if not targets:
+        return {}
+    rows = await bindings_for(
+        host_app_id=host_app_id, owner_user_id=user_id, build_registry_ids=list(targets),
+    )
+    projected: list[StudioDashboardBinding] = []
+    for row in rows:
+        try:
+            binding = StudioDashboardBinding.model_validate(row)
+        except ValidationError:
+            continue
+        if targets.get(binding.build_registry_id) == binding.target_app_id:
+            projected.append(binding)
+    target_counts = Counter(b.target_app_id for b in projected)
+    route_counts = Counter(b.dashboard_app_id for b in projected)
+    return {
+        b.target_app_id: b.dashboard_app_id for b in projected
+        if target_counts[b.target_app_id] == 1 and route_counts[b.dashboard_app_id] == 1
+    }
+
+
 def _analytics_funnel_for_record(record: dict[str, Any]) -> FunnelDef | None:
     """Load the app-declared funnel from the app's bundle, when present.
 
@@ -1064,13 +1214,16 @@ async def get_studio_analytics_portfolio(
         logger.exception("Analytics portfolio app listing failed")
         raise HTTPException(status_code=500, detail="Failed to list apps for analytics") from exc
 
-    rows = [
-        _analytics_app_row(record)
-        for record in records
-        if isinstance(record, dict) and record.get("app_id")
-    ]
+    records = [record for record in records if isinstance(record, dict) and record.get("app_id")]
+    rows = [_analytics_app_row(record) for record in records]
     try:
-        return await _get_owner_analytics_service().portfolio(rows, window)
+        dashboard_ids = await _dashboard_ids_by_target(principal, records)
+        result = await _get_owner_analytics_service().portfolio(rows, window)
+        for row in result["apps"]:
+            row["dashboard_app_id"] = dashboard_ids.get(row["app_id"])
+        return result
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("Analytics portfolio assembly failed")
         raise HTTPException(status_code=500, detail="Failed to build portfolio analytics") from exc
@@ -1080,13 +1233,17 @@ async def get_studio_analytics_portfolio(
 async def get_studio_analytics_app(
     app_id: str,
     period: str = "30d",
+    reference: Literal["target", "dashboard"] = "target",
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     """App View analytics for one owned app, including movement and funnel."""
 
     _, user_id = _resolve_studio_scope(principal)
     window = _analytics_period(period)
-    record = await _get_owned_app_record(app_id, user_id)
+    record = (
+        await _get_owned_dashboard_app_record(principal, app_id)
+        if reference == "dashboard" else await _get_owned_app_record(app_id, user_id)
+    )
     funnel = _analytics_funnel_for_record(record)
     try:
         return await _get_owner_analytics_service().app_analytics(
@@ -1102,13 +1259,17 @@ async def get_studio_analytics_metric_detail(
     app_id: str,
     metric_id: str,
     period: str = "30d",
+    reference: Literal["target", "dashboard"] = "target",
     principal: UserPrincipal = Depends(require_studio_user),
 ):
     """Drill-down detail for one metric on one owned app."""
 
     _, user_id = _resolve_studio_scope(principal)
     window = _analytics_period(period)
-    record = await _get_owned_app_record(app_id, user_id)
+    record = (
+        await _get_owned_dashboard_app_record(principal, app_id)
+        if reference == "dashboard" else await _get_owned_app_record(app_id, user_id)
+    )
     try:
         peers = (await _get_app_registry_service().list_apps(owner_user_id=user_id)).get(
             "apps"
@@ -1143,16 +1304,77 @@ async def get_app_integrations(
     return await build_integrations_summary(app_id=app_id)
 
 
+async def _connector_scope(
+    principal: UserPrincipal, *, app_id: str | None, dashboard_app_id: str | None,
+) -> tuple[str, str]:
+    if dashboard_app_id is None:
+        return await _resolve_owned_app_scope(principal, app_id=app_id)
+    if app_id is not None:
+        raise HTTPException(status_code=400, detail="Choose one app selector")
+    record = await _get_owned_dashboard_app_record(principal, dashboard_app_id)
+    return record["app_id"], record["owner_user_id"]
+
+
+def _selected_connector_record(record: dict[str, Any]) -> dict[str, Any]:
+    # The app Health page reads these same connectors from /api/studio/integrations,
+    # which sends lifecycle_status and the last check's error_code. Without them
+    # this list called a connector "Ready" that Health reported as not working.
+    fields = (
+        "service", "display_name", "notes", "status", "lifecycle_status", "secret_available", "ready",
+        "expires_at", "updated_at",
+    )
+    result = {key: record[key] for key in fields if key in record}
+    health = record.get("health") or {}
+    result["health"] = {
+        key: health[key]
+        for key in ("status", "message", "last_checked_at", "missing_fields", "error_code", "health_check_supported")
+        if key in health
+    }
+    return result
+
+
 @app.get("/api/studio/integrations/connectors")
 async def get_integration_connectors(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_studio_user),
+    dashboard_app_id: str | None = None,
 ):
-    app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
+    app_id, _ = await _connector_scope(principal, app_id=app_id, dashboard_app_id=dashboard_app_id)
     connectors = await list_connectors(scope=ConnectorStore.SCOPE_APP, scope_id=app_id)
+    if dashboard_app_id is None:
+        return {
+            "app_id": app_id,
+            "connectors": [_redact_connector_record(connector) for connector in connectors],
+        }
+    from factory_app.app.modules.workspace_integrations.backend.repo import (
+        IntegrationDeclarationsRepo,
+    )
+    from factory_app.app.modules.workspace_integrations.backend.schemas import INTEGRATIONS_CATALOG
+
+    actions = getattr(app.state, "module_action_surfaces", {}).get("workspace_integrations", {})
+    can_remove = (
+        "delete_app_integration_need" in actions
+        and actions["delete_app_integration_need"] not in {"internal", "admin_internal"}
+        and (
+            principal.has_local_development_access
+            or "workspace_integrations.manage" in resolve_module_permissions(principal, app=app)
+        )
+    )
+    declarations = await IntegrationDeclarationsRepo().get_for_app(app_id=app_id)
     return {
         "app_id": app_id,
-        "connectors": [_redact_connector_record(connector) for connector in connectors],
+        "connectors": [_selected_connector_record(connector) for connector in connectors],
+        "catalog": [{key: entry[key] for key in ("id", "name", "category")} for entry in INTEGRATIONS_CATALOG],
+        "declarations": [
+            {
+                **{key: row.get(key) for key in (
+                    "service", "catalog_id", "display_name", "kind", "purpose", "required_at", "optional",
+                )},
+                "removable": bool(row.get("removable") and can_remove),
+            }
+            for row in declarations if not row.get("removed")
+        ],
+        "credential_storage_available": bool((await get_connector_backend_summary()).get("configured")),
     }
 
 
@@ -1776,14 +1998,35 @@ async def create_studio_app_context_policy_override(
     )
 
 
+async def _connector_write_result(
+    app_id: str, service: str, dashboard_app_id: str | None,
+    record: dict[str, Any] | None, secret_result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if dashboard_app_id is None:
+        return {
+            "app_id": app_id,
+            "connector": _redact_connector_record(record),
+            "secret_result": _redact_secret_result(secret_result),
+        }
+    saved = await get_connector(scope=ConnectorStore.SCOPE_APP, scope_id=app_id, service=service)
+    if saved is None:
+        raise HTTPException(status_code=404, detail="Connector not found")
+    return {"app_id": app_id, "connector": _selected_connector_record(saved)}
+
+
 @app.post("/api/studio/integrations/connectors")
 async def create_or_update_integration_connector(
     body: IntegrationConnectorCreateRequest,
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_studio_user),
+    dashboard_app_id: str | None = None,
 ):
-    app_id, user_id = await _resolve_owned_app_scope(principal, app_id=app_id)
-    record = None
+    app_id, user_id = await _connector_scope(principal, app_id=app_id, dashboard_app_id=dashboard_app_id)
+    # An empty identifier or a single-dot path segment has no per-service edit route.
+    if body.service.strip() in {"", "."}:
+        raise HTTPException(status_code=400, detail="Invalid service format")
+    if dashboard_app_id is not None:
+        validate_path_id(body.service, "service")
     secret_result: dict[str, Any] | None = None
     if body.secret_value:
         secret_result = await save_connector(
@@ -1794,51 +2037,27 @@ async def create_or_update_integration_connector(
             secret_value=body.secret_value,
             display_name=body.display_name,
             ttl_days=body.ttl_days or 30,
+            allow_metadata_only=dashboard_app_id is None,
             public_config=body.public_config,
             required_fields=body.required_fields,
         )
-        record = secret_result.get("connector")
-    if (
-        body.display_name is not None
-        or body.notes is not None
-        or body.status is not None
-        or body.expires_at is not None
-        or body.public_config is not None
-    ):
-        record = await patch_connector(
-            scope=ConnectorStore.SCOPE_APP,
-            scope_id=app_id,
-            service=body.service,
-            user_id=user_id,
-            display_name=body.display_name,
-            notes=body.notes,
-            status=body.status or ("active" if (secret_result or {}).get("success") else "metadata_only"),
-            expires_at=body.expires_at,
-            public_config=body.public_config,
-            required_fields=body.required_fields,
-        )
-    if not record:
-        store = ConnectorStore()
-        record = await store.upsert(
-            scope=ConnectorStore.SCOPE_APP,
-            scope_id=app_id,
-            service=body.service,
-            display_name=body.display_name,
-            user_id=user_id,
-            status=body.status or "metadata_only",
-            secret_storage="unmanaged",
-            secret_available=False,
-            notes=body.notes,
-            expires_at=body.expires_at,
-            public_config=body.public_config,
-            required_fields=body.required_fields,
-            status_reason="Created manually from the integrations surface.",
-        )
-    return {
-        "app_id": app_id,
-        "connector": _redact_connector_record(record),
-        "secret_result": _redact_secret_result(secret_result),
-    }
+        if dashboard_app_id is not None and not secret_result.get("success"):
+            raise HTTPException(status_code=503, detail="Credential could not be saved")
+
+    record = await patch_connector(
+        scope=ConnectorStore.SCOPE_APP,
+        scope_id=app_id,
+        service=body.service,
+        user_id=user_id,
+        display_name=body.display_name,
+        notes=body.notes,
+        status=body.status,
+        expires_at=body.expires_at,
+        public_config=body.public_config,
+        required_fields=body.required_fields,
+        create_if_missing=not body.secret_value,
+    )
+    return await _connector_write_result(app_id, body.service, dashboard_app_id, record, secret_result)
 
 
 @app.patch("/api/studio/integrations/connectors/{service}")
@@ -1847,9 +2066,10 @@ async def patch_integration_connector(
     body: IntegrationConnectorPatchRequest,
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_studio_user),
+    dashboard_app_id: str | None = None,
 ):
     validate_path_id(service, "service")
-    app_id, user_id = await _resolve_owned_app_scope(principal, app_id=app_id)
+    app_id, user_id = await _connector_scope(principal, app_id=app_id, dashboard_app_id=dashboard_app_id)
     store = ConnectorStore()
     existing = await store.get(scope=ConnectorStore.SCOPE_APP, scope_id=app_id, service=service)
     if not existing:
@@ -1865,9 +2085,12 @@ async def patch_integration_connector(
             secret_value=body.secret_value,
             display_name=body.display_name,
             ttl_days=body.ttl_days or 30,
+            allow_metadata_only=dashboard_app_id is None,
             public_config=body.public_config,
             required_fields=body.required_fields,
         )
+        if dashboard_app_id is not None and not secret_result.get("success"):
+            raise HTTPException(status_code=503, detail="Credential could not be saved")
     record = await patch_connector(
         scope=ConnectorStore.SCOPE_APP,
         scope_id=app_id,
@@ -1880,11 +2103,7 @@ async def patch_integration_connector(
         public_config=body.public_config,
         required_fields=body.required_fields,
     )
-    return {
-        "app_id": app_id,
-        "connector": _redact_connector_record(record),
-        "secret_result": _redact_secret_result(secret_result),
-    }
+    return await _connector_write_result(app_id, service, dashboard_app_id, record, secret_result)
 
 
 @app.post("/api/studio/integrations/connectors/{service}/health-check")
@@ -1892,9 +2111,10 @@ async def check_integration_connector_health(
     service: str,
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_studio_user),
+    dashboard_app_id: str | None = None,
 ):
     validate_path_id(service, "service")
-    app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
+    app_id, _ = await _connector_scope(principal, app_id=app_id, dashboard_app_id=dashboard_app_id)
     result = await run_connector_health_check(app_id=app_id, service=service, checked_by="manual")
     return {
         "app_id": app_id,
@@ -1920,10 +2140,13 @@ async def remove_integration_connector(
     service: str,
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_studio_user),
+    dashboard_app_id: str | None = None,
 ):
     validate_path_id(service, "service")
-    app_id, _ = await _resolve_owned_app_scope(principal, app_id=app_id)
+    app_id, _ = await _connector_scope(principal, app_id=app_id, dashboard_app_id=dashboard_app_id)
     result = await delete_connector(scope=ConnectorStore.SCOPE_APP, scope_id=app_id, service=service)
+    if dashboard_app_id is not None and result.get("error"):
+        raise HTTPException(status_code=503, detail="Connector could not be removed")
     if not result.get("deleted"):
         raise HTTPException(status_code=404, detail=f"Connector not found: {service}")
     return {
@@ -2501,6 +2724,84 @@ async def accept_imported_genesis_artifact(
         "genesis_import": (await registry.get_app_record(
             owner_user_id=owner_user_id, build_registry_id=build_registry_id,
         ))["app"]["genesis_import"],
+    }
+
+
+def _is_revalidatable_refinement_draft(version) -> bool:  # noqa: ANN001
+    return (
+        version.build_family == "app_bundle"
+        and version.lifecycle_status == ArtifactLifecycleStatus.DRAFT
+        and _version_metadata(version).get("bundle_mode") == "staged_refinement_bundle"
+        and bool(version.parent_build_record_id)
+        and _refinement_metadata_from_version(version) is None
+    )
+
+
+@app.post("/api/studio/build/artifacts/{artifact_version_id}/revalidate")
+async def revalidate_refinement_draft(
+    artifact_version_id: str,
+    build_registry_id: BuildIdentity,
+    principal: UserPrincipal = Depends(require_studio_user),
+):
+    from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
+    from mozaiksai.core.validation.compilation_inputs import resolve_app_compilation_inputs
+    from mozaiksai.core.validation.generated_app import validate_generated_app_candidate
+
+    validate_path_id(artifact_version_id, "artifact_version_id")
+    app_id, owner = await _resolve_studio_artifact_scope(
+        principal, app_id=None, build_registry_id=build_registry_id,
+    )
+    store = get_artifact_store()
+    draft = await store.get_build_record(app_id=app_id, build_record_id=artifact_version_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    metadata = _version_metadata(draft)
+    if (
+        not _is_revalidatable_refinement_draft(draft)
+        or metadata.get("build_registry_id") != build_registry_id
+        or draft.commit_metadata.author_user_id != owner
+    ):
+        raise HTTPException(status_code=409, detail="This build is not eligible for draft revalidation")
+    if draft.validation_status == ArtifactValidationStatus.PASSED:
+        return {
+            "validation_status": "passed",
+            **await get_build_artifact_review(
+                artifact_version_id, build_registry_id=build_registry_id, principal=principal,
+            ),
+        }
+    await _require_current_build_in_lineage(draft, app_id=app_id, artifact_store=store)
+    try:
+        files, diagnostics = await read_artifact_bundle(draft, include_binary=True)
+        compilation = await resolve_app_compilation_inputs(
+            app_id=app_id, build_record_id=draft.id, owner_user_id=owner,
+            build_registry_id=build_registry_id, artifact_store=store,
+        )
+    except (ValueError, OSError, ContentNotFoundError, zipfile.BadZipFile) as exc:
+        raise HTTPException(status_code=409, detail="Draft archive identity or compilation inputs could not be verified") from exc
+    if diagnostics:
+        raise HTTPException(status_code=409, detail="Draft contains files that cannot be revalidated")
+    result = await validate_generated_app_candidate(
+        files=files, app_id=app_id, validation_strategy="docker",
+        capability_packs=metadata.get("capability_packs", []), approved_compilation=compilation,
+    )
+    acceptance = result.get("app_bundle_acceptance_result")
+    build = result.get("app_validation_result")
+    if not isinstance(acceptance, dict) or not isinstance(build, dict):
+        raise HTTPException(status_code=503, detail="Draft validation evidence is incomplete")
+    if result["validation_status"] == "passed" and (
+        acceptance.get("passed") is not True or build.get("validation_status") != "passed"
+    ):
+        raise HTTPException(status_code=503, detail="Draft validation evidence is inconsistent")
+    async with _workspace_acceptance_guard(app_id, draft):
+        await _verified_app_bundle(draft)
+        await _require_current_build_in_lineage(draft, app_id=app_id, artifact_store=store)
+        if not await store.record_draft_revalidation(record=draft, validation=result):
+            raise HTTPException(status_code=409, detail="Draft changed during validation. Refresh the review.")
+    return {
+        "validation_status": result["validation_status"],
+        **await get_build_artifact_review(
+            artifact_version_id, build_registry_id=build_registry_id, principal=principal,
+        ),
     }
 
 
@@ -3549,11 +3850,42 @@ def _confirmed_refinement_decision(
         for field in (
             "app_id", "target_app_id", "user_id", "request_kind", "declared_change_class",
             "build_family", "build_key", "build_record_id", "raw_user_request",
-            "requested_workflow_id", "source_surface",
+            "requested_workflow_id", "source_surface", "refinement_model",
         )
     ):
         raise HTTPException(status_code=409, detail="The proposed scope belongs to a different request or artifact. Submit the change again.")
     return pending
+
+
+async def require_studio_model_admin(
+    principal: UserPrincipal = Depends(require_studio_user),
+) -> UserPrincipal:
+    if not principal.is_authenticated or not principal.has_role("admin"):
+        raise HTTPException(403, "Workspace administrator access required.")
+    return principal
+
+
+@app.get("/api/studio/refinement/models")
+async def list_refinement_models(
+    principal: UserPrincipal = Depends(require_studio_user),
+) -> dict[str, Any]:
+    return await studio_model_options(principal)
+
+
+@app.get("/api/studio/settings/ai-models")
+async def read_studio_model_policy(
+    principal: UserPrincipal = Depends(require_studio_model_admin),
+) -> dict[str, Any]:
+    return await studio_model_options(principal, admin=True)
+
+
+@app.put("/api/studio/settings/ai-models", status_code=204)
+async def update_studio_model_policy(
+    body: StudioModelPolicy,
+    principal: UserPrincipal = Depends(require_studio_model_admin),
+) -> Response:
+    await save_studio_model_policy(principal, body)
+    return Response(status_code=204)
 
 
 @app.post("/api/workflows/trigger")
@@ -3672,6 +4004,12 @@ async def trigger_workflow(
                 status_code=400,
                 detail="refinement triggers require trigger_payload.refinement_request.",
             )
+        if action_id is None:
+            selection = await select_studio_model(
+                principal, refinement_request.refinement_model, require_available=False,
+            )
+            if selection is not None:
+                refinement_request = refinement_request.model_copy(update={"refinement_model": selection})
         source_version = await get_artifact_store().get_build_record(
             app_id=artifact_app_id, build_record_id=refinement_request.build_record_id,
         ) if refinement_request.build_record_id else None
@@ -3860,6 +4198,10 @@ async def trigger_workflow(
                         owner_user_id=user_id, app_id=app_id, build_registry_id=build_registry_id,
                         workflow_name=refinement_decision.workflow_id,
                     )
+                    if refinement_request.refinement_model is not None:
+                        inline_binding = inline_binding.model_copy(update={
+                            "refinement_model": refinement_request.refinement_model,
+                        })
                     refinement_request = refinement_request.model_copy(update={
                         "usage_context": usage_context.model_copy(update={"run_build_binding": inline_binding}),
                     })
@@ -3931,6 +4273,10 @@ async def trigger_workflow(
                             build_registry_id=build_registry_id,
                             workflow_name=refinement_decision.workflow_id,
                         )
+                        if refinement_request.refinement_model is not None:
+                            inline_binding = inline_binding.model_copy(update={
+                                "refinement_model": refinement_request.refinement_model,
+                            })
                         # Server-derived, set after the request is built: the client
                         # payload cannot carry it.
                         coding_request = coding_request.model_copy(update={
@@ -4287,6 +4633,8 @@ async def trigger_workflow(
             build_registry_id=build_registry_id,
             source_chat_id=body.source_chat_id,
             session_router=session_router,
+            **({"refinement_model": refinement_request.refinement_model}
+               if refinement_request is not None and refinement_request.refinement_model is not None else {}),
             routing_contribution=(
                 TriggerRoutingContribution(
                     workflow_id=refinement_decision.workflow_id,

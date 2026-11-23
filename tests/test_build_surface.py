@@ -48,8 +48,9 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     assert '"path": "/settings"' not in manifest_source
     assert '"path": "/apps"' in manifest_source
     assert '"component": "AppsPage"' in manifest_source
-    assert '"path": "/apps/:appId/access"' in manifest_source
-    assert '"component": "AppAccessPage"' in manifest_source
+    # The first-party Studio has no account directory, so it mounts no Access page.
+    assert '"path": "/apps/:appId/access"' not in manifest_source
+    assert '"component": "AppAccessPage"' not in manifest_source
     assert '"path": "/apps/:appId/building"' in manifest_source
     assert '"component": "DashboardPortalPage"' in manifest_source
     assert '"path": "/apps/:appId/users"' not in manifest_source
@@ -86,13 +87,13 @@ def test_factory_app_ui_barrel_registers_admin_pages_and_omits_removed_pages() -
     assert "registerComponent('DashboardPortalPage'" in admin_source
     assert "registerComponent('WorkspaceHostingPage'" not in admin_source
     assert "registerComponent('AppHealthPage'" in admin_source
-    assert "registerComponent('AppAccessPage'" in admin_source
+    assert "registerComponent('AppAccessPage'" not in admin_source
     assert "registerComponent('ProfilePage', ProfilePage, {" in admin_source
     assert "User profile surface" in admin_source
     assert "override: true" in admin_source
     assert "registerComponent('AppHostingPage'" not in admin_source
     assert "./pages/AppHealthPage.jsx" in admin_source
-    assert "./pages/AppAccessPage.jsx" in admin_source
+    assert "./pages/AppAccessPage.jsx" not in admin_source
     assert "./pages/DashboardPortalPage.jsx" in admin_source
     assert "./pages/AppHostingPage.jsx" not in admin_source
     assert "AppBuildPage" not in source
@@ -336,36 +337,22 @@ def test_route_manifest_components_all_registered_in_admin_index() -> None:
     )
 
 
-def test_integrations_routes_have_global_management_and_app_detail() -> None:
-    manifest_source = _read("factory_app/app/ui/route_manifest.json")
-    admin_registry = _read("factory_app/app/admin/admin_registry.yaml")
-    playwright_source = _read("web_shell/playwright/apps.responsive.smoke.spec.js")
+def test_integrations_routes_have_separate_workspace_and_selected_app_pages() -> None:
+    import json
 
-    assert '"/integrations"' in manifest_source
-    assert '"/apps/:appId/integrations"' in manifest_source
-    assert '"component": "WorkspaceIntegrationsPage"' in manifest_source
-    assert '"include": false' in manifest_source
-    assert "pages: []" in admin_registry
-    assert "path: /integrations" not in admin_registry
-    assert "path: /apps/:appId/integrations" not in admin_registry
-    assert "show_in_navigation: false" not in admin_registry
-    assert "page.goto(`/apps/${APP_ID}/integrations`)" in playwright_source
-    assert "page.goto('/integrations')" in playwright_source
+    import yaml
 
-
-def test_app_integrations_page_is_setup_detail_not_crud_inventory() -> None:
-    source = _read("factory_app/app/admin/pages/AppIntegrationsPage.jsx")
-    assert "App Integrations" in source
-    assert "list_app_integration_needs" in source
-    assert "Workspace integrations" in source
-    assert "Services this app needs" in source
-    assert "Required" in source
-    assert "Optional" in source
-    assert "App-specific" in source
-    assert "Add Integration" not in source
-    assert "/api/studio/integrations/connectors/" not in source
-    assert "checkConnectorHealth" not in source
-    assert 'eyebrow="Studio"' not in source
+    routes = {
+        page["path"]: page for page in json.loads(_read("factory_app/app/ui/route_manifest.json"))["pages"]
+    }
+    assert routes["/integrations"]["component"] == "WorkspaceIntegrationsPage"
+    selected = routes["/apps/:appId/integrations"]
+    assert selected["component"] == "AppIntegrationsPage"
+    assert selected["meta"]["requiresAuth"]
+    assert selected["meta"]["navigation"]["group"] == "app-studio"
+    assert selected["meta"]["navigation"].get("include", True)
+    portals = yaml.safe_load(_read("factory_app/app/dashboard/dashboard.yaml"))["app"]["portals"]
+    assert any(portal["route"] == selected["path"] for portal in portals)
 
 
 def test_app_overview_links_out_instead_of_owning_diagnostic_panels() -> None:
@@ -383,7 +370,7 @@ def test_app_overview_links_out_instead_of_owning_diagnostic_panels() -> None:
 def test_integrations_page_uses_shared_primitives_for_health_ui() -> None:
     source = _read("factory_app/app/admin/pages/AppIntegrationsPage.jsx")
     assert "StatusPill" in source
-    assert "SummaryStrip" in source
+    assert "StudioSlideOver" in source
     assert "Panel" in source
     assert "ActionButton" in source
     assert "StudioInlineEmptyState" in source
