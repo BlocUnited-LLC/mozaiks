@@ -74,6 +74,8 @@ Covers (health.py):
 """
 from __future__ import annotations
 
+import json
+
 from mozaiksai.control_plane.context_graph.query import (
     _contract_role_boost,
     _dedupe,
@@ -81,12 +83,76 @@ from mozaiksai.control_plane.context_graph.query import (
     _keywords,
     _normalize_path,
     _path_priority_score,
+    build_context_graph_scope,
 )
 from mozaiksai.core.app_context.health import (
     _dict_ints,
     _int,
     _parser_fallback_warning,
 )
+from mozaiksai.core.app_context.models import (
+    AppContextGraph,
+    AppContextGraphEdge,
+    AppContextGraphNode,
+)
+
+
+def test_compact_coding_scope_bounds_directed_dependencies_and_symbols():
+    selected_path = "src/main.py"
+    nodes = [
+        AppContextGraphNode(node_id="main", node_type="file", metadata={"path": selected_path}),
+        AppContextGraphNode(node_id="caller", node_type="symbol", metadata={"path": "src/a_caller.py"}),
+        AppContextGraphNode(node_id="callee", node_type="symbol", metadata={"path": "src/b_callee.py"}),
+        AppContextGraphNode(node_id="unresolved", node_type="symbol", metadata={"path": "src/0_unresolved.py"}),
+    ]
+    edges = [
+        AppContextGraphEdge(edge_type="calls", source_node_id="caller", target_node_id="main"),
+        AppContextGraphEdge(edge_type="calls", source_node_id="main", target_node_id="callee"),
+        AppContextGraphEdge(
+            edge_type="calls", source_node_id="main", target_node_id="unresolved",
+            metadata={"resolved": False},
+        ),
+    ]
+    for index in range(10):
+        symbol_id, neighbor_id = f"symbol_{index}", f"neighbor_{index}"
+        nodes.extend([
+            AppContextGraphNode(
+                node_id=symbol_id, node_type="symbol", label=f"task_{index}",
+                metadata={"path": selected_path, "line": index + 1},
+            ),
+            AppContextGraphNode(
+                node_id=neighbor_id, node_type="file", metadata={"path": f"src/z_{index}.py"},
+            ),
+        ])
+        edges.extend([
+            AppContextGraphEdge(edge_type="defines", source_node_id="main", target_node_id=symbol_id),
+            AppContextGraphEdge(edge_type="imports", source_node_id="main", target_node_id=neighbor_id),
+        ])
+    for item in [*nodes, *edges]:
+        item.metadata["unrelated"] = "DO_NOT_INLINE" * 1000
+    graph = AppContextGraph(graph_id="graph", app_id="app", graph_hash="sha256:" + "a" * 64, nodes=nodes, edges=edges)
+
+    def scope(snapshot):
+        return build_context_graph_scope(
+            graph=snapshot, selected_paths=[selected_path],
+            file_map={selected_path: "SOURCE_MUST_NOT_BE_REPEATED"}, compact=True,
+        )
+
+    result = scope(graph)
+    assert result == scope(graph.model_copy(update={"nodes": list(reversed(nodes)), "edges": list(reversed(edges))}))
+    assert result["graph_hash"] == graph.graph_hash
+    assert result["truncated"] is True
+    assert len(result["selected_scope"][selected_path]["symbols"]) == 8
+    assert result["selected_scope"][selected_path]["symbols"][0] == {"label": "task_0", "line": 1}
+    assert len(result["related_edges"]) == len(result["related_file_paths"]) == 8
+    for source, target in [("src/a_caller.py", selected_path), (selected_path, "src/b_callee.py")]:
+        assert {"source_path": source, "target_path": target, "edge_type": "calls"} in result["related_edges"]
+    assert "src/0_unresolved.py" not in result["related_file_paths"]
+    encoded = json.dumps(result, sort_keys=True)
+    assert "src/0_unresolved.py" not in encoded
+    assert "DO_NOT_INLINE" not in encoded
+    assert "SOURCE_MUST_NOT_BE_REPEATED" not in encoded
+    assert "semantic_annotation_request" not in result
 
 # ---------------------------------------------------------------------------
 # 1. _contract_role_boost

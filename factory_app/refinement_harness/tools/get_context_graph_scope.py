@@ -30,8 +30,9 @@ async def get_context_graph_scope(
         graph=loaded["graph"],
         selected_paths=selected_paths,
         file_map=loaded["file_map"],
-        raw_user_request=tool_context.raw_user_request,
+        compact=True,
     )
+    scan_health = loaded["workspace"].get("scan_health") or {}
     scope.update(
         {
             "build_record_id": artifact.id,
@@ -40,7 +41,14 @@ async def get_context_graph_scope(
             "source": loaded["workspace"]["source"],
             "provenance": loaded["provenance"],
             "warnings": list(loaded.get("warnings") or []),
-            "scan_health": loaded["workspace"].get("scan_health"),
+            "scan_health": {
+                key: scan_health[key]
+                for key in (
+                    "candidate_file_count", "selected_file_count", "limit_reached",
+                    "artifact_source_incomplete", "parse_coverage", "skipped",
+                )
+                if key in scan_health
+            },
         }
     )
     return scope

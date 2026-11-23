@@ -29,24 +29,24 @@ async def search_app_source_context(
         return {**bundle_result, "results": []}
 
     resolved_query = str(query or tool_context.raw_user_request or "").strip()
-    if not resolved_query:
-        return {**bundle_result, "present": False, "reason": "missing_query", "results": []}
-
-    bundle = bundle_result["bundle"]
-    results = search_source_corpus(
-        bundle,
-        resolved_query,
-        max_results=_bounded_int(max_results, default=12, minimum=1, maximum=40),
-    )
-    return {
-        "present": True,
+    payload = {
         "query": resolved_query,
         "source": bundle_result["source"],
         "provenance": bundle_result.get("provenance"),
-        "source_context_catalog": build_source_corpus_catalog(bundle, max_files=40, max_chunks=8),
-        "results": results,
         "warnings": list(bundle_result.get("warnings") or []),
     }
+    if not resolved_query:
+        return {**payload, "present": False, "reason": "missing_query", "results": []}
+
+    bundle = bundle_result["bundle"]
+    # Coding already has its editable files and graph neighborhood.
+    coding = tool_context.checkpoint == "coding_requested"
+    limit = _bounded_int(max_results, default=12, minimum=1, maximum=4 if coding else 40)
+    payload["present"] = True
+    payload["results"] = search_source_corpus(bundle, resolved_query, max_results=limit)
+    if not coding:
+        payload["source_context_catalog"] = build_source_corpus_catalog(bundle, max_files=40, max_chunks=8)
+    return payload
 
 
 async def read_app_source_file(

@@ -102,6 +102,7 @@ def build_context_graph_scope(
     raw_user_request: str = "",
     max_related_nodes: int = 40,
     max_related_files: int = 12,
+    compact: bool = False,
 ) -> dict[str, Any]:
     """Return selected files, symbols, and relationship context for coding."""
     normalized_paths = _dedupe([_normalize_path(path) for path in selected_paths if _normalize_path(path)])
@@ -120,6 +121,12 @@ def build_context_graph_scope(
             related_node_ids.add(edge.target_node_id)
 
     nodes_by_id = {node.node_id: node for node in graph.nodes}
+    if compact:
+        return _compact_graph_scope(
+            graph=graph, selected_paths=normalized_paths, file_map=file_map or {},
+            nodes_by_id=nodes_by_id, related_node_ids=related_node_ids,
+            max_related_files=min(max_related_files, 8),
+        )
     for node_id in sorted(related_node_ids):
         node = nodes_by_id.get(node_id)
         path = str((node.metadata or {}).get("path") or "")  # type: ignore[union-attr]
@@ -153,6 +160,67 @@ def build_context_graph_scope(
             max_items=20,
         ),
         "request_keywords": _keywords(raw_user_request),
+    }
+
+
+def _compact_graph_scope(
+    *, graph: AppContextGraph, selected_paths: list[str], file_map: dict[str, str],
+    nodes_by_id: dict[str, Any], related_node_ids: set[str], max_related_files: int,
+) -> dict[str, Any]:
+    """Project coding evidence without repeating source or annotation inputs."""
+    selected = set(selected_paths)
+    symbols: dict[str, list[dict[str, Any]]] = {path: [] for path in selected_paths}
+    for node_id in sorted(related_node_ids):
+        node = nodes_by_id.get(node_id)
+        if node is None or node.node_type != GraphNodeType.SYMBOL:
+            continue
+        metadata = node.metadata or {}
+        path = str(metadata.get("path") or "")
+        if path in symbols:
+            symbols[path].append({
+                "label": str(metadata.get("qualified_name") or node.label),
+                "line": metadata.get("line"),
+            })
+
+    dependencies: set[tuple[str, str, str]] = set()
+    for edge in graph.edges:
+        if edge.edge_type not in {
+            GraphEdgeType.IMPORTS, GraphEdgeType.CALLS, GraphEdgeType.REFERENCES,
+            GraphEdgeType.DEPENDS_ON, GraphEdgeType.RENDERS, GraphEdgeType.IMPLEMENTS_CAPABILITY,
+        } or (edge.metadata or {}).get("resolved") is False:
+            continue
+        source = nodes_by_id.get(edge.source_node_id)
+        target = nodes_by_id.get(edge.target_node_id)
+        source_path = str((source.metadata or {}).get("path") or "") if source else ""
+        target_path = str((target.metadata or {}).get("path") or "") if target else ""
+        if (
+            source_path and target_path and source_path != target_path
+            and (source_path in selected or target_path in selected)
+        ):
+            dependencies.add((source_path, target_path, edge.edge_type.value))
+
+    ordered_edges = sorted(dependencies, key=lambda item: (item[2] != "calls", item))
+    related_paths = sorted({path for edge in ordered_edges for path in edge[:2]} - selected)
+    selected_scope = {}
+    symbols_truncated = False
+    for path, items in symbols.items():
+        items.sort(key=lambda item: (item["line"] if isinstance(item["line"], int) else 0, item["label"]))
+        symbols_truncated |= len(items) > 8
+        selected_scope[path] = {"present": path in file_map, "symbols": items[:8]}
+    return {
+        "present": True,
+        "graph_id": graph.graph_id,
+        "app_id": graph.app_id,
+        "graph_hash": graph.graph_hash,
+        "stale_status": graph.stale_status.value,
+        "selected_file_paths": selected_paths,
+        "selected_scope": selected_scope,
+        "related_file_paths": related_paths[:max_related_files],
+        "related_edges": [
+            {"source_path": source, "target_path": target, "edge_type": kind}
+            for source, target, kind in ordered_edges[:8]
+        ],
+        "truncated": symbols_truncated or len(ordered_edges) > 8 or len(related_paths) > max_related_files,
     }
 
 

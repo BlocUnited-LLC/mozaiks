@@ -229,6 +229,8 @@ class StructuredOutputCodingProvider:
         request: CodingWorkerRequest,
         control_plane_context: dict[str, Any],
     ) -> str:
+        # Routing and resume state stays on the request. The model sees the
+        # scoped edit inputs and the evidence selected by checkpoint tools.
         payload = {
             "build_family": request.build_family,
             "build_key": request.build_key,
@@ -241,8 +243,6 @@ class StructuredOutputCodingProvider:
             "input_files": request.files,
             "validation_strategy": request.validation_strategy,
             "start_preview_requested": bool(request.start_preview),
-            "context_seed": request.context_seed,
-            "metadata": request.metadata,
             "refinement_context": control_plane_context,
         }
         if request.dependency_graph is not None:
