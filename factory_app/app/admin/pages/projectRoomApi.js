@@ -33,7 +33,8 @@ function familyPage(buildRegistryId, family, signal) {
  * History sorts by version number across every family and caps the page, so
  * internal records (App Intelligence indexes) can push a document off a full
  * first page. One unfiltered request is enough when that page is not full;
- * otherwise each document family missing from it is read on its own.
+ * otherwise each document family without a current version on it is read on
+ * its own.
  * A failed first request throws; a failed follow-up leaves its family unknown.
  */
 export async function fetchProjectVersions(buildRegistryId, { signal } = {}) {

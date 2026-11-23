@@ -51,14 +51,15 @@ export const FAMILY_PAGE_LIMIT = 25
  * Families to read on their own after a first history page.
  *
  * A page shorter than its limit holds every record of the app, so nothing is
- * missing. A full page may have cut older records, so each wanted family
- * absent from it gets a follow-up.
+ * missing. A full page may have cut older records, including a family's
+ * current version below newer draft or stale ones, so each wanted family
+ * without a current version on the page gets a follow-up.
  */
 export function familiesToFollowUp(rows, families, pageLimit = HISTORY_PAGE_LIMIT) {
   const list = Array.isArray(rows) ? rows : []
   if (list.length < pageLimit) return []
-  const present = new Set(list.map(familyOf))
-  return families.filter((family) => !present.has(family))
+  const withCurrent = new Set(list.filter(isCurrent).map(familyOf))
+  return families.filter((family) => !withCurrent.has(family))
 }
 
 const DOCUMENT_NAMES = Object.fromEntries(PROJECT_DOCUMENTS.map((entry) => [entry.family, entry.name]))
@@ -181,11 +182,11 @@ const BUILDING_STATES = new Set(['draft', 'building', 'configuring'])
  * than the documents can: `needs_change` (`needs_revision`), `ready_for_review`
  * (`review`), `deploying`, `archived`, and a rebuild in progress (a building
  * state with a recorded build conversation, even when an earlier app version
- * passed, unless the newest app version failed). Otherwise the saved documents decide: `not_started` (nothing saved
- * and no build conversation), `in_progress`, `built` (the current app version
- * passed its checks), `failed` (the newest app version did not pass its
- * checks), or `live` (an `active` app without a passing app version, such as
- * an imported app).
+ * passed or the newest one failed). Otherwise the saved documents decide:
+ * `not_started` (nothing saved and no build conversation), `in_progress`,
+ * `built` (the current app version passed its checks), `failed` (the newest
+ * app version did not pass its checks and no build is running), or `live` (an
+ * `active` app without a passing app version, such as an imported app).
  *
  * `unknownFamilies` names document families the caller could not read; a next
  * step in one of them is not guessed.
@@ -200,12 +201,14 @@ export function projectStatus({ versions: rows = [], app = null, unknownFamilies
   const appVersions = versionsOf(versions, 'app_bundle')
   const newestApp = appVersions[0] || null
   const currentApp = appVersions.find(isCurrent) || null
-  // The newest app version's failure is the most specific news, even mid-build.
-  if (newestApp?.validation_status === 'failed') {
+  // A build conversation running now outranks the result of an earlier
+  // attempt: after a failed version the owner retries, and the server moves
+  // the app back to a building state with the retry's chat recorded.
+  const buildRunning = BUILDING_STATES.has(lifecycle) && Boolean(activeChat(app))
+  if (newestApp?.validation_status === 'failed' && !buildRunning) {
     return { kind: 'failed', nextStep: null, date: versionDate(newestApp) }
   }
-  const rebuilding = Boolean(currentApp) && BUILDING_STATES.has(lifecycle) && Boolean(activeChat(app))
-  if (rebuilding) return { kind: 'in_progress', firstBuild: false, nextStep: null, date: null }
+  if (buildRunning && currentApp) return { kind: 'in_progress', firstBuild: false, nextStep: null, date: null }
   if (currentApp?.validation_status === 'passed') {
     return { kind: 'built', nextStep: null, date: versionDate(currentApp) }
   }

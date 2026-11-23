@@ -182,7 +182,8 @@ def test_dashboard_portal_page_renders_the_project_and_host_panels() -> None:
         assert removed not in source
     # Other portals keep the hero summary; the Project panel states the status itself.
     assert "summaryItems={hasProjectPanel ? [] : buildSummaryItems(portal, snapshot)}" in source
-    # Saved document versions come from build history, one family per request.
+    # Saved document versions come from build history: one page, plus a read per
+    # family only when that page was full and lacked the family's current version.
     assert "fetchProjectVersions(buildRegistryId" in project_source
     assert "Try again" in project_source
     assert "/api/studio/build/history" in _read("factory_app/app/admin/pages/projectRoomApi.js")

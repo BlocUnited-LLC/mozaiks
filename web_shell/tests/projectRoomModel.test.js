@@ -181,10 +181,11 @@ test("a built app offers a change through the app's review chat", () => {
 
 test("a failed newest app version points at what failed", () => {
   const versions = [row("app_bundle", 2, "draft", "failed"), row("app_bundle", 1, "current", "passed")];
-  const status = projectStatus({ versions, app: buildingApp });
+  const stopped = { build_registry_id: "appreg_1", app_id: "draft-app-1", status: "building" };
+  const status = projectStatus({ versions, app: stopped });
   assert.equal(status.kind, "failed");
   assert.equal(projectStatusSentence(status), "The last build didn't pass its checks.");
-  assert.deepEqual(projectAction({ status, app: buildingApp, appId: "draft app" }), {
+  assert.deepEqual(projectAction({ status, app: stopped, appId: "draft app" }), {
     type: "link", label: "See what failed", href: "/apps/draft%20app/activity",
   });
 });
@@ -288,6 +289,25 @@ test("follow-up reads are needed only for families missing from a full first pag
   const full = Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => row("app_context_version", index + 1, "current", "passed"));
   full[0] = row("concept", 1, "current", "skipped");
   assert.deepEqual(familiesToFollowUp(full, ["concept", "theme_capture", "app_bundle"]), ["theme_capture", "app_bundle"]);
+  // A family present only as newer draft or stale versions may have its current
+  // version cut off the page, so it is read on its own too.
+  full[1] = row("app_bundle", 30, "draft", "pending");
+  full[2] = row("app_bundle", 29, "stale", "passed");
+  assert.deepEqual(familiesToFollowUp(full, ["concept", "app_bundle"]), ["app_bundle"]);
+});
+
+test("a retry after a failed app version reopens the running build, not the failure", () => {
+  const failedFirst = [row("app_bundle", 1, "draft", "failed")];
+  const retrying = { ...buildingApp, active_workflow_id: "AppGenerator" };
+  const status = projectStatus({ versions: failedFirst, app: retrying });
+  assert.equal(status.kind, "in_progress");
+  assert.equal(projectAction({ status, app: retrying }).href,
+    "/chat?workflow=AppGenerator&mode=workflow&chat_id=chat-1&app_id=mozaiks-factory");
+  const rebuild = [row("app_bundle", 2, "draft", "failed"), row("app_bundle", 1, "current", "passed")];
+  assert.equal(projectStatusSentence(projectStatus({ versions: rebuild, app: retrying })), "A new build is in progress.");
+  // With no build running, the failure is still what the owner sees.
+  const quiet = { build_registry_id: "appreg_1", app_id: "draft-app-1", status: "building" };
+  assert.equal(projectStatus({ versions: rebuild, app: quiet }).kind, "failed");
 });
 
 test("request counts: one history read per visit unless a full page hides documents", async () => {
