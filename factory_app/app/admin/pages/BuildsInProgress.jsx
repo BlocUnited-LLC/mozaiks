@@ -22,8 +22,9 @@ function formatDay(value) {
 
 /**
  * Apps whose build is not finished, each with the same one-sentence status
- * and button as its Project page. One history request per listed app; an app
- * whose history cannot be read is left out rather than shown with a guess.
+ * and button as its Project page. One history request per listed app (two
+ * when a full first page left out the app version); an app whose history
+ * cannot be read is left out rather than shown with a guess.
  */
 export default function BuildsInProgress({ apps }) {
   const { apps: candidates, more } = useMemo(() => buildsInProgressCandidates(apps), [apps])
@@ -35,7 +36,7 @@ export default function BuildsInProgress({ apps }) {
     const controller = new AbortController()
     Promise.allSettled(candidates.map((app) => (
       fetchRecentVersions(app.build_registry_id, { signal: controller.signal })
-        .then((versions) => [app.build_registry_id, versions])
+        .then((result) => [app.build_registry_id, result])
     ))).then((results) => {
       if (controller.signal.aborted) return
       setLoaded({
@@ -54,7 +55,8 @@ export default function BuildsInProgress({ apps }) {
   const rows = candidates
     .filter((app) => loaded.versionsById[app.build_registry_id])
     .map((app) => {
-      const status = projectStatus({ versions: loaded.versionsById[app.build_registry_id], app })
+      const { versions, unknownFamilies } = loaded.versionsById[app.build_registry_id]
+      const status = projectStatus({ versions, app, unknownFamilies })
       return { app, status, action: projectAction({ status, app, appId: app.app_id }) }
     })
   if (rows.length === 0) return null

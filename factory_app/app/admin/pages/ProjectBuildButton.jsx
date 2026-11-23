@@ -38,5 +38,5 @@ export default function ProjectBuildButton({ action, size = 'sm', className = ''
       </span>
     )
   }
-  return <span className="text-sm text-muted-foreground">{action.reason}</span>
+  return action.reason ? <span className="text-sm text-muted-foreground">{action.reason}</span> : null
 }

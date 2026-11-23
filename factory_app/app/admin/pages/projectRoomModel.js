@@ -42,6 +42,25 @@ export const PROJECT_DOCUMENTS = [
 
 export const PROJECT_DOCUMENT_FAMILIES = PROJECT_DOCUMENTS.map((entry) => entry.family)
 
+/** Rows of the first, unfiltered history page. */
+export const HISTORY_PAGE_LIMIT = 100
+/** Rows of a per-family follow-up page. */
+export const FAMILY_PAGE_LIMIT = 25
+
+/**
+ * Families to read on their own after a first history page.
+ *
+ * A page shorter than its limit holds every record of the app, so nothing is
+ * missing. A full page may have cut older records, so each wanted family
+ * absent from it gets a follow-up.
+ */
+export function familiesToFollowUp(rows, families, pageLimit = HISTORY_PAGE_LIMIT) {
+  const list = Array.isArray(rows) ? rows : []
+  if (list.length < pageLimit) return []
+  const present = new Set(list.map(familyOf))
+  return families.filter((family) => !present.has(family))
+}
+
 const DOCUMENT_NAMES = Object.fromEntries(PROJECT_DOCUMENTS.map((entry) => [entry.family, entry.name]))
 
 /** Lifecycle states in which the server resumes the app's recorded build conversation. */
@@ -152,39 +171,56 @@ function activeChat(app) {
   return chatId && workflowId ? { chatId, workflowId } : null
 }
 
+/** Lifecycle states in which a build conversation is producing a new version. */
+const BUILDING_STATES = new Set(['draft', 'building', 'configuring'])
+
 /**
  * Where the app's build stands.
  *
- * The app's lifecycle state (the one My Apps shows) wins when it says the
- * build waits on the owner: `needs_change` (lifecycle `needs_revision`) and
- * `ready_for_review` (lifecycle `review`). Otherwise the saved documents
- * decide: `not_started` (nothing saved and no build conversation),
- * `in_progress`, `built` (the current app version passed its checks) or
- * `failed` (the newest app version did not pass its checks).
+ * The app's lifecycle state (the one My Apps shows) wins when it says more
+ * than the documents can: `needs_change` (`needs_revision`), `ready_for_review`
+ * (`review`), `deploying`, `archived`, and a rebuild in progress (a building
+ * state with a recorded build conversation, even when an earlier app version
+ * passed, unless the newest app version failed). Otherwise the saved documents decide: `not_started` (nothing saved
+ * and no build conversation), `in_progress`, `built` (the current app version
+ * passed its checks), `failed` (the newest app version did not pass its
+ * checks), or `live` (an `active` app without a passing app version, such as
+ * an imported app).
+ *
+ * `unknownFamilies` names document families the caller could not read; a next
+ * step in one of them is not guessed.
  */
-export function projectStatus({ versions: rows = [], app = null } = {}) {
+export function projectStatus({ versions: rows = [], app = null, unknownFamilies = [] } = {}) {
   const lifecycle = lifecycleOf(app)
   if (lifecycle === 'needs_revision') return { kind: 'needs_change', nextStep: null, date: null }
   if (lifecycle === 'review') return { kind: 'ready_for_review', nextStep: null, date: null }
+  if (lifecycle === 'deploying') return { kind: 'deploying', nextStep: null, date: null }
+  if (lifecycle === 'archived') return { kind: 'archived', nextStep: null, date: null }
   const versions = projectVersions(rows)
   const appVersions = versionsOf(versions, 'app_bundle')
   const newestApp = appVersions[0] || null
   const currentApp = appVersions.find(isCurrent) || null
+  // The newest app version's failure is the most specific news, even mid-build.
   if (newestApp?.validation_status === 'failed') {
     return { kind: 'failed', nextStep: null, date: versionDate(newestApp) }
   }
+  const rebuilding = Boolean(currentApp) && BUILDING_STATES.has(lifecycle) && Boolean(activeChat(app))
+  if (rebuilding) return { kind: 'in_progress', firstBuild: false, nextStep: null, date: null }
   if (currentApp?.validation_status === 'passed') {
     return { kind: 'built', nextStep: null, date: versionDate(currentApp) }
   }
-  if (versions.length === 0 && !activeChat(app)) {
+  if (lifecycle === 'active') return { kind: 'live', nextStep: null, date: null }
+  if (versions.length === 0 && !activeChat(app) && unknownFamilies.length === 0) {
     return { kind: 'not_started', nextStep: BUILD_STEPS[0].next, date: null }
   }
+  if (currentApp) return { kind: 'in_progress', firstBuild: false, nextStep: null, date: null }
   const nextStep = buildSteps(versions).find((step) => step.state === 'next')
-  const reviewReady = !currentApp && newestApp?.lifecycle_status === 'draft' && newestApp.validation_status === 'passed'
+  const reviewReady = newestApp?.lifecycle_status === 'draft' && newestApp.validation_status === 'passed'
+  const unknown = new Set(unknownFamilies)
   return {
     kind: 'in_progress',
-    firstBuild: !currentApp,
-    nextStep: reviewReady || !nextStep ? 'review the app' : nextStep.next,
+    firstBuild: true,
+    nextStep: reviewReady || !nextStep ? 'review the app' : unknown.has(nextStep.family) ? null : nextStep.next,
     date: null,
   }
 }
@@ -201,8 +237,15 @@ export function projectStatusSentence(status, formatDate = (value) => String(val
       return 'Needs a change before the build can continue.'
     case 'ready_for_review':
       return 'Ready for your review.'
+    case 'live':
+      return 'This app is live.'
+    case 'deploying':
+      return 'Being deployed.'
+    case 'archived':
+      return 'Archived.'
     default:
-      return `${status?.firstBuild === false ? 'Build' : 'First build'} in progress. Next step: ${status?.nextStep || 'review the app'}.`
+      if (status?.firstBuild === false) return 'A new build is in progress.'
+      return status?.nextStep ? `First build in progress. Next step: ${status.nextStep}.` : 'First build in progress.'
   }
 }
 
@@ -237,6 +280,13 @@ export function projectAction({ status, app = null, appId = null } = {}) {
 
   if (status?.kind === 'failed') {
     return { type: 'link', label: 'See what failed', href: reviewHref(routeAppId) }
+  }
+  if (status?.kind === 'live') {
+    return { type: 'link', label: 'Open overview', href: `/apps/${encodeURIComponent(routeAppId || '')}/overview` }
+  }
+  if (status?.kind === 'deploying' || status?.kind === 'archived') {
+    // Nothing to build from here; the status says what is happening.
+    return { type: 'none', label: null, reason: null }
   }
   if (status?.kind === 'ready_for_review') {
     // A saved build waiting for review is reviewed on the build review page,

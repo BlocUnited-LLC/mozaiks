@@ -302,6 +302,7 @@ export default function DashboardPortalPage({ targetAppId, buildRegistryId } = {
   const panels = toArray(portal.panels).slice().sort((left, right) => (
     Number(left.order || 0) - Number(right.order || 0) || String(left.id).localeCompare(String(right.id))
   ))
+  const hasProjectPanel = panels.some((panel) => panel.type === 'build_project')
 
   return (
     <WorkspaceLayout>
@@ -312,6 +313,8 @@ export default function DashboardPortalPage({ targetAppId, buildRegistryId } = {
           dataMode={dataMode}
           title={portal.label}
           subtitle={portal.description || `${portal.label} portal for this app.`}
+          // The Project panel states the build status itself; a second summary would repeat it.
+          summaryItems={hasProjectPanel ? [] : buildSummaryItems(portal, snapshot)}
           actions={[{ id: 'refresh', label: 'Refresh', variant: 'outline' }]}
           onAction={(id) => id === 'refresh' && refresh()}
         />

@@ -2115,6 +2115,11 @@ test('app project route stays responsive across desktop and mobile widths', asyn
     json: buildOnboardingStatusPayload({ dismissed: true }),
   }));
   const triggers = [];
+  const historyReads = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === '/api/studio/build/history') historyReads.push(url.search);
+  });
   await page.route('**/api/workflows/trigger', async (route) => {
     triggers.push(route.request().postDataJSON());
     await route.fulfill({ json: { chat_id: 'review-chat', workflow_id: 'AppReview', execution_mode: 'workflow' } });
@@ -2128,6 +2133,11 @@ test('app project route stays responsive across desktop and mobile widths', asyn
   await expect(main.getByRole('link', { name: 'Continue build', exact: true })).toHaveAttribute(
     'href', '/chat?workflow=AppGenerator&mode=workflow&chat_id=campaign-revision-chat&app_id=factory-session-app',
   );
+
+  // One unfiltered history page holds every document here: no per-family reads.
+  // (The other read is the app-version history the shared App Studio data loads.)
+  expect(historyReads.filter((search) => !search.includes('build_family='))).toEqual(['?build_registry_id=demo_campaign_revision&limit=100']);
+  expect(historyReads.filter((search) => search.includes('build_family=') && !search.includes('build_family=app_bundle'))).toEqual([]);
 
   // Once live, the current app version passed its checks: built, with one button.
   const live = { ...appsPayload.apps[0], status: 'active', current_build_run: { artifact_version_id: 'ver-17' } };
@@ -2170,6 +2180,29 @@ test('app project route stays responsive across desktop and mobile widths', asyn
   expect(triggers).toEqual([expect.objectContaining({
     workflow_id: 'AppReview', trigger_source: 'manual', build_registry_id: 'demo_campaign_revision',
   })]);
+});
+
+test('a failed history read degrades only the Project panel, which can retry', async ({ page }) => {
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', (route) => route.fulfill({
+    json: buildOnboardingStatusPayload({ dismissed: true }),
+  }));
+  let refuse = true;
+  await page.route('**/api/studio/build/history?**', async (route) => {
+    const url = new URL(route.request().url());
+    if (refuse && !url.searchParams.get('build_family')) {
+      return route.fulfill({ status: 429, json: { detail: 'Too many requests' } });
+    }
+    return route.fulfill({ json: { app_id: APP_ID, artifact_versions: historyRows(url), change_requests: [] } });
+  });
+  await page.goto(`/apps/${APP_ID}/building`);
+  const main = page.locator('main');
+  await expect(main.getByRole('heading', { name: 'Project', exact: true })).toBeVisible();
+  await expect(main.getByText('Saved documents could not be loaded')).toBeVisible();
+  refuse = false;
+  await main.getByRole('button', { name: 'Try again' }).click();
+  await expect(main.getByText('Needs a change before the build can continue.')).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Open Idea & value' })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
 });
 
 test('a first build in progress continues the app build conversation from Project and My Apps', async ({ page }, testInfo) => {

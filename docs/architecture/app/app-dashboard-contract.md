@@ -181,10 +181,14 @@ default portal.
 `build_project` renders an app's Project from records the server already keeps,
 read-only:
 
-- the saved build documents, read from `GET /api/studio/build/history` with one
-  `build_family` filter per document (history sorts by version number across
-  families, so one unfiltered page can hide a document behind internal
-  records). Each document shows its latest `current` version, or its newest
+- the saved build documents, read from `GET /api/studio/build/history` in one
+  unfiltered request of 100 rows. History sorts by version number across
+  families, so when that page is full a document can sit behind internal
+  records; only then is each document family missing from it read with its own
+  `build_family` filter (25 rows). A full page means older versions may exist,
+  and the version list says it shows only the latest ones. A failed read shows
+  an error with a retry inside the Project panel; the rest of the page stays.
+  Each document shows its latest `current` version, or its newest
   version when none is current. Internal families (`app_context_version`,
   `app_intelligence_snapshot`, `app_context_graph`, `source_context_bundle`,
   `brownfield_registration`) are not shown;
@@ -202,7 +206,16 @@ read-only:
   says so.
 
 My Apps lists up to five in-build apps under "Builds in progress" with the same
-sentence and button, using one history request per listed app.
+sentence and button, using one history request per listed app, plus one for the
+app version only when a full first page left it out. A next step whose document
+family a full page left out is not guessed ("First build in progress.").
+
+The status follows the app's lifecycle state where it says more than the
+documents: Needs Revision, Review, Deploying ("Being deployed."), Archived
+("Archived."), and a rebuild in progress (a building state with a recorded
+build conversation, even when an earlier app version passed). An active app
+without a passing app version, such as an imported one, reads "This app is
+live." with a link to its overview.
 
 ### Host Sections
 

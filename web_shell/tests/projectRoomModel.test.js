@@ -233,3 +233,125 @@ test("My Apps lists in-build apps most recently updated first, at most five", ()
   assert.deepEqual(listed.map((app) => app.app_id), ["a5", "a4", "a3", "a2", "a1"]);
   assert.equal(more, 1);
 });
+
+test("a rebuild with a recorded build conversation is in progress, not built", () => {
+  const versions = [row("app_bundle", 2, "current", "passed")];
+  for (const lifecycle of ["building", "configuring", "draft"]) {
+    const app = { ...buildingApp, status: lifecycle, active_workflow_id: "AppGenerator" };
+    const status = projectStatus({ versions, app });
+    assert.equal(status.kind, "in_progress");
+    assert.equal(projectStatusSentence(status), "A new build is in progress.");
+    assert.deepEqual(projectAction({ status, app, appId: "draft-app-1" }), {
+      type: "link", label: "Continue build",
+      href: "/chat?workflow=AppGenerator&mode=workflow&chat_id=chat-1&app_id=mozaiks-factory",
+    });
+  }
+  // Without a conversation to reopen the saved build still reads as built.
+  const quiet = { build_registry_id: "appreg_1", app_id: "draft-app-1", status: "building" };
+  assert.equal(projectStatus({ versions, app: quiet }).kind, "built");
+});
+
+test("live, deploying and archived apps get honest sentences", () => {
+  const discoveryOnly = [row("application_inventory", 1, "draft", "pending"), row("risk_report", 1, "draft", "pending")];
+  const live = { build_registry_id: "appreg_1", app_id: "imported-1", status: "active" };
+  const liveStatus = projectStatus({ versions: discoveryOnly, app: live });
+  assert.equal(projectStatusSentence(liveStatus), "This app is live.");
+  assert.deepEqual(projectAction({ status: liveStatus, app: live }), {
+    type: "link", label: "Open overview", href: "/apps/imported-1/overview",
+  });
+  // A live app whose current version passed reads as built, with a change offered.
+  const built = projectStatus({ versions: [row("app_bundle", 1, "current", "passed")], app: live });
+  assert.equal(built.kind, "built");
+  for (const [lifecycle, sentence] of [["deploying", "Being deployed."], ["archived", "Archived."]]) {
+    const app = { ...live, status: lifecycle };
+    const status = projectStatus({ versions: [row("app_bundle", 1, "current", "passed")], app });
+    assert.equal(projectStatusSentence(status), sentence);
+    assert.deepEqual(projectAction({ status, app }), { type: "none", label: null, reason: null });
+  }
+});
+
+test("a next step in a family that could not be read is not guessed", () => {
+  const versions = [row("concept", 1, "current", "skipped")];
+  const status = projectStatus({ versions, app: buildingApp, unknownFamilies: ["theme_capture"] });
+  assert.equal(projectStatusSentence(status), "First build in progress.");
+  const known = projectStatus({ versions, app: buildingApp, unknownFamilies: ["design_docs"] });
+  assert.equal(projectStatusSentence(known), "First build in progress. Next step: choose the look and feel.");
+  // Unknown families mean the app may have documents: never "hasn't started".
+  const app = { build_registry_id: "appreg_1", app_id: "draft-app-1", status: "draft" };
+  assert.notEqual(projectStatus({ versions: [], app, unknownFamilies: ["concept"] }).kind, "not_started");
+});
+
+test("follow-up reads are needed only for families missing from a full first page", () => {
+  const { familiesToFollowUp, HISTORY_PAGE_LIMIT } = model;
+  const short = [row("concept", 1, "current", "skipped")];
+  assert.deepEqual(familiesToFollowUp(short, ["concept", "app_bundle"]), []);
+  const full = Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => row("app_context_version", index + 1, "current", "passed"));
+  full[0] = row("concept", 1, "current", "skipped");
+  assert.deepEqual(familiesToFollowUp(full, ["concept", "theme_capture", "app_bundle"]), ["theme_capture", "app_bundle"]);
+});
+
+test("request counts: one history read per visit unless a full page hides documents", async () => {
+  const api = await import(pathToFileURL(path.join(pages, "projectRoomApi.js")).href);
+  const requests = [];
+  let firstPage = [];
+  const pageFor = (url) => {
+    const params = new URL(url, "http://local").searchParams;
+    const family = params.get("build_family");
+    return family ? [row(family, 1, "current", family === "app_bundle" ? "passed" : "skipped")] : firstPage;
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    requests.push(String(url));
+    return { ok: true, json: async () => ({ artifact_versions: pageFor(url) }) };
+  };
+  try {
+    firstPage = [row("concept", 1, "current", "skipped"), row("app_bundle", 1, "draft", "pending")];
+    let project = await api.fetchProjectVersions("appreg_1");
+    assert.equal(project.requests, 1);
+    assert.equal(requests.length, 1);
+    assert.match(requests[0], /\/api\/studio\/build\/history\?build_registry_id=appreg_1&limit=100$/);
+    assert.equal(project.capped, false);
+
+    // A full page of index records: each missing document family is read once.
+    requests.length = 0;
+    firstPage = Array.from({ length: 100 }, (_, index) => row("app_context_version", index + 1, "current", "passed"));
+    firstPage[0] = row("concept", 1, "current", "skipped");
+    project = await api.fetchProjectVersions("appreg_1");
+    assert.equal(project.requests, 11);
+    assert.equal(requests.length, 11);
+    assert.equal(project.capped, true);
+    assert.ok(!requests.some((url) => url.includes("build_family=concept")));
+
+    // My Apps: one read, plus one for the app version only when a full page left it out.
+    requests.length = 0;
+    let recent = await api.fetchRecentVersions("appreg_1");
+    assert.equal(recent.requests, 2);
+    assert.equal(requests.length, 2);
+    assert.match(requests[1], /build_family=app_bundle/);
+    assert.deepEqual(recent.unknownFamilies, ["theme_capture", "design_docs", "subscription_contract", "workflow_bundle"]);
+    requests.length = 0;
+    firstPage = [row("concept", 1, "current", "skipped")];
+    recent = await api.fetchRecentVersions("appreg_1");
+    assert.equal(recent.requests, 1);
+    assert.deepEqual(recent.unknownFamilies, []);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("a failed first history read fails the Project read; a failed follow-up leaves its family unknown", async () => {
+  const api = await import(pathToFileURL(path.join(pages, "projectRoomApi.js")).href);
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => ({ ok: false, status: 429, json: async () => ({}) });
+    await assert.rejects(api.fetchProjectVersions("appreg_1"), /429/);
+    const full = Array.from({ length: 100 }, (_, index) => row("app_context_version", index + 1, "current", "passed"));
+    globalThis.fetch = async (url) => (String(url).includes("build_family=risk_report")
+      ? { ok: false, status: 429, json: async () => ({}) }
+      : { ok: true, json: async () => ({ artifact_versions: String(url).includes("build_family") ? [] : full }) });
+    const result = await api.fetchProjectVersions("appreg_1");
+    assert.deepEqual(result.unknownFamilies, ["risk_report"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

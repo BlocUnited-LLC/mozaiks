@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import {
+  ActionButton,
   LinkButton,
   StatusPill,
   StudioInlineEmptyState,
@@ -34,25 +35,29 @@ function formatDay(value) {
   }
 }
 
+const EMPTY_RESULT = { versions: [], unknownFamilies: [], capped: false }
+
 function useProjectVersions(buildRegistryId, dataMode, demoVersions) {
-  const [state, setState] = useState({ key: null, versions: [], incomplete: false, error: null })
-  const key = JSON.stringify([buildRegistryId, dataMode])
+  const [attempt, setAttempt] = useState(0)
+  const [state, setState] = useState({ key: null, ...EMPTY_RESULT, error: null })
+  const key = JSON.stringify([buildRegistryId, dataMode, attempt])
 
   useEffect(() => {
     if (dataMode === 'demo' || !buildRegistryId) return undefined
     const controller = new AbortController()
     fetchProjectVersions(buildRegistryId, { signal: controller.signal })
-      .then(({ versions, incomplete }) => setState({ key, versions, incomplete, error: null }))
+      .then(({ versions, unknownFamilies, capped }) => setState({ key, versions, unknownFamilies, capped, error: null }))
       .catch((err) => {
         if (err?.name === 'AbortError') return
-        setState({ key, versions: [], incomplete: false, error: err instanceof Error ? err.message : 'Saved documents unavailable.' })
+        setState({ key, ...EMPTY_RESULT, error: err instanceof Error ? err.message : 'Saved documents unavailable.' })
       })
     return () => controller.abort()
   }, [buildRegistryId, dataMode, key])
 
-  if (dataMode === 'demo') return { loading: false, versions: demoVersions, incomplete: false, error: null }
-  if (!buildRegistryId) return { loading: false, versions: [], incomplete: false, error: null }
-  return { loading: state.key !== key, ...state }
+  const retry = () => setAttempt((value) => value + 1)
+  if (dataMode === 'demo') return { loading: false, ...EMPTY_RESULT, versions: demoVersions, error: null, retry }
+  if (!buildRegistryId) return { loading: false, ...EMPTY_RESULT, error: null, retry }
+  return { loading: state.key !== key, ...state, retry }
 }
 
 const STEP_MARKS = {
@@ -168,28 +173,33 @@ function DocumentView({ document, appId }) {
   )
 }
 
-function VersionList({ versions }) {
+function VersionList({ versions, capped }) {
   if (versions.length === 0) return null
   return (
-    <details className="rounded-lg border border-border/55 bg-background/30 p-4">
-      <summary className="cursor-pointer text-sm font-semibold text-foreground">All versions ({versions.length})</summary>
-      <ul className="mt-3 divide-y divide-border/50">
-        {versions.map((version) => {
-          const status = versionStatus(version)
-          return (
-            <li key={version.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm">
-              <span className="min-w-0 text-foreground">
-                {documentName(version.build_family)} · Version {version.version_number ?? '?'}
-              </span>
-              <span className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-muted-foreground">{formatDay(versionDate(version))}</span>
-                <StatusPill tone={status.tone}>{status.label}</StatusPill>
-              </span>
-            </li>
-          )
-        })}
-      </ul>
-    </details>
+    <SurfaceCard>
+      <details>
+        {/* When the history pages were full, older versions exist beyond what is listed. */}
+        <summary className="cursor-pointer text-sm font-semibold text-foreground">
+          {capped ? `All versions: showing the latest ${versions.length}` : `All versions (${versions.length})`}
+        </summary>
+        <ul className="mt-3 divide-y divide-border/50">
+          {versions.map((version) => {
+            const status = versionStatus(version)
+            return (
+              <li key={version.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm">
+                <span className="min-w-0 text-foreground">
+                  {documentName(version.build_family)} · Version {version.version_number ?? '?'}
+                </span>
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-muted-foreground">{formatDay(versionDate(version))}</span>
+                  <StatusPill tone={status.tone}>{status.label}</StatusPill>
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      </details>
+    </SurfaceCard>
   )
 }
 
@@ -198,26 +208,35 @@ function VersionList({ versions }) {
  * saved documents, and every version. Read-only.
  */
 export default function AppProjectPanel({ appId, app, buildRegistryId, dataMode, demoVersions = [] }) {
-  const { loading, versions: rows, incomplete, error } = useProjectVersions(buildRegistryId, dataMode, demoVersions)
+  const { loading, versions: rows, unknownFamilies, capped, error, retry } = useProjectVersions(buildRegistryId, dataMode, demoVersions)
   const [openFamily, setOpenFamily] = useState(null)
   const versions = useMemo(() => projectVersions(rows), [rows])
   const documents = useMemo(() => latestDocuments(versions), [versions])
   const steps = useMemo(() => buildSteps(versions), [versions])
-  const status = useMemo(() => projectStatus({ versions, app }), [versions, app])
+  const status = useMemo(() => projectStatus({ versions, app, unknownFamilies }), [versions, app, unknownFamilies])
   const action = useMemo(() => projectAction({ status, app, appId }), [status, app, appId])
   const openDocument = documents.find((document) => document.family === openFamily) || null
 
   if (loading) return <StudioLoadingState label="Loading the project…" />
 
+  // A failed read degrades this panel only; the rest of the page stays usable.
+  if (error) {
+    return (
+      <div className="space-y-3">
+        <StudioInlineEmptyState title="Saved documents could not be loaded" description={error} />
+        <ActionButton variant="outline" size="sm" onClick={retry}>Try again</ActionButton>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-5">
-      {error ? (
-        <StudioInlineEmptyState title="Saved documents could not be loaded" description={error} />
-      ) : (
-        <StatusSection status={status} action={action} steps={steps} />
-      )}
-      {incomplete ? (
-        <p className="text-sm text-warning">Some documents could not be loaded. Refresh to try again.</p>
+      <StatusSection status={status} action={action} steps={steps} />
+      {unknownFamilies.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-sm text-warning">Some documents could not be loaded.</p>
+          <ActionButton variant="outline" size="sm" onClick={retry}>Try again</ActionButton>
+        </div>
       ) : null}
 
       <section aria-labelledby="project-documents-heading" className="space-y-3">
@@ -236,7 +255,7 @@ export default function AppProjectPanel({ appId, app, buildRegistryId, dataMode,
         )}
       </section>
 
-      <VersionList versions={versions} />
+      <VersionList versions={versions} capped={capped} />
 
       <StudioSlideOver
         open={Boolean(openDocument)}
