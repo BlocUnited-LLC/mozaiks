@@ -1639,3 +1639,102 @@ def test_an_installed_module_page_passes_bundle_validation(tmp_path):
     assert module_page_errors() == []
     (roots.app_root / "modules/stock_ledger/ui/index.js").write_text("export const Other = () => null;\n", encoding="utf-8")
     assert any("declares component 'StockLedgerPage'" in error for error in module_page_errors())
+
+
+def _page_pack(tmp_path: Path, name: str, *, module: str | None = None, component: str = "DashboardPage", version: str = "v1") -> Path:
+    """A library whose module exports DashboardPage and whose route names it as ``component``."""
+    pack = _capability_pack(tmp_path / version, name)
+    templates = pack / "templates"
+    module = module or name
+    (templates / "modules" / module / "ui").mkdir(parents=True, exist_ok=True)
+    (templates / "ui").mkdir()
+    (templates / "modules" / module / "module.yaml").write_text(f"module:\n  id: {module}\n", encoding="utf-8")
+    (templates / "modules" / module / "ui/index.js").write_text(
+        "export { default as DashboardPage } from './DashboardPage.jsx';\n", encoding="utf-8",
+    )
+    (templates / "modules" / module / "ui/DashboardPage.jsx").write_text(
+        "export default function DashboardPage() { return null; }\n", encoding="utf-8",
+    )
+    (templates / "ui/route_manifest.json").write_text(
+        json.dumps({"pages": [{"id": name, "path": f"/{name}", "component": component}]}), encoding="utf-8",
+    )
+    return pack
+
+
+def test_two_modules_cannot_supply_one_plain_component_name(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    apply_component_install(source=PackSource(directory=_page_pack(tmp_path, "alpha")), roots=roots)
+    before = _tree(tmp_path / "shop")
+    source = PackSource(directory=_page_pack(tmp_path, "beta"))
+    plan = plan_component_install(source=source, roots=roots)
+    assert plan.status == "blocked"
+    [conflict] = plan.conflicts
+    assert (conflict["kind"], conflict["key"], conflict["path"]) == (
+        "ambiguous_module_component", "DashboardPage", "ui/route_manifest.json",
+    )
+    assert "['alpha', 'beta']" in conflict["detail"]
+    with pytest.raises(CommunityComponentConflictError):
+        apply_component_install(source=source, roots=roots)
+    assert _tree(tmp_path / "shop") == before
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+
+
+def test_namespaced_references_keep_shared_component_names_unambiguous(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    for name in ("alpha", "beta"):
+        source = PackSource(directory=_page_pack(tmp_path, name, component=f"{name}:DashboardPage"))
+        assert apply_component_install(source=source, roots=roots).status == "applied"
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+    # The app then names the shared export without saying whose it is.
+    manifest = roots.app_root / "ui/route_manifest.json"
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    document["pages"].append({"id": "own", "path": "/own", "component": "DashboardPage"})
+    manifest.write_text(json.dumps(document), encoding="utf-8")
+    report = verify_installed_components(roots=roots)
+    assert report["status"] == "findings"
+    assert [[row["kind"] for row in pack["findings"]] for pack in report["packs"]] == [["ambiguous_module_component"]] * 2
+    # An unrelated library still installs; one that adds to the ambiguity does not.
+    assert plan_component_install(source=PackSource(directory=_capability_pack(tmp_path, "notes")), roots=roots).status == "ready"
+    third = PackSource(directory=_page_pack(tmp_path, "gamma", component="gamma:DashboardPage"))
+    assert plan_component_install(source=third, roots=roots).status == "blocked"
+
+
+def test_an_app_component_override_wins_over_shared_module_names(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    (roots.app_root / "ui/index.js").write_text(
+        "import DashboardPage from './pages/custom/dashboard.jsx';\n"
+        "export function register(registerComponent) {\n  registerComponent('DashboardPage', DashboardPage);\n}\n",
+        encoding="utf-8",
+    )
+    for name in ("alpha", "beta"):
+        assert apply_component_install(source=PackSource(directory=_page_pack(tmp_path, name)), roots=roots).status == "applied"
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+    # A registration that is only a comment is not an override.
+    (roots.app_root / "ui/index.js").write_text("// registerComponent('DashboardPage', DashboardPage);\n", encoding="utf-8")
+    assert verify_installed_components(roots=roots)["status"] == "findings"
+
+
+def test_an_upgrade_cannot_introduce_a_shared_plain_component_name(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    apply_component_install(source=PackSource(directory=_page_pack(tmp_path, "alpha")), roots=roots)
+    quiet = _page_pack(tmp_path, "beta", component="beta:DashboardPage", version="v1")
+    (quiet / "templates/modules/beta/ui/index.js").write_text(
+        "export { default as BetaPage } from './DashboardPage.jsx';\n", encoding="utf-8",
+    )
+    apply_component_install(source=PackSource(directory=quiet), roots=roots)
+    candidate = _page_pack(tmp_path, "beta", component="beta:DashboardPage", version="v2")
+    _edit(candidate / "context.yaml", "version: 1.0.0", "version: 2.0.0")
+    before = _tree(tmp_path / "shop")
+    with pytest.raises(CommunityComponentConflictError, match="ambiguous_module_component"):
+        apply_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+    assert _tree(tmp_path / "shop") == before
+
+
+def test_a_module_barrel_that_does_not_resolve_is_refused(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _page_pack(tmp_path, "alpha")
+    (pack / "templates/modules/alpha/ui/DashboardPage.jsx").unlink()
+    before = _tree(tmp_path / "shop")
+    plan = plan_component_install(source=PackSource(directory=pack), roots=roots)
+    assert [row["kind"] for row in plan.conflicts] == ["invalid_module_ui_barrel"]
+    assert _tree(tmp_path / "shop") == before

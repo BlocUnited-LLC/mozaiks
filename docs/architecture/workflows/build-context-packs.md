@@ -711,7 +711,8 @@ pack workflows. Every declared workflow must also retain a source folder after
 the planned writes; the packaged-default fallback follows the runtime rules.
 Removing or renaming a referenced workflow blocks the upgrade.
 Workflow assets must supply valid orchestrator and agent declarations, including
-a declared initial agent. An app without a workflow registry launches every
+a declared initial agent and a `workflow_name` that matches the folder, as the
+runtime requires. An app without a workflow registry launches every
 loaded workflow, so initial registry entries are skipped there with a warning.
 Deleting an already-owned registry remains drift and blocks an upgrade.
 
@@ -722,6 +723,17 @@ scan. Each export registers as `<module_id>:<Export>` and as `<Export>`, after
 the app's own barrel, so an app component of the same name always wins.
 `LoginPage` and `AuthCallbackPage` register only under their module-prefixed
 names; module exports cannot replace the shell's authentication defaults.
+
+When several modules export one name, the plain name belongs to whichever module
+the shell scans first. If an app declaration's `component` uses that plain name,
+install and upgrade block with `ambiguous_module_component`, and `verify` reports
+it, unless the app registers the name itself with a literal `registerComponent`
+call. References written as `<module_id>:<Export>` are never ambiguous. A pack
+whose module barrel does not resolve blocks with `invalid_module_ui_barrel`.
+
+Bundle validation resolves a route's component the same way. Module page sources
+are `modules/<module_id>/ui/<Component>.jsx` beside the barrel; a component no
+barrel exports stays unresolved.
 
 Editing a pack-owned file or entry fails `mozaiks pack verify` and blocks
 upgrades. Customize instead through seeded files, the app's own entries and

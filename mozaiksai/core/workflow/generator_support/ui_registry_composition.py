@@ -444,6 +444,21 @@ def module_ui_registrations(
     return registrations
 
 
+def registered_component_names(source: str, label: str = "ui/index.js") -> set[str]:
+    """Every key an app UI source passes to ``registerComponent`` as a literal."""
+    names: set[str] = set()
+    pending = [_parse(source, label)]
+    while pending:
+        node = pending.pop()
+        pending.extend(node.named_children)
+        if node.type != "call_expression" or _text(node.child_by_field_name("function")) != "registerComponent":
+            continue
+        arguments = _children(node.child_by_field_name("arguments"))
+        if arguments and arguments[0].type == "string":
+            names.add(_string(arguments[0]))
+    return names
+
+
 def _route_key(route: Mapping[str, Any]) -> str:
     """A route's identity for composition: its ``id``, or, for a route that declares none, its path.
 
