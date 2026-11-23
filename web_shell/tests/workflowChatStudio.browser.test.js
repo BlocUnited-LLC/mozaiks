@@ -51,7 +51,7 @@ async function startWorkflowFixture(t, {localCanvas = false, viewport} = {}) {
     '../../context/ChatUIContext': `import React from 'react';
       function Review({event,onResponse}) {
         return <section><h3>{event.payload.title}</h3>
-          <button onClick={()=>onResponse({answer:'approve'})}>Approve review</button></section>;
+          <button onClick={()=>onResponse(event.payload.decision || {answer:'approve'})}>Approve review</button></section>;
       }
       export const useChatUI = () => ({uiToolRenderer: (event,onResponse) =>
         event.tool_name === 'StudyReview' ? <Review event={event} onResponse={onResponse}/> : null});
@@ -132,6 +132,9 @@ test('an embedded Studio conversation renders the Factory chat and scopes previe
   const interactive = 'document.querySelector("button").onclick = e => { e.currentTarget.textContent = "Saved"; };';
   const document = '<h1>Revised design</h1><button>Save</button><script src="data:text/javascript;base64,' + Buffer.from(interactive).toString('base64') + '"></script>';
   const artifact = id => ({tool_call_id:id,display:'artifact',tool_name:'present_design',payload:{document}});
+  await emit('chat.chat_meta',{chat_exists:true,chat_id:'private-first',workflow_name:'DesignHelper',
+    last_artifact:artifact('saved-preview')});
+  assert.equal(await page.evaluate(()=>window.candidates.length),0);
   await emit('chat.tool_call',artifact('opening'));
   await expect(composer).toBeDisabled();
   await emit('chat.awaiting_reply');
@@ -275,5 +278,97 @@ test('a standalone generated-app workflow uses its logo to toggle the live Facto
   await page.getByRole('button',{name:'Collapse artifact workspace'}).click();
   await expect(heading).toHaveCount(0);
   await expect(toggle).toBeVisible();
+  assert.deepEqual(errors,[]);
+});
+
+test('a resumed app canvas restores its saved review from session metadata and preserves live event order', async t => {
+  const {page,errors} = await startWorkflowFixture(t,{localCanvas:true,viewport:{width:1280,height:800}});
+  const output = page.getByRole('region',{name:'Artifact output stream'});
+  const toggle = page.getByRole('button',{name:'View workflow output'});
+  const composer = page.getByRole('textbox',{name:'Study message'});
+  const scope = {chat_id:'private-first',app_id:'orchard',user_id:'owner',workflow_name:'StudyReview'};
+  const saved = {tool_call_id:'saved-call',tool_name:'StudyReview',component_type:'StudyReview',workflow_name:'StudyReview',
+    display:'artifact',response_available:true,payload:{title:'Saved team schedule',artifact_id:'schedule-v2',
+      interaction_type:'ui_tool',decision:{day:'Tuesday',approved_shifts:[1,3]}}};
+  const meta = {chat_exists:true,...scope,last_artifact:saved};
+  const sendFrame = f => page.evaluate(frame => window.channels['private-first'].onMessage(frame),f);
+  const emit = (type,data) => sendFrame({type,data});
+  const connect = () => page.waitForFunction(()=>window.channels?.['private-first']);
+  await connect();
+  await page.reload();
+  await connect();
+  await emit('chat.text',{agent:'Scheduler',index:0,replay:true,content:'Review the saved schedule.'});
+  await expect(page.getByRole('region',{name:'Study conversation'})).toContainText('Review the saved schedule.');
+  await emit('chat.chat_meta',{...meta,app_id:'another-app'});
+  await emit('chat_meta',{...meta,user_id:'another-owner'});
+  await emit('chat_meta',{...meta,chat_id:'another-chat'});
+  await emit('chat_meta',{...meta,last_artifact:{...saved,workflow_name:'AnotherReview'}});
+  await emit('chat_meta',{...meta,last_artifact:{...saved,display:'inline'}});
+  await emit('chat_meta',{...meta,chat_exists:false});
+  await sendFrame({type:'unknown',content:JSON.stringify({type:'chat_meta',data:meta})});
+  await expect(output.getByRole('img',{name:'Orchard Kitchen logo'})).toBeVisible();
+
+  await emit('chat.chat_meta',{...meta,last_artifact:{...saved,response_available:false}});
+  await expect(output.getByRole('region',{name:'Inactive saved review'})).toBeVisible();
+  assert.equal(await output.getByText('Saved team schedule').evaluate(el=>Boolean(el.closest('[inert]'))),true);
+  const responses = [];
+  await page.route('**/api/tool-call/respond',route=>{
+    responses.push({body:route.request().postDataJSON(),token:route.request().headers().authorization});
+    return route.fulfill({json:{status:'success'}});
+  });
+  await sendFrame({type:'chat_meta',...meta,last_artifact:{...saved,display:'fullscreen'}});
+  await expect(output.getByRole('heading',{name:'Saved team schedule'})).toBeVisible();
+  await output.getByRole('button',{name:'Approve review'}).click();
+  await expect.poll(()=>responses).toEqual([{body:{event_id:'saved-call',response_data:saved.payload.decision},token:'Bearer test-scope'}]);
+  await composer.fill('Which team did this study cover?');
+  await page.getByRole('button',{name:'Send message'}).click();
+  expect(await page.evaluate(()=>window.sent.at(-1).context.artifact_context)).toMatchObject({
+    id:'saved-call',artifact_id:'schedule-v2',chat_id:'private-first',workflow_name:'StudyReview',type:'StudyReview',display:'fullscreen'});
+
+  const update = (id,title) => emit('ui.update',{...scope,tool_call_id:id,patch:{title}});
+  await update('another-call','Unrelated patch');
+  await expect(output.getByRole('heading',{name:'Saved team schedule'})).toBeVisible();
+  await update('saved-call','Patched schedule');
+  await emit('chat_meta',meta);
+  await expect(output.getByRole('heading',{name:'Patched schedule'})).toBeVisible();
+  await emit('ui.dismiss',{...scope,tool_call_id:'another-call'});
+  await expect(output.getByRole('heading',{name:'Patched schedule'})).toBeVisible();
+  await emit('ui.dismiss',{...scope,tool_call_id:'saved-call'});
+  await expect(output).toHaveCount(0);
+  await toggle.click();
+  await expect(output.getByRole('img',{name:'Orchard Kitchen logo'})).toBeVisible();
+  await emit('chat_meta',meta);
+  await expect(output.getByRole('button',{name:'Approve review'})).toHaveCount(0);
+
+  await toggle.click();
+  await expect(output).toHaveCount(0);
+  const render = (id,display) => emit('ui.render',{...scope,tool_call_id:id,component:'StudyReview',
+    display_mode:display,awaiting_response:true,payload:{title:id}});
+  await render('New review','artifact');
+  await emit('chat_meta',meta);
+  await emit('ui.render',{...saved,display_mode:'artifact',replay:true,payload:{title:'Old replay'}});
+  await expect(output.getByRole('heading',{name:'New review'})).toBeVisible();
+  await expect(composer).toBeVisible();
+  for (const alias of ['view','fullscreen']) {
+    await render('Focused '+alias,alias);
+    await expect(output.getByRole('heading',{name:'Focused '+alias})).toBeVisible();
+    await expect(composer).toHaveCount(0);
+    await page.getByRole('button',{name:'Return to chat'}).click();
+    await expect(composer).toBeVisible();
+  }
+
+  await page.setViewportSize({width:390,height:844});
+  await page.reload();
+  await connect();
+  await emit('chat_meta',{...meta,last_artifact:{...saved,display:'view'}});
+  await expect(composer).toBeVisible();
+  await expect(output).toHaveCount(0);
+  await toggle.click();
+  await expect(output.getByRole('heading',{name:'Saved team schedule'})).toBeVisible();
+  await page.getByRole('button',{name:'Collapse artifact workspace'}).click();
+  await render('New mobile review','artifact');
+  await expect(output.getByRole('heading',{name:'New mobile review'})).toBeVisible();
+  await emit('ui.dismiss',{...scope,tool_call_id:'New mobile review'});
+  await expect(composer).toBeVisible();
   assert.deepEqual(errors,[]);
 });

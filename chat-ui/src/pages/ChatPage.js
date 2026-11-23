@@ -85,8 +85,11 @@ import {
 } from '../utils/supportLinks';
 import {
   buildComposerArtifactContext,
+  patchToolCallMessage,
+  projectSavedArtifact,
   upsertInlineToolCallMessage,
 } from '../components/chat/inlineSurfaces';
+import { isArtifactViewDisplay, isCanvasDisplay } from '../state/uiSurfaceReducer';
 
 // Extracted hooks for gradual migration
 // Usage: const { messages, addMessage, ... } = useConversation({ chatId, conversationMode, ... });
@@ -809,7 +812,7 @@ const ChatPage = () => {
       // This guards against stale localStorage data written before the
       // display-mode guard was added to cacheServerLastArtifact.
       // Also clear the stale entry so it never resurfaces.
-      if (cachedDisplay !== 'artifact') {
+      if (!isCanvasDisplay(cachedDisplay)) {
         try { clearStoredArtifactState(chatId); } catch (_) {}
         return false;
       }
@@ -857,7 +860,8 @@ const ChatPage = () => {
             tool_name: cachedToolName,
             tool_call_id: cached.tool_call_id || cachedToolCall.tool_call_id || null,
             component_type: cached.component_type || cachedToolCall.component_type || cachedToolName,
-            display: cachedDisplay || 'artifact',
+            // Resume alongside the conversation. Only a fresh view request takes over the screen.
+            display: 'artifact',
           });
         }
       }
@@ -912,7 +916,7 @@ const ChatPage = () => {
 
     const payload = toolCall.payload || {};
     const displayMode = toolCall.display || payload.display || payload.mode || 'artifact';
-    if (displayMode !== 'artifact') return;
+    if (!isCanvasDisplay(displayMode)) return;
 
     const artifactPayload = {
       ...payload,
@@ -2104,7 +2108,7 @@ const ChatPage = () => {
   const cacheServerLastArtifact = useCallback((lastArtifact, options = {}) => {
     const targetChatId = options?.chatId || currentChatId;
     const targetWorkflowName = options?.workflowName || lastArtifact?.workflow_name || currentWorkflowName;
-    if (!targetChatId || !lastArtifact?.tool_name) {
+    if (!targetChatId || !lastArtifact?.tool_name || !isCanvasDisplay(lastArtifact.display || 'artifact')) {
       return false;
     }
     // Don't restore an artifact that was emitted by a different workflow — unless
@@ -2120,41 +2124,8 @@ const ChatPage = () => {
       }
     }
 
-    const cachedArtifact = {
-      tool_name: lastArtifact.tool_name,
-      tool_call_id: lastArtifact.tool_call_id || null,
-      component_type: lastArtifact.component_type || lastArtifact.tool_name,
-      response_available: lastArtifact.response_available,
-      workflow_name: targetWorkflowName,
-      payload: lastArtifact.payload || {},
-      display: lastArtifact.display || 'artifact',
-      ts: Date.now(),
-    };
-    const artifactPayload = {
-      ...cachedArtifact.payload,
-      // Passive UI surfaces do not await a tool response. The persisted artifact
-      // stores interaction_type, while live events also carry awaiting_response.
-      ...(cachedArtifact.payload.interaction_type === 'ui_surface' ? { awaiting_response: false } : {}),
-      artifact_id: deriveArtifactId(cachedArtifact.payload, cachedArtifact.tool_call_id || cachedArtifact.tool_name),
-    };
-    const restoredArtifactMessage = {
-      id: `ui-restored-${cachedArtifact.tool_call_id || cachedArtifact.tool_name}`,
-      sender: 'agent',
-      agentName: artifactPayload.agentName || artifactPayload.agent_name || 'Agent',
-      content: artifactPayload.structured_output || artifactPayload || {},
-      isStreaming: false,
-      toolCall: {
-        tool_name: cachedArtifact.tool_name,
-        payload: artifactPayload,
-        tool_call_id: cachedArtifact.tool_call_id,
-        workflow_name: cachedArtifact.workflow_name,
-        onResponse: null,
-        display: cachedArtifact.display,
-        component_type: cachedArtifact.component_type || cachedArtifact.tool_name,
-        response_available: cachedArtifact.response_available,
-        restored: true,
-      },
-    };
+    const { cachedArtifact, restoredArtifactMessage } = projectSavedArtifact(lastArtifact, targetWorkflowName);
+    const artifactPayload = restoredArtifactMessage.toolCall.payload;
 
     let storedPanelOpen = null;
     let hadStoredArtifact = false;
@@ -2169,46 +2140,37 @@ const ChatPage = () => {
       hadStoredArtifact = false;
     }
 
-    const isArtifactDisplay = (cachedArtifact.display || 'artifact') === 'artifact';
-
     try {
-      // Only persist to localStorage when this is a proper artifact (display: 'artifact').
-      // Inline components must not be stored here — they would be incorrectly restored
-      // into the artifact panel on the next page load.
-      if (isArtifactDisplay) {
-        writeStoredLastArtifact(targetChatId, cachedArtifact);
-        writeStoredCurrentArtifact(targetChatId, restoredArtifactMessage);
-      }
+      writeStoredLastArtifact(targetChatId, cachedArtifact);
+      writeStoredCurrentArtifact(targetChatId, restoredArtifactMessage);
       artifactCacheValidRef.current = true;
     } catch (e) {
       console.warn('⚠️ Failed to cache server last_artifact', e);
     }
 
-    if (isArtifactDisplay) {
-      setCurrentArtifactMessages((prev) => {
-        const continuation = reviewContinuationRef.current;
-        if (continuation?.chat_id === targetChatId
-            && continuation.target_app_id === artifactPayload.target_app_id
-            && continuation.build_registry_id === artifactPayload.build_registry_id
-            && continuation.artifact_version_id === artifactPayload.artifact_version_id) {
-          return [restoredArtifactMessage];
-        }
-        if (Array.isArray(prev) && prev.length > 0) {
-          return prev.map(message => message?.toolCall?.tool_call_id === cachedArtifact.tool_call_id
-            ? {...message, toolCall: {...message.toolCall, response_available: cachedArtifact.response_available}}
-            : message);
-        }
+    setCurrentArtifactMessages((prev) => {
+      const continuation = reviewContinuationRef.current;
+      if (continuation?.chat_id === targetChatId
+          && continuation.target_app_id === artifactPayload.target_app_id
+          && continuation.build_registry_id === artifactPayload.build_registry_id
+          && continuation.artifact_version_id === artifactPayload.artifact_version_id) {
         return [restoredArtifactMessage];
-      });
-      lastArtifactEventRef.current = cachedArtifact.tool_call_id || restoredArtifactMessage.id;
-      artifactAutoClearRef.current = false;
-      artifactRestoredOnceRef.current = true;
+      }
+      if (Array.isArray(prev) && prev.length > 0) {
+        return prev.map(message => message?.toolCall?.tool_call_id === cachedArtifact.tool_call_id
+          ? {...message, toolCall: {...message.toolCall, response_available: cachedArtifact.response_available}}
+          : message);
+      }
+      return [restoredArtifactMessage];
+    });
+    lastArtifactEventRef.current = cachedArtifact.tool_call_id || restoredArtifactMessage.id;
+    artifactAutoClearRef.current = false;
+    artifactRestoredOnceRef.current = true;
 
-      if (!(storedPanelOpen === false && hadStoredArtifact)) {
-        setIsSidePanelOpen(true);
-        if (setLayoutMode) {
-          setLayoutMode('split');
-        }
+    if (!(storedPanelOpen === false && hadStoredArtifact)) {
+      setIsSidePanelOpen(true);
+      if (setLayoutMode) {
+        setLayoutMode('split');
       }
     }
 
@@ -3327,17 +3289,7 @@ const ChatPage = () => {
         const patchId = inner.tool_call_id || null;
         const patch   = inner.patch || {};
         if (patchId) {
-          const applyPatch = (msg) => {
-            if (msg?.toolCall?.tool_call_id === patchId || msg?.metadata?.toolCallId === patchId) {
-              return {
-                ...msg,
-                toolCall: msg.toolCall
-                  ? { ...msg.toolCall, payload: { ...(msg.toolCall.payload || {}), ...patch } }
-                  : msg.toolCall,
-              };
-            }
-            return msg;
-          };
+          const applyPatch = msg => patchToolCallMessage(msg, patchId, patch);
           setMessagesWithLogging(prev => prev.map(applyPatch));
           setCurrentArtifactMessages(prev => prev.map(applyPatch));
         }
@@ -4942,12 +4894,7 @@ const ChatPage = () => {
         if (update.type === 'ui.update') {
           const { tool_call_id: patchId, patch = {} } = update;
           if (patchId) {
-            const applyPatch = (msg) => {
-              if (msg?.toolCall?.tool_call_id === patchId || msg?.metadata?.toolCallId === patchId) {
-                return { ...msg, toolCall: msg.toolCall ? { ...msg.toolCall, payload: { ...(msg.toolCall.payload || {}), ...patch } } : msg.toolCall };
-              }
-              return msg;
-            };
+            const applyPatch = msg => patchToolCallMessage(msg, patchId, patch);
             setMessagesWithLogging(prev => prev.map(applyPatch));
             setCurrentArtifactMessages(prev => prev.map(applyPatch));
           }
@@ -5067,7 +5014,7 @@ const ChatPage = () => {
             });
             return;
           }
-          const isViewDisplay = displayMode === 'view' || displayMode === 'fullscreen';
+          const isViewDisplay = isArtifactViewDisplay(displayMode);
           if (isViewDisplay) {
             const snapshotState = surfaceStateRef.current;
             if (snapshotState?.layoutMode !== 'view') {
@@ -5079,7 +5026,7 @@ const ChatPage = () => {
               };
             }
           }
-          const shouldRenderArtifact = displayMode === 'artifact' || isViewDisplay;
+          const shouldRenderArtifact = isCanvasDisplay(displayMode);
           if (shouldRenderArtifact) {
             const awaitingResponse = update.awaiting_response ?? payload.awaiting_response ?? payload.awaitingResponse ?? null;
             artifactAutoClearRef.current = displayMode === 'artifact' ? false : awaitingResponse !== false;
@@ -6020,6 +5967,7 @@ const ChatPage = () => {
 
   useChatArtifactLayoutEffects({
     hasArtifactContent: currentArtifactMessages.length > 0,
+    hasLiveArtifactContent: currentArtifactMessages.some(message => !message.toolCall?.restored),
     connectionStatus,
     currentChatId,
     chatExists,

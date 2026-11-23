@@ -30,6 +30,14 @@ const normalizeDisplayMode = (value) => {
   return null;
 };
 
+export function isArtifactViewDisplay(display) {
+  return display === 'view' || display === 'fullscreen';
+}
+
+export function isCanvasDisplay(display) {
+  return display === 'artifact' || isArtifactViewDisplay(display);
+}
+
 const deriveSurfaceMode = (conversationMode, layoutMode) => {
   if (layoutMode === 'view') return SURFACE_MODES.VIEW;
   return conversationMode === 'ask' ? SURFACE_MODES.ASK : SURFACE_MODES.WORKFLOW;
@@ -209,7 +217,7 @@ export const uiSurfaceReducer = (state, action) => {
     }
     case 'ARTIFACT_EMITTED': {
       const display = normalizeDisplayMode(action.display) || 'artifact';
-      const wantsView = display === 'view' || display === 'fullscreen';
+      const wantsView = isArtifactViewDisplay(display);
       const nextConversation = 'workflow';
       const nextLayout = wantsView
         ? 'view'
@@ -266,11 +274,12 @@ export const mapSurfaceEventToAction = (event) => {
 
   const eventType = String(event.type);
 
-  if (eventType === 'tool_call' || eventType === 'chat.tool_call' || eventType === 'ui.render') {
+  if (eventType === 'tool_call' || eventType === 'chat.tool_call' || eventType === 'ui.render' || eventType === 'chat.ui.render') {
     const detail = event.data || {};
-    const display = event.display || event.display_type || event.mode || detail.display || detail.display_type || detail.mode || detail?.payload?.display;
+    const display = event.display_mode || event.display || event.display_type || event.mode
+      || detail.display_mode || detail.display || detail.display_type || detail.mode || detail?.payload?.display;
     const normalized = normalizeDisplayMode(display);
-    if (normalized === 'artifact' || normalized === 'view' || normalized === 'fullscreen') {
+    if (isCanvasDisplay(normalized)) {
       return {
         type: 'ARTIFACT_EMITTED',
         display: normalized,

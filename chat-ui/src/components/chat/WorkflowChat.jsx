@@ -11,10 +11,14 @@ import { WorkflowToolSurface } from '../../core/ui/UIToolRenderer';
 import { useOptionalChatUI } from '../../context/ChatUIContext';
 import { useTheme } from '../../styles/useTheme';
 import { applyTheme } from '../../styles/themeProvider';
+import { isArtifactViewDisplay, isCanvasDisplay } from '../../state/uiSurfaceReducer';
 import ArtifactPanel from './ArtifactPanel';
 import ChatInterface from './ChatInterface';
 import FluidChatLayout from './FluidChatLayout';
-import { buildComposerArtifactContext, buildInlineToolCallMessageFromEvent, buildToolCallMessageFromEvent, upsertInlineToolCallMessage } from './inlineSurfaces';
+import {
+  buildComposerArtifactContext, buildInlineToolCallMessageFromEvent, buildToolCallMessageFromEvent,
+  patchToolCallMessage, projectSavedArtifact, savedResponseAvailability, upsertInlineToolCallMessage,
+} from './inlineSurfaces';
 
 function renderStandaloneTool(event, onResponse, actions) {
   return <ShellUIToolRenderer event={event} onResponse={onResponse} {...actions} />;
@@ -117,6 +121,7 @@ function WorkflowConversation({
   const pendingUser = useRef(null);
   const activeUserTurn = useRef(false);
   const seenArtifacts = useRef(new Set());
+  const canvasEvent = useRef({id: null, source: null});
   const streams = useRef(new Map());
   const messageSequence = useRef(0);
   const active = useRef(true);
@@ -199,7 +204,28 @@ function WorkflowConversation({
     };
     const eventType = getWorkflowEventType(event);
     const callbacksForSession = callbacks.current;
+    const frame = rawEvent.data || rawEvent;
+    // Only a typed frame on this socket can restore or change its canvas. Chat text may quote one.
+    const matchesScope = data => (!data.chat_id || data.chat_id === chatId)
+      && (!data.app_id || data.app_id === resolvedAppId) && (!data.user_id || data.user_id === userId)
+      && (!data.workflow_name || data.workflow_name === workflow) && (!data.workflow || data.workflow === workflow);
+    const isCanvasFrame = getWorkflowEventType(rawEvent) === eventType && matchesScope(rawEvent) && matchesScope(frame);
     switch (eventType) {
+      case 'chat_meta': {
+        if (callbacksForSession.onArtifact || !isCanvasFrame || event.chat_id !== chatId || event.chat_exists !== true) return;
+        const saved = frame.last_artifact;
+        if (!saved?.tool_name || !isCanvasDisplay(saved.display || 'artifact') || !matchesScope(saved)) return;
+        const previous = canvasEvent.current;
+        if (previous.source === 'live' || (previous.source === 'dismissed' && previous.id === saved.tool_call_id)) return;
+        const {restoredArtifactMessage} = projectSavedArtifact(saved, workflow);
+        const tool = restoredArtifactMessage.toolCall;
+        if (tool.response_available === true && tool.payload.awaiting_response !== false && tool.tool_call_id) {
+          tool.onResponse = response => submitResponse(tool.tool_call_id, response);
+        }
+        canvasEvent.current = {id: tool.tool_call_id, source: 'metadata'};
+        setArtifactMessage(restoredArtifactMessage);
+        return;
+      }
       case 'awaiting_reply':
         expectingUser.current = true;
         activeUserTurn.current = false;
@@ -255,13 +281,20 @@ function WorkflowConversation({
         if (artifact) {
           // Render authority comes from a tool event on this session's socket, never quoted chat text.
           const id = event.tool_call_id || event.corr;
-          const frame = rawEvent.data || rawEvent;
-          if (!id || (frame.tool_call_id || frame.corr) !== id ||
-              !['tool_call', 'ui.render', 'chat.ui.render', 'chat.tool_call'].includes(rawEvent.type)) return;
+          if (!isCanvasFrame || !id || (frame.tool_call_id || frame.corr) !== id) return;
           if (!callbacksForSession.onArtifact) {
+            const previous = canvasEvent.current;
+            if (previous.source === 'dismissed' && previous.id === id) return;
+            if (event.replay && ['live', 'metadata', 'dismissed'].includes(previous.source)) return;
+            canvasEvent.current = {id, source: event.replay ? 'history' : 'live'};
+            if (event.replay) artifact.toolCall.response_available = savedResponseAvailability(event);
             artifact.toolCall.onResponse = response => submitResponse(id, response);
             setArtifactMessage(artifact);
-          } else if (!seenArtifacts.current.has(id)) {
+            if (!event.replay && (previous.id !== id || previous.source !== 'live')) {
+              setLayoutMode(isArtifactViewDisplay(artifact.toolCall.display) && !isMobile ? 'view' : 'split');
+              setMobileDrawerState('expanded');
+            }
+          } else if (artifact.toolCall.display === 'artifact' && !seenArtifacts.current.has(id)) {
             seenArtifacts.current.add(id);
             callbacksForSession.onArtifact?.(rawEvent, { chatId, afterUserInput: activeUserTurn.current && !event.replay });
           }
@@ -278,6 +311,25 @@ function WorkflowConversation({
           });
         });
         callbacksForSession.onMessage?.(inlineEntry);
+        return;
+      }
+      case 'ui.update': {
+        if (!isCanvasFrame || !frame.tool_call_id || !frame.patch || typeof frame.patch !== 'object' || Array.isArray(frame.patch)) return;
+        if (canvasEvent.current.id === frame.tool_call_id && canvasEvent.current.source !== 'dismissed') {
+          canvasEvent.current.source = 'live';
+        }
+        const applyPatch = message => patchToolCallMessage(message, frame.tool_call_id, frame.patch);
+        setArtifactMessage(applyPatch);
+        setMessages(previous => previous.map(applyPatch));
+        return;
+      }
+      case 'ui.dismiss': {
+        const id = frame.tool_call_id;
+        if (!isCanvasFrame || !id || canvasEvent.current.id !== id || canvasEvent.current.source === 'dismissed') return;
+        canvasEvent.current = {id, source: 'dismissed'};
+        setArtifactMessage(null);
+        setLayoutMode('full');
+        setMobileDrawerState('peek');
         return;
       }
       case 'artifact.action.started':
@@ -343,7 +395,7 @@ function WorkflowConversation({
       default:
         return;
     }
-  }, [chatId, workflow, submitResponse]);
+  }, [chatId, resolvedAppId, userId, workflow, isMobile, submitResponse]);
 
   const { connectionStatus, retryConnection, wsRef } = useChatWebSocket({
     api: workflowApi,
@@ -355,6 +407,8 @@ function WorkflowConversation({
     onMessage: handleRuntimeEvent,
     recoverOnDrop: !ended,
     onInterrupted: () => {
+      // On reconnect the server can project a newer snapshot or expire a pending decision.
+      if (canvasEvent.current.source === 'live') canvasEvent.current.source = null;
       if (pendingUser.current) setSendError('Delivery of your last message is unconfirmed. Check the conversation before sending it again.');
       streams.current.clear();
       expectingUser.current = false;
@@ -543,7 +597,7 @@ function WorkflowConversation({
     transcriptLabel={transcriptLabel}
     artifactContext={artifactMessage && {
       id: artifactMessage.toolCall.tool_call_id, type: artifactMessage.toolCall.component_type,
-      payload: artifactMessage.toolCall.payload, chat_id: chatId, workflow_name: workflow, display: 'artifact',
+      payload: artifactMessage.toolCall.payload, chat_id: chatId, workflow_name: workflow, display: artifactMessage.toolCall.display,
     }}
   />;
 

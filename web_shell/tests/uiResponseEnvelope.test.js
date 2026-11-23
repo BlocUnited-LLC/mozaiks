@@ -111,6 +111,45 @@ test('chat metadata restores pending transitions from enveloped and flat websock
   }
 });
 
+test('ChatPage caches pending canvas reviews for rereading and excludes inline tools', async () => {
+  const root = path.resolve(shell,'../chat-ui/src');
+  const start = chatPage.indexOf('  const cacheServerLastArtifact =');
+  const callback = chatPage.slice(start,chatPage.indexOf('  const handleMissingBackendArtifact =',start));
+  const fixture = await build({stdin:{resolveDir:shell,contents:`
+    import {projectSavedArtifact} from ${JSON.stringify(path.join(root,'components/chat/inlineSurfaces.js'))};
+    import {isCanvasDisplay} from ${JSON.stringify(path.join(root,'state/uiSurfaceReducer.js'))};
+    export function restore(snapshot) {
+      let stored, messages=[], writes=0;
+      const currentChatId='chat-a', currentWorkflowName='Review';
+      const useCallback=value=>value;
+      const getStoredArtifactPanelOpen=()=>false,readStoredCurrentArtifact=()=>null,readStoredLastArtifact=()=>null;
+      const writeStoredLastArtifact=(chat,record)=>{ stored={chat,record};writes++; };
+      const writeStoredCurrentArtifact=()=>{};
+      const setCurrentArtifactMessages=update=>{messages=update(messages);};
+      const reviewContinuationRef={current:null},artifactCacheValidRef={},lastArtifactEventRef={},
+        artifactAutoClearRef={},artifactRestoredOnceRef={};
+      const setLayoutMode=()=>{},setIsSidePanelOpen=()=>{};
+      ${callback}
+      const restored=cacheServerLastArtifact(snapshot);
+      return {restored,messages,stored,writes};
+    }
+  `},bundle:true,write:false,format:'esm',platform:'node'});
+  const {restore} = await import('data:text/javascript;base64,'+Buffer.from(fixture.outputFiles[0].text).toString('base64'));
+  const saved = {tool_name:'show_review',component_type:'DecisionSheet',tool_call_id:'decision-1',response_available:true,
+    payload:{artifact_id:'sheet-original',interaction_type:'ui_tool',choices:['Retry','Continue']}};
+  for (const display of ['artifact','view','fullscreen']) {
+    const result = restore({...saved,display});
+    assert.equal(result.restored,true);
+    assert.equal(result.stored.chat,'chat-a');
+    assert.deepEqual(result.stored.record.payload,saved.payload);
+    assert.deepEqual(result.messages[0].toolCall,{...saved,display,workflow_name:'Review',onResponse:null,restored:true});
+  }
+  const inline = restore({...saved,display:'inline'});
+  assert.equal(inline.restored,false);
+  assert.equal(inline.writes,0);
+  assert.deepEqual(inline.messages,[]);
+});
+
 test('ChatPage approvals preserve original request identity through real browser controls and trigger HTTP', async t => {
   const root = path.dirname(shell);
   const normalizerStart = chatPage.indexOf('  const buildPendingHarnessDecision =');

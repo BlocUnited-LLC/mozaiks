@@ -17,6 +17,7 @@ export function useChatArtifactLayoutEffects({
   setWidgetOverlayOpen,
   isSidePanelOpen,
   hasArtifactContent,
+  hasLiveArtifactContent = hasArtifactContent,
   setIsSidePanelOpen,
   isMobileView,
   mobileDrawerState,
@@ -105,8 +106,8 @@ export function useChatArtifactLayoutEffects({
     // A new workflow shows the empty canvas on desktop. Mobile starts on the
     // conversation and opens the drawer for output or an explicit logo click.
     if (!isSidePanelOpen) setMobileDrawerState('peek');
-    else if (hasArtifactContent || layoutMode === 'view') setMobileDrawerState('expanded');
-  }, [currentChatId, conversationMode, isMobileView, isSidePanelOpen, hasArtifactContent, layoutMode, setMobileDrawerState]);
+    else if (hasLiveArtifactContent || layoutMode === 'view') setMobileDrawerState('expanded');
+  }, [currentChatId, conversationMode, isMobileView, isSidePanelOpen, hasLiveArtifactContent, layoutMode, setMobileDrawerState]);
 
   useEffect(() => {
     if (!isSidePanelOpen || !hasArtifactContent) {

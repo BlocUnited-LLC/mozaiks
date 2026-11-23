@@ -89,6 +89,7 @@ test('ChatPage retains one live artifact and conversation across responsive layo
           if (isMobileView) setMobileDrawerState(mode === 'full' ? 'peek' : 'expanded');
         };
         window.clearTestArtifact = () => setHasArtifact(false);
+        window.restoreTestArtifact = () => setHasArtifact('snapshot');
         window.deliverTestArtifact = () => setHasArtifact(true);
         window.setTestConversation = mode => dispatch({type:'SET_CONVERSATION_MODE',mode});
         useLayoutEffect(() => {
@@ -98,6 +99,7 @@ test('ChatPage retains one live artifact and conversation across responsive layo
           artifactRestoredOnceRef,conversationMode,currentWorkflowName:'Review',restoreStoredArtifactForChat:noop,
           layoutMode,setLayoutMode,setIsMobileView,setForceOverlay,widgetOverlayOpen:false,setWidgetOverlayOpen:noop,
           isSidePanelOpen,setIsSidePanelOpen,isMobileView,mobileDrawerState,setMobileDrawerState,hasArtifactContent:hasArtifact,
+          hasLiveArtifactContent:hasArtifact === true,
           setHasUnseenArtifact,hasUnseenChat,setHasUnseenChat,forceOverlay,isInWidgetMode:false,
           widgetChatMinimized:false,setWidgetChatMinimized:noop});
         const chatInterface = <Conversation />;
@@ -136,7 +138,6 @@ test('ChatPage retains one live artifact and conversation across responsive layo
         .map(file => `\n@source "${path.join(ui,file).replaceAll('\\','/')}";`).join(''),
     {from:path.join(shell,'styles.css')},
   );
-  let previewRequests = 0;
   const server = http.createServer((request,response) => {
     if (request.url === '/orchard-mark.svg') {
       response.setHeader('Content-Type','image/svg+xml');
@@ -146,7 +147,6 @@ test('ChatPage retains one live artifact and conversation across responsive layo
     if (request.url === '/fixture.js') {response.setHeader('Content-Type','text/javascript');response.end(bundle.outputFiles.find(file=>file.path.endsWith('.js')).text);return;}
     response.setHeader('Content-Type','text/html');
     if (request.url === '/preview') {
-      previewRequests += 1;
       response.end('<style>body{font:16px Arial;padding:16px}input{display:block;margin-top:16px;max-width:90%}</style><h2>Project board</h2><button onclick="this.textContent=\'Item added\'">Add item</button><input aria-label="Preview note">');return;
     }
     response.end(`<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><style>${styles.css}
@@ -162,6 +162,8 @@ test('ChatPage retains one live artifact and conversation across responsive layo
   let traceActive = false;
   t.after(async()=>{try {if (traceActive) await page.context().tracing.stop();} finally {await browser.close();}});
   page = await browser.newPage({viewport:{width:1280,height:900}});
+  let previewRequests = 0;
+  page.on('request', request => { if (new URL(request.url()).pathname === '/preview') previewRequests++; });
   const errors = [];
   const consoleErrors = [];
   const failedRequests = [];
@@ -269,6 +271,13 @@ test('ChatPage retains one live artifact and conversation across responsive layo
       await phone.getByRole('button',{name:'Collapse artifact workspace'}).click();
       await expect(composer).toBeVisible();
       await expect(heading).toHaveCount(0);
+      await phone.reload();
+      await expect.poll(()=>phone.evaluate(()=>window.testState?.isMobileView)).toBe(true);
+      await phone.evaluate(()=>window.restoreTestArtifact());
+      await expect(composer).toBeVisible();
+      await expect(heading).toHaveCount(0);
+      await phone.evaluate(()=>window.deliverTestArtifact());
+      await expect(heading).toBeVisible();
     } finally {
       await phone.close();
     }
