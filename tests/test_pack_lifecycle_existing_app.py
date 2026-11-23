@@ -1361,6 +1361,25 @@ def test_invalid_workflow_agents_are_rejected_before_install(tmp_path, invalid):
     assert not roots.build_context_root.exists()
 
 
+@pytest.mark.parametrize("operation", ["install", "upgrade"])
+def test_workflow_identity_must_match_its_folder_before_any_write(tmp_path, monkeypatch, operation):
+    from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+    if operation == "upgrade":
+        roots, pack, apply = _install(tmp_path), _version_two(tmp_path), apply_workspace_upgrade
+    else:
+        roots, pack, apply = _ordinary_app(tmp_path / "shop"), _pack(tmp_path), apply_component_install
+    _edit(pack / "workflows/StockReview/orchestrator.yaml", "workflow_name: StockReview", "workflow_name: DifferentReview")
+    before = _tree(tmp_path / "shop")
+    with pytest.raises(CommunityComponentLifecycleError, match="mismatched workflow_name 'DifferentReview'"):
+        apply(source=PackSource(directory=pack), roots=roots)
+    assert _tree(tmp_path / "shop") == before
+    # The runtime refuses the same folder for the same reason.
+    monkeypatch.setattr(workflow_manager, "resolve_workflow_path", lambda name: pack / "workflows" / name)
+    report = workflow_manager.validate_workflow("StockReview")
+    assert not report["valid"] and any("mismatched workflow_name 'DifferentReview'" in row for row in report["errors"])
+
+
 def test_plain_plan_lists_permissions_host_requirements_and_dependencies(tmp_path, capsys):
     from mozaiks_cli.commands.pack import _print_plan
 

@@ -14,6 +14,7 @@ from .contracts import (
     parse_tools_config,
     parse_transition_graph_config,
     parse_ui_config,
+    validate_orchestrator_contract,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "parse_ui_config",
     "parse_middleware_config",
     "parse_a2a_config",
+    "validate_orchestrator_contract",
 ]

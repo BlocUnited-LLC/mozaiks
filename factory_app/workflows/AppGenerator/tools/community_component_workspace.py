@@ -525,6 +525,7 @@ def _validate_workflow_assets(rendered: _RenderedPack) -> None:
     from mozaiksai.core.workflow.declarative.contracts import (
         parse_agents_config,
         parse_orchestrator_config,
+        validate_orchestrator_contract,
     )
 
     for path, content in rendered.workflow_files.items():
@@ -533,6 +534,8 @@ def _validate_workflow_assets(rendered: _RenderedPack) -> None:
         folder = path.rsplit("/", 1)[0]
         try:
             orchestrator = parse_orchestrator_config(yaml.safe_load(content))
+            # The runtime refuses to load a folder whose declared identity differs.
+            validate_orchestrator_contract(folder, orchestrator)
             agents = parse_agents_config(yaml.safe_load(rendered.workflow_files.get(f"{folder}/agents.yaml", "")))
             if not agents["agents"]:
                 raise ValueError("workflow requires at least one agent")

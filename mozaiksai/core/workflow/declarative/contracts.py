@@ -1059,6 +1059,34 @@ def parse_orchestrator_config(raw: dict[str, Any]) -> dict[str, Any]:
     return _validate_config(OrchestratorConfig, raw, "orchestrator.yaml")
 
 
+_ALLOWED_STARTUP_MODES = {"AgentDriven", "UserDriven", "BackendOnly"}
+
+
+def validate_orchestrator_contract(workflow_name: str, config: dict[str, Any]) -> None:
+    """Enforce required orchestrator contract fields for runtime safety."""
+    declared_name = str(config.get("workflow_name") or "").strip()
+    if not declared_name:
+        raise ValueError(f"Workflow '{workflow_name}' is missing required field: workflow_name")
+
+    if declared_name.lower() != workflow_name.lower():
+        raise ValueError(
+            f"Workflow '{workflow_name}' has mismatched workflow_name '{declared_name}' in orchestrator.yaml"
+        )
+
+    startup_mode = str(config.get("workflow_startup_mode") or "").strip()
+    if not startup_mode:
+        raise ValueError(
+            f"Workflow '{workflow_name}' is missing required field: workflow_startup_mode"
+        )
+
+    if startup_mode not in _ALLOWED_STARTUP_MODES:
+        allowed = ", ".join(sorted(_ALLOWED_STARTUP_MODES))
+        raise ValueError(
+            f"Workflow '{workflow_name}' has invalid workflow_startup_mode '{startup_mode}'. "
+            f"Allowed values: {allowed}"
+        )
+
+
 def parse_agents_config(raw: dict[str, Any]) -> dict[str, Any]:
     parsed = _validate_config(AgentsConfig, raw, "agents.yaml")
     agents_list = parsed.get("agents", [])

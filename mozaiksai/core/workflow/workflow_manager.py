@@ -28,6 +28,7 @@ from .declarative import (
     parse_tools_config,
     parse_transition_graph_config,
     parse_ui_config,
+    validate_orchestrator_contract,
 )
 from .paths import (
     discover_workflow_paths,
@@ -69,7 +70,6 @@ class UnifiedWorkflowManager:
     """
 
     _instance = None
-    _ALLOWED_STARTUP_MODES = {"AgentDriven", "UserDriven", "BackendOnly"}
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -372,7 +372,7 @@ class UnifiedWorkflowManager:
         if not config:
             logger.warning("WORKFLOW_CONFIG_EMPTY workflow=%s", workflow_name)
             config = {}
-        self._validate_orchestrator_contract(workflow_name, config)
+        validate_orchestrator_contract(workflow_name, config)
         validate_workflow_context_contract(
             workflow_name=workflow_name,
             workflow_config=config,
@@ -714,7 +714,7 @@ class UnifiedWorkflowManager:
                 with open(orchestrator_yaml, encoding='utf-8') as f:
                     orchestrator_data = yaml.safe_load(f) or {}
                 parsed_orchestrator = parse_orchestrator_config(orchestrator_data)
-                self._validate_orchestrator_contract(workflow_name, parsed_orchestrator)
+                validate_orchestrator_contract(workflow_name, parsed_orchestrator)
                 validation_result['info']['orchestrator_yaml_valid'] = True
             except Exception as e:
                 validation_result['errors'].append(f"Invalid orchestrator.yaml: {e}")
@@ -945,30 +945,6 @@ class UnifiedWorkflowManager:
             config.pop("entry_point", None)
         
         return config
-
-    def _validate_orchestrator_contract(self, workflow_name: str, config: dict[str, Any]) -> None:
-        """Enforce required orchestrator contract fields for runtime safety."""
-        declared_name = str(config.get("workflow_name") or "").strip()
-        if not declared_name:
-            raise ValueError(f"Workflow '{workflow_name}' is missing required field: workflow_name")
-
-        if declared_name.lower() != workflow_name.lower():
-            raise ValueError(
-                f"Workflow '{workflow_name}' has mismatched workflow_name '{declared_name}' in orchestrator.yaml"
-            )
-
-        startup_mode = str(config.get("workflow_startup_mode") or "").strip()
-        if not startup_mode:
-            raise ValueError(
-                f"Workflow '{workflow_name}' is missing required field: workflow_startup_mode"
-            )
-
-        if startup_mode not in self._ALLOWED_STARTUP_MODES:
-            allowed = ", ".join(sorted(self._ALLOWED_STARTUP_MODES))
-            raise ValueError(
-                f"Workflow '{workflow_name}' has invalid workflow_startup_mode '{startup_mode}'. "
-                f"Allowed values: {allowed}"
-            )
 
     # ========================================================================
     # RUNTIME HANDLER REGISTRY
