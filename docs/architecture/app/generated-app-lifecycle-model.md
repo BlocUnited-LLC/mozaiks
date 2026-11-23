@@ -152,7 +152,7 @@ Overview reads the owned AppRegistry record and its `current_build_run` for
 build status and the saved chat destination. The separately saved Build request
 and plan form does not indicate whether a Factory run has started. A resumable
 link requires both the saved chat and workflow identities; otherwise the action
-opens the existing `/apps/{app_id}/building` surface without claiming to resume.
+opens the app's Project page (`/apps/{app_id}/building`) without claiming to resume.
 
 For a registered target different from the loaded Studio workspace, its identity
 must not inherit the host app's name, description, or tagline. An approved concept

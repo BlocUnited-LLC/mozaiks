@@ -15,6 +15,18 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Studio's app Building page is replaced by a Project page at the same route.
+  The old page read a build-state record nothing writes, so its build requests
+  and approvals were always empty, and its Continue Build link did not open the
+  app's build. The Project page says where the build stands in one sentence,
+  with one button that opens this app's build conversation, its build review,
+  or starts its build on the server. It lists the build steps in order and the
+  app's saved documents (idea, look and feel, design, plans and pricing, AI
+  workflows, app) as cards that open into a readable view, with every version
+  below. A host product can add a section through a `custom_component` panel.
+- My Apps lists up to five apps whose build is not finished under "Builds in
+  progress", with the same status sentence and button.
+
 - A generated app's admin portal shows real numbers. Overview, Usage, and
   Operations read token and cost totals from the usage ledger instead of fields
   no endpoint returned (they showed 0 and `$0.0000`), a failed run is listed as
@@ -858,6 +870,10 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Removed
 
+- The `build_requests`, `artifact_timeline`, `approval_queue`, and
+  `workflow_launcher` dashboard panel types, used only by the old Building
+  page. A dashboard manifest that still declares one fails validation; use
+  `build_project` for the Project page.
 - Studio's workspace Users page and app Access page. Neither had a data source,
   so both could only show zeros. User counts remain on Performance and on each
   app's Users page.

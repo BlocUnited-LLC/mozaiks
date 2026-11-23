@@ -37,10 +37,7 @@ DashboardPanelType = Literal[
     "app_portfolio_table",
     "workspace_usage_summary",
     "workspace_integrations",
-    "build_requests",
-    "artifact_timeline",
-    "approval_queue",
-    "workflow_launcher",
+    "build_project",
     "brand_kit",
     "media_asset_gallery",
     "landing_page_status",
@@ -411,32 +408,13 @@ def _default_manifest_dict() -> dict[str, Any]:
                 },
                 {
                     "id": "building",
-                    "label": "Building",
+                    "label": "Project",
                     "route": "/apps/:appId/building",
-                    "description": "Build requests, artifact versions, approval queue, and workflow launch actions.",
+                    "description": "Where the build stands, its saved documents, and every version.",
                     "icon": "hammer",
                     "order": 10,
-                    "capabilities": ["build_requests", "artifact_versions", "approval_queue"],
                     "panels": [
-                        {"id": "requests", "type": "build_requests", "title": "Build requests"},
-                        {"id": "artifacts", "type": "artifact_timeline", "title": "Artifacts"},
-                        {"id": "approvals", "type": "approval_queue", "title": "Approvals"},
-                        {
-                            "id": "continue_build",
-                            "type": "workflow_launcher",
-                            "title": "Continue build",
-                            "source": "workflow",
-                            "workflow_id": "extended_orchestration",
-                            "actions": [
-                                {
-                                    "id": "continue_build",
-                                    "label": "Continue Build",
-                                    "type": "workflow_sequence",
-                                    "target": "build",
-                                    "variant": "primary",
-                                }
-                            ],
-                        },
+                        {"id": "project", "type": "build_project", "title": "Project"},
                     ],
                 },
                 {

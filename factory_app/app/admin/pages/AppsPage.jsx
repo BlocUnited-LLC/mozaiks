@@ -18,6 +18,7 @@ import {
   StatusPill,
 } from '../../ui/components/StudioShared.jsx'
 import { WorkspaceStudioHero, formatCompactNumber } from './AppStudioChrome.jsx'
+import BuildsInProgress from './BuildsInProgress.jsx'
 import {
   fetchDashboardConfig,
   getDefaultPortalRoute,
@@ -310,6 +311,9 @@ export function AppsDirectory({
           summaryItems={pagination ? summaryItems.slice(0, 1) : summaryItems}
           summaryClassName="hidden md:block"
         />
+
+        {/* Studio's own directory only: its buttons target Studio's build records. */}
+        {!navigationForApp && !pagination ? <BuildsInProgress apps={apps} /> : null}
 
         <section className="space-y-4">
           {pagination && (
