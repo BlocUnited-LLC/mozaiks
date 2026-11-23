@@ -367,20 +367,24 @@ def _composed_contributors(app_root: Path, path: str) -> set[str]:
 
 def _merged_provenance(app_root: Path, upgraded: dict[str, Any], pack_id: str) -> dict[str, Any]:
     """Replace one pack's provenance entry and composed-root contributions; keep every other pack's."""
-    existing = _provenance_manifest(app_root).get("composed_outputs")
-    composed: dict[str, list[dict[str, Any]]] = {
-        path: [row for row in rows if isinstance(row, dict) and row.get("pack_id") != pack_id]
-        for path, rows in (existing.items() if isinstance(existing, dict) else ())
-        if isinstance(rows, list)
-    }
-    for path, rows in (upgraded.get("composed_outputs") or {}).items():
-        composed.setdefault(path, []).extend(rows)
+    manifest = _provenance_manifest(app_root)
+    # Workspace-installed packs also record entries they own in the workflow registry.
+    for field_name in ("composed_outputs", "composed_workflow_outputs"):
+        existing = manifest.get(field_name)
+        composed: dict[str, list[dict[str, Any]]] = {
+            path: [row for row in rows if isinstance(row, dict) and row.get("pack_id") != pack_id]
+            for path, rows in (existing.items() if isinstance(existing, dict) else ())
+            if isinstance(rows, list)
+        }
+        for path, rows in (upgraded.get(field_name) or {}).items():
+            composed.setdefault(path, []).extend(rows)
+        upgraded.pop(field_name, None)
+        if any(composed.values()):
+            upgraded[field_name] = {path: rows for path, rows in composed.items() if rows}
     upgraded["packs"] = [
-        pack for pack in _provenance_pack_entries(app_root) if str(pack.get("pack_id") or "").strip() != pack_id
+        pack for pack in manifest.get("packs") or []
+        if isinstance(pack, dict) and str(pack.get("pack_id") or "").strip() != pack_id
     ] + list(upgraded.get("packs") or [])
-    upgraded.pop("composed_outputs", None)
-    if any(composed.values()):
-        upgraded["composed_outputs"] = {path: rows for path, rows in composed.items() if rows}
     return upgraded
 
 

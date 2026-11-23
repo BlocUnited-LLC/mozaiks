@@ -1536,3 +1536,40 @@ def test_install_beside_a_generator_pack_that_contributed_the_ui_barrel(tmp_path
     assert "ui/index.js" in json.loads(provenance.read_text(encoding="utf-8"))["composed_outputs"]
     assert (roots.app_root / "ui/index.js").read_bytes() == barrel
     assert verify_installed_components(roots=roots)["status"] == "clean"
+
+
+def test_generator_upgrade_keeps_another_packs_workflow_registry_ownership(tmp_path):
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        install_verified_local_pack,
+    )
+    from tests.test_community_component_lifecycle import (
+        GREETINGS,
+        _greetings_v2,
+        _write_app_root_from_pack,
+    )
+
+    roots = _ordinary_app(tmp_path / "shop")
+    install_verified_local_pack(pack_source_path=GREETINGS, build_context_root=roots.build_context_root)
+    _write_app_root_from_pack(roots.app_root, GREETINGS, "greetings")
+    apply_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots)
+    provenance = roots.app_root / ".mozaiks/pack_provenance.json"
+    recorded = json.loads(provenance.read_text(encoding="utf-8"))["composed_workflow_outputs"]
+
+    applied = apply_workspace_upgrade(source=PackSource(directory=_greetings_v2(tmp_path)), roots=roots)
+
+    assert applied.status == "applied"
+    assert json.loads(provenance.read_text(encoding="utf-8"))["composed_workflow_outputs"] == recorded
+    # Verification still checks the other pack's registry entries ...
+    registry = roots.workflows_root / "extended_orchestration/extension_registry.json"
+    doc = json.loads(registry.read_text(encoding="utf-8"))
+    original = registry.read_text(encoding="utf-8")
+    doc["workflows"][0]["description"] = "edited by the app"
+    registry.write_text(json.dumps(doc), encoding="utf-8")
+    report = verify_installed_components(roots=roots)
+    findings = next(row["findings"] for row in report["packs"] if row["pack_id"] == PACK_ID)
+    assert {"kind": "modified_composed_entry", "root": "workflows/extended_orchestration/extension_registry.json",
+            "key": "workflows:StockReview"} in findings
+    # ... and that pack still upgrades as the owner of those entries.
+    registry.write_text(original, encoding="utf-8")
+    assert apply_workspace_upgrade(source=PackSource(directory=_version_two(tmp_path)), roots=roots).status == "applied"
+    assert verify_installed_components(roots=roots)["status"] == "clean"
