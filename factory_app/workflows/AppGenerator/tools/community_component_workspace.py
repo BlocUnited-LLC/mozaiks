@@ -530,28 +530,68 @@ def _render_workflow_asset(
 
 
 def _validate_workflow_assets(rendered: _RenderedPack) -> None:
-    from mozaiksai.core.workflow.declarative.contracts import (
-        parse_agents_config,
-        parse_orchestrator_config,
+    """Refuse a workflow folder the runtime would refuse, with the runtime's own checks."""
+    for path in rendered.workflow_files:
+        if path.endswith("/orchestrator.yaml") and path.count("/") == 1:
+            folder = path.split("/", 1)[0]
+            try:
+                _validate_workflow_folder(folder, rendered.workflow_files)
+            except (ValueError, yaml.YAMLError) as exc:
+                raise CommunityComponentLifecycleError(
+                    f"Pack '{rendered.pack_id}' workflow {folder} is invalid: {exc}"
+                ) from exc
+
+
+def _validate_workflow_folder(folder: str, files: Mapping[str, str]) -> None:
+    from mozaiksai.core.workflow.contract_validation import validate_workflow_context_contract
+    from mozaiksai.core.workflow.declarative import (
+        assemble_workflow_config,
+        parse_workflow_mapping,
         validate_orchestrator_contract,
     )
 
-    for path, content in rendered.workflow_files.items():
-        if not path.endswith("/orchestrator.yaml"):
-            continue
-        folder = path.rsplit("/", 1)[0]
-        try:
-            orchestrator = parse_orchestrator_config(yaml.safe_load(content))
-            # The runtime refuses to load a folder whose declared identity differs.
-            validate_orchestrator_contract(folder, orchestrator)
-            agents = parse_agents_config(yaml.safe_load(rendered.workflow_files.get(f"{folder}/agents.yaml", "")))
-            if not agents["agents"]:
-                raise ValueError("workflow requires at least one agent")
-            initial = orchestrator.get("initial_agent")
-            if initial and initial not in agents["agents"]:
-                raise ValueError(f"initial_agent {initial!r} is not a declared agent")
-        except (ValueError, yaml.YAMLError) as exc:
-            raise CommunityComponentLifecycleError(f"Pack '{rendered.pack_id}' workflow {folder} is invalid: {exc}") from exc
+    def read_section(name: str) -> dict[str, Any] | None:
+        text = files.get(f"{folder}/{name}.yaml")
+        return None if text is None else parse_workflow_mapping(text.removeprefix("\ufeff"), f"{name}.yaml")
+
+    config = assemble_workflow_config(folder, read_section)
+    # The runtime refuses to load a folder whose declared identity differs.
+    validate_orchestrator_contract(folder, config)
+    task_batches = None
+    if (batches := read_section("extended_orchestration/task_batches")) is not None:
+        from mozaiksai.core.workflow.task_batches import parse_task_batches_config
+
+        task_batches = parse_task_batches_config(batches)
+    validate_workflow_context_contract(workflow_name=folder, workflow_config=config, task_batches=task_batches)
+    agents = (config.get("agents") or {}).get("agents") or {}
+    if not agents:
+        raise ValueError("workflow requires at least one agent")
+    initial = config.get("initial_agent")
+    # A workflow that starts with the user resolves its first agent through the transition rules.
+    if initial and initial.lower() != "user" and initial not in agents:
+        raise ValueError(f"initial_agent {initial!r} is not a declared agent")
+    rules = (config.get("transition_graph") or {}).get("transition_rules") or []
+    if rules:
+        from mozaiksai.core.workflow.context.authority import (
+            build_context_authority_policy,
+            task_batch_written_context_keys,
+        )
+        from mozaiksai.core.workflow.execution.network_graph import (
+            compile_transition_rules_to_graph,
+        )
+
+        compile_transition_rules_to_graph(
+            rules,
+            initial_agent_name=initial or next(iter(agents)),
+            agent_id_by_name={name: name for name in agents},
+            max_turns=config.get("max_turns"),
+            context_authority_policy=build_context_authority_policy(
+                workflow_name=folder,
+                definitions=(config.get("context_variables") or {}).get("definitions") or {},
+                transition_rules=rules,
+                task_batch_context_keys=task_batch_written_context_keys(task_batches),
+            ),
+        )
 
 
 # --------------------------------------------------------------------------------------

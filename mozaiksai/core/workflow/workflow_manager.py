@@ -19,6 +19,7 @@ from mozaiksai.core.runtime.app.ai_config import resolve_runtime_ai_config
 
 from .contract_validation import validate_workflow_context_contract
 from .declarative import (
+    assemble_workflow_config,
     parse_a2a_config,
     parse_agents_config,
     parse_context_variables_config,
@@ -28,6 +29,7 @@ from .declarative import (
     parse_tools_config,
     parse_transition_graph_config,
     parse_ui_config,
+    parse_workflow_mapping,
     validate_orchestrator_contract,
 )
 from .paths import (
@@ -836,13 +838,7 @@ class UnifiedWorkflowManager:
             return None
         
         try:
-            with open(yaml_path, encoding='utf-8-sig') as f:
-                data = yaml.safe_load(f)
-            if data is None:
-                return {}
-            if not isinstance(data, dict):
-                raise ValueError(f"{yaml_path} must contain a mapping at root")
-            return data
+            return parse_workflow_mapping(yaml_path.read_text(encoding='utf-8-sig'), str(yaml_path))
         except Exception as e:
             raise ValueError(f"Failed reading YAML {yaml_path}: {e}") from e
 
@@ -882,59 +878,12 @@ class UnifiedWorkflowManager:
             return resolve_runtime_ai_config({}, app_root=app_root)
 
     def _load_modular_workflow_config(self, workflow_path: Path) -> dict[str, Any]:
-        """Load modular workflow configuration from YAML files.
-
-        Canonical files: orchestrator.yaml, agents.yaml, transition_graph.yaml,
-        context_variables.yaml, structured_outputs.yaml, tools.yaml,
-        ui_config.yaml, middleware.yaml.
-        Optional file: a2a.yaml.
-        Tools file is expected to expose a unified 'tools' list.
-
-        Top-level merge rules:
-          - orchestrator keys merged at root
-          - explicit sections under their key (agents, transition_graph, middleware, context_variables, structured_outputs)
-          - tools contributes its root keys ('tools' and 'lifecycle_tools') without transformation
-          - ui_config contributes its root keys
-        """
-        config: dict[str, Any] = {}
+        """Load modular workflow configuration from YAML files (see ``assemble_workflow_config``)."""
         if not workflow_path.exists():
-            return config
-
-        # Orchestrator (top-level keys)
-        orchestrator_raw = self._load_config_if_exists(workflow_path, "orchestrator")
-        if orchestrator_raw is None:
-            raise ValueError(f"Workflow '{workflow_path.name}' is missing required file: orchestrator.yaml")
-        orchestrator = parse_orchestrator_config(orchestrator_raw)
-        config.update(orchestrator)
-
-        # Sectioned files
-        section_parsers = {
-            "agents": parse_agents_config,
-            "transition_graph": parse_transition_graph_config,
-            "context_variables": parse_context_variables_config,
-            "structured_outputs": parse_structured_outputs_config,
-            "middleware": parse_middleware_config,
-            "a2a": parse_a2a_config,
-        }
-        for section_name, parser in section_parsers.items():
-            raw_data = self._load_config_if_exists(workflow_path, section_name)
-            if raw_data is None:
-                continue
-            config[section_name] = parser(raw_data)
-        
-        # Tools file (canonical unified list under 'tools')
-        tools_raw = self._load_config_if_exists(workflow_path, "tools")
-        if tools_raw is not None:
-            tools_data = parse_tools_config(tools_raw)
-            config["tools"] = tools_data.get("tools", [])
-            config["lifecycle_tools"] = tools_data.get("lifecycle_tools", [])
-        
-        # UI config
-        ui_raw = self._load_config_if_exists(workflow_path, "ui_config")
-        if ui_raw is not None:
-            ui_data = parse_ui_config(ui_raw)
-            # Merge UI config keys at root (e.g., visual_agents)
-            config.update(ui_data)
+            return {}
+        config = assemble_workflow_config(
+            workflow_path.name, lambda section: self._load_config_if_exists(workflow_path, section),
+        )
 
         configured_entry_point = (
             ((self._ai_config or {}).get("workflows") or {}).get("entry_point")

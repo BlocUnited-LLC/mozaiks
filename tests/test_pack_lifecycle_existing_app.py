@@ -1380,6 +1380,109 @@ def test_workflow_identity_must_match_its_folder_before_any_write(tmp_path, monk
     assert not report["valid"] and any("mismatched workflow_name 'DifferentReview'" in row for row in report["errors"])
 
 
+COMPANION_FAULTS = {
+    "tools": ("tools.yaml", "tools: not-a-list\n", "tools.yaml"),
+    "root-not-a-mapping": ("tools.yaml", "- one\n", "must contain a mapping"),
+    "not-yaml": ("ui_config.yaml", "visual_agents: [\n", "workflow StockReview is invalid"),
+    "ui-config": ("ui_config.yaml", "visual_agents: 3\n", "ui_config.yaml"),
+    "middleware": ("middleware.yaml", "unknown_middleware: []\n", "middleware.yaml"),
+    "structured-outputs": (
+        "structured_outputs.yaml",
+        "schema_version: mozaiks.structured_outputs.v1\nregistry: {StockReviewAgent: Missing}\nmodels: {}\n",
+        "unknown model",
+    ),
+    "a2a": ("a2a.yaml", "agents: {}\n", "a2a.yaml"),
+    "context-agents": (
+        "context_variables.yaml",
+        "definitions: {}\nagents:\n  StockReviewAgent:\n    variables: [unset]\n",
+        "undeclared context variable 'unset'",
+    ),
+    "transition-target": (
+        "transition_graph.yaml",
+        "transition_rules:\n  - {source_agent: StockReviewAgent, target_agent: Nobody, transition_type: after_turn}\n",
+        "'Nobody' is not a declared agent",
+    ),
+    "transition-variable": (
+        "transition_graph.yaml",
+        "transition_rules:\n  - {source_agent: StockReviewAgent, target_agent: terminate, transition_type: condition,"
+        " condition_type: context_equals, condition_key: unset, condition_value: yes}\n",
+        "undeclared context variable 'unset'",
+    ),
+    "task-batches": ("extended_orchestration/task_batches.yaml", "version: 1\nunknown_batches: []\n", "unknown_batches"),
+}
+
+
+@pytest.mark.parametrize("operation", ["install", "upgrade"])
+@pytest.mark.parametrize("fault", COMPANION_FAULTS)
+def test_invalid_companion_workflow_yaml_is_rejected_before_any_write(tmp_path, operation, fault):
+    name, text, message = COMPANION_FAULTS[fault]
+    if operation == "upgrade":
+        roots, pack, apply = _install(tmp_path), _version_two(tmp_path), apply_workspace_upgrade
+    else:
+        roots, pack, apply = _ordinary_app(tmp_path / "shop"), _pack(tmp_path), apply_component_install
+    target = pack / "workflows/StockReview" / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+    before = _tree(tmp_path / "shop")
+    with pytest.raises(CommunityComponentLifecycleError, match="workflow StockReview is invalid") as refused:
+        apply(source=PackSource(directory=pack), roots=roots)
+    assert message in str(refused.value)
+    assert _tree(tmp_path / "shop") == before
+
+
+def test_valid_companion_workflow_yaml_installs(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    folder = pack / "workflows/StockReview"
+    _edit(folder / "orchestrator.yaml", "initial_agent: StockReviewAgent", "initial_agent: user")
+    (folder / "transition_graph.yaml").write_text(
+        "transition_rules:\n"
+        "  - {source_agent: user, target_agent: StockReviewAgent, transition_type: after_turn}\n"
+        "  - {source_agent: StockReviewAgent, target_agent: terminate, transition_type: after_turn}\n",
+        encoding="utf-8",
+    )
+    (folder / "context_variables.yaml").write_text("definitions: {}\nagents: {}\n", encoding="utf-8")
+    # A byte order mark and an empty document load in the runtime, so they install.
+    (folder / "ui_config.yaml").write_bytes(b"\xef\xbb\xbfvisual_agents: [StockReviewAgent]\n")
+    (folder / "middleware.yaml").write_text("", encoding="utf-8")
+    assert apply_component_install(source=PackSource(directory=pack), roots=roots).status == "applied"
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+
+
+def test_every_shipped_workflow_passes_the_pack_workflow_checks():
+    root = Path(workspace_module.__file__).parents[2]
+    folders = sorted(path.parent for path in root.glob("*/orchestrator.yaml"))
+    assert len(folders) > 10
+    for folder in folders:
+        workspace_module._validate_workflow_folder(folder.name, {
+            f"{folder.name}/{path.relative_to(folder).as_posix()}": path.read_text(encoding="utf-8")
+            for path in folder.rglob("*.yaml")
+        })
+
+
+def test_pack_validation_does_not_load_the_workspace_workflows(tmp_path):
+    # Importing the workflow manager loads every workflow in the current directory.
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    (pack / "workflows/StockReview/transition_graph.yaml").write_text(
+        "transition_rules:\n  - {source_agent: StockReviewAgent, target_agent: terminate, transition_type: after_turn}\n",
+        encoding="utf-8",
+    )
+    script = (
+        "import sys\nfrom pathlib import Path\n"
+        "from factory_app.workflows.AppGenerator.tools import community_component_workspace as w\n"
+        "roots = w.workspace_roots(sys.argv[1])\n"
+        "plan = w.plan_component_install(source=w.PackSource(directory=Path(sys.argv[2])), roots=roots)\n"
+        "print(plan.status, 'mozaiksai.core.workflow.workflow_manager' in sys.modules)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(roots.app_root.parent), str(pack)],
+        cwd=Path(workspace_module.__file__).parents[4], capture_output=True, text=True, check=False,
+        env={**os.environ, "PYTHONPATH": str(Path(workspace_module.__file__).parents[4])},
+    )
+    assert result.stdout.split() == ["ready", "False"], result.stdout + result.stderr
+
+
 def test_plain_plan_lists_permissions_host_requirements_and_dependencies(tmp_path, capsys):
     from mozaiks_cli.commands.pack import _print_plan
 

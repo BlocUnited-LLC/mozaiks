@@ -4,6 +4,7 @@ This package defines strict Pydantic-backed contracts for workflow YAML files
 and exposes parser helpers that return validated, canonical dictionaries.
 """
 
+from .assembly import assemble_workflow_config, parse_workflow_mapping
 from .contracts import (
     parse_a2a_config,
     parse_agents_config,
@@ -18,6 +19,8 @@ from .contracts import (
 )
 
 __all__ = [
+    "assemble_workflow_config",
+    "parse_workflow_mapping",
     "parse_orchestrator_config",
     "parse_agents_config",
     "parse_transition_graph_config",
