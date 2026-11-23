@@ -38,6 +38,7 @@ from mozaiksai.core.session.build_context import (
 )
 from mozaiksai.core.utils.path_containment import resolve_inside
 from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
+from mozaiksai.core.workflow.generator_support.module_action_inventory import SHARED_PACK_OUTPUT_PATHS
 from mozaiksai.core.workflow.generator_support.persistence_artifacts import (
     normalize_data_contract_indexes,
 )
@@ -1156,10 +1157,13 @@ def _validate_provenance(
 ) -> str:
     text = json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     files_map = {_PROVENANCE_PATH: text}
-    for root in KEYED_ROOTS:
-        target = _destination(roots.app_root, root.path)
-        if root.base == "app" and (writes.get(target) is not None or (target not in writes and target.is_file())):
-            files_map[root.path] = ""
+    # Every shared composition root the app has: generator provenance may record
+    # ui/index.js contributions although a workspace install never writes that barrel.
+    app_roots = {root.path for root in KEYED_ROOTS if root.base == "app"} | SHARED_PACK_OUTPUT_PATHS
+    for path in sorted(app_roots):
+        target = _destination(roots.app_root, path)
+        if writes.get(target) is not None or (target not in writes and target.is_file()):
+            files_map[path] = ""
     errors = scan_pack_provenance(files_map)
     if errors:
         raise CommunityComponentLifecycleError(f"Updated component provenance failed validation: {errors}")

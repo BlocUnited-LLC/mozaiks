@@ -1515,3 +1515,24 @@ def test_upgrade_checks_app_owned_registry_references_to_pack_workflows(tmp_path
     with pytest.raises(CommunityComponentConflictError):
         apply_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
     assert _tree(tmp_path / "shop") == before
+
+
+def test_install_beside_a_generator_pack_that_contributed_the_ui_barrel(tmp_path):
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        install_verified_local_pack,
+    )
+    from tests.test_community_component_lifecycle import GREETINGS, _write_app_root_from_pack
+
+    roots = _ordinary_app(tmp_path / "shop")
+    install_verified_local_pack(pack_source_path=GREETINGS, build_context_root=roots.build_context_root)
+    _write_app_root_from_pack(roots.app_root, GREETINGS, "greetings")
+    provenance = roots.app_root / ".mozaiks/pack_provenance.json"
+    assert "ui/index.js" in json.loads(provenance.read_text(encoding="utf-8"))["composed_outputs"]
+    barrel = (roots.app_root / "ui/index.js").read_bytes()
+
+    applied = apply_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots)
+
+    assert applied.status == "applied"
+    assert "ui/index.js" in json.loads(provenance.read_text(encoding="utf-8"))["composed_outputs"]
+    assert (roots.app_root / "ui/index.js").read_bytes() == barrel
+    assert verify_installed_components(roots=roots)["status"] == "clean"
