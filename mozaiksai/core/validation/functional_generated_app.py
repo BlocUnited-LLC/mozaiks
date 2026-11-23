@@ -11,7 +11,11 @@ from urllib.parse import urlsplit
 import yaml
 
 from mozaiksai.core.runtime.app.auth_contract import APP_AUTH_COMPONENTS
-from mozaiksai.core.workflow.generator_support.ui_registry_composition import SHELL_ROUTE_COMPONENTS
+from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+    SHELL_ROUTE_COMPONENTS,
+    module_ui_components,
+    module_ui_registrations,
+)
 
 
 @dataclass(frozen=True)
@@ -414,6 +418,10 @@ def _validate_routes(
         return
     schemas = _page_schema_index(files, diagnostics)
     registered = _registered_components(files) | inherited_components
+    module_components, _ = module_ui_components(files)
+    module_registrations = module_ui_registrations(module_components, _registered_components(
+        {path: content for path, content in files.items() if not path.startswith("modules/")}
+    ))
     custom_files = {
         PurePosixPath(path).stem
         for path in files
@@ -454,6 +462,8 @@ def _validate_routes(
                 )
             continue
         if component in _BUILT_IN_ROUTE_COMPONENTS or component in inherited_components:
+            continue
+        if component not in registered and len(module_registrations.get(component, {})) == 1:
             continue
         if component not in registered:
             diagnostics.append(

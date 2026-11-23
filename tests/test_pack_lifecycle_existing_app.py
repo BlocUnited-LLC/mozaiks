@@ -1620,3 +1620,22 @@ def test_template_outputs_sharing_a_destination_block_before_any_write(tmp_path,
         apply_component_install(source=PackSource(directory=pack), roots=roots)
     assert _tree(tmp_path / "shop") == before
     assert not roots.build_context_root.exists()
+
+
+def test_an_installed_module_page_passes_bundle_validation(tmp_path):
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        _app_files,
+    )
+    from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
+        scan_generated_bundle,
+    )
+
+    roots = _install(tmp_path)
+
+    def module_page_errors() -> list[str]:
+        errors = scan_generated_bundle(_app_files(roots.app_root))
+        return [error for error in errors if "StockLedgerPage" in error or "modules/stock_ledger/ui" in error]
+
+    assert module_page_errors() == []
+    (roots.app_root / "modules/stock_ledger/ui/index.js").write_text("export const Other = () => null;\n", encoding="utf-8")
+    assert any("declares component 'StockLedgerPage'" in error for error in module_page_errors())

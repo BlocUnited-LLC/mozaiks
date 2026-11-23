@@ -23,6 +23,10 @@ from mozaiksai.core.runtime.app.page_schema import (
     PageSchemaValidationError,
     validate_page_schema,
 )
+from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
+    module_ui_components,
+    module_ui_registrations,
+)
 
 try:
     from mozaiksai.core.workflow.ui_primitives import get_page_ui_primitive_names
@@ -353,6 +357,15 @@ def resolve_registered_component_files(
                 else:
                     registered_files[component].add(import_path)
     return registered_files, warnings
+
+
+def resolve_module_ui_registrations(files: dict[str, str]) -> tuple[dict[str, dict[str, str]], list[str]]:
+    """Registry keys module UI barrels add after the app's own registrations, and unresolved barrels."""
+    app_components, _ = resolve_registered_component_files(
+        files, source_label="app", registry_paths={path for path in files if not path.startswith("modules/")},
+    )
+    components, errors = module_ui_components(files)
+    return module_ui_registrations(components, app_components), [errors[module_id] for module_id in sorted(errors)]
 
 
 def _parse_admin_registry(content: str, *, source_label: str) -> tuple[dict[str, Any] | None, list[str]]:
@@ -1243,6 +1256,8 @@ def audit_app_ui_bundle_integrity(
 
     registered_files, registry_warnings = resolve_registered_component_files(files, source_label=source_label)
     warnings.extend(registry_warnings)
+    module_registrations, module_errors = resolve_module_ui_registrations(files)
+    warnings.extend(f"{source_label} {error}" for error in module_errors)
 
     route_components: dict[str, set[str]] = {}
     for index, page in enumerate(route_pages):
@@ -1252,7 +1267,11 @@ def audit_app_ui_bundle_integrity(
         if not component:
             continue
         route_components.setdefault(component, set()).add(route_path or "<missing path>")
-        if component not in registered_files and component not in APP_AUTH_COMPONENTS:
+        if (
+            component not in registered_files
+            and component not in APP_AUTH_COMPONENTS
+            and len(module_registrations.get(component, {})) != 1
+        ):
             warnings.append(
                 f"{source_label} {label} path '{route_path or '<missing path>'}' references component '{component}' but no registerComponent('{component}', ...) call was found in ui/index.js."
             )
@@ -1342,5 +1361,6 @@ __all__ = [
     "audit_route_auth_action_contracts",
     "custom_route_bundle_page_files",
     "dedupe",
+    "resolve_module_ui_registrations",
     "resolve_registered_component_files",
 ]

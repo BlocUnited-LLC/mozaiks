@@ -31,6 +31,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from factory_app.workflows._shared.generated_ui_contract import (
     audit_page_data_states,
+    resolve_module_ui_registrations,
     resolve_registered_component_files,
 )
 from factory_app.workflows._shared.hook_utils import workflow_context_path
@@ -2088,6 +2089,8 @@ def _scan_route_manifest_component_files(files_map: dict[str, str]) -> list[str]
         normalized, source_label="ui/route_manifest.json:",
     )
     errors.extend(registry_errors)
+    module_registrations, module_errors = resolve_module_ui_registrations(normalized)
+    errors.extend(module_errors)
 
     for i, page in enumerate(pages):
         if not isinstance(page, dict):
@@ -2097,6 +2100,16 @@ def _scan_route_manifest_component_files(files_map: dict[str, str]) -> list[str]
             continue
         # Shell-built-in components are always available — no custom JSX file required.
         if component in _SHELL_ROUTE_COMPONENTS or component in APP_AUTH_COMPONENTS:
+            continue
+        providers = module_registrations.get(component, {})
+        if len(providers) > 1:
+            errors.append(
+                f"ui/route_manifest.json: pages[{i}] component '{component}' is exported by modules "
+                f"{sorted(providers)}. Name one as '<module_id>:{component}', or register the app's own "
+                f"'{component}' in ui/index.js."
+            )
+            continue
+        if providers:
             continue
         if not any(
             path.startswith("ui/pages/custom/") and path.endswith(".jsx")

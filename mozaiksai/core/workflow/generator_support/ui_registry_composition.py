@@ -307,6 +307,143 @@ SHELL_CORE_COMPONENTS = frozenset({
 SHELL_ROUTE_COMPONENTS = frozenset({"ChatPage", "SchemaPage", "ProfilePage"})
 
 
+_MODULE_UI_BARREL = re.compile(r"^modules/([^/._][^/]*)/ui/index\.jsx?$")
+# Values the shell's registration skips, because they are not components.
+_NON_COMPONENT_VALUES = frozenset({"string", "template_string", "number", "true", "false", "null", "undefined"})
+
+
+def _declared_components(declaration: Any, path: str) -> dict[str, str]:
+    if declaration.type not in {"lexical_declaration", "variable_declaration"}:
+        name = _text(declaration.child_by_field_name("name"))
+        return {name: path} if name else {}
+    found: dict[str, str] = {}
+    for child in _children(declaration):
+        target, value = child.child_by_field_name("name"), child.child_by_field_name("value")
+        if target is None or target.type != "identifier":
+            raise ValueError(f"{path}: destructured UI exports are unsupported; export each component by name")
+        if value is not None and value.type not in _NON_COMPONENT_VALUES:
+            found[_text(target)] = path
+    return found
+
+
+def _component_exports(path: str, files: dict[str, str], active: frozenset[str] = frozenset()) -> dict[str, str]:
+    """Each component one module UI file exports, with the file that implements it."""
+    if path in active:
+        raise ValueError(f"Cyclic UI export: {path}")
+    active = active | {path}
+    statements = _children(_parse(files[path], path))
+
+    def target_exports(source: str) -> dict[str, str]:
+        return _component_exports(_target(source, path, files), files, active)
+
+    def local_binding(binding: str) -> str | None:
+        for statement in statements:
+            if statement.type == "import_statement":
+                clause = next((child for child in _children(statement) if child.type == "import_clause"), None)
+                # A namespace or side-effect import binds no component.
+                if clause is None or any(child.type == "namespace_import" for child in _children(clause)):
+                    continue
+                original = _import_names(statement).get(binding)
+                if original is not None:
+                    source = _string(statement.child_by_field_name("source"))
+                    # A package component has no local file; the importing file provides it.
+                    return target_exports(source).get(original) if source.startswith(".") else path
+                continue
+            declaration = statement.child_by_field_name("declaration") if statement.type == "export_statement" else statement
+            if declaration is None or not declaration.type.endswith("_declaration"):
+                continue
+            if declaration.type in {"lexical_declaration", "variable_declaration"}:
+                for child in _children(declaration):
+                    value = child.child_by_field_name("value")
+                    if _text(child.child_by_field_name("name")) == binding:
+                        return None if value is None or value.type in _NON_COMPONENT_VALUES else path
+            elif _text(declaration.child_by_field_name("name")) == binding:
+                return path
+        return None
+
+    exported: dict[str, str] = {}
+    starred: dict[str, str] = {}
+    for node in statements:
+        if node.type != "export_statement":
+            continue
+        declaration, value = node.child_by_field_name("declaration"), node.child_by_field_name("value")
+        source_node = node.child_by_field_name("source")
+        source = _string(source_node) if source_node is not None else None
+        clause = next((child for child in _children(node) if child.type == "export_clause"), None)
+        found: str | None
+        if any(child.type == "default" for child in node.children):
+            found = local_binding(_text(value)) if value is not None and value.type == "identifier" else path
+            if found is not None and (value is None or value.type not in _NON_COMPONENT_VALUES):
+                exported["default"] = found
+        elif declaration is not None:
+            exported.update(_declared_components(declaration, path))
+        elif clause is not None:
+            available = target_exports(source) if source is not None and source.startswith(".") else None
+            for specifier in _children(clause):
+                original = _text(specifier.child_by_field_name("name"))
+                # tree-sitter exposes the keyword `default` as an unnamed child.
+                if not original and any(child.type == "default" for child in specifier.children):
+                    original = "default"
+                found = local_binding(original) if source is None else path if available is None else available.get(original)
+                if found is not None:
+                    exported[_text(specifier.child_by_field_name("alias")) or original] = found
+        elif source is not None and not any(child.type == "namespace_export" for child in _children(node)):
+            # `export * as Name` is skipped: a namespace object is not a page component.
+            if not source.startswith("."):
+                raise ValueError(f"{path}: export-star forwarding from a package is unsupported; export each component by name")
+            starred.update((name, file) for name, file in target_exports(source).items() if name != "default")
+    return {**starred, **exported}
+
+
+def module_ui_components(files: Mapping[str, str]) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
+    """The components module UI barrels export, and the barrels that do not resolve.
+
+    Mirrors ``web_shell/moduleUi.js``: a module with a manifest and one
+    ``ui/index.js`` or ``ui/index.jsx`` contributes every component its barrel
+    exports. The first result maps a module id to its exports and the files that
+    implement them, the second a module id to why its barrel does not resolve.
+    """
+    barrels: dict[str, list[str]] = {}
+    for path in sorted(files):
+        match = _MODULE_UI_BARREL.fullmatch(path)
+        if match and f"modules/{match.group(1)}/module.yaml" in files:
+            barrels.setdefault(match.group(1), []).append(path)
+    components: dict[str, dict[str, str]] = {}
+    errors: dict[str, str] = {}
+    for module_id, paths in barrels.items():
+        if len(paths) > 1:
+            errors[module_id] = f"Module {module_id} declares multiple UI barrels: {paths}"
+            continue
+        try:
+            exports = _component_exports(paths[0], dict(files))
+        except ValueError as exc:
+            errors[module_id] = f"{paths[0]}: {exc}"
+            continue
+        components[module_id] = {name: file for name, file in exports.items() if name != "default"}
+    return components, errors
+
+
+def module_ui_registrations(
+    components: Mapping[str, Mapping[str, str]], app_components: Collection[str] = (),
+) -> dict[str, dict[str, str]]:
+    """Registry keys module UI barrels add, each with its providing modules and implementation files.
+
+    Mirrors ``web_shell/moduleUiRegistration.js``: every export registers as
+    ``<module_id>:<Export>`` and as ``<Export>``, and never replaces a key the
+    app (``app_components``), the shell's core components or its sign-in pages
+    own. A plain key with several providers is ambiguous: the shell keeps
+    whichever module it scans first.
+    """
+    registrations: dict[str, dict[str, str]] = {}
+    reserved = {*app_components, *SHELL_CORE_COMPONENTS, *APP_AUTH_COMPONENTS}
+    for module_id, exports in components.items():
+        for name, path in exports.items():
+            registrations[f"{module_id}:{name}"] = {module_id: path}
+            if name not in reserved:
+                registrations.setdefault(name, {})[module_id] = path
+    return registrations
+
+
 def _route_key(route: Mapping[str, Any]) -> str:
     """A route's identity for composition: its ``id``, or, for a route that declares none, its path.
 
@@ -644,10 +781,18 @@ def compose_ui_registry(
             selected[key] = override
         else:
             raise ValueError(f"Conflicting component registration: {key}")
-    for route in routes.values():
-        component = route["component"]
-        if component not in selected and component not in APP_AUTH_COMPONENTS and component not in SHELL_ROUTE_COMPONENTS:
-            raise ValueError(f"Unregistered route component: {component}")
+    unregistered = {
+        route["component"] for route in routes.values()
+    } - selected.keys() - APP_AUTH_COMPONENTS - SHELL_ROUTE_COMPONENTS
+    module_components, module_errors = module_ui_components(files) if unregistered else ({}, {})
+    module_registrations = module_ui_registrations(module_components, selected)
+    for component in sorted(unregistered):
+        providers = module_registrations.get(component, {})
+        if len(providers) > 1:
+            raise ValueError(f"Ambiguous module route component: {component} is exported by {sorted(providers)}")
+        if not providers:
+            reasons = f" ({'; '.join(module_errors.values())})" if module_errors else ""
+            raise ValueError(f"Unregistered route component: {component}{reasons}")
     result: dict[str, str] = {}
     if has_index:
         imports, calls = [], []

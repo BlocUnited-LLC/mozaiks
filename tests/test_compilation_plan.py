@@ -94,7 +94,10 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 # The optional module smoke-fixture companion adds exactly one registry row
 # and one reports-module input gap. The row-isolation proof below recovers
 # the preceding hash and preserves all 61 unit bodies and earlier gaps.
-_GOLDEN_PLAN_DIGEST = "da71c10a82922bbf0fce2fd4d570ada3223f3aa398f9b9eda84a25190ee49305"
+_PLAN_DIGEST_BEFORE_MODULE_UI_ROWS = "da71c10a82922bbf0fce2fd4d570ada3223f3aa398f9b9eda84a25190ee49305"
+# The module-owned page rows move only the registry digest and their own gaps;
+# the module UI row-isolation proof below recovers the preceding hash.
+_GOLDEN_PLAN_DIGEST = "b7c2926c2b77489556e243e5b45bb5f736a3cb32dbd4be2109080db8122297ef"
 
 
 def _registry():
@@ -214,30 +217,63 @@ def test_service_package_markers_preserve_existing_units_and_gaps() -> None:
     )
 
 
-def test_module_smoke_fixture_row_preserves_existing_units_and_gaps() -> None:
+def _registry_of(families):
     from mozaiksai.core.runtime.app.layout_registry import AppLayoutRegistry, _stable_digest
 
+    return AppLayoutRegistry(
+        families=families,
+        registry_digest=_stable_digest({
+            "schema_version": _registry().schema_version,
+            "families": [row.identity_payload for row in families],
+        }),
+    )
+
+
+def _registry_before_module_ui_rows():
+    from tests.service_package_marker_migration_helpers import MODULE_UI_FAMILY_PATHS
+
+    return _registry_of(tuple(
+        row for row in _registry().families if row.path_template not in MODULE_UI_FAMILY_PATHS
+    ))
+
+
+def test_module_ui_rows_preserve_existing_units_and_gaps() -> None:
+    from tests.service_package_marker_migration_helpers import MODULE_UI_FAMILY_PATHS
+
+    graph, payloads = _corpus_graph()
+    previous = derive_compilation_plan(
+        graph=graph, payloads=payloads, registry=_registry_before_module_ui_rows(),
+    )
+    current = _plan()
+    assert previous.plan_digest == _PLAN_DIGEST_BEFORE_MODULE_UI_ROWS
+    assert current.plan_digest == _GOLDEN_PLAN_DIGEST
+    assert [unit.model_dump(mode="json") for unit in current.units] == [
+        unit.model_dump(mode="json") for unit in previous.units
+    ]
+    assert [gap for gap in current.gaps if gap.path_template not in MODULE_UI_FAMILY_PATHS] == list(previous.gaps)
+    restored = current.canonical_payload(include_digest=False)
+    restored["registry_digest"] = previous.registry_digest
+    restored["gaps"] = [gap for gap in restored["gaps"] if gap["path_template"] not in MODULE_UI_FAMILY_PATHS]
+    assert restored == previous.canonical_payload(include_digest=False)
+    assert canonical_digest(restored) == previous.plan_digest
+
+
+def test_module_smoke_fixture_row_preserves_existing_units_and_gaps() -> None:
     path = "modules/{module_id}/contracts/fixtures.yaml"
-    current_registry = _registry()
+    # Isolate this row from the module UI rows registered after it.
+    current_registry = _registry_before_module_ui_rows()
     previous_rows = tuple(
         row for row in current_registry.families if row.path_template != path
     )
     assert len(previous_rows) == 132
     assert len(current_registry.families) == 133
-    previous_registry = AppLayoutRegistry(
-        families=previous_rows,
-        registry_digest=_stable_digest({
-            "schema_version": current_registry.schema_version,
-            "families": [row.identity_payload for row in previous_rows],
-        }),
-    )
     graph, payloads = _corpus_graph()
     previous = derive_compilation_plan(
-        graph=graph, payloads=payloads, registry=previous_registry,
+        graph=graph, payloads=payloads, registry=_registry_of(previous_rows),
     )
-    current = _plan()
+    current = derive_compilation_plan(graph=graph, payloads=payloads, registry=current_registry)
     assert previous.plan_digest == "fdc88e33746108a99f99db21707f69767e04b043180cf3d5487fe2223cb729be"
-    assert current.plan_digest == _GOLDEN_PLAN_DIGEST
+    assert current.plan_digest == _PLAN_DIGEST_BEFORE_MODULE_UI_ROWS
     assert len(previous.units) == len(current.units) == 61
     assert [unit.model_dump(mode="json") for unit in current.units] == [
         unit.model_dump(mode="json") for unit in previous.units
