@@ -30,7 +30,11 @@ from typing import Any
 import yaml
 
 from mozaiksai.core.runtime.app.provenance import resolve_build_timestamp
-from mozaiksai.core.semantics.portable_path import PortablePathError, detect_collisions, validate_portable_path
+from mozaiksai.core.semantics.portable_path import (
+    PortablePathError,
+    detect_collisions,
+    validate_portable_path,
+)
 from mozaiksai.core.session.build_context import (
     BuildContextError,
     iter_context_assets,
@@ -38,7 +42,9 @@ from mozaiksai.core.session.build_context import (
 )
 from mozaiksai.core.utils.path_containment import resolve_inside
 from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
-from mozaiksai.core.workflow.generator_support.module_action_inventory import SHARED_PACK_OUTPUT_PATHS
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    SHARED_PACK_OUTPUT_PATHS,
+)
 from mozaiksai.core.workflow.generator_support.persistence_artifacts import (
     normalize_data_contract_indexes,
 )
