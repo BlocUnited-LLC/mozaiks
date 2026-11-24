@@ -811,8 +811,15 @@ and keeps the upgrade path described above, from a directory source; that
 upgrade keeps every other pack's recorded entries, including workflow registry
 entries.
 
+Planning renders a pack's `.j2` templates, so they are untrusted text. A template
+gets the plain data it names and a fixed set of text filters. It has no default
+globals (`range`, `cycler`, `lipsum` and the rest), no `include`, `import` or
+`extends`, no string formatting and no access to Python attributes, and its source
+and output are bounded. No pack code runs before a pack is applied.
+
 The workspace pin, its source sidecar, the provenance and the app's files are
-written as one transaction. Each file is replaced atomically and keeps its
+written as one transaction, including when a generator-materialized pack is
+upgraded. Each file is replaced atomically and keeps its
 permissions; a new file follows the umask. A failure attempts
 to restore files and remove newly created directories, and reports any incomplete
 rollback. A

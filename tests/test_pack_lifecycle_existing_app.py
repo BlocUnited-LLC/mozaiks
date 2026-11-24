@@ -3169,3 +3169,118 @@ def test_an_app_page_with_a_missing_workflow_does_not_block(tmp_path):
     target.parent.mkdir(parents=True)
     shutil.copy(app_page / "templates/ui/pages/stock_actions.yaml", target)
     assert plan_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots).conflicts == []
+
+
+# --------------------------------------------------------------------------------------
+# Generator upgrades are one transaction
+# --------------------------------------------------------------------------------------
+
+
+def _generator_upgrade(tmp_path: Path):
+    """An upgrade that adds, changes and removes files, the contract, provenance, the pin and the source."""
+    roots = _ordinary_app(tmp_path / "shop")
+    _materialize(roots, _generator_pack(tmp_path, "1.0.0", modules=("ledger", "journal")))
+    return roots, PackSource(directory=_generator_pack(tmp_path, "2.0.0", modules=("ledger", "audit")))
+
+
+def _snapshot(root: Path) -> dict[str, tuple[int, bytes] | None]:
+    return {
+        path.relative_to(root).as_posix(): (_mode(path), path.read_bytes()) if path.is_file() else None
+        for path in root.rglob("*")
+    }
+
+
+# Two files written, two removed, two modified in the app, plus contract, provenance, pin and source.
+@pytest.mark.parametrize("position", range(1, 10))
+def test_a_generator_upgrade_that_fails_restores_everything(tmp_path, monkeypatch, position):
+    roots, source = _generator_upgrade(tmp_path)
+    before = _snapshot(tmp_path / "shop")
+    calls = 0
+    replace, unlink = os.replace, Path.unlink
+
+    def step() -> None:
+        nonlocal calls
+        calls += 1
+        if calls == position:
+            raise OSError("disk full")
+
+    def failing_replace(old, new):
+        step()
+        replace(old, new)
+
+    def failing_unlink(self, *args, **kwargs):
+        # Only the removals the upgrade plans, not the cleanup of temporary files.
+        if calls < position and self.parent.parent.name == "journal" or calls < position and self.parent.name == "journal":
+            step()
+        unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(workspace_module.os, "replace", failing_replace)
+    monkeypatch.setattr(Path, "unlink", failing_unlink)
+    with pytest.raises(OSError, match="disk full"):
+        apply_workspace_upgrade(source=source, roots=roots)
+    monkeypatch.undo()
+    assert _snapshot(tmp_path / "shop") == before
+    # Nothing half-done is left: the same upgrade then applies and leaves a state the base lifecycle reads.
+    assert apply_workspace_upgrade(source=source, roots=roots).status == "applied"
+    assert not (roots.app_root / "modules/journal").exists()
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+
+
+def test_the_fault_injection_covers_every_write(tmp_path, monkeypatch):
+    roots, source = _generator_upgrade(tmp_path)
+    written: list[str] = []
+    replace, unlink = os.replace, Path.unlink
+    monkeypatch.setattr(workspace_module.os, "replace", lambda old, new: (written.append(Path(new).name), replace(old, new))[1])
+    monkeypatch.setattr(Path, "unlink", lambda self, *a, **k: (written.append(self.name), unlink(self, *a, **k))[1])
+    apply_workspace_upgrade(source=source, roots=roots)
+    written.remove("lifecycle.lock")
+    assert sorted(written) == sorted([
+        "module.yaml", "handler.py", "module.yaml", "handler.py", "generated_marker.py", "contract.json", "pack_provenance.json",
+        "installed_components.json", "installed_component_sources.json",
+    ])
+
+
+def test_a_generator_upgrade_does_not_follow_a_destination_redirected_after_planning(tmp_path, monkeypatch):
+    roots, source = _generator_upgrade(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    commit = workspace_module._commit
+
+    def redirected_commit(*args, **kwargs):
+        services = roots.app_root / "services"
+        services.rename(tmp_path / "moved-services")
+        _directory_redirect(services, outside)
+        return commit(*args, **kwargs)
+
+    monkeypatch.setattr(workspace_module, "_commit", redirected_commit)
+    before = _tree(roots.build_context_root)
+    with pytest.raises(CommunityComponentLifecycleError, match="Unsafe workspace path"):
+        apply_workspace_upgrade(source=source, roots=roots)
+    assert list(outside.iterdir()) == []
+    assert (tmp_path / "moved-services/generated_marker.py").read_text(encoding="utf-8") == "VERSION = '1.0.0'\n"
+    assert {path: data for path, data in _tree(roots.build_context_root).items() if not path.endswith(".lock")} == before
+
+
+def test_a_generator_upgrade_writes_what_the_base_lifecycle_writes(tmp_path):
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        apply_component_upgrade,
+    )
+
+    trees = []
+    for name in ("wrapper", "base"):
+        roots = _ordinary_app(tmp_path / name)
+        _materialize(roots, _generator_pack(tmp_path / name, "1.0.0", modules=("ledger", "journal")))
+        candidate = _generator_pack(tmp_path / "shared" / name, "2.0.0", modules=("ledger", "audit"))
+        if name == "wrapper":
+            apply_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+        else:
+            apply_component_upgrade(
+                build_context_root=roots.build_context_root, candidate_pack_source_path=candidate, workspace_app_root=roots.app_root,
+            )
+        tree = {path: data.replace(b"\r\n", b"\n") for path, data in _tree(roots.app_root.parent).items()}
+        provenance = json.loads(tree.pop("app/.mozaiks/pack_provenance.json"))
+        provenance.pop("generated_at")
+        sources = json.loads(tree.pop("build_context/.mozaiks/installed_component_sources.json"))
+        assert [Path(row["local_source_path"]).samefile(candidate) for row in sources["sources"]] == [True]
+        trees.append((tree, provenance))
+    assert trees[0] == trees[1]

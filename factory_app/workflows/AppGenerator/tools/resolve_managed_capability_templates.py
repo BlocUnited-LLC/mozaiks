@@ -12,10 +12,13 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
-from jinja2 import StrictUndefined, Template, TemplateError
+from jinja2 import TemplateError
 from pydantic import ValidationError
 
 from factory_app.workflows._shared.surface_ownership import SurfaceOwnershipRule
+from factory_app.workflows.AppGenerator.tools.pack_template_rendering import (
+    render_pack_template,
+)
 from mozaiksai.core.runtime.app.provenance import resolve_build_timestamp
 from mozaiksai.core.session.build_context import (
     BuildContextError,
@@ -807,6 +810,12 @@ def _build_provenance_manifest(
     return json.dumps(manifest, indent=2)
 
 
+# What an untrusted template can make rendering, or the check of what it rendered, raise.
+_TEMPLATE_FAILURES = (
+    TemplateError, yaml.YAMLError, ValueError, TypeError, ArithmeticError, AttributeError, LookupError, RecursionError, MemoryError,
+)
+
+
 def _template_output_path(path: Path, templates_root: Path) -> str:
     try:
         relative = path.resolve().relative_to(templates_root.resolve())
@@ -1513,12 +1522,12 @@ def _render_pack_templates(
             content = path.read_text(encoding="utf-8")
             if path.suffix == ".j2":
                 try:
-                    content = Template(content, undefined=StrictUndefined).render(**template_vars)
+                    content = render_pack_template(content, template_vars)
                     if output_path.endswith((".yaml", ".yml")):
                         yaml.safe_load(content)
                     elif output_path.endswith(".json"):
                         json.loads(content)
-                except (TemplateError, yaml.YAMLError, ValueError, TypeError) as exc:
+                except _TEMPLATE_FAILURES as exc:
                     raise ManagedCapabilityTemplateError(
                         f"Pack '{pack_id}' template '{path.relative_to(context_root).as_posix()}' "
                         f"could not render valid '{output_path}': {exc}"

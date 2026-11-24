@@ -94,7 +94,6 @@ from .community_component_lifecycle import (
     _ensure_dependencies_satisfied,
     _pack_id_from_context,
     _render_pack,
-    apply_component_upgrade,
     prepare_component_upgrade,
 )
 from .community_component_sources import (
@@ -2221,7 +2220,7 @@ def _is_generator_materialized(roots: WorkspaceRoots, pack_id: str) -> bool:
 
 
 def _generator_upgrade_plan(candidate: _Candidate, roots: WorkspaceRoots, *, apply: bool) -> LifecyclePlan:
-    """Upgrade a pack AppGenerator materialized, through the base lifecycle's unchanged path."""
+    """Upgrade a pack AppGenerator materialized: planned by the base lifecycle, written as any pack operation."""
     try:
         metadata = verify_pack_integrity(candidate.pack_dir, candidate.pack_id)
         installed = component_by_id(load_installed_components(roots.build_context_root))
@@ -2262,14 +2261,20 @@ def _generator_upgrade_plan(candidate: _Candidate, roots: WorkspaceRoots, *, app
             return plan
         if plan.status == "blocked":
             raise _blocked(plan)
-        result = apply_component_upgrade(
-            build_context_root=roots.build_context_root,
-            candidate_pack_source_path=candidate.pack_dir,
-            workspace_app_root=roots.app_root,
-        )
     except ManagedCapabilityTemplateError as exc:
         raise CommunityComponentLifecycleError(str(exc)) from exc
-    return _plan_from_base_upgrade(result, metadata, candidate, applied=True)
+    # What the base lifecycle would write, with its pin and source, as one transaction.
+    root = roots.build_context_root
+    sources = load_installed_component_sources(root)
+    sources[candidate.pack_id] = str(candidate.pack_dir.resolve())
+    installed[candidate.pack_id] = entry
+    _commit({
+        **writes,
+        installed_components_path(root): installed_components_text({"components": list(installed.values())}),
+        installed_component_sources_path(root): installed_component_sources_text(sources),
+    }, roots)
+    _prune_empty_parents([path for path, text in writes.items() if text is None], (roots.app_root,), roots)
+    return _plan_from_base_upgrade(preview, metadata, candidate, applied=True)
 
 
 def _plan_from_base_upgrade(result: UpgradePlan, metadata: dict[str, Any], candidate: _Candidate, *, applied: bool) -> LifecyclePlan:
