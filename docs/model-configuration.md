@@ -66,10 +66,16 @@ structured-output requirements.
 
 ### Choosing a model in a workflow chat
 
-The workflow composer offers the models configured for the running app. A user
-can choose a model for subsequent workflow replies and reopen the conversation
-with that choice. Each conversation keeps its own selection. The full chat page
-and embedded `WorkflowChat` use the same control.
+Open **AI model** in the workflow composer to select a model for subsequent
+replies. Reopening the conversation restores the selection. Choose **Workflow
+default** to use the runtime default again. The full chat page and embedded
+`WorkflowChat` use the same control.
+
+The options come from the runtime's configured providers. For an environment
+using OpenAI, for example, `LLM_PRIMARY_MODEL=gpt-4o-mini` and
+`LLM_FALLBACK_MODELS=gpt-4.1-mini` make two models available with the configured
+OpenAI credential. The primary model remains the default. A runtime that loads
+its provider list from MongoDB uses those entries instead.
 
 The choice applies to the agents answering in that workflow. Background jobs
 with their own model configuration continue to use it. Factory builds and

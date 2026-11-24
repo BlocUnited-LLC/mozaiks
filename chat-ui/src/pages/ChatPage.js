@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import Header from "../components/layout/Header";
 import Footer from "../components/layout/Footer";
 import ChatInterface from '../components/chat/ChatInterface';
+import { ModelSelect, useWorkflowModelPicker } from '../components/chat/WorkflowModelPicker';
 import { shouldReconnectAfterClose } from '../adapters/socketClose.js';
 import ArtifactPanel from '../components/chat/ArtifactPanel';
 import FluidChatLayout from '../components/chat/FluidChatLayout';
@@ -361,7 +362,7 @@ const ChatPage = () => {
 
   const defaultWorkflow = resolveWorkflow(urlWorkflowName) || '';
   const [currentWorkflowName, setCurrentWorkflowName] = useState(defaultWorkflow);
-  const [refinementModels, setRefinementModels] = useState([]);
+  const [refinementModels, setRefinementModels] = useState(null);
   const [refinementModel, setRefinementModel] = useState('');
   const [boundChatModels, setBoundChatModels] = useState(() => new Map());
   const refinementModelRef = useRef('');
@@ -370,19 +371,20 @@ const ChatPage = () => {
   useEffect(() => {
     if (!showRefinementModelPicker) return undefined;
     const controller = new AbortController();
+    setRefinementModels(null);
     authFetch('/api/studio/refinement/models', { signal: controller.signal })
       .then(response => response.ok ? response.json() : null)
       .then(policy => {
-        if (!policy || controller.signal.aborted) return;
-        const models = Array.isArray(policy.models) ? policy.models : [];
+        if (controller.signal.aborted) return;
+        const models = Array.isArray(policy?.models) ? policy.models : [];
         const selected = models.some(model => model.id === refinementModelRef.current)
           ? refinementModelRef.current
-          : models.some(model => model.id === policy.default) ? policy.default : models[0]?.id || '';
+          : models.some(model => model.id === policy?.default) ? policy.default : models[0]?.id || '';
         setRefinementModels(models);
         setRefinementModel(selected);
         refinementModelRef.current = selected;
       })
-      .catch(() => {});
+      .catch(() => { if (!controller.signal.aborted) setRefinementModels([]); });
     return () => controller.abort();
   }, [showRefinementModelPicker]);
 
@@ -391,19 +393,17 @@ const ChatPage = () => {
     : null;
   const activeRunModelLabel = activeRunModel === 'gemini' ? 'Gemini 3.8 Flash'
     : activeRunModel === 'openai' ? 'GPT-5 Nano' : null;
-  const refinementModelPicker = showRefinementModelPicker && refinementModels.length > 0 ? (
-    <select
-      aria-label="AI model"
-      className="h-8 max-w-full cursor-pointer rounded-full border border-transparent bg-card px-2.5 text-xs font-medium text-foreground hover:border-border focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-default disabled:text-muted-foreground"
+  const refinementModelPicker = showRefinementModelPicker && refinementModels?.length > 0 ? (
+    <ModelSelect
       value={refinementModel}
       disabled={loading || Boolean(pendingHarnessDecision)}
-      onChange={event => {
-        refinementModelRef.current = event.target.value;
-        setRefinementModel(event.target.value);
+      onChange={value => {
+        refinementModelRef.current = value;
+        setRefinementModel(value);
       }}
     >
       {refinementModels.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
-    </select>
+    </ModelSelect>
   ) : activeRunModelLabel ? (
     <span
       className="rounded-full px-2.5 py-1 text-xs font-medium text-muted-foreground"
@@ -1180,6 +1180,12 @@ const ChatPage = () => {
     'MozaiksAI'
   ).trim() || 'MozaiksAI';
   const currentUserId = user?.id || user?.user_id || user?.sub || getUserIdFromToken() || 'anonymous';
+  const workflowModel = useWorkflowModelPicker({
+    api, appId: currentAppId, userId: currentUserId, chatId: currentChatId,
+    workflow: conversationMode === 'workflow' && !refinementModelPicker && !(showRefinementModelPicker && refinementModels === null)
+      ? currentWorkflowName : null,
+    disabled: workflowCompleted || Boolean(pendingHarnessDecision),
+  });
   const failedWorkflowRetry = useFailedWorkflowRetry({
     appId: currentAppId, userId: currentUserId, chatId: currentChatId,
     workflowName: currentWorkflowName, surface: navContext?.surface, mode: conversationMode,
@@ -6136,7 +6142,8 @@ const ChatPage = () => {
       chatStatus={chatStatus}
       transportType={transportType}
       workflowName={currentWorkflowName}
-      refinementModelPicker={refinementModelPicker}
+      modelPicker={refinementModelPicker || workflowModel.picker}
+      modelSaving={workflowModel.saving}
       structuredOutputs={getWorkflow(currentWorkflowName)?.structuredOutputs || {}}
       startupMode={workflowConfig?.getWorkflowConfig(currentWorkflowName)?.startup_mode}
       onRetry={retryConnection}
@@ -6375,7 +6382,8 @@ const ChatPage = () => {
         chatStatus={chatStatus}
         transportType={transportType}
         workflowName={currentWorkflowName}
-        refinementModelPicker={refinementModelPicker}
+        modelPicker={refinementModelPicker || workflowModel.picker}
+        modelSaving={workflowModel.saving}
         structuredOutputs={getWorkflow(currentWorkflowName)?.structuredOutputs || {}}
         startupMode={uiStartupMode}
         onRetry={retryConnection}

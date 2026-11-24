@@ -25,6 +25,7 @@ test('the AppReview composer lets the user select a model and preserves it acros
       import React, {useEffect, useRef, useState} from 'react';
       import {createRoot} from 'react-dom/client';
       import ChatInterface from ${JSON.stringify(path.join(ui, 'components/chat/ChatInterface.jsx'))};
+      import {ModelSelect, useWorkflowModelPicker} from ${JSON.stringify(path.join(ui, 'components/chat/WorkflowModelPicker.jsx'))};
       const authFetch = (url, options) => fetch(url, options);
       function Fixture() {
         const [currentWorkflowName, setCurrentWorkflowName] = useState('AppReview');
@@ -33,6 +34,9 @@ test('the AppReview composer lets the user select a model and preserves it acros
         const [conversationMode, changeMode] = useState('workflow');
         const loading = false;
         ${picker}
+        const workflowModel = useWorkflowModelPicker({appId:'app', userId:'owner', chatId:currentChatId,
+          workflow:conversationMode === 'workflow' && !refinementModelPicker && !(showRefinementModelPicker && refinementModels === null)
+            ? currentWorkflowName : null});
         window.changeWorkflow = setCurrentWorkflowName;
         window.showBuildModel = () => {
           setCurrentWorkflowName('ValueEngine');
@@ -41,9 +45,10 @@ test('the AppReview composer lets the user select a model and preserves it acros
         window.changeChat = changeChat;
         window.changeMode = changeMode;
         window.selectedModel = () => refinementModelRef.current;
-        return <ChatInterface messages={[]} onSendMessage={() => {}} loading={false}
+        return <ChatInterface messages={[]} onSendMessage={() => {window.sent = (window.sent || 0) + 1;}} loading={false}
           workflowName={currentWorkflowName} connectionStatus="connected"
-          conversationMode={conversationMode} plainContainer={true} refinementModelPicker={refinementModelPicker} />;
+          conversationMode={conversationMode} plainContainer={true} modelPicker={refinementModelPicker || workflowModel.picker}
+          modelSaving={workflowModel.saving} />;
       }
       createRoot(document.getElementById('root')).render(<Fixture />);
     ` },
@@ -53,6 +58,7 @@ test('the AppReview composer lets the user select a model and preserves it acros
     define: { 'process.env.NODE_ENV': '"test"' },
     plugins: [{ name: 'host-boundaries', setup(builder) {
       const stubs = {
+        '../../adapters/api': 'export const authFetch = (url, options) => fetch(url,options);',
         'react-router-dom': 'export const useNavigate = () => () => {}; export const useParams = () => ({});',
         '../../core/ui/UIToolRenderer': 'export default function UIToolRenderer() { return null; }',
         '../../styles/brandAssets': 'export const getBrandLogoSrc = () => ""; export const applyBrandImageFallback = () => {};',
@@ -69,7 +75,8 @@ test('the AppReview composer lets the user select a model and preserves it acros
       + `\n@source "${ui.replaceAll('\\', '/')}";`,
     {from:path.join(shell, 'styles.css')},
   );
-  const server = http.createServer((request, response) => {
+  const choices = new Map();
+  const server = http.createServer(async (request, response) => {
     if (request.url === '/styles.css') {
       response.setHeader('Content-Type', 'text/css');
       response.end(css.css);
@@ -80,6 +87,19 @@ test('the AppReview composer lets the user select a model and preserves it acros
       response.end(JSON.stringify({ default: 'default', models: [
         { id: 'default', label: 'Default model' }, { id: 'chosen', label: 'Chosen model' },
       ] }));
+      return;
+    }
+    if (request.url.startsWith('/api/chats/model/')) {
+      if (request.method === 'PUT') {
+        let body = '';
+        for await (const chunk of request) body += chunk;
+        choices.set(request.url, JSON.parse(body).model);
+      }
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({
+        default:'local:m1', selected:choices.get(request.url) || null, locked:false,
+        models:[{id:'local:m1', label:'First model'}, {id:'local:m2', label:'Second model'}],
+      }));
       return;
     }
     response.setHeader('Content-Type', request.url === '/fixture.js' ? 'text/javascript' : 'text/html');
@@ -94,13 +114,74 @@ test('the AppReview composer lets the user select a model and preserves it acros
     t.after(() => page.close());
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    const origin = `http://127.0.0.1:${server.address().port}/`;
+    await page.goto(origin);
     const select = page.getByRole('combobox', { name: 'AI model' });
     await expect(select).toHaveValue('default');
     await select.selectOption('chosen');
     assert.equal(await page.evaluate(() => window.selectedModel()), 'chosen');
     await page.evaluate(() => window.changeWorkflow('Other'));
+    await expect(select).toHaveValue('');
+    await expect(select.locator('option:checked')).toHaveText('Workflow default · First model');
+    await select.selectOption('local:m2');
+    await expect(select).toHaveValue('local:m2');
+    const peer = await page.context().newPage();
+    await peer.goto(origin);
+    await peer.evaluate(() => { window.changeChat('parallel'); window.changeWorkflow('Other'); });
+    const peerSelect = peer.getByRole('combobox', {name:'AI model'});
+    await peerSelect.selectOption('local:m1');
+    await expect(peerSelect).toHaveValue('local:m1');
+    await expect(select).toHaveValue('local:m2');
+    await peer.close();
+    await page.evaluate(() => window.changeChat('sibling'));
+    await expect(select).toHaveValue('');
+    await page.evaluate(() => window.changeChat('fixture-chat'));
+    await expect(select).toHaveValue('local:m2');
+    const modelPath = '**/api/chats/model/app/Other/fixture-chat';
+    let completeSave;
+    let saveStarted;
+    const started = new Promise(resolve => { saveStarted = resolve; });
+    const paused = new Promise(resolve => { completeSave = resolve; });
+    await page.route(modelPath, async route => {
+      if (route.request().method() === 'PUT') {
+        saveStarted();
+        await paused;
+      }
+      await route.continue();
+    });
+    await page.locator('textarea').fill('A new question');
+    await select.selectOption('');
+    await started;
+    await expect(page.getByRole('button',{name:'Send message'})).toBeDisabled();
+    await page.locator('textarea').press('Enter');
+    assert.equal(await page.evaluate(() => window.sent || 0),0);
+    await expect(page.locator('textarea')).toHaveValue('A new question');
+    completeSave();
+    await expect(select).toBeEnabled();
+    await expect(select).toHaveValue('');
+    await page.unroute(modelPath);
+    await page.route(modelPath, route => route.fulfill({status:422,body:'Model no longer available'}));
+    await select.selectOption('local:m2');
+    await expect(page.getByText('Couldn’t confirm the model change.')).toBeVisible();
+    await expect(page.getByRole('button',{name:'Send message'})).toBeDisabled();
+    await page.unroute(modelPath);
+    await page.getByRole('button',{name:'Reload models'}).click();
+    await expect(select).toHaveValue('');
+    await expect(page.getByRole('button',{name:'Send message'})).toBeEnabled();
+    await page.locator('textarea').fill('');
+    const retiredModelPath = '**/api/chats/model/app/Other/retired-chat';
+    let retiredChoice = 'retired:old-model';
+    await page.route(retiredModelPath, route => {
+      const request = route.request();
+      if (request.method() === 'PUT') retiredChoice = request.postDataJSON().model;
+      return route.fulfill({json:{default:null, models:[], selected:retiredChoice, locked:false}});
+    });
+    await page.evaluate(() => window.changeChat('retired-chat'));
+    await expect(select.locator('option:checked')).toHaveText('retired:old-model (unavailable)');
+    await select.selectOption('');
     await expect(select).toHaveCount(0);
+    assert.equal(retiredChoice,null);
+    await page.evaluate(() => window.changeChat('fixture-chat'));
     await page.evaluate(() => window.changeWorkflow('AppReview'));
     await expect(select).toHaveValue('chosen');
     await select.focus();

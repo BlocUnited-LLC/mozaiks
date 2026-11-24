@@ -14,7 +14,8 @@ const ui = path.resolve(shell, '../chat-ui/src');
 
 async function startWorkflowFixture(t, {localCanvas = false, viewport} = {}) {
   const boundaries = {
-    '../../adapters/api': `export class WebSocketApiAdapter {
+    '../../adapters/api': `export {authFetch} from ${JSON.stringify(path.join(ui,'adapters/api.js'))};
+    export class WebSocketApiAdapter {
       constructor(config) { this.config = config; }
       async startChat(app, wf, user, {signal}, context, trigger, options) {
         window.starts.push({app, wf, user, context, options, token:this.config.getAccessToken()});
@@ -38,6 +39,10 @@ async function startWorkflowFixture(t, {localCanvas = false, viewport} = {}) {
     '../../pages/hooks': `export {useChatWebSocket} from ${JSON.stringify(path.join(ui,'pages/hooks/useChatWebSocket.js'))}`,
     '../../utils/resolveWorkflow': 'export default value => value;',
     '../../config': 'export default {get: () => null};',
+    '../config': 'export default {get: () => null};',
+    '../config/workflowConfig': 'export default {};',
+    '../utils/resolveWorkflow': 'export default value => value;',
+    '../platform/index.js': 'export default {getAccessToken: () => null, resolveHttpUrl: () => window.location.origin};',
     '../../platform/index.js': 'export default {getAccessToken: () => null};',
     '../../styles/useTheme': `
       import {DEFAULT_THEME} from ${JSON.stringify(path.join(ui,'styles/themeProvider.js'))};
@@ -104,8 +109,15 @@ async function startWorkflowFixture(t, {localCanvas = false, viewport} = {}) {
     (await fs.readFile(cssPath,'utf8')) + '\n@source "' + path.join(ui,'components/chat').replaceAll('\\','/') + '";', {from:cssPath});
   const componentCss = bundle.outputFiles.find(file => file.path.endsWith('.css'));
   const script = bundle.outputFiles.find(file => file.path.endsWith('.js'));
+  const chatModels = new Map();
   await page.route('http://fixture.test/**', route => {
     const url = route.request().url();
+    if (url.includes('/api/chats/model/')) {
+      const request = route.request();
+      if (request.method() === 'PUT') chatModels.set(url, request.postDataJSON().model);
+      return route.fulfill({json:{models:[{id:'local:small',label:'Small'},{id:'local:large',label:'Large'}],
+        selected:chatModels.get(url) || null, default:'local:small', locked:false}});
+    }
     if (url.endsWith('/fixture.js')) return route.fulfill({contentType:'text/javascript',body:script.text});
     if (url.endsWith('/fixture.css')) return route.fulfill({contentType:'text/css',body:styles.css + (componentCss?.text || '')});
     if (url.endsWith('.svg')) return route.fulfill({contentType:'image/svg+xml',
@@ -213,6 +225,24 @@ test('an embedded Studio conversation renders the Factory chat and scopes previe
   assert.equal(await page.evaluate(() => window.candidates.length),3);
   await expect(transcript.getByText('Here is the design.')).toHaveCount(0);
   assert.deepEqual(errors,[]);
+});
+
+test('an embedded workflow persists and restores the model under its host token and chat scope', async t => {
+  const {page} = await startWorkflowFixture(t, {localCanvas:true});
+  const picker = page.getByRole('combobox', {name:'AI model'});
+  await expect(picker).toHaveValue('');
+  await page.evaluate(() => window.rotateToken('new-owner-token'));
+  const written = page.waitForRequest(request => request.method() === 'PUT');
+  await picker.selectOption('local:large');
+  const request = await written;
+  assert.equal(new URL(request.url()).pathname, '/api/chats/model/orchard/StudyReview/private-first');
+  assert.equal(request.headers().authorization, 'Bearer new-owner-token');
+  assert.deepEqual(request.postDataJSON(), {model:'local:large'});
+  await expect(picker).toHaveValue('local:large');
+  await page.evaluate(() => window.select('second'));
+  await expect(picker).toHaveValue('');
+  await page.reload();
+  await expect(picker).toHaveValue('local:large');
 });
 
 test('a standalone generated-app workflow uses its logo to toggle the live Factory canvas', async t => {

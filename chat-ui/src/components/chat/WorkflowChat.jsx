@@ -14,6 +14,7 @@ import { applyTheme } from '../../styles/themeProvider';
 import { isArtifactViewDisplay, isCanvasDisplay } from '../../state/uiSurfaceReducer';
 import ArtifactPanel from './ArtifactPanel';
 import ChatInterface from './ChatInterface';
+import { useWorkflowModelPicker } from './WorkflowModelPicker';
 import FluidChatLayout from './FluidChatLayout';
 import {
   buildComposerArtifactContext, buildInlineToolCallMessageFromEvent, buildToolCallMessageFromEvent,
@@ -176,6 +177,8 @@ function WorkflowConversation({
     const token = await (tokenProvider.current ? tokenProvider.current() : platform.getAccessToken());
     return submitToolCallResponse(id, response, { baseUrl: workflowApi.getHttpBaseUrl(), token });
   }, [workflowApi]);
+
+  const workflowModel = useWorkflowModelPicker({ api: workflowApi, appId: resolvedAppId, userId, chatId, workflow, disabled: ended });
 
   const handleRuntimeEvent = useCallback((rawEvent) => {
     const event = normalizeWorkflowEvent(rawEvent);
@@ -584,6 +587,8 @@ function WorkflowConversation({
     isOnChatPage
     appDisplayName={appName}
     workflowName={workflow}
+    modelPicker={workflowModel.picker}
+    modelSaving={workflowModel.saving}
     chatTheme={chatTheme}
     overlayMode={Boolean(onClose)}
     onOverlayClose={onClose}
