@@ -20,12 +20,11 @@ import os
 import re
 import secrets
 import stat
-import sys
 import tempfile
 import time
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping, Set
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -113,6 +112,7 @@ from .community_component_state import (
     load_installed_component_sources,
     load_installed_components,
 )
+from .file_access import FileAccess, keep_access, read_access
 from .generated_bundle_scanner import scan_app_contracts, scan_pack_provenance
 from .resolve_managed_capability_templates import (
     ManagedCapabilityTemplateError,
@@ -1837,7 +1837,7 @@ def _missing_parents(path: Path) -> list[Path]:
 _CREATE = os.O_CREAT | os.O_WRONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
 
 
-def _temporary_file(parent: Path, previous: os.stat_result | None) -> tuple[int, Path]:
+def _temporary_file(parent: Path, previous: FileAccess | None) -> tuple[int, Path]:
     """An unpredictable new file beside a destination.
 
     ``mkstemp`` would leave the destination owner-only. A new file gets ordinary
@@ -1853,17 +1853,6 @@ def _temporary_file(parent: Path, previous: os.stat_result | None) -> tuple[int,
         return descriptor, path
 
 
-def _keep_access(path: Path, previous: os.stat_result) -> None:
-    """Give a file the mode, and where permitted the owner, another had. Windows inherits both from the folder."""
-    if sys.platform == "win32":
-        return
-    current = path.stat()
-    if (current.st_uid, current.st_gid) != (previous.st_uid, previous.st_gid):
-        with suppress(PermissionError):
-            os.chown(path, previous.st_uid, previous.st_gid)
-    os.chmod(path, stat.S_IMODE(previous.st_mode))
-
-
 def _commit(
     writes: Mapping[Path, str | bytes | None], roots: WorkspaceRoots, *, directories: tuple[Path, ...] = (),
 ) -> None:
@@ -1872,7 +1861,7 @@ def _commit(
     Unsafe or unwritable rollback destinations remain untouched; exception
     notes report cleanup failures without replacing the original exception.
     """
-    backups: list[tuple[Path, tuple[bytes, os.stat_result] | None]] = []
+    backups: list[tuple[Path, tuple[bytes, FileAccess] | None]] = []
     created: list[Path] = []
     temporary: Path | None = None
     for path in (*writes, *directories):
@@ -1884,7 +1873,7 @@ def _commit(
             directory.mkdir(parents=True, exist_ok=True)
         for path, text in writes.items():
             path = _write_destination(path, roots)
-            replaced = path.stat() if path.is_file() else None
+            replaced = read_access(path) if path.is_file() else None
             backups.append((path, None if replaced is None else (path.read_bytes(), replaced)))
             if text is None:
                 if path.is_file():
@@ -1896,7 +1885,7 @@ def _commit(
             descriptor, temporary = _temporary_file(path.parent, replaced)
             with os.fdopen(descriptor, "wb") as stream:
                 if replaced is not None:
-                    _keep_access(temporary, replaced)
+                    keep_access(temporary, replaced)
                 stream.write(text if isinstance(text, bytes) else text.encode("utf-8"))
             os.replace(_write_destination(temporary, roots), _write_destination(path, roots))
             temporary = None
@@ -1916,7 +1905,7 @@ def _commit(
                     content, access = previous
                     path.parent.mkdir(parents=True, exist_ok=True)
                     with os.fdopen(os.open(path, _CREATE | os.O_TRUNC, 0o600), "wb") as stream:
-                        _keep_access(path, access)
+                        keep_access(path, access)
                         stream.write(content)
             except (OSError, CommunityComponentLifecycleError) as exc:
                 failure.add_note(f"Rollback could not restore {path}: {exc}")

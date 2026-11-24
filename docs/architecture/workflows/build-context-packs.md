@@ -851,7 +851,8 @@ and output are bounded. No pack code runs before a pack is applied.
 The workspace pin, its source sidecar, the provenance and the app's files are
 written as one transaction, including when a generator-materialized pack is
 upgraded. Each file is replaced atomically and keeps its
-permissions; a new file follows the umask. A failure attempts
+permissions (on Windows, its access list); a new file follows the umask, or
+on Windows its folder. A failure attempts
 to restore files and remove newly created directories, and reports any incomplete
 rollback. A
 lock file at `build_context/.mozaiks/lifecycle.lock` refuses concurrent

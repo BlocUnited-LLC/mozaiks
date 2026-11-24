@@ -3080,6 +3080,91 @@ def test_a_generator_upgrade_keeps_file_modes(tmp_path, _umask):
     assert {_mode(path) for path in paths} == {0o664}
 
 
+def _access_list(path: Path) -> list[str]:
+    """``icacls`` rows for a path: an inherited grant carries ``(I)``."""
+    listing = subprocess.run(["icacls", str(path)], capture_output=True, text=True, check=True).stdout
+    return sorted(row.replace(str(path), "").strip() for row in listing.splitlines() if ":(" in row)
+
+
+def _only_me(path: Path) -> list[str]:
+    """Stop inheriting the folder's access and grant it to the current account alone."""
+    account = subprocess.run(["whoami"], capture_output=True, text=True, check=True).stdout.strip()
+    subprocess.run(
+        ["icacls", str(path), "/inheritance:r", "/grant:r", f"{account}:F"], capture_output=True, check=True,
+    )
+    rows = _access_list(path)
+    assert len(rows) == 1 and "(I)" not in rows[0]
+    return rows
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows access lists")
+def test_replaced_files_keep_their_windows_access_list(tmp_path, monkeypatch):
+    roots = _ordinary_app(tmp_path / "shop")
+    private = roots.app_root / "ui/route_manifest.json"
+    ordinary = roots.app_root / "data/contract.json"
+    private_rows, ordinary_rows = _only_me(private), _access_list(ordinary)
+    granted = roots.app_root / "admin/admin_registry.yaml"
+    subprocess.run(["icacls", str(granted), "/grant", "*S-1-5-32-546:R"], capture_output=True, check=True)
+    granted_rows = _access_list(granted)
+    seen: list[list[str]] = []
+    replace = os.replace
+
+    def watching_replace(source, destination):
+        if Path(destination) == private:
+            seen.append(_access_list(Path(source)))
+        replace(source, destination)
+
+    monkeypatch.setattr(workspace_module.os, "replace", watching_replace)
+    apply_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots)
+    assert seen == [private_rows]
+    assert "stock" in private.read_text(encoding="utf-8")
+    assert (_access_list(private), _access_list(granted)) == (private_rows, granted_rows)
+    assert _access_list(ordinary) == ordinary_rows
+    # A pack-owned file an operator restricted stays restricted on upgrade.
+    handler = roots.app_root / "modules/stock_ledger/backend/handler.py"
+    handler_rows = _only_me(handler)
+    apply_workspace_upgrade(source=PackSource(directory=_version_two(tmp_path)), roots=roots)
+    assert (_access_list(handler), _access_list(private)) == (handler_rows, private_rows)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows access lists")
+def test_rollback_restores_windows_access_lists_of_replaced_and_deleted_files(tmp_path, monkeypatch):
+    roots = _ordinary_app(tmp_path / "shop")
+    deleted, replaced, failing = (roots.app_root / name for name in ("deleted.txt", "replaced.txt", "failing.txt"))
+    for path in (deleted, replaced, failing):
+        path.write_bytes(b"before")
+    rows = {path: _only_me(path) for path in (deleted, replaced, failing)}
+    replace = os.replace
+
+    def failing_replace(source, destination):
+        if Path(destination) == failing:
+            assert not deleted.exists() and replaced.read_bytes() == b"after"
+            raise OSError("disk full")
+        replace(source, destination)
+
+    monkeypatch.setattr(workspace_module.os, "replace", failing_replace)
+    with pytest.raises(OSError, match="disk full"):
+        workspace_module._commit({deleted: None, replaced: "after", failing: "after"}, roots)
+    assert {path: _access_list(path) for path in rows} == rows
+    assert {path.read_bytes() for path in rows} == {b"before"}
+    assert not list(roots.app_root.glob(".mz-*"))
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows access lists")
+def test_a_generator_upgrade_keeps_windows_access_lists(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    _materialize(roots, _generator_pack(tmp_path, "1.0.0", modules=("ledger", "journal")))
+    paths = [
+        roots.app_root / "data/contract.json", roots.app_root / "services/generated_marker.py",
+        roots.app_root / ".mozaiks/pack_provenance.json",
+        roots.build_context_root / ".mozaiks/installed_components.json",
+    ]
+    rows = [_only_me(path) for path in paths]
+    candidate = PackSource(directory=_generator_pack(tmp_path, "2.0.0", modules=("ledger",)))
+    assert apply_workspace_upgrade(source=candidate, roots=roots).status == "applied"
+    assert [_access_list(path) for path in paths] == rows
+
+
 # --------------------------------------------------------------------------------------
 # Workflows a library page launches
 # --------------------------------------------------------------------------------------
