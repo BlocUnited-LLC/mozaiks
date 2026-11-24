@@ -49,6 +49,13 @@ from .intelligence import (
     build_app_intelligence_snapshot,
     search_app_intelligence_snapshot,
 )
+from .journeys import (
+    AppJourney,
+    AppJourneyCatalog,
+    AppJourneySelection,
+    load_app_journeys,
+    select_affected_journeys,
+)
 from .models import (
     AdoptionPath,
     AdoptionPhase,
@@ -167,6 +174,11 @@ __all__ = [
     "AppContextStaleStatus",
     "AppContextSurfaceIndexes",
     "AppContextVersion",
+    "AppJourney",
+    "AppJourneyCatalog",
+    "AppJourneySelection",
+    "load_app_journeys",
+    "select_affected_journeys",
     "ApplicationInventory",
     "ArtifactRef",
     "BROWNFIELD_APP_CONTEXT_REQUIRED_ARTIFACT_KINDS",

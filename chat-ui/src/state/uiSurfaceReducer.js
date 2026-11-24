@@ -30,6 +30,14 @@ const normalizeDisplayMode = (value) => {
   return null;
 };
 
+export function isArtifactViewDisplay(display) {
+  return display === 'view' || display === 'fullscreen';
+}
+
+export function isCanvasDisplay(display) {
+  return display === 'artifact' || isArtifactViewDisplay(display);
+}
+
 const deriveSurfaceMode = (conversationMode, layoutMode) => {
   if (layoutMode === 'view') return SURFACE_MODES.VIEW;
   return conversationMode === 'ask' ? SURFACE_MODES.ASK : SURFACE_MODES.WORKFLOW;
@@ -39,19 +47,17 @@ const shouldOpenArtifactPanel = (layoutMode) => layoutMode !== 'full';
 
 export const createInitialSurfaceState = (conversationMode = 'workflow') => {
   const normalizedConversation = normalizeConversationMode(conversationMode);
-  // Always start in 'full' (chat-only) layout — the artifact pane opens only
-  // when an actual artifact event is received.
-  const layoutMode = 'full';
+  const layoutMode = normalizedConversation === 'workflow' ? 'split' : 'full';
   return {
     conversationMode: normalizedConversation,
     layoutMode,
-    previousLayoutMode: 'full',
+    previousLayoutMode: 'split',
     surfaceMode: deriveSurfaceMode(normalizedConversation, layoutMode),
     workflowStatus: 'idle',
     artifact: {
       status: ARTIFACT_STATUS.INACTIVE,
       display: null,
-      panelOpen: false,
+      panelOpen: shouldOpenArtifactPanel(layoutMode),
       lastEventId: null,
     },
     widget: {
@@ -88,15 +94,7 @@ export const uiSurfaceReducer = (state, action) => {
         };
       }
 
-      // Restore non-full layout only if the user had previously opened the
-      // artifact pane AND there is still an artifact in state to show.
-      // If no artifact is present (status === INACTIVE), keep 'full' so the
-      // pane stays closed until a real artifact event arrives.
-      const hasArtifact = state.artifact.status !== ARTIFACT_STATUS.INACTIVE;
-      const restoredLayout = (state.previousLayoutMode && state.previousLayoutMode !== 'full' && hasArtifact)
-        ? state.previousLayoutMode
-        : 'full';
-      const normalizedLayout = normalizeLayoutMode(restoredLayout);
+      const normalizedLayout = normalizeLayoutMode(state.previousLayoutMode);
       return {
         ...state,
         conversationMode: 'workflow',
@@ -206,7 +204,8 @@ export const uiSurfaceReducer = (state, action) => {
         artifact: {
           ...state.artifact,
           panelOpen: nextPanelOpen,
-          status: nextPanelOpen ? ARTIFACT_STATUS.ACTIVE : state.artifact.status,
+          status: nextPanelOpen && state.artifact.status === ARTIFACT_STATUS.STALE
+            ? ARTIFACT_STATUS.ACTIVE : state.artifact.status,
         },
       };
     }
@@ -218,7 +217,7 @@ export const uiSurfaceReducer = (state, action) => {
     }
     case 'ARTIFACT_EMITTED': {
       const display = normalizeDisplayMode(action.display) || 'artifact';
-      const wantsView = display === 'view' || display === 'fullscreen';
+      const wantsView = isArtifactViewDisplay(display);
       const nextConversation = 'workflow';
       const nextLayout = wantsView
         ? 'view'
@@ -238,7 +237,7 @@ export const uiSurfaceReducer = (state, action) => {
       };
     }
     case 'ARTIFACT_CLEARED': {
-      const nextLayout = state.conversationMode === 'ask' ? 'full' : 'full';
+      const nextLayout = state.layoutMode === 'view' ? state.previousLayoutMode : state.layoutMode;
       return {
         ...state,
         layoutMode: nextLayout,
@@ -247,7 +246,7 @@ export const uiSurfaceReducer = (state, action) => {
           ...state.artifact,
           status: ARTIFACT_STATUS.INACTIVE,
           display: null,
-          panelOpen: false,
+          panelOpen: shouldOpenArtifactPanel(nextLayout),
           lastEventId: null,
         },
       };
@@ -275,11 +274,12 @@ export const mapSurfaceEventToAction = (event) => {
 
   const eventType = String(event.type);
 
-  if (eventType === 'tool_call' || eventType === 'chat.tool_call' || eventType === 'ui.render') {
+  if (eventType === 'tool_call' || eventType === 'chat.tool_call' || eventType === 'ui.render' || eventType === 'chat.ui.render') {
     const detail = event.data || {};
-    const display = event.display || event.display_type || event.mode || detail.display || detail.display_type || detail.mode || detail?.payload?.display;
+    const display = event.display_mode || event.display || event.display_type || event.mode
+      || detail.display_mode || detail.display || detail.display_type || detail.mode || detail?.payload?.display;
     const normalized = normalizeDisplayMode(display);
-    if (normalized === 'artifact' || normalized === 'view' || normalized === 'fullscreen') {
+    if (isCanvasDisplay(normalized)) {
       return {
         type: 'ARTIFACT_EMITTED',
         display: normalized,

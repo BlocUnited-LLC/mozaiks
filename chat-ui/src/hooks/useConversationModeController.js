@@ -469,8 +469,8 @@ export function useConversationModeController({
           }));
         }
         setCurrentArtifactMessages([]);
-        setIsSidePanelOpen(false);
-        if (setLayoutMode) setLayoutMode('full');
+        setIsSidePanelOpen(true);
+        if (setLayoutMode) setLayoutMode('split');
       }
     }, 100);
 

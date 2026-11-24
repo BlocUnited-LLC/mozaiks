@@ -8,7 +8,7 @@ Layout modes control the visual split between the chat panel and the artifact pa
 
 | Mode | Chat width | Artifact width | When it applies |
 |------|-----------|---------------|----------------|
-| `full` | 100% | 0% (hidden) | Ask mode; workflow not yet started |
+| `full` | 100% | 0% (hidden) | Ask mode or a manually collapsed workflow canvas |
 | `split` | 50% | 50% | Default for workflow mode |
 | `minimized` | 10% | 90% | User wants to focus on the artifact |
 | `view` | 0% (hidden) | 100% | Artifact fullscreen; widget appears |
@@ -17,7 +17,7 @@ Layout modes control the visual split between the chat panel and the artifact pa
 
 ## `full`
 
-The default state for `ask` mode. The artifact panel is hidden. An artifact that has never been opened is not mounted; an already-opened artifact stays mounted while hidden so its iframe and local interaction state survive reopening. The chat occupies the full width before the first visible workflow artifact.
+Ask mode opens with the conversation at full width. In workflow mode, selecting the logo toggle collapses or reopens the canvas. A previously opened artifact stays mounted while hidden so its iframe and local interaction state survive reopening.
 
 `ask` mode is locked to `full`. Requesting any other layout while in `ask` mode is silently ignored by the reducer.
 
@@ -25,7 +25,9 @@ The default state for `ask` mode. The artifact panel is hidden. An artifact that
 
 ## `split`
 
-The default state for `workflow` mode. The screen is divided 50/50 between the chat panel on the left and the artifact panel on the right. This is the layout where most of the workflow interaction happens — the user can read agent output in the chat and see the live artifact update on the right simultaneously.
+The shared workflow screen opens with a conversation on the left and an equally wide artifact canvas on the right. Before the first output, the canvas shows the app logo. As the workflow emits artifacts, the same canvas renders them under its header. The active app supplies the logo and optional chat background through `app/brand/theme_config.json`.
+
+The normal `/chat` route provides this screen to Factory, App Zero and generated apps. A page embedding a single workflow can use the public `WorkflowChat` component from `@mozaiks/chat-ui`. When a host explicitly handles artifacts through `onArtifact`, it supplies the destination for those outputs. Workflow tools provide the contents of an artifact through the component registry.
 
 On desktop, `FluidChatLayout` sets each panel's width to 50%. Below 768px,
 the artifact uses the mobile drawer presentation instead of side-by-side columns.

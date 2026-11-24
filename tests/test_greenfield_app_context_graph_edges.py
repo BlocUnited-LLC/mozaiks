@@ -239,3 +239,20 @@ def test_greenfield_graph_edge_enrichment_has_no_graph_database_or_proprietary_t
         for term in forbidden_terms:
             assert term.lower() not in text
 
+def test_module_change_selects_its_bound_route_journey():
+    from mozaiksai.core.app_context import AppJourney, AppJourneyCatalog, select_affected_journeys
+
+    graph = _drafts().app_context_graph
+    dashboard = next(node for node in graph.nodes
+                     if node.node_type == GraphNodeType.ROUTE and node.metadata.get("route_path") == "/dashboard")
+    projects = next(node for node in graph.nodes if node.metadata.get("module_id") == "projects"
+                    and node.node_type == GraphNodeType.MODULE)
+    catalog = AppJourneyCatalog(app_id=graph.app_id, journeys=[AppJourney(
+        journey_id="view-projects", task="Find a project.", start_route="/dashboard",
+        starting_state="The owner has a saved project.", success_criterion="The saved project is visible.",
+        graph_node_ids=[dashboard.node_id],
+    )])
+    selection = select_affected_journeys(catalog, graph=graph, changed_node_ids=[projects.node_id])
+
+    assert selection.reason == "impact"
+    assert selection.journey_ids == ("view-projects",)

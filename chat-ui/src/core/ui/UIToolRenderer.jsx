@@ -11,9 +11,7 @@ import { isCoreArtifact } from '../../primitives/utils';
  *
  * This avoids coupling @mozaiks/chat-ui to any workflow registry implementation.
  */
-const UIToolRenderer = ({ event, onResponse, className = '', onArtifactAction, actionStatusMap }) => {
-  const { uiToolRenderer } = useChatUI();
-
+export const WorkflowToolSurface = ({ event, onResponse, className = '', onArtifactAction, actionStatusMap, uiToolRenderer }) => {
   if (!event || !event.tool_name) {
     return null;
   }
@@ -26,9 +24,10 @@ const UIToolRenderer = ({ event, onResponse, className = '', onArtifactAction, a
           in this chat to resume it and request a fresh review. This saved review cannot accept a decision.
         </p>
         <div ref={(element) => { if (element) element.inert = true; }} aria-disabled="true">
-          <UIToolRenderer
+          <WorkflowToolSurface
             event={{...event, response_available: undefined}}
             onResponse={async () => { throw new Error('This saved review is not active.'); }}
+            uiToolRenderer={uiToolRenderer}
             className="opacity-60"
           />
         </div>
@@ -92,4 +91,7 @@ const UIToolRenderer = ({ event, onResponse, className = '', onArtifactAction, a
   return null;
 };
 
-export default UIToolRenderer;
+export default function UIToolRenderer(props) {
+  const { uiToolRenderer } = useChatUI();
+  return <WorkflowToolSurface {...props} uiToolRenderer={uiToolRenderer} />;
+}

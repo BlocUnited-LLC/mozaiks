@@ -1111,3 +1111,54 @@ P2:
   shapes.
 - Add heavier archetype rows outside ordinary CI if they materially slow normal
   test feedback.
+
+## Graph-bound user journeys
+
+An app can declare repeatable user journeys in `app/config/journeys.json`.
+Regression runners and evaluators can share the declaration. The app owns
+setup, fixture data, browser sessions, and verification of the saved result.
+
+```json
+{
+  "schema_version": "mozaiks.app_journeys.v1",
+  "app_id": "projects",
+  "journeys": [
+    {
+      "journey_id": "publish-project",
+      "task": "Publish a project your team can open.",
+      "start_route": "/projects",
+      "starting_state": "The signed-in owner has a draft project.",
+      "success_criterion": "A teammate can open the published project after reload.",
+      "graph_node_ids": ["route:route_projects"]
+    }
+  ]
+}
+```
+
+Use the exact node IDs of the indexed app. The traversal follows incoming
+edges from changed dependencies to the journeys that cover their dependents.
+Leave `graph_node_ids` empty for an always-run journey. A start route may
+include route parameters. The runner resolves them against the test fixture.
+Give exploratory testers the task and starting state. Verify the success
+criterion independently in the test runner.
+
+```python
+from pathlib import Path
+
+from mozaiksai.core.app_context import load_app_journeys, select_affected_journeys
+
+catalog = load_app_journeys(Path("app"))
+if catalog is not None:
+    selected = select_affected_journeys(
+        catalog, graph=build_graph, changed_node_ids=changed_node_ids,
+    )
+    run_ids = selected.journey_ids
+```
+
+Provide the graph for the tested app and build, plus node IDs derived from the
+actual change set. Pass the index's health report through `graph_health` when available.
+A warning or blocked report keeps baseline coverage. A first run selects the full catalog. A missing or stale
+graph, unidentified change, missing binding or incomplete traversal also selects
+the full catalog. Apps can inspect the selection reason and graph digest when
+recording coverage. An empty impact selection means none of the declared
+journeys matched the change. Only a runner can produce a test outcome.

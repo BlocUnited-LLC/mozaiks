@@ -1,12 +1,32 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { BrowserRouter, useInRouterContext } from 'react-router-dom';
 import { WebSocketApiAdapter } from '../../adapters/api';
 import { submitToolCallResponse } from '../../adapters/uiToolResponse';
 import platform from '../../platform/index.js';
 import config from '../../config';
 import { useChatWebSocket } from '../../pages/hooks';
 import ShellUIToolRenderer from '../../core/ui/ShellUIToolRenderer';
+import { applyArtifactUpdate, buildArtifactAction, deriveArtifactId } from '../../core/actions/actionUtils';
+import { WorkflowToolSurface } from '../../core/ui/UIToolRenderer';
+import { useOptionalChatUI } from '../../context/ChatUIContext';
+import { useTheme } from '../../styles/useTheme';
+import { applyTheme } from '../../styles/themeProvider';
+import { isArtifactViewDisplay, isCanvasDisplay } from '../../state/uiSurfaceReducer';
+import ArtifactPanel from './ArtifactPanel';
 import ChatInterface from './ChatInterface';
-import { buildInlineToolCallMessageFromEvent, upsertInlineToolCallMessage } from './inlineSurfaces';
+import FluidChatLayout from './FluidChatLayout';
+import {
+  buildComposerArtifactContext, buildInlineToolCallMessageFromEvent, buildToolCallMessageFromEvent,
+  patchToolCallMessage, projectSavedArtifact, savedResponseAvailability, upsertInlineToolCallMessage,
+} from './inlineSurfaces';
+
+function renderStandaloneTool(event, onResponse, actions) {
+  return <ShellUIToolRenderer event={event} onResponse={onResponse} {...actions} />;
+}
+
+function StandaloneToolRenderer(props) {
+  return <WorkflowToolSurface {...props} uiToolRenderer={renderStandaloneTool} />;
+}
 
 function normalizeWorkflowEvent(event) {
   if (!event || typeof event !== 'object') {
@@ -91,10 +111,17 @@ function WorkflowConversation({
   const [activity, setActivity] = useState('idle');
   const [sendError, setSendError] = useState('');
   const [ended, setEnded] = useState(false);
+  const [artifactMessage, setArtifactMessage] = useState(null);
+  const [actionStatuses, setActionStatuses] = useState({});
+  const [layoutMode, setLayoutMode] = useState('split');
+  const [mobileDrawerState, setMobileDrawerState] = useState('peek');
+  const [isMobile, setIsMobile] = useState(false);
+  const layoutRef = useRef(null);
   const expectingUser = useRef(false);
   const pendingUser = useRef(null);
   const activeUserTurn = useRef(false);
   const seenArtifacts = useRef(new Set());
+  const canvasEvent = useRef({id: null, source: null});
   const streams = useRef(new Map());
   const messageSequence = useRef(0);
   const active = useRef(true);
@@ -108,6 +135,32 @@ function WorkflowConversation({
   }, [chatId]);
 
   const resolvedAppId = appId || config.get('chat.defaultAppId') || 'default';
+  const hostChat = useOptionalChatUI();
+  const { theme, loading: themeLoading } = useTheme(resolvedAppId, { applyToDocument: false });
+  const appName = brandName || (!themeLoading && theme.branding?.name) || workflow;
+  const backdrop = backgroundImage === undefined ? theme.branding?.chatbackgroundImage : backgroundImage;
+  const chatTheme = useMemo(() => ({
+    ...theme,
+    branding: { ...theme.branding, name: appName, logo: logo ?? theme.branding?.logo, chatbackgroundImage: backdrop },
+  }), [theme, appName, logo, backdrop]);
+  useLayoutEffect(() => {
+    if (layoutRef.current) applyTheme(chatTheme, layoutRef.current);
+  }, [chatTheme, loading, themeLoading, error]);
+  const ownsCanvas = typeof onArtifact !== 'function';
+  const ToolRenderer = hostChat ? undefined : StandaloneToolRenderer;
+  useLayoutEffect(() => {
+    const container = layoutRef.current;
+    if (!container || !ownsCanvas) return;
+    const measure = () => setIsMobile(container.clientWidth < 768);
+    measure();
+    if (typeof ResizeObserver !== 'function') {
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [ownsCanvas, loading, themeLoading, error]);
   const tokenProvider = useRef(getAccessToken);
   tokenProvider.current = getAccessToken;
   const hasTokenProvider = typeof getAccessToken === 'function';
@@ -118,6 +171,11 @@ function WorkflowConversation({
     }),
     [hasTokenProvider]
   );
+
+  const submitResponse = useCallback(async (id, response) => {
+    const token = await (tokenProvider.current ? tokenProvider.current() : platform.getAccessToken());
+    return submitToolCallResponse(id, response, { baseUrl: workflowApi.getHttpBaseUrl(), token });
+  }, [workflowApi]);
 
   const handleRuntimeEvent = useCallback((rawEvent) => {
     const event = normalizeWorkflowEvent(rawEvent);
@@ -146,7 +204,28 @@ function WorkflowConversation({
     };
     const eventType = getWorkflowEventType(event);
     const callbacksForSession = callbacks.current;
+    const frame = rawEvent.data || rawEvent;
+    // Only a typed frame on this socket can restore or change its canvas. Chat text may quote one.
+    const matchesScope = data => (!data.chat_id || data.chat_id === chatId)
+      && (!data.app_id || data.app_id === resolvedAppId) && (!data.user_id || data.user_id === userId)
+      && (!data.workflow_name || data.workflow_name === workflow) && (!data.workflow || data.workflow === workflow);
+    const isCanvasFrame = getWorkflowEventType(rawEvent) === eventType && matchesScope(rawEvent) && matchesScope(frame);
     switch (eventType) {
+      case 'chat_meta': {
+        if (callbacksForSession.onArtifact || !isCanvasFrame || event.chat_id !== chatId || event.chat_exists !== true) return;
+        const saved = frame.last_artifact;
+        if (!saved?.tool_name || !isCanvasDisplay(saved.display || 'artifact') || !matchesScope(saved)) return;
+        const previous = canvasEvent.current;
+        if (previous.source === 'live' || (previous.source === 'dismissed' && previous.id === saved.tool_call_id)) return;
+        const {restoredArtifactMessage} = projectSavedArtifact(saved, workflow);
+        const tool = restoredArtifactMessage.toolCall;
+        if (tool.response_available === true && tool.payload.awaiting_response !== false && tool.tool_call_id) {
+          tool.onResponse = response => submitResponse(tool.tool_call_id, response);
+        }
+        canvasEvent.current = {id: tool.tool_call_id, source: 'metadata'};
+        setArtifactMessage(restoredArtifactMessage);
+        return;
+      }
       case 'awaiting_reply':
         expectingUser.current = true;
         activeUserTurn.current = false;
@@ -156,7 +235,7 @@ function WorkflowConversation({
       case 'print':
       case 'message':
       case 'agent_message':
-        if (studio && event.replay) {
+        if (event.replay) {
           const content = getWorkflowEventContent(event);
           if (!content) return;
           const agentName = getWorkflowAgentName(event);
@@ -198,10 +277,24 @@ function WorkflowConversation({
         return;
       case 'tool_call':
       case 'ui.render': {
-        if ((event.display || event.mode) === 'artifact') {
-          const id = event.tool_call_id;
-          if (id && ['ui.render', 'chat.ui.render', 'chat.tool_call'].includes(rawEvent.type)
-              && rawEvent.data?.tool_call_id === id && !seenArtifacts.current.has(id)) {
+        const artifact = buildToolCallMessageFromEvent(event, workflow, 'artifact');
+        if (artifact) {
+          // Render authority comes from a tool event on this session's socket, never quoted chat text.
+          const id = event.tool_call_id || event.corr;
+          if (!isCanvasFrame || !id || (frame.tool_call_id || frame.corr) !== id) return;
+          if (!callbacksForSession.onArtifact) {
+            const previous = canvasEvent.current;
+            if (previous.source === 'dismissed' && previous.id === id) return;
+            if (event.replay && ['live', 'metadata', 'dismissed'].includes(previous.source)) return;
+            canvasEvent.current = {id, source: event.replay ? 'history' : 'live'};
+            if (event.replay) artifact.toolCall.response_available = savedResponseAvailability(event);
+            artifact.toolCall.onResponse = response => submitResponse(id, response);
+            setArtifactMessage(artifact);
+            if (!event.replay && (previous.id !== id || previous.source !== 'live')) {
+              setLayoutMode(isArtifactViewDisplay(artifact.toolCall.display) && !isMobile ? 'view' : 'split');
+              setMobileDrawerState('expanded');
+            }
+          } else if (artifact.toolCall.display === 'artifact' && !seenArtifacts.current.has(id)) {
             seenArtifacts.current.add(id);
             callbacksForSession.onArtifact?.(rawEvent, { chatId, afterUserInput: activeUserTurn.current && !event.replay });
           }
@@ -218,6 +311,43 @@ function WorkflowConversation({
           });
         });
         callbacksForSession.onMessage?.(inlineEntry);
+        return;
+      }
+      case 'ui.update': {
+        if (!isCanvasFrame || !frame.tool_call_id || !frame.patch || typeof frame.patch !== 'object' || Array.isArray(frame.patch)) return;
+        if (canvasEvent.current.id === frame.tool_call_id && canvasEvent.current.source !== 'dismissed') {
+          canvasEvent.current.source = 'live';
+        }
+        const applyPatch = message => patchToolCallMessage(message, frame.tool_call_id, frame.patch);
+        setArtifactMessage(applyPatch);
+        setMessages(previous => previous.map(applyPatch));
+        return;
+      }
+      case 'ui.dismiss': {
+        const id = frame.tool_call_id;
+        if (!isCanvasFrame || !id || canvasEvent.current.id !== id || canvasEvent.current.source === 'dismissed') return;
+        canvasEvent.current = {id, source: 'dismissed'};
+        setArtifactMessage(null);
+        setLayoutMode('full');
+        setMobileDrawerState('peek');
+        return;
+      }
+      case 'artifact.action.started':
+      case 'artifact.action.completed':
+      case 'artifact.action.failed': {
+        if (rawEvent.type !== eventType || !event.action_id) return;
+        const status = eventType.slice('artifact.action.'.length);
+        setActionStatuses(previous => ({ ...previous, [event.action_id]: {
+          ...previous[event.action_id], status, result: event.result, error: event.error,
+        } }));
+        const update = event.artifact_update || event.result?.artifact_update;
+        if (status === 'completed' && update) {
+          setArtifactMessage(current => {
+            const toolCall = current?.toolCall;
+            if (!toolCall || deriveArtifactId(toolCall.payload, toolCall.tool_call_id) !== event.artifact_id) return current;
+            return { ...current, toolCall: { ...toolCall, payload: applyArtifactUpdate(toolCall.payload, update) } };
+          });
+        }
         return;
       }
       case 'run_complete':
@@ -265,9 +395,9 @@ function WorkflowConversation({
       default:
         return;
     }
-  }, [chatId, workflow, studio]);
+  }, [chatId, resolvedAppId, userId, workflow, isMobile, submitResponse]);
 
-  const { connectionStatus, retryConnection } = useChatWebSocket({
+  const { connectionStatus, retryConnection, wsRef } = useChatWebSocket({
     api: workflowApi,
     appId: resolvedAppId,
     userId,
@@ -275,8 +405,10 @@ function WorkflowConversation({
     workflowName: workflow,
     workflowConfigLoaded: true,
     onMessage: handleRuntimeEvent,
-    recoverOnDrop: studio && !ended,
+    recoverOnDrop: !ended,
     onInterrupted: () => {
+      // On reconnect the server can project a newer snapshot or expire a pending decision.
+      if (canvasEvent.current.source === 'live') canvasEvent.current.source = null;
       if (pendingUser.current) setSendError('Delivery of your last message is unconfirmed. Check the conversation before sending it again.');
       streams.current.clear();
       expectingUser.current = false;
@@ -369,7 +501,9 @@ function WorkflowConversation({
     setIsSending(true);
 
     try {
-      const result = await workflowApi.sendMessageToWorkflow(trimmed, resolvedAppId, userId, workflow, chatId);
+      const context = buildComposerArtifactContext(e?.artifactContext);
+      const result = await workflowApi.sendMessageToWorkflow(trimmed, resolvedAppId, userId, workflow, chatId,
+        context ? { artifact_context: context } : null);
       if (result === false || result?.success === false) throw new Error();
     } catch {
       if (!active.current || pendingUser.current !== userMessage) return;
@@ -386,14 +520,7 @@ function WorkflowConversation({
     }
   }, [chatId, connectionStatus, inputValue, isSending, resolvedAppId, userId, workflowApi, workflow, studio]);
 
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
-
-  if (loading) {
+  if (loading || themeLoading) {
     return (
       <div
         className={`flex items-center justify-center h-full ${className}`}
@@ -426,173 +553,89 @@ function WorkflowConversation({
     );
   }
 
-  if (studio) {
-    const agent = brandName || workflow;
-    const phase = ended ? 'complete' : activity === 'answering' ? 'working' : 'idle';
-    const detail = ended ? 'Conversation ended.' : activity === 'answering' ? agent + ' is replying…'
-      : activity === 'replied' ? agent + ' replied' : canReply ? 'Ready for your question.' : 'Opening chat…';
-    return <div className={'flex h-full min-h-0 flex-col ' + className}>
-      {sendError && <p role="alert">{sendError}</p>}
-      <ChatInterface messages={messages} onSendMessage={handleSendMessage} loading={activity === 'answering'}
-        onAgentAction={action => submitToolCallResponse(action.tool_call_id, action.response, {
-          baseUrl: workflowApi.getHttpBaseUrl(), token: getAccessToken ? getAccessToken() : platform.getAccessToken(),
-        })}
-        hideHeader={!showHeader} plainContainer isOnChatPage={false} appDisplayName={agent} workflowName={workflow}
-        connectionStatus={connectionStatus} onRetry={ended ? undefined : retryConnection} chatStatus={{ phase, detail }}
-        composerDisabled={!canReply || connectionStatus !== 'connected' || ended} composerLabel={composerLabel}
-        composerValue={inputValue} onComposerChange={setInputValue} transcriptLabel={transcriptLabel}/>
-    </div>;
-  }
-
-  const containerStyle = {
-    fontFamily: 'var(--mozaiks-font, system-ui, sans-serif)',
-    backgroundColor: 'var(--color-background, var(--mozaiks-bg, #0f172a))',
-    color: 'var(--color-text-primary, var(--mozaiks-text, #f8fafc))',
+  const phase = ended ? 'complete' : activity === 'answering' ? 'working' : 'idle';
+  const detail = ended ? 'Conversation ended.' : activity === 'answering' ? appName + ' is replying…'
+    : activity === 'replied' ? appName + ' replied' : canReply ? 'Ready for your question.' : 'Opening chat…';
+  const toggleCanvas = () => {
+    if (isMobile) setMobileDrawerState(state => state === 'expanded' ? 'peek' : 'expanded');
+    else setLayoutMode(mode => mode === 'split' ? 'full' : 'split');
   };
-
-  const headerStyle = {
-    backgroundColor: 'var(--color-surface, var(--mozaiks-bg-secondary, #1e293b))',
-    borderColor: 'var(--color-border-subtle, var(--mozaiks-border, #334155))',
+  const sendArtifactAction = (action, context) => {
+    const message = buildArtifactAction(action, context, {
+      app_id: resolvedAppId, chat_id: chatId, user_id: userId, workflow_name: workflow,
+    }, artifactMessage?.toolCall.tool_call_id);
+    if (!message || connectionStatus !== 'connected' || !wsRef.current?.send) return null;
+    wsRef.current.send(message);
+    setActionStatuses(previous => ({ ...previous, [message.action_id]: { status: 'pending' } }));
+    return message.action_id;
   };
-
-  const messagesStyle = backgroundImage
-    ? { backgroundImage: `url(${backgroundImage})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-    : {};
+  const chat = <ChatInterface
+    messages={messages}
+    onSendMessage={handleSendMessage}
+    loading={activity === 'answering'}
+    onAgentAction={action => submitResponse(action.tool_call_id, action.response)}
+    onArtifactAction={sendArtifactAction}
+    actionStatusMap={actionStatuses}
+    onArtifactToggle={ownsCanvas ? toggleCanvas : undefined}
+    ToolRenderer={ToolRenderer}
+    hideHeader={!showHeader}
+    outputControlOnly={!showHeader && ownsCanvas}
+    plainContainer={!ownsCanvas}
+    isOnChatPage
+    appDisplayName={appName}
+    workflowName={workflow}
+    chatTheme={chatTheme}
+    overlayMode={Boolean(onClose)}
+    onOverlayClose={onClose}
+    connectionStatus={connectionStatus}
+    onRetry={ended ? undefined : retryConnection}
+    chatStatus={{ phase, detail }}
+    composerDisabled={(studio && !canReply) || connectionStatus !== 'connected' || ended || isSending}
+    composerLabel={composerLabel}
+    composerValue={inputValue}
+    onComposerChange={setInputValue}
+    transcriptLabel={transcriptLabel}
+    artifactContext={artifactMessage && {
+      id: artifactMessage.toolCall.tool_call_id, type: artifactMessage.toolCall.component_type,
+      payload: artifactMessage.toolCall.payload, chat_id: chatId, workflow_name: workflow, display: artifactMessage.toolCall.display,
+    }}
+  />;
 
   return (
-    <div className={`flex flex-col h-full ${className}`} style={containerStyle}>
+    <div ref={layoutRef} className={`relative isolate flex h-full min-h-0 flex-col ${className}`}>
+      {backdrop && <img src={backdrop} alt="" className="absolute inset-0 -z-10 h-full w-full object-cover" />}
       {sendError && <p role="alert">{sendError}</p>}
-      {showHeader && (
-        <div className="flex-shrink-0 p-4 border-b" style={headerStyle}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              {logo && (
-                <img src={logo} alt={brandName || workflow} className="h-8 w-auto" />
-              )}
-              <div>
-                <h2 className="text-lg font-semibold">{brandName || workflow}</h2>
-                <span
-                  className="text-xs"
-                  style={{ color: connectionStatus === 'connected' ? '#22c55e' : 'var(--mozaiks-text-secondary, #6b7280)' }}
-                >
-                  {connectionStatus}
-                </span>
-              </div>
-            </div>
-            {onClose && (
-              <button
-                type="button"
-                onClick={onClose}
-                className="p-2 rounded-lg transition-colors"
-                style={{ color: 'var(--mozaiks-text-secondary, #6b7280)' }}
-                aria-label="Close chat"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      <div className="flex-1 overflow-y-auto p-4 space-y-4" style={messagesStyle}>
-        {messages.length === 0 ? (
-          <div className="text-center py-8" style={{ color: 'var(--mozaiks-text-secondary, #6b7280)' }}>
-            <p className="text-sm">This workflow is ready when you are.</p>
-          </div>
-        ) : (
-          messages.map((message) => {
-            const hasContent = Boolean(message.content && String(message.content).trim());
-            const hasToolCall = Boolean(message.toolCall);
-            if (!hasContent && !hasToolCall) {
-              return null;
-            }
-
-            const isUser = message.sender === 'user';
-            const isToolOnly = hasToolCall && !hasContent;
-            const messageStyle = isToolOnly
-              ? { color: 'var(--color-text-primary, #f8fafc)' }
-              : {
-                backgroundColor: isUser
-                  ? 'var(--mozaiks-primary, #3b82f6)'
-                  : 'var(--color-surface, var(--mozaiks-bg-secondary, #1e293b))',
-                color: isUser
-                  ? 'var(--color-text-on-accent, #ffffff)'
-                  : 'var(--color-text-primary, #f8fafc)',
-                border: isUser
-                  ? 'none'
-                  : '1px solid var(--color-border-subtle, var(--mozaiks-border, #334155))',
-              };
-
-            return (
-              <div
-                key={message.id}
-                className={`${isToolOnly ? 'max-w-[90%]' : 'max-w-[80%] rounded-2xl px-4 py-3'} ${
-                  isUser ? 'ml-auto' : 'mr-auto'
-                }`}
-                style={messageStyle}
-              >
-                {hasContent && (
-                  <div className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</div>
-                )}
-                {hasToolCall && (
-                  <ShellUIToolRenderer
-                    event={message.toolCall}
-                    className={hasContent ? 'mt-3' : ''}
-                  />
-                )}
-                {hasContent && message.agentName && !isUser && (
-                  <div className="mt-2 text-[11px] uppercase tracking-[0.18em]" style={{ color: 'var(--mozaiks-text-secondary, #6b7280)' }}>
-                    {message.agentName}
-                  </div>
-                )}
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      <form
-        onSubmit={handleSendMessage}
-        className="flex-shrink-0 p-4 border-t"
-        style={{
-          borderColor: 'var(--color-border-subtle, var(--mozaiks-border, #334155))',
-          backgroundColor: 'var(--color-surface, var(--mozaiks-bg-secondary, #1e293b))',
-        }}
-      >
-        <div className="flex gap-3">
-          <textarea
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyPress}
-            placeholder="Type your message..."
-            className="flex-1 min-h-[48px] max-h-40 px-4 py-3 rounded-2xl resize-none"
-            style={{
-              backgroundColor: 'var(--color-background, var(--mozaiks-bg, #0f172a))',
-              color: 'var(--color-text-primary, var(--mozaiks-text, #f8fafc))',
-              border: '1px solid var(--color-border-subtle, var(--mozaiks-border, #334155))',
-            }}
-          />
-          <button
-            type="submit"
-            disabled={!inputValue.trim() || connectionStatus !== 'connected' || isSending}
-            className="px-5 py-3 rounded-2xl font-semibold transition-opacity disabled:opacity-50"
-            style={{
-              backgroundColor: 'var(--mozaiks-primary, #3b82f6)',
-              color: 'var(--color-text-on-accent, #ffffff)',
-            }}
-          >
-            Send
-          </button>
-        </div>
-      </form>
+      {ownsCanvas ? (
+        <FluidChatLayout
+          layoutMode={layoutMode}
+          onLayoutChange={setLayoutMode}
+          chatContent={chat}
+          isMobile={isMobile}
+          mobileDrawerState={mobileDrawerState}
+          onMobileDrawerStateChange={setMobileDrawerState}
+          onExitView={() => setLayoutMode('split')}
+          onArtifactClose={() => {
+            if (isMobile) setMobileDrawerState('peek');
+            else setLayoutMode('full');
+          }}
+          artifactContent={<ArtifactPanel
+            isEmbedded isMobile={isMobile} chatTheme={chatTheme} workflowName={workflow}
+            messages={artifactMessage ? [artifactMessage] : []} ToolRenderer={ToolRenderer}
+            onArtifactAction={sendArtifactAction} actionStatusMap={actionStatuses}
+            viewMode={!isMobile && layoutMode === 'view'}
+            onExpand={isMobile ? undefined : () => setLayoutMode('view')}
+            onExitView={() => setLayoutMode('split')}
+          />}
+        />
+      ) : chat}
     </div>
   );
 }
 
 export default function WorkflowChat(props) {
+  const inRouter = useInRouterContext();
   const identity = JSON.stringify([props.appId, props.userId, props.workflow, props.initialContext, props.freshSession]);
   const initialContext = useMemo(() => props.initialContext, [identity]);
-  return <WorkflowConversation key={identity} {...props} initialContext={initialContext} />;
+  const chat = <WorkflowConversation key={identity} {...props} initialContext={initialContext} />;
+  return inRouter ? chat : <BrowserRouter>{chat}</BrowserRouter>;
 }
