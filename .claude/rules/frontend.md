@@ -140,13 +140,13 @@ Three extension layers sit on top of `chat-ui/`:
 | Layer | Files | Registered via |
 |-------|-------|----------------|
 | `chat-ui/` substrate | `src/registry/coreComponents.js` | Always loaded |
-| Studio management | `factory_app/app/ui/pages/custom/studio/`, `src/admin/` | `@studio/extensions` → `registerStudioComponents()` |
+| Studio management | `factory_app/app/admin/pages/`, `src/admin/` | `@studio/extensions` → `registerStudioComponents()` |
 | App/workspace extensions | `app/ui/index.js`, `app/ui/pages/custom/` | `@platform/extensions` → `register()` |
 
 **Critical rules:**
 - `chat-ui/coreComponents.js` must contain only substrate primitives: `ChatPage`, `SchemaPage`, `LauncherScreen`, `ConfirmScreen`, `ProfilePage`. Studio and product pages are not core primitives.
 - `AdminPortal` and all Studio pages are **platform-management surfaces** — registered by Studio through `factory_app/app/ui/index.js` and the Studio route manifest, not by `coreComponents.js`.
-- App-owned custom routes must not import from `factory_app/app/ui/pages/custom/studio/` or `chat-ui/src/admin/` directly. The dependency goes one way: app extensions build on the substrate; the substrate does not depend on extensions.
+- App-owned custom routes must not import from `factory_app/app/admin/pages/` or `chat-ui/src/admin/` directly. The dependency goes one way: app extensions build on the substrate; the substrate does not depend on extensions.
 - CLI and Studio are parallel interfaces. Do not add UI to `chat-ui` just because it is used locally.
 
 ## Boundaries
