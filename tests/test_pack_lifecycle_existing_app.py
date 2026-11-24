@@ -2719,3 +2719,160 @@ def test_an_unchanged_directory_install_rebinds_a_source_that_no_longer_serves(t
     assert {path for path in before.keys() | after.keys() if before.get(path) != after.get(path)} == {relative}
     [descriptor] = resolve_installed_component_descriptors(**resolve)
     assert Path(descriptor["pack_source_path"]).samefile(moved)
+
+
+# --------------------------------------------------------------------------------------
+# Imports and route targets a plan introduces
+# --------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("operation", ["install", "upgrade"])
+@pytest.mark.parametrize("where", ["module", "workflow"])
+def test_a_library_ui_file_cannot_import_what_does_not_exist(tmp_path, operation, where):
+    if operation == "upgrade":
+        roots, pack = _install(tmp_path), _version_two(tmp_path)
+        plan_for, apply = plan_workspace_upgrade, apply_workspace_upgrade
+    else:
+        roots, pack = _ordinary_app(tmp_path / "shop"), _pack(tmp_path)
+        plan_for, apply = plan_component_install, apply_component_install
+    if where == "module":
+        page = pack / "templates/modules/stock_ledger/ui/StockLedgerPage.jsx"
+        page.write_text("import X from './DoesNotExist.jsx';\n" + page.read_text(encoding="utf-8"), encoding="utf-8")
+        expected = ("invalid_module_ui_barrel", "stock_ledger")
+    else:
+        _workflow_ui(pack / "workflows/StockReview", "import './DoesNotExist.jsx';\nexport const Panel = () => null;\n")
+        expected = ("invalid_workflow_ui_barrel", "StockReview")
+    before = _tree(tmp_path / "shop")
+    plan = plan_for(source=PackSource(directory=pack), roots=roots)
+    assert expected in {(row["kind"], row["key"]) for row in plan.conflicts}
+    with pytest.raises(CommunityComponentConflictError):
+        apply(source=PackSource(directory=pack), roots=roots)
+    assert _tree(tmp_path / "shop") == before
+
+
+def test_library_imports_of_app_files_and_assets_resolve(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    helper = roots.app_root / "ui/lib/moduleApi.js"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("export const moduleAction = () => null;\n", encoding="utf-8")
+    shared = roots.workflows_root / "_shared/ui/Badge.jsx"
+    shared.parent.mkdir(parents=True)
+    shared.write_text("export default function Badge() { return null; }\n", encoding="utf-8")
+    pack = _pack(tmp_path)
+    page = pack / "templates/modules/stock_ledger/ui/StockLedgerPage.jsx"
+    page.write_text(
+        "import { moduleAction } from '../../../ui/lib/moduleApi.js';\n"
+        # A binary the app holds, and a file of the workspace beyond the bundle.
+        "import logo from '../../../brand/logo.png';\n"
+        "import Badge from '../../../../workflows/_shared/ui/Badge.jsx';\n" + page.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    assert plan_component_install(source=PackSource(directory=pack), roots=roots).conflicts == []
+    helper.write_text("export const other = 1;\n", encoding="utf-8")
+    plan = plan_component_install(source=PackSource(directory=pack), roots=roots)
+    assert ("invalid_module_ui_barrel", "stock_ledger") in {(row["kind"], row["key"]) for row in plan.conflicts}
+
+
+@pytest.mark.parametrize("owner", ["app-module", "app-barrel", "workflow"])
+def test_an_upgrade_cannot_remove_a_file_the_app_imports(tmp_path, owner):
+    roots = _install(tmp_path)
+    page = "modules/stock_ledger/ui/StockLedgerPage.jsx"
+    if owner == "app-module":
+        _orders_module(roots)
+        barrel = roots.app_root / "modules/orders/ui/index.js"
+        barrel.parent.mkdir(parents=True)
+        barrel.write_text("import Page from '../../stock_ledger/ui/StockLedgerPage.jsx';\nexport const Orders = () => Page;\n", encoding="utf-8")
+        expected = ("invalid_module_ui_barrel", "orders")
+    elif owner == "app-barrel":
+        (roots.app_root / "ui/index.js").write_text(f"import Page from '../{page}';\nexport const keep = Page;\n", encoding="utf-8")
+        expected = ("invalid_module_ui_barrel", "ui/index.js")
+    else:
+        _entrypoint(roots, "/own")
+        _workflow_ui(roots.workflows_root / "Own", f"import Page from '../../../app/{page}';\nexport const Own = () => Page;\n")
+        expected = ("invalid_workflow_ui_barrel", "Own")
+        _edit(
+            roots.workflows_root / "extended_orchestration/extension_registry.json", '"id": "Own"',
+            '"id": "Own"\n    },\n    {\n      "id": "StockReview",\n      "description": "Review stock levels and propose restocking. '
+            'Proposal only; no orders are placed."',
+        )
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+    candidate = _renamed_page(tmp_path, keep_route=False)
+    plan = plan_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+    assert [(row["kind"], row["key"]) for row in plan.conflicts] == [expected]
+
+
+def test_import_errors_the_app_already_has_do_not_block(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    _orders_module(roots)
+    barrel = roots.app_root / "modules/orders/ui/index.js"
+    barrel.parent.mkdir(parents=True)
+    barrel.write_text("import './gone.js';\nexport const Orders = () => null;\n", encoding="utf-8")
+    (roots.app_root / "ui/index.js").write_text("import './gone.js';\n", encoding="utf-8")
+    assert apply_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots).status == "applied"
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+
+
+@pytest.mark.parametrize("kind", ["transition", "sequence"])
+def test_a_library_route_must_target_what_the_registry_declares(tmp_path, kind):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    route = pack / "templates/ui/route_manifest.json"
+    _edit(route, '"component": "StockLedgerPage"', f'"component": "StockLedgerPage", "{kind}": "NoSuchTarget"')
+    before = _tree(tmp_path / "shop")
+    plan = plan_component_install(source=PackSource(directory=pack), roots=roots)
+    assert [(row["kind"], row["key"]) for row in plan.conflicts] == [("unresolved_workflow_reference", "NoSuchTarget")]
+    with pytest.raises(CommunityComponentConflictError):
+        apply_component_install(source=PackSource(directory=pack), roots=roots)
+    assert _tree(tmp_path / "shop") == before
+
+
+def test_a_library_route_may_target_its_own_transition(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    registry = pack / "workflows/extended_orchestration/extension_registry.json"
+    document = json.loads(registry.read_text(encoding="utf-8"))
+    document["transitions"] = [
+        {"id": "choose-review", "transition_type": "silent", "route_to": "StockReview", "route_type": "workflow"},
+    ]
+    registry.write_text(json.dumps(document), encoding="utf-8")
+    _edit(pack / "templates/ui/route_manifest.json", '"component": "StockLedgerPage"', '"transition": "choose-review"')
+    apply_component_install(source=PackSource(directory=pack), roots=roots)
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+    # An app that loses the transition has an unresolved library route, which verify reports.
+    target = roots.workflows_root / "extended_orchestration/extension_registry.json"
+    document = json.loads(target.read_text(encoding="utf-8"))
+    document["transitions"] = []
+    target.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    [report] = verify_installed_components(roots=roots)["packs"]
+    assert ("unresolved_workflow_reference", "choose-review") in {(row["kind"], row.get("key")) for row in report["findings"]}
+
+
+def test_route_targets_that_were_already_unresolved_do_not_block(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    home = '{ "id": "home"'
+    route = json.dumps({"id": "mine", "path": "/mine", "transition": "AlreadyGone"})
+    _edit(roots.app_root / "ui/route_manifest.json", home, f"{route},\n        {home}")
+    pack = _pack(tmp_path)
+    registry = pack / "workflows/extended_orchestration/extension_registry.json"
+    document = json.loads(registry.read_text(encoding="utf-8"))
+    document["workflows"] = []
+    registry.write_text(json.dumps(document), encoding="utf-8")
+    app_registry = roots.workflows_root / "extended_orchestration/extension_registry.json"
+    original = app_registry.read_text(encoding="utf-8")
+    document = json.loads(original)
+    document["transitions"] = [
+        {"id": "app-choice", "transition_type": "silent", "route_to": "Own", "route_type": "workflow"},
+    ]
+    _entrypoint(roots, "/own")
+    current = json.loads(app_registry.read_text(encoding="utf-8"))
+    current["transitions"] = document["transitions"]
+    app_registry.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
+    _edit(pack / "templates/ui/route_manifest.json", '"component": "StockLedgerPage"', '"transition": "app-choice"')
+    apply_component_install(source=PackSource(directory=pack), roots=roots)
+    # The app then drops its transition: the library's route was unresolved before the upgrade.
+    current["transitions"] = []
+    app_registry.write_text(json.dumps(current, indent=2) + "\n", encoding="utf-8")
+    candidate = _version_two(tmp_path)
+    (candidate / "workflows/extended_orchestration/extension_registry.json").write_text(json.dumps({"workflows": []}), encoding="utf-8")
+    _edit(candidate / "templates/ui/route_manifest.json", '"component": "StockLedgerPage"', '"transition": "app-choice"')
+    assert plan_workspace_upgrade(source=PackSource(directory=candidate), roots=roots).conflicts == []

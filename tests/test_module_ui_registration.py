@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -27,6 +28,7 @@ from mozaiksai.core.workflow.generator_support.ui_registry_composition import (
     compose_ui_registry,
     module_ui_components,
     module_ui_registrations,
+    ui_import_error,
 )
 
 PAGE = "export default function StockPage() { return null; }\n"
@@ -252,3 +254,92 @@ def test_an_ambiguous_plain_name_is_refused_unless_the_app_owns_it() -> None:
 def test_module_page_sources_are_canonical_app_paths(path: str, registered: bool) -> None:
     status = classify_layout_path(path).status
     assert (status is LayoutClassificationStatus.REGISTERED) is registered
+
+
+PAGE_PATH = "modules/stock/ui/StockPage.jsx"
+
+
+def _import_error(page: str, **sources: str) -> str | None:
+    """Why the shell could not load a module whose page starts with ``page``."""
+    files = _files(**{PAGE_PATH: page + PAGE, **{f"modules/stock/ui/{name}": text for name, text in sources.items()}})
+    present = {*files, "modules/stock/ui/logo.png", "modules/stock/ui/icons/box.svg"}
+    _components, errors = module_ui_components(files, present.__contains__)
+    assert errors.get("stock", "").removeprefix(f"{INDEX}: ") == (ui_import_error(INDEX, files, present.__contains__) or "")
+    return errors.get("stock")
+
+
+@pytest.mark.parametrize(
+    ("page", "sources"),
+    [
+        ("import Gone from './Gone.jsx';\n", {}),
+        ("import './gone.css';\n", {}),
+        ("import logo from './gone.png';\n", {}),
+        ("import raw from './gone.yaml?raw';\n", {}),
+        ("import * as all from '../lib/gone';\n", {}),
+        ("const Lazy = React.lazy(() => import('./Gone.jsx'));\n", {}),
+        ("async function load() { if (ready) { await import('./Gone.jsx'); } }\n", {}),
+        ("import { Missing } from './parts.js';\n", {"parts.js": "export const Part = 1;\n"}),
+        ("import parts from './parts.js';\n", {"parts.js": "export const Part = 1;\n"}),
+        ("import { Both } from './parts.js';\n", {
+            "parts.js": "export * from './a.js';\nexport * from './b.js';\n",
+            "a.js": "export const Both = 1;\n", "b.js": "export const Both = 2;\n",
+        }),
+        ("import './deep.js';\n", {"deep.js": "import './deeper.js';\n", "deeper.js": "import './Gone.js';\n"}),
+        ("import './panel';\n", {"panel/other.js": ""}),
+        ("export { helper } from './Gone.js';\n", {}),
+    ],
+    ids=[
+        "file", "stylesheet", "asset", "raw-asset", "namespace", "lazy", "nested-dynamic", "missing-name", "missing-default",
+        "ambiguous-name", "transitive", "directory-without-index", "re-export-from-a-page",
+    ],
+)
+def test_an_import_the_shell_cannot_load_fails_the_barrel(page: str, sources: dict[str, str]) -> None:
+    assert _import_error(page, **sources) is not None
+
+
+@pytest.mark.parametrize(
+    ("page", "sources"),
+    [
+        ("import React, { useState } from 'react';\nimport { Panel } from '@mozaiks/chat-ui/ui';\nimport x from '@mozaiks/gone';\n", {}),
+        ("import logo from './logo.png';\nimport box from './icons/box.svg?url';\n", {}),
+        ("import { Part, default as Whole } from './parts';\n", {"parts.jsx": "export const Part = 1;\nexport default Part;\n"}),
+        ("import { Typed } from './typed';\n", {"typed.ts": "export enum Typed { A }\n"}),
+        ("import panel from './panel';\n", {"panel/index.jsx": "export default 1;\n"}),
+        ("import data from './data.json';\n", {"data.json": "{}"}),
+        ("import { anything } from './bundle.js';\n", {"bundle.js": "export * from 'a-package';\n"}),
+        ("import { old } from './common.js';\n", {"common.js": "module.exports = { old: 1 };\n"}),
+        ("import { Odd } from './odd.js';\n", {"odd.js": "export const Odd = @decorated class {};;;(\n"}),
+        ("import './loop.js';\n", {"loop.js": "import { StockPage } from './index.js';\nexport const use = () => StockPage;\n"}),
+        ("const load = (name) => import(`./${name}.jsx`);\n", {}),
+        ("const later = () => import(/* @vite-ignore */ './Gone.jsx');\n", {}),
+        ("// import Gone from './Gone.jsx';\nconst text = \"import './Gone.jsx'\";\n", {}),
+        ("import { value } from './nested.js';\n", {"nested.js": "const { a: { value } } = { a: { value: 1 } };\nexport { value };\n"}),
+    ],
+    ids=[
+        "packages-and-aliases", "assets", "extensionless", "typescript", "directory-index", "json", "package-star", "commonjs",
+        "unreadable", "cycle", "computed-dynamic", "vite-ignore", "not-code", "destructured",
+    ],
+)
+def test_an_import_the_shell_loads_does_not_fail_the_barrel(page: str, sources: dict[str, str]) -> None:
+    assert _import_error(page, **sources) is None
+
+
+def test_a_partial_file_set_judges_only_re_exports() -> None:
+    # Generation validates bundles before every shared file exists and without binary assets.
+    files = _files(**{PAGE_PATH: "import api from '../../../ui/lib/moduleApi.js';\nimport logo from './logo.png';\n" + PAGE})
+    assert _verdicts(files) == _all(True)
+
+
+def test_the_shells_own_sources_import_what_exists() -> None:
+    # A large hand-written code base, so a rule that misreads real JavaScript shows up here.
+    root = Path(__file__).parents[1] / "chat-ui/src"
+    files = {
+        path.relative_to(root).as_posix(): path.read_text(encoding="utf-8")
+        for path in root.rglob("*") if path.suffix in {".js", ".jsx"}
+    }
+    assert len(files) > 100
+
+    def exists(relative: str) -> bool:
+        return (root / relative).is_file()
+
+    assert {path: error for path in files if (error := ui_import_error(path, files, exists))} == {}

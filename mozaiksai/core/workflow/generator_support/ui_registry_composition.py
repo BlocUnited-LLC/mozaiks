@@ -11,8 +11,8 @@ import json
 import logging
 import posixpath
 import re
-from collections.abc import Collection, Iterable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Collection, Iterable, Mapping
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from mozaiksai.core.app_context.context_graph import _tree_sitter_parser
@@ -330,6 +330,10 @@ class _ModuleExports:
     # Export name -> (source, imported name); "*" names the source's namespace object.
     indirect: dict[str, tuple[str, str]]
     stars: list[str]
+    # Every local file the module loads, and the name it needs from it (None: the file only).
+    imports: list[tuple[str, str | None]] = field(default_factory=list)
+    # A package is forwarded whole, so any name may exist.
+    package_star: bool = False
 
 
 def _pattern_names(node: Any) -> list[str]:
@@ -377,6 +381,26 @@ def _import_entries(statement: Any) -> dict[str, tuple[str, str]]:
     return entries
 
 
+def _loaded_files(statements: list[Any]) -> list[tuple[str, str | None]]:
+    """Each relative source a module imports, statically or by a literal ``import()``, with the name it needs."""
+    loaded: list[tuple[str, str | None]] = []
+    pending = list(statements)
+    while pending:
+        node = pending.pop()
+        if node.type in {"import_statement", "export_statement"} and node.child_by_field_name("source") is not None:
+            source = _string(node.child_by_field_name("source"))
+            names = {name for _source, name in _import_entries(node).values()} if node.type == "import_statement" else set()
+            loaded.extend((source, name) for name in (names - {"*"} or {None}))
+            continue
+        if node.type == "call_expression" and node.child_by_field_name("function").type == "import":
+            arguments = node.child_by_field_name("arguments")
+            first = next(iter(_children(arguments)), None)
+            if first is not None and first.type == "string" and "@vite-ignore" not in _text(arguments):
+                loaded.append((_string(first), None))
+        pending.extend(node.named_children)
+    return [(source, name) for source, name in loaded if source.startswith(".")]
+
+
 def _module_exports(path: str, files: dict[str, str]) -> _ModuleExports:
     statements = _children(_parse(files[path], path))
     declared: dict[str, bool] = {}
@@ -389,6 +413,7 @@ def _module_exports(path: str, files: dict[str, str]) -> _ModuleExports:
         if declaration is not None:
             declared.update(_declared_bindings(declaration))
     exports = _ModuleExports({}, {}, [])
+    exports.imports.extend(_loaded_files(statements))
 
     def export_local(exported: str, name: str) -> None:
         if name in imported:
@@ -431,83 +456,184 @@ def _module_exports(path: str, files: dict[str, str]) -> _ModuleExports:
         elif namespace is not None and source is not None:
             exports.indirect[_text(_children(namespace)[0])] = (source, "*")
         elif source is not None:
-            if not source.startswith("."):
-                raise ValueError(f"{path}: export-star forwarding from a package is unsupported; export each component by name")
-            exports.stars.append(source)
+            if source.startswith("."):
+                exports.stars.append(source)
+            else:
+                exports.package_star = True
     return exports
 
 
-def _component_exports(path: str, files: dict[str, str]) -> dict[str, str]:
-    """Each component one module UI file exports, with the file that implements it.
+# Vite's default resolve.extensions, in its order.
+_RESOLVED_EXTENSIONS = (".mjs", ".js", ".mts", ".ts", ".jsx", ".tsx", ".json")
+_SCRIPT_EXTENSIONS = frozenset({".js", ".jsx", ".mjs"})
+_SOURCE_EXTENSIONS = _SCRIPT_EXTENSIONS | {".cjs", ".ts", ".tsx", ".mts", ".json", ""}
+_UNREAD = _ModuleExports({}, {}, [], package_star=True)
 
-    Follows ECMAScript export resolution: a module's own export wins over
-    ``export *``; a name two ``export *`` sources bind differently is absent
-    from the namespace; an explicit export of a name its source does not
-    provide fails, as the module fails to link.
+
+class _ModuleGraph:
+    """Local modules as the shell's build loads them.
+
+    ``exists`` tells whether a file outside the known sources is there, such as
+    an image or a file beyond the root. Without it the sources may be a partial
+    set, so only re-exports are followed. Package and alias imports are the
+    host's and are not checked.
     """
-    modules: dict[str, _ModuleExports] = {}
 
-    def exports_of(module: str) -> _ModuleExports:
-        if module not in modules:
-            modules[module] = _module_exports(module, files)
-        return modules[module]
+    def __init__(self, files: dict[str, str], exists: Callable[[str], bool] | None = None) -> None:
+        self.files = files
+        self.exists = exists
+        self.modules: dict[str, _ModuleExports] = {}
 
-    def imported(module: str, source: str, name: str, seen: set[tuple[str, str]]) -> _Binding | Literal["ambiguous"] | None:
+    def locate(self, module: str, source: str) -> str | None:
+        """The file a relative source loads, or None when it cannot be known to be missing."""
+        specifier = re.split(r"[?#]", source, maxsplit=1)[0]
+        path = posixpath.normpath(posixpath.join(posixpath.dirname(module), specifier))
+        for candidate in (
+            path, *(path + extension for extension in _RESOLVED_EXTENSIONS),
+            *(f"{path}/index{extension}" for extension in _RESOLVED_EXTENSIONS),
+        ):
+            if candidate in self.files or (self.exists is not None and self.exists(candidate)):
+                return candidate
+        if self.exists is None and not path.startswith("../") and posixpath.splitext(path)[1] not in _SOURCE_EXTENSIONS:
+            return None
+        raise ValueError(f"{module}: imports {source!r}, which does not exist")
+
+    def exports_of(self, module: str) -> _ModuleExports:
+        if module not in self.modules:
+            readable = module in self.files and posixpath.splitext(module)[1] in _SCRIPT_EXTENSIONS
+            self.modules[module] = _module_exports(module, self.files) if readable else _UNREAD
+        return self.modules[module]
+
+    def imported(
+        self, module: str, source: str, name: str, seen: set[tuple[str, str]],
+    ) -> _Binding | Literal["ambiguous"] | None:
         if not source.startswith("."):
             # A package has no local file; the importing file provides it.
             return _Binding(f"package:{source}", name, name != "*")
-        target = _target(source, module, files)
-        return _Binding(target, "*", False) if name == "*" else resolve(target, name, seen)
+        target = self.locate(module, source)
+        if target is None or name == "*":
+            return _Binding(target or f"unread:{source}", name, name != "*")
+        return self.resolve(target, name, seen)
 
-    def resolve(module: str, name: str, seen: set[tuple[str, str]]) -> _Binding | Literal["ambiguous"] | None:
+    def resolve(self, module: str, name: str, seen: set[tuple[str, str]]) -> _Binding | Literal["ambiguous"] | None:
         if (module, name) in seen:
             return None
         seen.add((module, name))
-        exports = exports_of(module)
+        exports = self.exports_of(module)
         if name in exports.local:
             local, component = exports.local[name]
             if isinstance(component, tuple):
-                copied = imported(module, *component, set())
+                copied = self.imported(module, *component, set())
                 component = isinstance(copied, _Binding) and copied.component
             return _Binding(module, local, component)
         if name in exports.indirect:
-            return imported(module, *exports.indirect[name], seen)
+            return self.imported(module, *exports.indirect[name], seen)
         found: _Binding | None = None
         for source in exports.stars if name != "default" else ():
-            binding = resolve(_target(source, module, files), name, seen)
+            target = self.locate(module, source)
+            binding = None if target is None else self.resolve(target, name, seen)
             if binding == "ambiguous":
                 return "ambiguous"
             if isinstance(binding, _Binding):
                 if found is not None and (found.path, found.name) != (binding.path, binding.name):
                     return "ambiguous"
                 found = binding
+        if found is None and exports.package_star:
+            return _Binding(module, name, posixpath.splitext(module)[1] in {".ts", ".tsx", ".mts"})
         return found
 
-    def names_of(module: str, seen: set[str]) -> set[str]:
+    def names_of(self, module: str, seen: set[str]) -> set[str]:
         if module in seen:
             return set()
         seen.add(module)
-        exports = exports_of(module)
-        starred = (names_of(_target(source, module, files), seen) - {"default"} for source in exports.stars)
-        return {*exports.local, *exports.indirect}.union(*starred)
+        exports = self.exports_of(module)
+        if exports.package_star:
+            raise ValueError(f"{module}: export-star forwarding from a package is unsupported; export each component by name")
+        names = {*exports.local, *exports.indirect}
+        for source in exports.stars:
+            target = self.locate(module, source)
+            if target is not None:
+                names |= self.names_of(target, seen) - {"default"}
+        return names
 
-    names = names_of(path, set())
-    result: dict[str, str] = {}
-    for name in names:
-        binding = resolve(path, name, set())
-        if isinstance(binding, _Binding) and binding.component:
-            result[name] = path if binding.path.startswith("package:") else binding.path
-    checked: set[str] = set()
-    while pending := sorted(modules.keys() - checked):
-        for module in pending:
+    def check_links(self, entry: str) -> None:
+        """Every file a barrel loads must exist, and provide each name that is taken from it."""
+        pending, checked = [entry], set()
+        while pending:
+            module = pending.pop()
+            if module in checked:
+                continue
             checked.add(module)
-            for name, (source, original) in sorted(modules[module].indirect.items()):
-                if not isinstance(imported(module, source, original, set()), _Binding):
+            exports = self._links_of(module)
+            for name, (source, original) in sorted(exports.indirect.items()):
+                if not isinstance(self._provided(module, source, original), _Binding):
                     raise ValueError(f"{module}: exports {name!r}, which {source!r} does not provide")
+            if self.exists is None:
+                forwarded = [*(source for source, _name in exports.indirect.values()), *exports.stars]
+                targets = (self.locate(module, source) for source in forwarded if source.startswith("."))
+                pending.extend(target for target in targets if target is not None)
+                continue
+            for source, original in exports.imports:
+                target = self.locate(module, source)
+                if target is None:
+                    continue
+                pending.append(target)
+                if original is not None and not isinstance(self._provided(module, source, original), _Binding):
+                    raise ValueError(f"{module}: imports {original!r}, which {source!r} does not provide")
+
+    def _links_of(self, module: str) -> _ModuleExports:
+        """A module's links; a file that cannot be read statically is not judged."""
+        if module not in self.modules and module in self.files:
+            text = self.files[module]
+            if "module.exports" in text or _tree_has_error(text):
+                self.modules[module] = _UNREAD
+        return self.exports_of(module)
+
+    def _provided(self, module: str, source: str, name: str) -> _Binding | Literal["ambiguous"] | None:
+        if source.startswith("."):
+            target = self.locate(module, source)
+            if target is not None:
+                self._links_of(target)
+        return self.imported(module, source, name, set())
+
+
+def _tree_has_error(source: str) -> bool:
+    parser = _tree_sitter_parser("javascript")
+    return parser is None or bool(parser.parse(source.encode("utf-8")).root_node.has_error)
+
+
+def _component_exports(
+    path: str, files: dict[str, str], exists: Callable[[str], bool] | None = None,
+) -> dict[str, str]:
+    """Each component one module UI file exports, with the file that implements it.
+
+    Follows ECMAScript export resolution: a module's own export wins over
+    ``export *``; a name two ``export *`` sources bind differently is absent
+    from the namespace; an import or explicit export of a name its source does
+    not provide fails, as the module fails to link.
+    """
+    graph = _ModuleGraph(files, exists)
+    result: dict[str, str] = {}
+    for name in graph.names_of(path, set()):
+        binding = graph.resolve(path, name, set())
+        if isinstance(binding, _Binding) and binding.component:
+            result[name] = path if binding.path.startswith(("package:", "unread:")) else binding.path
+    graph.check_links(path)
     return result
 
 
-def module_ui_components(files: Mapping[str, str]) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
+def ui_import_error(path: str, files: Mapping[str, str], exists: Callable[[str], bool] | None = None) -> str | None:
+    """Why the shell's build cannot load one UI file, if it cannot."""
+    try:
+        _ModuleGraph(dict(files), exists).check_links(path)
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
+def module_ui_components(
+    files: Mapping[str, str], exists: Callable[[str], bool] | None = None,
+) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
     """The components module UI barrels export, and the barrels that do not resolve.
 
     Mirrors ``web_shell/moduleUi.js``: a module with a manifest and one
@@ -527,7 +653,7 @@ def module_ui_components(files: Mapping[str, str]) -> tuple[dict[str, dict[str, 
             errors[module_id] = f"Module {module_id} declares multiple UI barrels: {paths}"
             continue
         try:
-            exports = _component_exports(paths[0], dict(files))
+            exports = _component_exports(paths[0], dict(files), exists)
         except ValueError as exc:
             errors[module_id] = f"{paths[0]}: {exc}"
             continue
@@ -535,17 +661,20 @@ def module_ui_components(files: Mapping[str, str]) -> tuple[dict[str, dict[str, 
     return components, errors
 
 
-def _workflow_exports(path: str, files: dict[str, str]) -> dict[str, str]:
+def _workflow_exports(
+    path: str, files: dict[str, str], exists: Callable[[str], bool] | None = None,
+) -> dict[str, str]:
     """The names one workflow UI barrel registers: its default export's keys, or else its named exports."""
     default = next((
         node for node in _children(_parse(files[path], path))
         if node.type == "export_statement" and any(child.type == "default" for child in node.children)
     ), None)
     if default is None:
-        exports = _component_exports(path, files)
+        exports = _component_exports(path, files, exists)
         if "default" in exports:
             raise ValueError(f"{path}: a re-exported default cannot be read; export each component by name")
         return exports
+    _ModuleGraph(files, exists).check_links(path)
     value = default.child_by_field_name("value")
     if value is None or value.type in {"function_expression", "arrow_function", "class"}:
         # The shell registers nothing from a default export that is not an object.
@@ -569,7 +698,7 @@ def _workflow_exports(path: str, files: dict[str, str]) -> dict[str, str]:
 
 
 def workflow_ui_components(
-    roots: Iterable[tuple[str, Mapping[str, str]]], removed: Collection[str] = (),
+    roots: Iterable[tuple[str, Mapping[str, str], Callable[[str], bool] | None]], removed: Collection[str] = (),
 ) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
     """The names effective workflow UI barrels register, and the barrels that do not resolve.
 
@@ -577,25 +706,25 @@ def workflow_ui_components(
     local workflow root, each a label and its files; a local workflow replaces the
     inherited one, including having no UI, and the registry may remove one.
     """
-    workflows: dict[str, tuple[str, str, Mapping[str, str], list[str]]] = {}
-    for label, files in roots:
+    workflows: dict[str, tuple[str, str, Mapping[str, str], Callable[[str], bool] | None, list[str]]] = {}
+    for label, files, exists in roots:
         for name in sorted({path.split("/", 1)[0] for path in files if "/" in path}):
             if name.startswith(".") or (name != "extended_orchestration" and f"{name}/orchestrator.yaml" not in files):
                 continue
             barrels = [path for path in (f"{name}/ui/index.js", f"{name}/ui/index.jsx") if path in files]
             if barrels or name != "extended_orchestration":
-                workflows[name.lower()] = (name, label, files, barrels)
+                workflows[name.lower()] = (name, label, files, exists, barrels)
     for name in removed:
         workflows.pop(name.lower(), None)
     components: dict[str, dict[str, str]] = {}
     errors: dict[str, str] = {}
-    for name, label, files, barrels in workflows.values():
+    for name, label, files, exists, barrels in workflows.values():
         if len(barrels) > 1:
             errors[name] = f"Workflow {name} declares multiple UI barrels: {barrels}"
         elif barrels:
             try:
                 components[name] = {
-                    export: f"{label}:{file}" for export, file in _workflow_exports(barrels[0], dict(files)).items()
+                    export: f"{label}:{file}" for export, file in _workflow_exports(barrels[0], dict(files), exists).items()
                 }
             except ValueError as exc:
                 errors[name] = f"{barrels[0]}: {exc}"

@@ -735,6 +735,11 @@ registration. References written as `<module_id>:<Export>` are never ambiguous. 
 whose module barrel does not resolve blocks with `invalid_module_ui_barrel`.
 Exports resolve as ECMAScript resolves them: a name two `export *` sources bind
 differently is not exported.
+Every file a barrel loads, through static imports and literal `import()` calls,
+must exist and provide the names taken from it; package and alias imports are the
+host's. The same holds for a workflow UI barrel (`invalid_workflow_ui_barrel`). A
+plan that breaks an app file's imports is blocked; import errors the app already
+had are not.
 
 An install or upgrade blocks with `unresolved_component_reference` when it would
 remove a component that any app declaration still names, or when one of the
