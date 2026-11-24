@@ -227,29 +227,43 @@ def _fallback_message(rendered: str) -> str:
     return first.split("  (audit_logger.py")[0]
 
 
-def _rejection_shaped_record(**overrides):
-    """An AuditRecord shaped like a structured-output rejection record."""
+def _billing_shaped_record(**overrides):
+    """An AuditRecord shaped like the billing fulfilment record (hosts/routers/billing.py)."""
 
     from mozaiksai.core.audit.audit_logger import AuditEventKind, AuditRecord
 
     fields = {
-        "kind": AuditEventKind.MODULE_ACTION,
+        "kind": AuditEventKind.ADMIN_WRITE,
         "actor_id": "user-7",
         "app_id": "app-1",
-        "chat_id": "chat-9",
+        "tenant_id": "tenant-3",
+        "workspace_id": "ws-4",
+        "resource": "billing.fulfillment",
+        "action": "applied",
+        "inputs_hash": _DIGEST,
+        "outcome": "ok",
+        "extra": {"command_id": "cmd-1", "event_type": "tokens.granted", "source": "hosted-billing"},
+    }
+    fields.update(overrides)
+    return AuditRecord(**fields)
+
+
+def _denied_module_action_record(**overrides):
+    """An AuditRecord shaped like a denied module action (ModuleExecutor._emit_dispatch_audit)."""
+
+    from mozaiksai.core.audit.audit_logger import AuditEventKind, AuditRecord
+
+    fields = {
+        "kind": AuditEventKind.MODULE_ACTION_FAIL,
+        "actor_id": "user-7",
+        "app_id": "app-1",
         "tenant_id": "tenant-3",
         "workspace_id": "ws-4",
         "resource": "contacts",
         "action": "create_contact",
-        "inputs_hash": _DIGEST,
-        "outcome": "fail",
-        "error": "schema_violation",
-        "extra": {
-            "source": "unit",
-            "trace_id": "trace-1",
-            "model_name": "ContactOut",
-            "failure_fields": ["payload.<redacted-field>:int_parsing", "name:string_type"],
-        },
+        "outcome": "denied",
+        "error": "PERMISSION_DENIED",
+        "extra": {"dispatch": {"module": "contacts", "action": "create_contact", "outcome": "denied"}},
     }
     fields.update(overrides)
     return AuditRecord(**fields)
@@ -277,51 +291,66 @@ def _render_audit_fallback(
     audit_logger.setLevel(logging.INFO)
     audit_logger.addHandler(handler)
     try:
-        asyncio.run(AuditLogger().log(record or _rejection_shaped_record()))
+        asyncio.run(AuditLogger().log(record or _billing_shaped_record()))
     finally:
         audit_logger.removeHandler(handler)
         audit_logger.setLevel(previous_level)
     return stream.getvalue()
 
 
-@pytest.mark.parametrize("collection_available", [False, True], ids=["no-collection", "insert-failure"])
-@pytest.mark.parametrize(
+_FORMATTERS = pytest.mark.parametrize(
     "make_formatter",
     [lambda: PrettyConsoleFormatter(no_color=True), logging_config.ProductionJSONFormatter],
     ids=["pretty", "json"],
 )
+_FALLBACK_PATHS = pytest.mark.parametrize(
+    "collection_available", [False, True], ids=["no-collection", "insert-failure"]
+)
+
+
+@_FALLBACK_PATHS
+@_FORMATTERS
+@pytest.mark.parametrize(
+    ("make_record", "evidence"),
+    [
+        (
+            _billing_shaped_record,
+            ("admin.write", "user-7", "app-1", "tenant-3", "ws-4", "billing.fulfillment", "applied", _DIGEST, "hosted-billing"),
+        ),
+        (
+            _denied_module_action_record,
+            ("module.action.fail", "user-7", "app-1", "tenant-3", "ws-4", "contacts", "create_contact", "PERMISSION_DENIED"),
+        ),
+    ],
+    ids=["billing-record", "denied-module-action"],
+)
 def test_audit_fallback_keeps_sanitized_evidence_in_rendered_output(
+    monkeypatch, make_formatter, collection_available, make_record, evidence
+) -> None:
+    rendered = _render_audit_fallback(
+        monkeypatch, make_formatter(), collection_available=collection_available, record=make_record()
+    )
+
+    for item in evidence:
+        assert item in rendered, f"{item!r} missing from the rendered fallback:\n{rendered}"
+
+
+@_FALLBACK_PATHS
+@_FORMATTERS
+def test_audit_fallback_renders_the_error_code_of_a_denied_module_action(
     monkeypatch, make_formatter, collection_available
 ) -> None:
     rendered = _render_audit_fallback(
-        monkeypatch, make_formatter(), collection_available=collection_available
+        monkeypatch,
+        make_formatter(),
+        collection_available=collection_available,
+        record=_denied_module_action_record(),
     )
 
-    for evidence in (
-        "module.action",  # audit kind
-        "user-7",  # initiating actor
-        "app-1",
-        "chat-9",
-        "tenant-3",
-        "ws-4",
-        "contacts",  # workflow
-        "create_contact",  # agent
-        _DIGEST,  # digest of the input
-        "schema_violation",  # failure category
-        "payload.<redacted-field>:int_parsing",  # safe schema path
-        "name:string_type",
-        "unit",  # source
-        "trace-1",
-        "ContactOut",
-    ):
-        assert evidence in rendered, f"{evidence!r} missing from the rendered fallback:\n{rendered}"
+    assert "error=PERMISSION_DENIED" in _fallback_message(rendered)
 
 
-@pytest.mark.parametrize(
-    "make_formatter",
-    [lambda: PrettyConsoleFormatter(no_color=True), logging_config.ProductionJSONFormatter],
-    ids=["pretty", "json"],
-)
+@_FORMATTERS
 def test_audit_insert_failure_does_not_render_raw_driver_exception_text(
     monkeypatch, make_formatter
 ) -> None:
@@ -331,23 +360,18 @@ def test_audit_insert_failure_does_not_render_raw_driver_exception_text(
     assert _DRIVER_SECRET not in rendered
 
 
-@pytest.mark.parametrize("collection_available", [False, True], ids=["no-collection", "insert-failure"])
-@pytest.mark.parametrize(
-    "make_formatter",
-    [lambda: PrettyConsoleFormatter(no_color=True), logging_config.ProductionJSONFormatter],
-    ids=["pretty", "json"],
-)
+@_FALLBACK_PATHS
+@_FORMATTERS
 def test_audit_fallback_leaves_out_values_that_are_not_safe_tokens(
     monkeypatch, make_formatter, collection_available
 ) -> None:
     secret = "sk-live-secret-in-free-text"
-    record = _rejection_shaped_record(
+    record = _denied_module_action_record(
         chat_id="chat-9" + chr(10) + "FORGED-LINE",
-        error="free text with spaces " + secret,
+        error="Permission denied for " + secret,
         extra={
-            "source": "unit",
+            "source": "bad source " + secret,
             "dispatch": {"params": secret},  # arbitrary content under a key the fallback never reads
-            "failure_fields": ["ok:int_type", "bad value with spaces " + secret],
         },
     )
 
@@ -356,12 +380,26 @@ def test_audit_fallback_leaves_out_values_that_are_not_safe_tokens(
     )
 
     message = _fallback_message(rendered)
-    assert "ok:int_type" in message
+    assert "tenant=tenant-3" in message  # the safe evidence is still there
     assert "FORGED-LINE" not in message
-    assert "free text" not in message
+    assert "Permission denied" not in message
     assert secret not in message
     # The readable line stays a single line; nothing forged can start a new one.
     assert chr(10) not in message
+
+
+def test_audit_fallback_renders_only_the_listed_fields(monkeypatch) -> None:
+    rendered = _render_audit_fallback(
+        monkeypatch,
+        PrettyConsoleFormatter(no_color=True),
+        collection_available=False,
+        record=_billing_shaped_record(),
+    )
+
+    message = _fallback_message(rendered)
+    assert "source=hosted-billing" in message
+    for unlisted in ("cmd-1", "tokens.granted", "command_id", "trace", "model", "paths"):
+        assert unlisted not in message
 
 
 def test_audit_fallback_renders_nothing_extra_for_a_minimal_record(monkeypatch) -> None:
@@ -374,5 +412,5 @@ def test_audit_fallback_renders_nothing_extra_for_a_minimal_record(monkeypatch) 
     )
 
     assert "AUDIT kind=admin.access actor=admin-1 resource=/admin action=GET outcome=ok" in rendered
-    for absent in ("digest=", "error=", "paths=", "tenant=", "chat_id="):
+    for absent in (" digest=", " error=", " source=", " tenant=", "chat_id="):
         assert absent not in rendered

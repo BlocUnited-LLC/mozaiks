@@ -514,15 +514,15 @@ This project follows a practical pre-1.0 changelog format:
 - The audit log's fallback line keeps its evidence when the audit collection is
   unavailable or an insert fails. With the default console formatter it used to
   drop what a record carries only in its nested extra: the app and chat ids,
-  tenant and workspace, the input digest, and `source`, `trace_id`, `error` or
-  schema-path fields where present (module-action and billing records carry the
-  ids, and billing also a digest and `source`). It now renders them from a
-  fixed list of fields, and only when a value is a short token (letters, digits
-  and `._-:@/<>`); free text, values with whitespace or control characters, and
-  any other `extra` content are left out. A failed insert now logs the
-  exception type instead of its message, because a driver message can quote the
-  document. The JSON structure and the audit document are unchanged. The
-  fallback is a log line, not a durable-delivery guarantee.
+  tenant and workspace, the input digest, the `error` code (for example
+  `PERMISSION_DENIED` on a denied module action) and `source` (billing
+  records). It now renders them from a fixed list of fields, and only when a
+  value is a short token (letters, digits and `._-:@/<>`); free text, values
+  with whitespace or control characters, and any other `extra` content are
+  left out. A failed insert now logs the exception type instead of its message,
+  because a driver message can quote the document. The JSON structure and the
+  audit document are unchanged. The fallback is a log line, not a
+  durable-delivery guarantee.
 - Context Graph indexing uses native TypeScript, TSX, and CSS grammars, resolves
   calls through source bindings, and keeps similarly named files separate
   when combining source and structural graphs.

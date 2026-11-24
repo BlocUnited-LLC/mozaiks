@@ -80,7 +80,6 @@ class AuditRecord:
 # exception message, a model-supplied string) and anything with whitespace or
 # control characters is left out rather than escaped.
 _SAFE_LOG_VALUE = re.compile(r"^[\w.@:<>/-]{1,200}$")
-_MAX_LOGGED_PATHS = 10
 
 
 def _safe_log_value(value: Any) -> str | None:
@@ -95,8 +94,9 @@ def _fallback_evidence(record: AuditRecord) -> str:
 
     The audit document stays attached to the log record as before; this is the
     readable rendition for formatters that ignore nested extras. ``error`` is
-    rendered only when it is a short token such as a failure category, and
-    ``extra`` contributes only the keys named here, never arbitrary content.
+    rendered only when it is a short token such as the module executor's
+    ``PERMISSION_DENIED``, and ``extra`` contributes only ``source``, never
+    arbitrary content.
     """
 
     pairs: list[tuple[str, str | None]] = [
@@ -105,13 +105,7 @@ def _fallback_evidence(record: AuditRecord) -> str:
         ("digest", _safe_log_value(record.inputs_hash)),
         ("error", _safe_log_value(record.error)),
         ("source", _safe_log_value(record.extra.get("source"))),
-        ("trace", _safe_log_value(record.extra.get("trace_id"))),
-        ("model", _safe_log_value(record.extra.get("model_name"))),
     ]
-    paths = record.extra.get("failure_fields")
-    if isinstance(paths, list | tuple):
-        safe_paths = [_safe_log_value(item) for item in paths[:_MAX_LOGGED_PATHS]]
-        pairs.append(("paths", ",".join(item for item in safe_paths if item) or None))
     return "".join(f" {key}={value}" for key, value in pairs if value)
 
 
