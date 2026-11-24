@@ -201,12 +201,16 @@ const ModernChatInterface = ({
   composerDisabled = false,
   composerLabel,
   composerValue,
+  rejectedDraft,
   onComposerChange,
   transcriptLabel,
 }) => {
   const [localMessage, setLocalMessage] = useState('');
   const message = composerValue ?? localMessage;
   const setMessage = onComposerChange || setLocalMessage;
+  useEffect(() => {
+    if (rejectedDraft) setLocalMessage(current => current || rejectedDraft.text);
+  }, [rejectedDraft]);
   const [hasUserInteracted, setHasUserInteracted] = useState(false);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const chatEndRef = useRef(null);

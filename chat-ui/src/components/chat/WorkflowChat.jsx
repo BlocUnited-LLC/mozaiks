@@ -379,16 +379,20 @@ function WorkflowConversation({
         }
         return;
       case 'error':
-        if (event.error_code === 'CHAT_BUSY' && pendingUser.current) {
+        if (event.error_code === 'WORKFLOW_MODEL_UNAVAILABLE' || (event.error_code === 'CHAT_BUSY' && pendingUser.current)) {
           const refused = pendingUser.current;
           pendingUser.current = null;
           activeUserTurn.current = false;
           expectingUser.current = true;
           setCanReply(true);
           setActivity('idle');
-          setInputValue(refused.content);
-          setMessages(previous => previous.filter(message => message !== refused));
-          setSendError('The agent is finishing the previous turn. Send your message again.');
+          if (refused) {
+            setInputValue(current => current || refused.content);
+            setMessages(previous => previous.filter(message => message !== refused));
+          }
+          setSendError(event.error_code === 'CHAT_BUSY'
+            ? 'The agent is finishing the previous turn. Send your message again.'
+            : event.message || 'Choose an available model and send your message again.');
           return;
         }
         activeUserTurn.current = false;

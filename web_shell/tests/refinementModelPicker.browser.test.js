@@ -90,6 +90,10 @@ test('the AppReview composer lets the user select a model and preserves it acros
       return;
     }
     if (request.url.startsWith('/api/chats/model/')) {
+      if (request.headers['x-user-id'] !== 'owner') {
+        response.writeHead(403).end();
+        return;
+      }
       if (request.method === 'PUT') {
         let body = '';
         for await (const chunk of request) body += chunk;
@@ -170,7 +174,16 @@ test('the AppReview composer lets the user select a model and preserves it acros
     await expect(select).toBeEnabled();
     await expect(select).toHaveValue('');
     await page.unroute(modelPath);
-    await page.route(modelPath, route => route.fulfill({status:422,body:'Model no longer available'}));
+    const pendingMessage = 'Finish the current workflow interaction before changing models.';
+    await page.route(modelPath, route => route.fulfill({status:409,json:{detail:pendingMessage}}));
+    await select.selectOption('local:m2');
+    await expect(page.getByRole('status').filter({hasText:pendingMessage})).toBeVisible();
+    await expect(page.getByRole('button',{name:'Send message'})).toBeEnabled();
+    await expect(page.locator('textarea')).toHaveValue('A new question');
+    await page.unroute(modelPath);
+    await page.getByRole('button',{name:'Reload models'}).click();
+    await expect(select).toHaveValue('');
+    await page.route(modelPath, route => route.fulfill({status:503,body:'Temporary gateway error'}));
     await select.selectOption('local:m2');
     await expect(page.getByText('Couldn’t confirm the model change.')).toBeVisible();
     await expect(page.getByRole('button',{name:'Send message'})).toBeDisabled();

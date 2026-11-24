@@ -34,7 +34,7 @@ export function useWorkflowModelPicker({ api, appId, workflow, chatId, userId, d
       : null);
     async function load() {
       try {
-        const response = await authFetch(path, { signal }, config);
+        const response = await authFetch(path, { headers: { 'X-User-ID': userId }, signal }, config);
         if (response.status === 404) {
           if (!signal.aborted) setState(null);
           return;
@@ -71,9 +71,15 @@ export function useWorkflowModelPicker({ api, appId, workflow, chatId, userId, d
     setState({ ...state, saving: true, error: null });
     try {
       const response = await authFetch(path, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-User-ID': userId },
         body: JSON.stringify({ model: value || null }), signal,
       }, config);
+      if (response.status === 409 || response.status === 422) {
+        const problem = await response.json().catch(() => ({}));
+        const error = typeof problem.detail === 'string' ? problem.detail : 'The model change was declined.';
+        if (!signal.aborted) setState({ ...state, saving: false, error, unconfirmed: false });
+        return;
+      }
       if (!response.ok) throw new Error();
       const updated = await response.json();
       if (!signal.aborted) setState({ ...state, catalog: updated, saving: false, error: null });
