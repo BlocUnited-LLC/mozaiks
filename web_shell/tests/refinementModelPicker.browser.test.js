@@ -33,6 +33,8 @@ test('the AppReview composer lets the user select a model and preserves it acros
         const [currentChatId, changeChat] = useState('fixture-chat');
         const [conversationMode, changeMode] = useState('workflow');
         const loading = false;
+        const [reconnecting, setReconnecting] = useState(false);
+        window.setReconnecting = setReconnecting;
         ${picker}
         const workflowModel = useWorkflowModelPicker({appId:'app', userId:'owner', chatId:currentChatId,
           workflow:conversationMode === 'workflow' && !refinementModelPicker && !(showRefinementModelPicker && refinementModels === null)
@@ -48,7 +50,7 @@ test('the AppReview composer lets the user select a model and preserves it acros
         return <ChatInterface messages={[]} onSendMessage={() => {window.sent = (window.sent || 0) + 1;}} loading={false}
           workflowName={currentWorkflowName} connectionStatus="connected"
           conversationMode={conversationMode} plainContainer={true} modelPicker={refinementModelPicker || workflowModel.picker}
-          modelSaving={workflowModel.saving} />;
+          modelSaving={workflowModel.saving} waitingForConnection={reconnecting} />;
       }
       createRoot(document.getElementById('root')).render(<Fixture />);
     ` },
@@ -190,6 +192,13 @@ test('the AppReview composer lets the user select a model and preserves it acros
     await page.unroute(modelPath);
     await page.getByRole('button',{name:'Reload models'}).click();
     await expect(select).toHaveValue('');
+    await expect(page.getByRole('button',{name:'Send message'})).toBeEnabled();
+    await page.evaluate(() => window.setReconnecting(true));
+    await expect(page.getByRole('button',{name:'Send message'})).toBeDisabled();
+    const draft = await page.locator('textarea').inputValue();
+    await page.locator('textarea').press('Enter');
+    await expect(page.locator('textarea')).toHaveValue(draft);
+    await page.evaluate(() => window.setReconnecting(false));
     await expect(page.getByRole('button',{name:'Send message'})).toBeEnabled();
     await page.locator('textarea').fill('');
     const retiredModelPath = '**/api/chats/model/app/Other/retired-chat';

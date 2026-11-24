@@ -163,6 +163,7 @@ const ModernChatInterface = ({
   refinementModelPicker,
   modelPicker = refinementModelPicker,
   modelSaving = false,
+  waitingForConnection = false,
   workflowHasChildren = false,
   conversationMode = 'workflow',
   onConversationModeChange,
@@ -386,7 +387,7 @@ const ModernChatInterface = ({
       return;
     }
 
-    if (hasPendingHarnessDecision) return;
+    if (hasPendingHarnessDecision || waitingForConnection) return;
     if (message.trim() === '') return;
 
     const newMessage = { "sender": "user", "content": message, "artifactContext": artifactContext || null };
@@ -1027,7 +1028,7 @@ const ModernChatInterface = ({
             <button
               type="submit"
               aria-label={buttonText === 'NEXT' ? 'Continue' : 'Send message'}
-              disabled={!message.trim() || hasPendingHarnessDecision || composerDisabled || modelSaving}
+              disabled={!message.trim() || hasPendingHarnessDecision || composerDisabled || modelSaving || (waitingForConnection && buttonText !== 'NEXT')}
               className={`
                 px-2 py-1.5 rounded-md transition-all duration-300 min-w-[36px] sm:min-w-[40px] w-auto h-8 sm:h-9 oxanium font-bold text-[13px] flex items-center justify-center letter-spacing-wide border-2 flex-shrink-0
                 ${(!message.trim())
