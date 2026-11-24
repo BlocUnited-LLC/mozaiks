@@ -20,7 +20,7 @@ const PENDING_HARNESS_DECISION_TITLES = {
 
 // Tool-call renderer for workflow-agnostic UI surfaces
 // NOTE: Hooks must run unconditionally; define state first, then early-return.
-const ToolCallRenderer = React.memo(({ toolCall, onResponse, isCompleted, onArtifactAction, actionStatusMap }) => {
+const ToolCallRenderer = React.memo(({ toolCall, onResponse, isCompleted, onArtifactAction, actionStatusMap, ToolRenderer }) => {
   const [completed, setCompleted] = React.useState(isCompleted || false);
   const [hasInteracted, setHasInteracted] = React.useState(false);
   const rootRef = React.useRef(null);
@@ -131,7 +131,7 @@ const ToolCallRenderer = React.memo(({ toolCall, onResponse, isCompleted, onArti
               onMouseDown={handleUserInteraction}
               onKeyDown={handleUserInteraction}
             >
-              <UIToolRenderer
+              <ToolRenderer
                 event={toolCall}
                 onResponse={handleResponse}
                 onArtifactAction={onArtifactAction}
@@ -153,6 +153,7 @@ const ModernChatInterface = ({
   loading,
   onAgentAction,
   onArtifactToggle,
+  ToolRenderer = UIToolRenderer,
   artifactToggleLabel,
   hasUnseenArtifact = false,
   connectionStatus,
@@ -178,6 +179,7 @@ const ModernChatInterface = ({
   onBrandClick, // Optional callback when brand/logo clicked
   isOnChatPage = true, // Whether we're on the primary chat page (not discovery/workflows)
   hideHeader = false, // Hide the header (used when widget has its own header)
+  outputControlOnly = false,
   plainContainer = false, // Skip decorative cosmic-ui-module styling (used in widget)
   chatTheme = null,
   appDisplayName = null,
@@ -220,7 +222,7 @@ const ModernChatInterface = ({
     ? (generalChatSummary?.label || 'Ask Session')
     : `${formattedWorkflowName || 'AI-Powered Workflow'}${workflowHasChildren ? ' · Pack' : ''}`;
   // When not on chat page: allow brand click if provided, else only show 🧠 (ask→workflow toggle)
-  const showModeToggle = isOnChatPage || conversationMode === 'ask' || Boolean(onBrandClick);
+  const showModeToggle = Boolean(onBrandClick || (onConversationModeChange && (isOnChatPage || conversationMode === 'ask')));
   const historyToggleHandler = typeof onHistoryToggle === 'function'
     ? onHistoryToggle
     : (typeof onAskHistoryToggle === 'function' ? onAskHistoryToggle : null);
@@ -569,6 +571,7 @@ const ModernChatInterface = ({
 
           {chat.toolCall && (
             <ToolCallRenderer
+              ToolRenderer={ToolRenderer}
               toolCall={chat.toolCall}
               isCompleted={chat.tool_call_completed || false}
               onArtifactAction={onArtifactAction}
@@ -635,10 +638,10 @@ const ModernChatInterface = ({
       {/* Per-turn loading: rely on subtle typing indicator inside messages area; avoid full-page spinner after init */}
 
       {/* Fixed Command Center Header - Dark background to match artifact */}
-      {!hideHeader && (
+      {(!hideHeader || outputControlOnly) && (
       <div className={`flex-shrink-0 chat-header-backdrop ${conversationMode === 'ask' ? 'chat-header-ask' : 'chat-header-workflow'} border-b border-[rgba(var(--color-primary-light-rgb),0.22)] backdrop-blur-xl`}>
         <div className="flex flex-row items-center justify-between px-3 py-2.5 sm:px-4 sm:py-3 md:px-5 md:py-3.5">
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+          <div className={outputControlOnly ? 'hidden' : 'flex items-center gap-2 sm:gap-3 min-w-0 flex-1'}>
             {showAskHistoryToggle && (
               <button
                 type="button"
@@ -654,7 +657,7 @@ const ModernChatInterface = ({
             )}
             {/* Chat Icon + Title */}
             {/* Avatar is clickable ONLY in workflow mode (to switch to Ask) */}
-            {conversationMode === 'workflow' ? (
+            {conversationMode === 'workflow' && showModeToggle ? (
               <button
                 type="button"
                 onClick={handleAvatarClick}
@@ -686,12 +689,13 @@ const ModernChatInterface = ({
             )}
           </div>
 
-          {overlayMode && typeof onOverlayClose === 'function' && (
+          {!hideHeader && overlayMode && typeof onOverlayClose === 'function' && (
             <button
               type="button"
               onClick={onOverlayClose}
               className="inline-flex items-center justify-center px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg border border-white/20 bg-black/40 text-white text-[10px] sm:text-xs font-semibold uppercase tracking-wide mr-2"
               title="Close chat overlay"
+              aria-label="Close chat"
             >
               Close
             </button>
@@ -699,7 +703,7 @@ const ModernChatInterface = ({
 
           {/* Mozaiks Logo Button - context-aware behavior */}
           {/* In Workflow mode: toggles artifact panel | In Ask mode: switches to Workflow mode */}
-          {isOnChatPage && (
+          {isOnChatPage && (conversationMode === 'workflow' ? onArtifactToggle : onConversationModeChange) && (
             <>
               <button
                 onClick={() => {

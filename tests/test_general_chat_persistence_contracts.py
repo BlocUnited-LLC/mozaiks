@@ -240,7 +240,8 @@ def test_inline_ui_progress_restores_from_workflow_transcript_not_artifact_state
     assert not (_workspace() / "chat-ui/src/components/chat/activityArtifacts.js").exists()
     assert "export function buildInlineToolCallMessageFromEvent" in inline_helper_source
     assert "export function upsertInlineToolCallMessage" in inline_helper_source
-    assert "display !== INLINE_DISPLAY" in inline_helper_source
+    assert "buildToolCallMessageFromEvent(data, currentWorkflowName, INLINE_DISPLAY)" in inline_helper_source
+    assert "display !== expectedDisplay" in inline_helper_source
     assert "metadata: {" in inline_helper_source
     assert "interaction_type: interactionType" in inline_helper_source
     assert "awaiting_response: awaitingResponse" in inline_helper_source

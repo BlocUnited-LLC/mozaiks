@@ -579,7 +579,8 @@ def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
     assert "upsertRestoredActivityFromArtifactMessages" not in source
     assert "export function buildInlineToolCallMessageFromEvent" in inline_helper
     assert "export function upsertInlineToolCallMessage" in inline_helper
-    assert "display !== INLINE_DISPLAY" in inline_helper
+    assert "buildToolCallMessageFromEvent(data, currentWorkflowName, INLINE_DISPLAY)" in inline_helper
+    assert "display !== expectedDisplay" in inline_helper
     assert "interactionType" in inline_helper
     assert "awaiting_response: awaitingResponse" in inline_helper
     assert "SystemStatusCard" in core_ui_index

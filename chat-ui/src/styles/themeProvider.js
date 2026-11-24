@@ -762,17 +762,17 @@ function themeConfigToTheme(config, basePath) {
  *
  * Applied with the resolved chat theme, after the consumer accepts the load.
  */
-function applyAppThemeTokens(themeConfig) {
+function applyAppThemeTokens(themeConfig, root) {
   try {
     const tokens = generateThemeTokens(themeConfig);
-    applyThemeTokens(tokens);
+    applyThemeTokens(tokens, root);
 
     // Apply dark mode class based on appearance setting
     const appearance = themeConfig.appearance ?? 'system';
     const prefersDark = typeof window !== 'undefined' &&
       window.matchMedia?.('(prefers-color-scheme: dark)').matches;
     const isDark = appearance === 'dark' || (appearance === 'system' && prefersDark);
-    document.documentElement.classList.toggle('dark', isDark);
+    root.classList.toggle('dark', isDark);
 
     // Inject Google Fonts for the selected fonts
     for (const url of getFontImports(themeConfig)) {
@@ -1059,12 +1059,14 @@ export async function initializeTheme(appId = 'default') {
 // applyTheme — injects CSS variables + loads fonts
 // ---------------------------------------------------------------------------
 
-export function applyTheme(theme) {
+export function applyTheme(theme, element) {
   // Invalid explicit title tokens must fail before any active-app variables change.
   resolvePageTitleStyle(theme?.ui?.page?.title);
   try {
     const t = theme || BARE_FALLBACK_THEME;
-    if (t._appThemeConfig) applyAppThemeTokens(t._appThemeConfig);
+    const root = element || document.documentElement;
+    const documentTheme = root === document.documentElement;
+    if (t._appThemeConfig) applyAppThemeTokens(t._appThemeConfig, root);
 
     // Fonts
     const fonts = t.fonts || BARE_FALLBACK_THEME.fonts;
@@ -1078,29 +1080,30 @@ export function applyTheme(theme) {
       void ensureLocalFont(font);
     });
 
-    const root = document.documentElement;
     applyFontVariables(root, fonts);
 
     // CSS variables
-    updateCSSVariables(t.colors, t.shadows, t.chat, t.primitives, t.ui);
+    updateCSSVariables(root, t.colors, t.shadows, t.chat, t.primitives, t.ui);
 
     // Branding
     const branding = t.branding || {};
-    if (branding.name) document.title = branding.name;
-    if (branding.favicon) updateFavicon(branding.favicon);
+    if (documentTheme && branding.name) document.title = branding.name;
+    if (documentTheme && branding.favicon) updateFavicon(branding.favicon);
 
     // Asset CSS variables (used by components via var() references)
     if (branding.chatbackgroundImage) {
       root.style.setProperty('--brand-bg-url', `url("${branding.chatbackgroundImage}")`);
-    } else {
+    } else if (documentTheme) {
       console.warn('⚠️ [THEME] branding.chatbackgroundImage is empty after resolution — --brand-bg-url will not be set');
       root.style.removeProperty('--brand-bg-url');
+    } else {
+      root.style.setProperty('--brand-bg-url', 'none');
     }
-    if (branding.logo)            root.style.setProperty('--brand-logo-url', branding.logo);
-    if (branding.wordmark)        root.style.setProperty('--brand-wordmark-url', branding.wordmark);
-    if (t.profile?.icon) root.style.setProperty('--brand-profile-icon-url', t.profile.icon);
+    if (branding.logo || !documentTheme) root.style.setProperty('--brand-logo-url', branding.logo || 'none');
+    if (branding.wordmark || !documentTheme) root.style.setProperty('--brand-wordmark-url', branding.wordmark || 'none');
+    if (t.profile?.icon || !documentTheme) root.style.setProperty('--brand-profile-icon-url', t.profile?.icon || 'none');
 
-    logThemeRuntimeDiagnostics(root, fonts, t);
+    if (documentTheme) logThemeRuntimeDiagnostics(root, fonts, t);
 
   } catch (err) {
     console.error('❌ [THEME] Error applying theme:', err);
@@ -1380,8 +1383,7 @@ function setDimensionVar(root, name, value, fallback) {
   }
 }
 
-function updateCSSVariables(themeColors, themeShadows, themeChat, themePrimitives, themeUi) {
-  const root    = document.documentElement;
+function updateCSSVariables(root, themeColors, themeShadows, themeChat, themePrimitives, themeUi) {
   const colors  = themeColors  || BARE_FALLBACK_THEME.colors;
   const shadows = themeShadows || BARE_FALLBACK_THEME.shadows;
   const primitives = themePrimitives || BARE_FALLBACK_THEME.primitives;

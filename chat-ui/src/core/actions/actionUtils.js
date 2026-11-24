@@ -38,6 +38,20 @@ export const deriveArtifactId = (payload, fallbackId = null) => {
   return payload.artifact_id || payload.artifactId || payload.id || fallbackId;
 };
 
+export function buildArtifactAction(action, contextData, scope, fallbackId) {
+  if (!action?.tool) return null;
+  const artifact = contextData?.artifactPayload || contextData?.payload || contextData || {};
+  const artifactId = deriveArtifactId(artifact, fallbackId);
+  return {
+    type: 'artifact.action',
+    action_id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    artifact_id: artifactId,
+    tool: action.tool,
+    params: interpolateParams(action.params || {}, { artifact, ...artifact, ...contextData, artifact_id: artifactId, ...scope }),
+    context: scope,
+  };
+}
+
 const cloneDeep = (value) => {
   if (typeof structuredClone === 'function') {
     try {

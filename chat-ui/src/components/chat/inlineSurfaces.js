@@ -1,4 +1,5 @@
 import { deriveArtifactId } from '../../core/actions/actionUtils';
+import { isCanvasDisplay } from '../../state/uiSurfaceReducer';
 
 const INLINE_DISPLAY = 'inline';
 
@@ -30,6 +31,10 @@ function normalizeToolCallId(toolName, componentType, fallbackId = null) {
 }
 
 export function buildInlineToolCallMessageFromEvent(data, currentWorkflowName) {
+  return buildToolCallMessageFromEvent(data, currentWorkflowName, INLINE_DISPLAY);
+}
+
+export function buildToolCallMessageFromEvent(data, currentWorkflowName, expectedDisplay) {
   if (!data || typeof data !== 'object') {
     return null;
   }
@@ -37,9 +42,11 @@ export function buildInlineToolCallMessageFromEvent(data, currentWorkflowName) {
   const detail = asPlainObject(data.data);
   const payload = asPlainObject(detail.payload || data.payload);
   const display = String(
-    data.display
+    data.display_mode
+    || data.display
     || data.display_type
     || data.mode
+    || detail.display_mode
     || detail.display
     || detail.display_type
     || detail.mode
@@ -48,12 +55,12 @@ export function buildInlineToolCallMessageFromEvent(data, currentWorkflowName) {
     || INLINE_DISPLAY
   ).trim().toLowerCase();
 
-  if (display !== INLINE_DISPLAY) {
+  if (display !== expectedDisplay && !(expectedDisplay === 'artifact' && isCanvasDisplay(display))) {
     return null;
   }
 
-  const toolName = data.tool_name || detail.tool_name || payload.tool_name || data.component_type || detail.component_type || null;
-  const componentType = data.component_type || detail.component_type || payload.component_type || toolName;
+  const toolName = data.tool_name || detail.tool_name || payload.tool_name || data.component_type || detail.component_type || data.component || detail.component || null;
+  const componentType = data.component_type || detail.component_type || payload.component_type || data.component || detail.component || toolName;
   if (!toolName && !componentType) {
     return null;
   }
@@ -63,9 +70,10 @@ export function buildInlineToolCallMessageFromEvent(data, currentWorkflowName) {
     componentType,
     data.tool_call_id || data.corr || detail.tool_call_id || detail.corr || payload.tool_call_id || null,
   );
-  const workflowName = data.workflow_name || detail.workflow_name || payload.workflow_name || currentWorkflowName || null;
+  const workflowName = data.workflow_name || data.workflow || detail.workflow_name || detail.workflow || payload.workflow_name || currentWorkflowName || null;
   const agentName = data.agent || data.agent_name || detail.agent || detail.agent_name || payload.agent || payload.agent_name || 'Agent';
-  const awaitingResponse = data.awaiting_response ?? detail.awaiting_response ?? payload.awaiting_response ?? false;
+  const typedRender = data.type === 'ui.render' || data.type === 'chat.ui.render';
+  const awaitingResponse = data.awaiting_response ?? detail.awaiting_response ?? payload.awaiting_response ?? typedRender;
   const interactionType = data.interaction_type || detail.interaction_type || payload.interaction_type || (awaitingResponse ? 'ui_tool' : 'ui_surface');
   const content = String(payload.agent_message || payload.description || '').trim();
 
@@ -91,6 +99,7 @@ export function buildInlineToolCallMessageFromEvent(data, currentWorkflowName) {
       workflow_name: workflowName,
       display,
       component_type: componentType || toolName,
+      ...((data.response_available ?? detail.response_available) === false && { response_available: false }),
     },
     metadata: {
       toolCallId,
@@ -103,6 +112,52 @@ export function buildInlineToolCallMessageFromEvent(data, currentWorkflowName) {
       awaiting_response: awaitingResponse,
     },
   };
+}
+
+// A saved or replayed decision needs a current server waiter. Passive surfaces still own their ordinary actions.
+export function savedResponseAvailability(tool) {
+  if (tool.awaiting_response === false || tool.interaction_type === 'ui_surface'
+    || tool.payload?.interaction_type === 'ui_surface') return tool.response_available;
+  return Boolean((tool.tool_call_id || tool.corr) && tool.response_available === true);
+}
+
+export function projectSavedArtifact(lastArtifact, workflowName) {
+  const payload = asPlainObject(lastArtifact.payload);
+  const passive = payload.interaction_type === 'ui_surface' || lastArtifact.awaiting_response === false;
+  const cachedArtifact = {
+    tool_name: lastArtifact.tool_name,
+    tool_call_id: lastArtifact.tool_call_id || null,
+    component_type: lastArtifact.component_type || lastArtifact.tool_name,
+    response_available: savedResponseAvailability(lastArtifact),
+    workflow_name: workflowName,
+    payload,
+    display: lastArtifact.display || 'artifact',
+    ts: Date.now(),
+  };
+  const artifactPayload = {
+    ...payload,
+    ...(passive && {awaiting_response: false}),
+    artifact_id: deriveArtifactId(payload, cachedArtifact.tool_call_id || cachedArtifact.tool_name),
+  };
+  const restoredArtifactMessage = {
+    id: `ui-restored-${cachedArtifact.tool_call_id || cachedArtifact.tool_name}`,
+    sender: 'agent',
+    agentName: artifactPayload.agentName || artifactPayload.agent_name || 'Agent',
+    content: artifactPayload.structured_output || artifactPayload,
+    isStreaming: false,
+    toolCall: {
+      tool_name: cachedArtifact.tool_name,
+      payload: artifactPayload,
+      tool_call_id: cachedArtifact.tool_call_id,
+      workflow_name: workflowName,
+      onResponse: null,
+      display: cachedArtifact.display,
+      component_type: cachedArtifact.component_type,
+      response_available: cachedArtifact.response_available,
+      restored: true,
+    },
+  };
+  return {cachedArtifact, restoredArtifactMessage};
 }
 
 export function upsertInlineToolCallMessage(messageList, inlineMessage) {
@@ -137,6 +192,12 @@ export function upsertInlineToolCallMessage(messageList, inlineMessage) {
   }
 
   return [...messagesList, inlineMessage];
+}
+
+export function patchToolCallMessage(message, toolCallId, patch) {
+  const tool = message?.toolCall;
+  if (!tool || (tool.tool_call_id !== toolCallId && message.metadata?.toolCallId !== toolCallId)) return message;
+  return {...message, toolCall: {...tool, payload: {...tool.payload, ...patch}}};
 }
 
 export function buildComposerArtifactContext(artifactContext) {
