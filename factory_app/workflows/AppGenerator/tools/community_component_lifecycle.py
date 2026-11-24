@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
@@ -28,6 +29,7 @@ from .community_component_state import (
 )
 from .generated_bundle_scanner import scan_generated_bundle
 from .resolve_managed_capability_templates import (
+    ManagedCapabilityTemplateError,
     PackDependencyError,
     PackIntegrityError,
     _capabilities_from_context,
@@ -87,6 +89,8 @@ class UpgradePlan:
     changed_files: list[str] = field(default_factory=list)
     potential_conflicts: list[dict[str, str]] = field(default_factory=list)
     recomposed_files: list[str] = field(default_factory=list)
+    # Files the candidate no longer ships that another pack records: kept, with their holder.
+    released_files: list[dict[str, str]] = field(default_factory=list)
 
 
 def _pack_id_from_context(pack_source_path: Path) -> str:
@@ -318,12 +322,15 @@ def _render_pack(
 
 def _recompose_data_contract(
     app_root: Path, old: list[dict[str, Any]], new: list[dict[str, Any]],
+    other_owners: Mapping[str, str], unrecorded: Mapping[str, str],
 ) -> tuple[str | None, str | None]:
     """Swap one pack's data contribution in the app contract.
 
     Returns the recomposed contract text, or the conflict kind that blocks it,
     or neither when an app without a contract has nothing to compose.
-    App-owned surfaces and other packs' contributions are preserved.
+    App-owned surfaces and other packs' contributions are preserved. A surface
+    another pack records stays as it is: this pack may stop contributing it, and
+    may not change it.
     """
     try:
         current = load_data_contract(app_root)
@@ -335,7 +342,17 @@ def _recompose_data_contract(
         surfaces = contract.get("surfaces") or []
         if any(row.get("surface_id") == surface["surface_id"] and row != surface for row in surfaces for surface in retired):
             return None, "locally_modified_composed_output"
-        contract["surfaces"] = [row for row in surfaces if row not in retired]
+        contributed = {row["surface_id"]: row for row in compile_data_contract(empty, pack_data_contracts=new)["surfaces"]}
+        for surface in retired:
+            surface_id = surface["surface_id"]
+            if surface_id in other_owners and contributed.get(surface_id, surface) != surface:
+                return None, "composed_entry_owned_by_other_pack"
+        contract["surfaces"] = [
+            row for row in surfaces
+            if row not in retired or (
+                (row["surface_id"] in other_owners or row["surface_id"] in unrecorded) and row["surface_id"] not in contributed
+            )
+        ]
         recomposed = compile_data_contract(contract, pack_data_contracts=new)
     except (ValueError, TypeError, AttributeError):
         # The app contract is workspace input; malformed rows block instead of crashing.
@@ -419,7 +436,96 @@ def _path_key(path: str) -> str:
 
 
 def _other_owners_by_key(app_root: Path, pack_id: str) -> dict[str, str]:
-    return {_path_key(path): owner for path, owner in _current_owner_by_path(app_root).items() if owner != pack_id}
+    """Every file another pack records, owned or seeded, by portable key."""
+    owners: dict[str, str] = {}
+    for pack in _provenance_pack_entries(app_root):
+        owner = str(pack.get("pack_id") or "").strip()
+        for row in pack.get("materialized_owned_files") or [] if owner != pack_id else ():
+            if isinstance(row, dict) and row.get("path"):
+                owners[_path_key(str(row["path"]))] = owner
+    return owners
+
+
+def _foreign_owner(path: str, owners: dict[str, str]) -> str | None:
+    """The pack that records a path, a file where the path needs a folder, or a file inside it."""
+    key = _path_key(path)
+    nested = next((other for other in owners if other.startswith(f"{key}/") or key.startswith(f"{other}/")), None)
+    return owners.get(key) or (owners[nested] if nested is not None else None)
+
+
+def installed_pack_outputs(build_context_root: Path, pack_id: str, identity: Mapping[str, Any]) -> dict[str, str] | None:
+    """What a pack's bound source renders, or None unless that source still is the version ``identity`` records."""
+    source = load_installed_component_sources(build_context_root).get(pack_id)
+    if source is None:
+        return None
+    try:
+        metadata = verify_pack_integrity(Path(source), pack_id)
+        if any(metadata[key] != identity.get(key) for key in ("version", "digest")):
+            return None
+        return _files_by_name(resolve_templates_for_pack(Path(source), pack_id))
+    except (ManagedCapabilityTemplateError, OSError, ValueError, yaml.YAMLError):
+        return None
+
+
+def recorded_modules(pack: Mapping[str, Any]) -> set[str]:
+    """The modules a provenance entry records files of, so whose data surface it would contribute."""
+    paths = [PurePosixPath(str(row.get("path"))) for row in pack.get("materialized_owned_files") or [] if isinstance(row, dict)]
+    return {path.parts[1] for path in paths if len(path.parts) > 2 and path.parts[0] == "modules"}
+
+
+def _surface_ids(outputs: Mapping[str, str]) -> set[str]:
+    try:
+        contract = json.loads(outputs.get(_DATA_CONTRACT_PATH, "{}"))
+    except ValueError:
+        return set()
+    surfaces = contract.get("surfaces") if isinstance(contract, dict) else None
+    return {str(row["surface_id"]) for row in surfaces or [] if isinstance(row, dict) and row.get("surface_id")}
+
+
+def _unrecorded_claims(build_context_root: Path, app_root: Path, pack_id: str) -> tuple[dict[str, str], dict[str, str]]:
+    """What pinned packs the app's provenance does not record ship: files by portable key, and data surfaces.
+
+    Provenance can be lost while the pin and source remain, so what such a pack
+    ships is not free to delete. A source that no longer verifies says nothing.
+    """
+    files: dict[str, str] = {}
+    surfaces: dict[str, str] = {}
+    recorded = {str(pack.get("pack_id") or "").strip() for pack in _provenance_pack_entries(app_root)}
+    for other_id, pin in component_by_id(load_installed_components(build_context_root)).items():
+        if other_id == pack_id or other_id in recorded:
+            continue
+        outputs = installed_pack_outputs(build_context_root, other_id, pin) or {}
+        files.update((_path_key(path), other_id) for path in outputs)
+        surfaces.update(dict.fromkeys(_surface_ids(outputs), other_id))
+    return files, surfaces
+
+
+def _other_surface_owners(build_context_root: Path, app_root: Path, pack_id: str) -> dict[str, str]:
+    """The data surfaces other packs compose.
+
+    A library records its entries. A generator pack records only that it
+    contributes, so its source tells which surfaces; failing that, the modules
+    it records do.
+    """
+    manifest = _provenance_manifest(app_root)
+    composed = manifest.get("composed_outputs")
+    rows = composed.get(_DATA_CONTRACT_PATH) if isinstance(composed, dict) else None
+    packs = {str(pack.get("pack_id") or "").strip(): pack for pack in _provenance_pack_entries(app_root)}
+    owners: dict[str, str] = {}
+    for row in rows if isinstance(rows, list) else []:
+        owner = str(row.get("pack_id") or "").strip() if isinstance(row, dict) else pack_id
+        if owner == pack_id:
+            continue
+        if "entries" in row:
+            surface_ids = {
+                str(entry["key"]) for entry in row["entries"] or []
+                if isinstance(entry, dict) and entry.get("container") == "surfaces"
+            }
+        else:
+            outputs = installed_pack_outputs(build_context_root, owner, row)
+            surface_ids = recorded_modules(packs.get(owner, {})) if outputs is None else _surface_ids(outputs)
+        owners.update(dict.fromkeys(surface_ids, owner))
+    return owners
 
 
 def _exclusive_shared_root_claims(app_root: Path) -> list[dict[str, str]]:
@@ -453,8 +559,12 @@ def _plan_upgrade(
     build_context_root: str | Path,
     candidate_pack_source_path: str | Path,
     workspace_app_root: str | Path | None,
+    workflow_owners: Mapping[str, str] | None = None,
 ) -> tuple[UpgradePlan, str | None]:
-    """Plan an upgrade and the recomposed data contract its apply step writes."""
+    """Plan an upgrade and the recomposed data contract its apply step writes.
+
+    ``workflow_owners`` are other packs' workflow files inside the app root, by portable key.
+    """
 
     root = Path(build_context_root).resolve()
     candidate_source = Path(candidate_pack_source_path).resolve()
@@ -501,11 +611,12 @@ def _plan_upgrade(
     removed = sorted(old_paths - new_paths)
     changed = sorted(path for path in old_paths & new_paths if old_files[path] != new_files[path])
     potential_conflicts: list[dict[str, str]] = []
+    released: list[dict[str, str]] = []
 
     app_root = Path(workspace_app_root).resolve() if workspace_app_root else None
     if app_root:
         owner_by_path = _current_owner_by_path(app_root)
-        other_owners = _other_owners_by_key(app_root, pack_id)
+        other_owners = {**(workflow_owners or {}), **_other_owners_by_key(app_root, pack_id)}
         # Provenance that claims a shared root as one pack's file predates composition.
         # Nothing is planned on it: the app is reassembled first, whichever pack claims it.
         legacy_claims = _exclusive_shared_root_claims(app_root)
@@ -519,9 +630,16 @@ def _plan_upgrade(
                 pack_id not in _composed_contributors(app_root, path)
             ):
                 potential_conflicts.append({"path": path, "kind": "composed_output_requires_reassembly"})
+        # A file another pack records stays: this pack only gives up its own record of it.
+        unrecorded_files, unrecorded_surfaces = _unrecorded_claims(root, app_root, pack_id)
+        claims = {**unrecorded_files, **other_owners}
+        released = [
+            {"path": path, "owner": claims[_path_key(path)]} for path in removed if _path_key(path) in claims
+        ]
+        removed = [path for path in removed if _path_key(path) not in claims]
         for path in sorted(added + changed):
             owner = owner_by_path.get(path)
-            other = other_owners.get(_path_key(path))
+            other = _foreign_owner(path, other_owners)
             if other:
                 potential_conflicts.append({"path": path, "kind": "owned_by_other_pack", "owner": other})
             target = app_root / path
@@ -539,7 +657,9 @@ def _plan_upgrade(
             if current_content != old_files[path]:
                 potential_conflicts.append({"path": path, "kind": "locally_modified_owned_file"})
         if recomposed and not legacy_claims:
-            data_contract, conflict = _recompose_data_contract(app_root, old_data, new_data)
+            data_contract, conflict = _recompose_data_contract(
+                app_root, old_data, new_data, _other_surface_owners(root, app_root, pack_id), unrecorded_surfaces,
+            )
             if conflict:
                 potential_conflicts.append({"path": _DATA_CONTRACT_PATH, "kind": conflict})
             elif data_contract is None:
@@ -574,6 +694,7 @@ def _plan_upgrade(
         changed_files=changed,
         potential_conflicts=potential_conflicts,
         recomposed_files=recomposed,
+        released_files=released,
     ), data_contract
 
 
@@ -582,6 +703,7 @@ def prepare_component_upgrade(
     build_context_root: str | Path,
     candidate_pack_source_path: str | Path,
     workspace_app_root: str | Path,
+    workflow_owners: Mapping[str, str] | None = None,
 ) -> tuple[UpgradePlan, dict[str, str | None]]:
     """An upgrade's plan and every app file applying it writes (``None`` removes one).
 
@@ -596,6 +718,7 @@ def prepare_component_upgrade(
         build_context_root=root,
         candidate_pack_source_path=candidate_source,
         workspace_app_root=app_root,
+        workflow_owners=workflow_owners,
     )
     if plan.potential_conflicts:
         return plan, {}

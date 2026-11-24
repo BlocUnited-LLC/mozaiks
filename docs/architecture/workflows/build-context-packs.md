@@ -778,6 +778,21 @@ not an edit: hashes normalize CRLF.
 the pack's content, without rewriting them. Anything that differs blocks the
 install. Reconcile the difference in a normal reviewed change first.
 
+Several packs can record one file or entry: one seeds it and another adopts it.
+No operation, in either lifecycle, deletes or overwrites what another pack holds:
+
+| An upgrade of one pack | Another pack owns it | Another pack seeded it | Another pack is pinned without provenance and its source ships it |
+| --- | --- | --- | --- |
+| drops a file or entry | kept (`kept_for_other_pack`) | kept (`kept_for_other_pack`) | kept (`kept_for_other_pack`) |
+| changes a file or entry | blocked (`owned_by_other_pack`, `composed_entry_owned_by_other_pack`) | a library's own file changes; a generator upgrade is blocked | changes |
+| starts shipping one that exists | blocked | identical content may be adopted | blocked |
+
+A dropped file that another pack records is released, as a seed is: the upgrade
+succeeds, the pack's own record goes, and the file stays. A generator pack records
+that it contributes to a shared file and not which entries, so its verified source
+tells. If that source is gone, the modules it records stand for its data surfaces,
+and existing entries in that file cannot be adopted.
+
 Before writing, an install checks the pack's closure. Pack dependencies are
 checked as before, and an upgrade also refuses to move a version another
 installed pack pins or to remove a capability, host module/action or import

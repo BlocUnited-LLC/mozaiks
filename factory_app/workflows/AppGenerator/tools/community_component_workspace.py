@@ -94,7 +94,9 @@ from .community_component_lifecycle import (
     _ensure_dependencies_satisfied,
     _pack_id_from_context,
     _render_pack,
+    installed_pack_outputs,
     prepare_component_upgrade,
+    recorded_modules,
 )
 from .community_component_sources import (
     PackSource,
@@ -384,32 +386,117 @@ def _recorded(manifest: Mapping[str, Any], pack_id: str) -> _Recorded:
     return recorded
 
 
-def _other_owners(manifest: Mapping[str, Any], pack_id: str) -> tuple[dict[str, str], dict[str, str], dict[str, dict[tuple[str, str], str]]]:
-    """What other packs own: files by portable collision key, entries by shared root and address."""
-    files: dict[str, str] = {}
-    workflow_files: dict[str, str] = {}
-    entries: dict[str, dict[tuple[str, str], str]] = {}
+@dataclass
+class _OtherPacks:
+    """What every other pack holds: files by portable collision key, entries by shared root and address."""
+
+    files: dict[str, str] = field(default_factory=dict)
+    workflow: dict[str, str] = field(default_factory=dict)
+    # Seeded once and the app's since, but a pack still records them.
+    seeds: dict[str, str] = field(default_factory=dict)
+    entries: dict[str, dict[tuple[str, str], str]] = field(default_factory=dict)
+    # Pinned packs the provenance does not record: what their sources ship.
+    unrecorded: dict[str, str] = field(default_factory=dict)
+    unrecorded_workflow: dict[str, str] = field(default_factory=dict)
+    unrecorded_entries: dict[str, dict[tuple[str, str], str]] = field(default_factory=dict)
+    # Where workflow files live in the app root, when they do.
+    workflow_prefix: str | None = None
+    # Shared roots a generator pack contributes to with entries that cannot be told.
+    unread_roots: dict[str, str] = field(default_factory=dict)
+
+    def holder(self, path: str, *, workflow: bool = False) -> str | None:
+        """Any other pack that records a file or would own it, whose file a removal must leave alone."""
+        key = collision_key(path)
+        maps = (self.workflow, self.unrecorded_workflow) if workflow else (self.files, self.seeds, self.unrecorded)
+        if workflow and self.workflow_prefix is not None and self.workflow_prefix + key in self.seeds:
+            return self.seeds[self.workflow_prefix + key]
+        return next((owners[key] for owners in maps if key in owners), None)
+
+    def entry_holder(self, root_path: str, address: tuple[str, str]) -> str | None:
+        """Any other pack that composes an entry, or whose pinned source would."""
+        held = (self.entries.get(root_path, {}), self.unrecorded_entries.get(root_path, {}))
+        return next((owners[address] for owners in held if address in owners), None)
+
+
+def _other_packs(manifest: Mapping[str, Any], pack_id: str, roots: WorkspaceRoots) -> _OtherPacks:
+    others = _OtherPacks()
+    rendered: dict[str, dict[str, str] | None] = {}
     for entry in _pack_entries(manifest):
         owner = str(entry.get("pack_id") or "")
         if owner == pack_id:
             continue
         for row in entry.get("materialized_owned_files") or []:
-            if isinstance(row, dict) and row.get("path") and row.get("owner") != "workspace":
-                files[collision_key(str(row["path"]))] = owner
+            if isinstance(row, dict) and row.get("path"):
+                target = others.seeds if row.get("owner") == "workspace" else others.files
+                target[collision_key(str(row["path"]))] = owner
         for row in entry.get("materialized_workflow_files") or []:
             if isinstance(row, dict) and row.get("path"):
-                workflow_files[collision_key(str(row["path"]))] = owner
+                others.workflow[collision_key(str(row["path"]))] = owner
     for field_name in ("composed_outputs", "composed_workflow_outputs"):
         composed = manifest.get(field_name)
         for path, contributors in (composed.items() if isinstance(composed, dict) else ()):
             for contributor in contributors if isinstance(contributors, list) else []:
-                if isinstance(contributor, dict) and contributor.get("pack_id") != pack_id:
-                    for row in contributor.get("entries") or []:
-                        if isinstance(row, dict):
-                            entries.setdefault(path, {})[(str(row["container"]), str(row["key"]))] = str(
-                                contributor["pack_id"]
-                            )
-    return files, workflow_files, entries
+                if not isinstance(contributor, dict) or contributor.get("pack_id") == pack_id:
+                    continue
+                owner = str(contributor["pack_id"])
+                entries = others.entries.setdefault(path, {})
+                if "entries" not in contributor:
+                    if owner not in rendered:
+                        identity = _lifecycle_entry(manifest, owner) or {}
+                        rendered[owner] = installed_pack_outputs(roots.build_context_root, owner, identity)
+                    addresses = _generated_entries(rendered[owner], path)
+                    if addresses is None:
+                        others.unread_roots[path] = owner
+                        if path == _DATA_CONTRACT_PATH:
+                            addresses = {("surfaces", name) for name in recorded_modules(_lifecycle_entry(manifest, owner) or {})}
+                    entries.update(dict.fromkeys(addresses or (), owner))
+                for row in contributor.get("entries") or []:
+                    if isinstance(row, dict):
+                        entries[(str(row["container"]), str(row["key"]))] = owner
+    _add_unrecorded(others, manifest, pack_id, roots)
+    # One file reached through both roots has one owner.
+    if roots.workflows_root.is_relative_to(roots.app_root) and roots.workflows_root != roots.app_root:
+        prefix = others.workflow_prefix = collision_key(roots.workflows_root.relative_to(roots.app_root).as_posix()) + "/"
+        for app_files, workflow_files in ((others.files, others.workflow), (others.unrecorded, others.unrecorded_workflow)):
+            inside = {key.removeprefix(prefix): owner for key, owner in app_files.items() if key.startswith(prefix)}
+            app_files.update({prefix + key: owner for key, owner in workflow_files.items()})
+            workflow_files.update(inside)
+    return others
+
+
+def _generated_entries(outputs: Mapping[str, str] | None, path: str) -> set[tuple[str, str]] | None:
+    """The entries a generator pack composed into a shared root, or None when its source cannot tell.
+
+    Generator provenance names the contributor and not its entries.
+    """
+    root = _ROOTS_BY_PATH.get(path)
+    if root is None:
+        return set()
+    if outputs is None:
+        return None
+    try:
+        return set(keyed_entries(parse_document(outputs[path], root.fmt), root)) if path in outputs else set()
+    except CompositionFormatError:
+        return None
+
+
+def _add_unrecorded(others: _OtherPacks, manifest: Mapping[str, Any], pack_id: str, roots: WorkspaceRoots) -> None:
+    recorded = {str(entry.get("pack_id") or "") for entry in _pack_entries(manifest)}
+    sources = load_installed_component_sources(roots.build_context_root)
+    for other_id, pin in component_by_id(load_installed_components(roots.build_context_root)).items():
+        if other_id == pack_id or other_id in recorded:
+            continue
+        if installed_pack_outputs(roots.build_context_root, other_id, pin) is None:
+            continue
+        try:
+            rendered = _render(Path(sources[other_id]), other_id, None)
+        except (CommunityComponentLifecycleError, ManagedCapabilityTemplateError, OSError, ValueError, yaml.YAMLError):
+            continue
+        others.unrecorded.update((collision_key(path), other_id) for path in rendered.owned)
+        others.seeds.update((collision_key(path), other_id) for path in rendered.seeds)
+        others.unrecorded_workflow.update((collision_key(path), other_id) for path in rendered.workflow_files)
+        for root_path, contribution in rendered.contributions.items():
+            others.unrecorded_entries.setdefault(root_path, {}).update(dict.fromkeys(contribution, other_id))
 
 
 def _lifecycle_entry(manifest: Mapping[str, Any], pack_id: str) -> dict[str, Any] | None:
@@ -1390,11 +1477,22 @@ def _respelled(path: str, spellings: Mapping[str, set[str]]) -> str | None:
     return None
 
 
+def _kept_warning(label: str, holder: str) -> dict[str, str]:
+    return {
+        "kind": "kept_for_other_pack",
+        "detail": f"{label}: the library no longer ships it; it stays because pack '{holder}' records it",
+    }
+
+
 def _new_path_conflict(
     path: str, label: str, other_files: Mapping[str, str], spellings: Mapping[str, set[str]],
+    unrecorded: Mapping[str, str], *, exists: bool,
 ) -> dict[str, str] | None:
     """Why a path the pack does not own yet cannot become its own, whatever the file holds."""
     key = collision_key(path)
+    if exists and key in unrecorded:
+        # The file may be a pinned pack's whose provenance was lost: it is not free to take over.
+        return {"kind": "owned_by_other_pack", "path": label, "owner": unrecorded[key]}
     nested = next((other for other in other_files if other.startswith(f"{key}/") or key.startswith(f"{other}/")), None)
     owner = other_files.get(key) or (other_files[nested] if nested is not None else None)
     if owner is not None:
@@ -1407,7 +1505,7 @@ def _new_path_conflict(
 
 def _plan_owned_files(
     outcome: _Outcome, rendered: _RenderedPack, recorded: _Recorded, roots: WorkspaceRoots,
-    other_files: dict[str, str], *, adopt: bool,
+    others: _OtherPacks, *, adopt: bool,
 ) -> None:
     plan = outcome.plan
     spellings = _existing_spellings(roots.app_root)
@@ -1419,7 +1517,7 @@ def _plan_owned_files(
         if new is not None:
             outcome.owned_rows.append({"path": path, "owner": "templates", "sha256": content_sha256(new)})
         if new is not None and old_hash is None:
-            conflict = _new_path_conflict(path, path, other_files, spellings)
+            conflict = _new_path_conflict(path, path, others.files, spellings, others.unrecorded, exists=current is not None)
             if conflict is not None:
                 plan.conflicts.append(conflict)
             elif current is None:
@@ -1439,11 +1537,17 @@ def _plan_owned_files(
             elif not isinstance(current, str) or content_sha256(current) != old_hash:
                 plan.conflicts.append({"kind": "locally_modified_owned_file", "path": path})
             elif content_sha256(new) != old_hash:
+                owner = others.files.get(collision_key(path))
+                if owner is not None:
+                    plan.conflicts.append({"kind": "owned_by_other_pack", "path": path, "owner": owner})
+                    continue
                 plan.files["write"].append(path)
                 outcome.writes[target] = new
         elif path in rendered.seeds or current is None:
             # Handed to the app as a seed, or already gone: nothing to remove.
             continue
+        elif (holder := others.holder(path)) is not None:
+            plan.warnings.append(_kept_warning(path, holder))
         elif not isinstance(current, str) or content_sha256(current) != old_hash:
             plan.conflicts.append({"kind": "locally_modified_owned_file", "path": path})
         else:
@@ -1456,7 +1560,9 @@ def _plan_owned_files(
         target = _destination(roots.app_root, path)
         current = _read_text(target)
         old_hash = recorded.seeds.get(path)
-        conflict = None if path in recorded.owned or old_hash is not None else _new_path_conflict(path, path, other_files, spellings)
+        conflict = None if path in recorded.owned or old_hash is not None else _new_path_conflict(
+            path, path, others.files, spellings, {}, exists=current is not None,
+        )
         if conflict is not None:
             plan.conflicts.append(conflict)
         elif current is None and old_hash is None and path not in recorded.owned:
@@ -1473,7 +1579,7 @@ def _plan_owned_files(
 
 def _plan_workflow_files(
     outcome: _Outcome, rendered: _RenderedPack, recorded: _Recorded, roots: WorkspaceRoots,
-    other_files: dict[str, str], *, adopt: bool,
+    others: _OtherPacks, *, adopt: bool,
 ) -> None:
     plan = outcome.plan
     spellings = _existing_spellings(roots.workflows_root)
@@ -1485,7 +1591,9 @@ def _plan_workflow_files(
         if new is not None:
             outcome.workflow_rows.append({"path": path, "owner": "templates", "sha256": content_sha256(new)})
         if new is not None and old_hash is None:
-            conflict = _new_path_conflict(path, f"workflows/{path}", other_files, spellings)
+            conflict = _new_path_conflict(
+                path, f"workflows/{path}", others.workflow, spellings, others.unrecorded_workflow, exists=current is not None,
+            )
             if conflict is not None:
                 plan.conflicts.append(conflict)
             elif current is None:
@@ -1503,10 +1611,16 @@ def _plan_workflow_files(
             elif not isinstance(current, str) or content_sha256(current) != old_hash:
                 plan.conflicts.append({"kind": "locally_modified_owned_file", "path": f"workflows/{path}"})
             elif content_sha256(new) != old_hash:
+                owner = others.workflow.get(collision_key(path))
+                if owner is not None:
+                    plan.conflicts.append({"kind": "owned_by_other_pack", "path": f"workflows/{path}", "owner": owner})
+                    continue
                 plan.workflow_files["write"].append(path)
                 outcome.writes[target] = new
         elif current is None:
             continue
+        elif (holder := others.holder(path, workflow=True)) is not None:
+            plan.warnings.append(_kept_warning(f"workflows/{path}", holder))
         elif not isinstance(current, str) or content_sha256(current) != old_hash:
             plan.conflicts.append({"kind": "locally_modified_owned_file", "path": f"workflows/{path}"})
         else:
@@ -1628,7 +1742,7 @@ def _splice(text: str, root: KeyedRoot, upserts: dict[tuple[str, str], Any], rem
 
 def _plan_entries(
     outcome: _Outcome, rendered: _RenderedPack, recorded: _Recorded, roots: WorkspaceRoots,
-    other_entries: dict[str, dict[tuple[str, str], str]], *, adopt: bool,
+    others: _OtherPacks, *, adopt: bool,
 ) -> None:
     plan = outcome.plan
     for root in KEYED_ROOTS:
@@ -1687,8 +1801,11 @@ def _plan_entries(
             present = address in current
             normalized = _normalize_entry(root.path, current[address]) if present else None
             row = {"root": label, "container": container, "key": key}
+            owner = others.entries.get(root.path, {}).get(address)
             if new is not None and old_hash is None:
-                owner = other_entries.get(root.path, {}).get(address)
+                if owner is None and present:
+                    # A pinned pack without provenance ships it, or a generator pack whose source is gone may have.
+                    owner = others.entry_holder(root.path, address) or others.unread_roots.get(root.path)
                 if owner:
                     plan.conflicts.append({"kind": "composed_entry_owned_by_other_pack", **row, "owner": owner})
                 elif not present:
@@ -1703,11 +1820,15 @@ def _plan_entries(
             elif new is not None:
                 if not present or entry_sha256(normalized) != old_hash:
                     plan.conflicts.append({"kind": "locally_modified_composed_entry", **row})
+                elif entry_sha256(new) != old_hash and owner:
+                    plan.conflicts.append({"kind": "composed_entry_owned_by_other_pack", **row, "owner": owner})
                 elif entry_sha256(new) != old_hash:
                     upserts[address] = new
                     plan.composed.append({**row, "action": "replace"})
                 else:
                     plan.composed.append({**row, "action": "unchanged"})
+            elif present and (holder := others.entry_holder(root.path, address)) is not None:
+                plan.warnings.append(_kept_warning(f"{label} {container}:{key}", holder))
             elif present:
                 if entry_sha256(normalized) != old_hash:
                     plan.conflicts.append({"kind": "locally_modified_composed_entry", **row})
@@ -2043,7 +2164,7 @@ def _plan_workspace_change(
             plan.status = "unchanged"
             return outcome, rendered, manifest
     recorded = _recorded(manifest, rendered.pack_id) if record_entry is not None else _Recorded()
-    other_files, other_workflow_files, other_entries = _other_owners(manifest, rendered.pack_id)
+    others = _other_packs(manifest, rendered.pack_id, roots)
     plan.conflicts.extend(
         {"kind": "ui_barrel_contribution_unsupported", "path": path} for path in sorted(rendered.ui_barrels)
     )
@@ -2051,9 +2172,9 @@ def _plan_workspace_change(
     if _destination_collisions(rendered, roots, plan):
         plan.status = "blocked"
         return outcome, rendered, manifest
-    _plan_owned_files(outcome, rendered, recorded, roots, other_files, adopt=adopt)
-    _plan_workflow_files(outcome, rendered, recorded, roots, other_workflow_files, adopt=adopt)
-    _plan_entries(outcome, rendered, recorded, roots, other_entries, adopt=adopt)
+    _plan_owned_files(outcome, rendered, recorded, roots, others, adopt=adopt)
+    _plan_workflow_files(outcome, rendered, recorded, roots, others, adopt=adopt)
+    _plan_entries(outcome, rendered, recorded, roots, others, adopt=adopt)
     complete = not plan.conflicts
     if complete:
         plan.conflicts.extend(_workflow_tool_conflicts(rendered.workflow_files, _planned_files(roots.workflows_root, outcome.writes)))
@@ -2265,11 +2386,19 @@ def _generator_upgrade_plan(candidate: _Candidate, roots: WorkspaceRoots, *, app
             pack_id=candidate.pack_id, entry=entry, contract={"requires": entry.get("host_requirements") or {}},
         )
         # Everything the base lifecycle writes, so the checks see the app it produces.
+        workflow_owners: dict[str, str] = {}
+        if roots.workflows_root.is_relative_to(roots.app_root):
+            others = _other_packs(_provenance(roots.app_root), candidate.pack_id, roots)
+            workflow_owners = {
+                f"{others.workflow_prefix or ''}{key}": owner
+                for key, owner in {**others.unrecorded_workflow, **others.workflow}.items()
+            }
         try:
             preview, base_writes = prepare_component_upgrade(
                 build_context_root=roots.build_context_root,
                 candidate_pack_source_path=candidate.pack_dir,
                 workspace_app_root=roots.app_root,
+                workflow_owners=workflow_owners,
             )
         except PackDependencyError:
             # A dependency conflict blocks the plan, however the pack was installed.
@@ -2330,6 +2459,7 @@ def _plan_from_base_upgrade(result: UpgradePlan, metadata: dict[str, Any], candi
     plan.composed = [{"root": path, "container": "", "key": "", "action": "recompose"} for path in result.recomposed_files]
     plan.dependencies = dict(result.dependency_changes)
     plan.conflicts = [dict(conflict) for conflict in result.potential_conflicts]
+    plan.warnings.extend(_kept_warning(row["path"], row["owner"]) for row in result.released_files)
     plan.warnings.append({
         "kind": "generator_provenance",
         "detail": "this pack was materialized by AppGenerator; its upgrade uses the base lifecycle and is not hash-verified",
