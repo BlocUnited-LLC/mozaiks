@@ -793,6 +793,21 @@ that it contributes to a shared file and not which entries, so its verified sour
 tells. If that source is gone, the modules it records stand for its data surfaces,
 and existing entries in that file cannot be adopted.
 
+Ownership is compared by physical destination, whichever root or spelling a record
+uses, so a file inside a workflow root that lies in the app has one owner. The
+shared documents (`data/contract.json`, `ui/route_manifest.json`, `ui/index.js`,
+`admin/admin_registry.yaml` and the workflow registry) are owned by entries: no
+library may take one whole (`shared_document_path`), and none is deleted because a
+library stops recording it. A generator pack may ship `admin/admin_registry.yaml`
+whole. Its entries cannot be adopted, others may add theirs, and its upgrade must
+leave every entry another pack records in the file unchanged.
+
+One check is the authority in both lifecycles. Over the writes a plan would make,
+every file, seed and entry another pack holds in the app must still be there,
+unchanged, or the plan is blocked. A pack's own record settles only what the other
+claim leaves open: the content of a file another pack merely seeded, or that a pack
+pinned without provenance would ship.
+
 Before writing, an install checks the pack's closure. Pack dependencies are
 checked as before, and an upgrade also refuses to move a version another
 installed pack pins or to remove a capability, host module/action or import
