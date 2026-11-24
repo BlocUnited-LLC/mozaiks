@@ -3284,3 +3284,125 @@ def test_a_generator_upgrade_writes_what_the_base_lifecycle_writes(tmp_path):
         assert [Path(row["local_source_path"]).samefile(candidate) for row in sources["sources"]] == [True]
         trees.append((tree, provenance))
     assert trees[0] == trees[1]
+
+
+# --------------------------------------------------------------------------------------
+# Tool files, component bindings and the command line's error contract
+# --------------------------------------------------------------------------------------
+
+
+def _tools(pack: Path, *, file: str = "review_stock.py", lifecycle: str | None = None) -> None:
+    document: dict = {"tools": [{
+        "agent": "StockReviewAgent", "file": file, "function": "review_stock", "description": "Review stock.",
+        "tool_type": "Agent_Tool", "auto_tool_call": False,
+    }]}
+    if lifecycle:
+        document["lifecycle_tools"] = [{
+            "trigger": "before_chat", "file": lifecycle, "function": "prepare", "description": "Prepare.",
+        }]
+    (pack / "workflows/StockReview/tools.yaml").write_text(yaml.safe_dump(document), encoding="utf-8")
+
+
+@pytest.mark.parametrize("operation", ["install", "upgrade"])
+@pytest.mark.parametrize("fault", ["tool", "lifecycle", "removed"])
+def test_a_workflow_tool_must_have_its_file(tmp_path, operation, fault):
+    if operation == "upgrade":
+        original = _pack(tmp_path)
+        _tools(original)
+        roots = _ordinary_app(tmp_path / "shop")
+        apply_component_install(source=PackSource(directory=original), roots=roots)
+        pack, plan_for, apply = _version_two(tmp_path), plan_workspace_upgrade, apply_workspace_upgrade
+    else:
+        roots, pack = _ordinary_app(tmp_path / "shop"), _pack(tmp_path)
+        plan_for, apply = plan_component_install, apply_component_install
+    missing = "review_stock.py" if fault == "removed" else "missing.py"
+    _tools(pack, file="missing.py" if fault == "tool" else "review_stock.py", lifecycle="missing.py" if fault == "lifecycle" else None)
+    if fault == "removed":
+        (pack / "workflows/StockReview/tools/review_stock.py").unlink()
+    before = _tree(tmp_path / "shop")
+    plan = plan_for(source=PackSource(directory=pack), roots=roots)
+    assert [(row["kind"], row["path"], row["key"]) for row in plan.conflicts] == [
+        ("missing_workflow_tool_file", "workflows/StockReview/tools.yaml", missing),
+    ]
+    with pytest.raises(CommunityComponentConflictError):
+        apply(source=PackSource(directory=pack), roots=roots)
+    assert _tree(tmp_path / "shop") == before
+
+
+@pytest.mark.parametrize("file", ["review_stock.py", "tools/review_stock.py", "tools\\review_stock.py", "../_shared/tools/stock_lookup.py"])
+def test_workflow_tool_files_resolve_where_the_runtime_looks(tmp_path, file):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    _tools(pack, file=file)
+    plan = plan_component_install(source=PackSource(directory=pack), roots=roots)
+    assert [row for row in plan.conflicts if row["kind"] == "missing_workflow_tool_file"] == []
+    if plan.status == "ready":
+        apply_component_install(source=PackSource(directory=pack), roots=roots)
+        assert verify_installed_components(roots=roots)["status"] == "clean"
+
+
+def _shared_component_app(tmp_path: Path):
+    roots = _ordinary_app(tmp_path / "shop")
+    shared = roots.app_root / "ui/lib/shared.jsx"
+    shared.parent.mkdir(parents=True)
+    shared.write_text("export const First = () => null;\nexport const Second = () => null;\n", encoding="utf-8")
+    return roots
+
+
+@pytest.mark.parametrize(("second", "conflicts"), [("Second", 1), ("First", 0)], ids=["two-components", "one-component"])
+def test_components_of_one_file_are_told_apart(tmp_path, second, conflicts):
+    roots = _shared_component_app(tmp_path)
+    packs = {}
+    for name, original in (("alpha", "First"), ("beta", second)):
+        packs[name] = _page_pack(tmp_path, name)
+        (packs[name] / f"templates/modules/{name}/ui/index.js").write_text(
+            f"export {{ {original} as DashboardPage }} from '../../../ui/lib/shared.jsx';\n", encoding="utf-8",
+        )
+    apply_component_install(source=PackSource(directory=packs["alpha"]), roots=roots)
+    plan = plan_component_install(source=PackSource(directory=packs["beta"]), roots=roots)
+    assert [row["kind"] for row in plan.conflicts] == ["ambiguous_module_component"] * conflicts
+
+
+@pytest.mark.parametrize("fault", ["context.yaml", "context-bytes", "contract.yaml"])
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_the_cli_reports_an_unreadable_source_as_invalid(tmp_path, capsys, monkeypatch, fault, dry_run):
+    from mozaiks_cli.commands import pack as pack_cli
+
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    if fault == "context-bytes":
+        (pack / "context.yaml").write_bytes(b"pack: \xff\xfe\n")
+    else:
+        (pack / fault).write_text("pack: [unclosed\n", encoding="utf-8")
+    parser = argparse.ArgumentParser()
+    pack_cli.add_parser(parser.add_subparsers())
+    command = ["pack", "install", str(pack), "--workspace", str(tmp_path / "shop"), "--json", *(["--dry-run"] if dry_run else [])]
+    before = _tree(tmp_path / "shop")
+    assert pack_cli.run(parser.parse_args(command)) == pack_cli.EXIT_INVALID == 2
+    assert json.loads(capsys.readouterr().out)["status"] == "invalid"
+    assert _tree(tmp_path / "shop") == before
+    assert not roots.build_context_root.exists()
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize("dependency", ["pack", "capability", "version"])
+def test_the_cli_reports_a_generator_dependency_conflict_as_blocked(tmp_path, capsys, dependency, dry_run):
+    from mozaiks_cli.commands import pack as pack_cli
+
+    roots = _ordinary_app(tmp_path / "shop")
+    _materialize(roots, _generator_pack(tmp_path, "1.0.0", modules=("ledger",)))
+    apply_component_install(source=PackSource(directory=_capability_pack(tmp_path, "other")), roots=roots)
+    requires, kind = {
+        "pack": ({"packs": [{"pack_id": "library.absent"}]}, "missing_pack"),
+        "capability": ({"capabilities": ["absent.capability"]}, "missing_capability"),
+        "version": ({"packs": [{"pack_id": "library.other", "version": "9.0.0"}]}, "pack_version_mismatch"),
+    }[dependency]
+    candidate = _generator_pack(tmp_path, "2.0.0", modules=("ledger",), requires=requires)
+    parser = argparse.ArgumentParser()
+    pack_cli.add_parser(parser.add_subparsers())
+    command = ["pack", "upgrade", str(candidate), "--workspace", str(tmp_path / "shop"), "--json", *(["--dry-run"] if dry_run else [])]
+    before = _tree(tmp_path / "shop")
+    assert pack_cli.run(parser.parse_args(command)) == pack_cli.EXIT_BLOCKED == 1
+    report = json.loads(capsys.readouterr().out)
+    assert (report["status"], [row["kind"] for row in report["conflicts"]]) == ("blocked", [kind])
+    assert _tree(tmp_path / "shop") == before

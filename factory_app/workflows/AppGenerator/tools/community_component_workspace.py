@@ -613,6 +613,28 @@ def _validate_workflow_folder(folder: str, files: Mapping[str, str]) -> None:
         )
 
 
+def _workflow_tool_conflicts(files: Mapping[str, str], exists: Callable[[str], bool]) -> list[dict[str, str]]:
+    """Tools and lifecycle tools whose file the runtime would not find, so the workflow would run without them."""
+    from mozaiksai.core.workflow.declarative import parse_tools_config, parse_workflow_mapping
+
+    conflicts: list[dict[str, str]] = []
+    for path, text in sorted(files.items()):
+        folder, _, name = path.partition("/")
+        if name != "tools.yaml":
+            continue
+        try:
+            tools = parse_tools_config(parse_workflow_mapping(text.removeprefix("\ufeff"), path))
+        except (ValueError, yaml.YAMLError):
+            # Validating the workflow folder reports it.
+            continue
+        for binding in [*tools["tools"], *tools["lifecycle_tools"]]:
+            file = str(binding.get("file") or "").replace("\\", "/")
+            # The two places load_agent_tool_functions and the lifecycle tool loader look.
+            if file and not exists(f"{folder}/{file}") and not exists(f"{folder}/tools/{file}"):
+                conflicts.append({"kind": "missing_workflow_tool_file", "path": f"workflows/{path}", "key": file})
+    return conflicts
+
+
 # --------------------------------------------------------------------------------------
 # Host requirements: modules, imports, secrets
 # --------------------------------------------------------------------------------------
@@ -976,7 +998,7 @@ def _component_state(app: _ProspectiveApp) -> _ComponentState:
                 providers.update({
                     owner: owner for owner, names in (("app", app_components), ("shell", shell_components)) if name in names
                 })
-            # Workflows may share one implementation file.
+            # Providers may share one component; two components of one file are still two.
             if len(set(providers.values())) > 1:
                 state.ambiguous.setdefault(name, (sorted(providers), []))[1].append(path)
             elif name not in state.registered:
@@ -1964,6 +1986,8 @@ def _candidate(source: PackSource) -> Iterator[_Candidate]:
             yield _Candidate(pack_dir=pack_dir, pack_id=_pack_id_from_context(pack_dir), locator=locator)
     except PackSourceError as exc:
         raise CommunityComponentLifecycleError(str(exc)) from exc
+    except (yaml.YAMLError, UnicodeDecodeError) as exc:
+        raise CommunityComponentLifecycleError(f"The pack source has a file that cannot be read: {exc}") from exc
 
 
 def _new_plan(operation: str, rendered: _RenderedPack, current: dict[str, Any] | None) -> LifecyclePlan:
@@ -2031,6 +2055,8 @@ def _plan_workspace_change(
     _plan_workflow_files(outcome, rendered, recorded, roots, other_workflow_files, adopt=adopt)
     _plan_entries(outcome, rendered, recorded, roots, other_entries, adopt=adopt)
     complete = not plan.conflicts
+    if complete:
+        plan.conflicts.extend(_workflow_tool_conflicts(rendered.workflow_files, _planned_files(roots.workflows_root, outcome.writes)))
     _check_host_requirements(rendered, roots, plan, outcome.writes)
     _check_dependent_host_requirements(rendered, installed, roots, outcome)
     _check_prospective_app(
@@ -2233,19 +2259,30 @@ def _generator_upgrade_plan(candidate: _Candidate, roots: WorkspaceRoots, *, app
                 f"Pack '{candidate.pack_id}' was materialized by AppGenerator; upgrade it from a directory "
                 "checkout of that commit rather than --git, because its upgrade path re-reads the source later."
             )
-        # Everything the base lifecycle writes, so the checks see the app it produces.
-        preview, base_writes = prepare_component_upgrade(
-            build_context_root=roots.build_context_root,
-            candidate_pack_source_path=candidate.pack_dir,
-            workspace_app_root=roots.app_root,
-        )
-        plan = _plan_from_base_upgrade(preview, metadata, candidate, applied=False)
-        files, _ui_roots, _data = _render_pack(candidate.pack_dir, candidate.pack_id)
         entry = _component_entry_from_verified_pack(candidate.pack_dir, candidate.pack_id)
         # Only what the pack declares is required of the host, as for every installed dependent.
         rendered = _RenderedPack(
             pack_id=candidate.pack_id, entry=entry, contract={"requires": entry.get("host_requirements") or {}},
         )
+        # Everything the base lifecycle writes, so the checks see the app it produces.
+        try:
+            preview, base_writes = prepare_component_upgrade(
+                build_context_root=roots.build_context_root,
+                candidate_pack_source_path=candidate.pack_dir,
+                workspace_app_root=roots.app_root,
+            )
+        except PackDependencyError:
+            # A dependency conflict blocks the plan, however the pack was installed.
+            unmet = _new_plan("upgrade", rendered, current)
+            _check_dependencies(rendered, installed, unmet, current=current)
+            if not unmet.conflicts:
+                raise
+            unmet.status = "blocked"
+            if apply:
+                raise _blocked(unmet) from None
+            return unmet
+        plan = _plan_from_base_upgrade(preview, metadata, candidate, applied=False)
+        files, _ui_roots, _data = _render_pack(candidate.pack_dir, candidate.pack_id)
         writes = {_destination(roots.app_root, path): text for path, text in base_writes.items()}
         outcome = _Outcome(plan=plan, writes=writes)
         complete = not plan.conflicts
@@ -2339,6 +2376,11 @@ def verify_installed_components(*, roots: WorkspaceRoots) -> dict[str, Any]:
                     _workflow_registry_conflicts(registry_document, roots, checked)
                 except CompositionFormatError as exc:
                     checked.conflicts.append({"kind": "invalid_workflow_registry", "detail": str(exc)})
+        tool_files = {
+            path: text for path in recorded.workflow if path.endswith("/tools.yaml")
+            for text in [_read_text(_destination(roots.workflows_root, path))] if isinstance(text, str)
+        }
+        checked.conflicts.extend(_workflow_tool_conflicts(tool_files, _planned_files(roots.workflows_root, {})))
         named = _recorded_route_targets(recorded, roots) | _page_targets(app, recorded.owned)
         checked.conflicts.extend(
             _workflow_reference_conflict(target, targets.get(target, [_ROUTE_MANIFEST_PATH]))

@@ -711,7 +711,8 @@ pack workflows. Every declared workflow must also retain a source folder after
 the planned writes; the packaged-default fallback follows the runtime rules.
 Removing or renaming a referenced workflow blocks the upgrade.
 Every workflow YAML file an asset ships is checked with the runtime's own parsers,
-context contract and transition graph compiler before anything is written. The
+context contract and transition graph compiler before anything is written, and
+every tool it declares must have its file. The
 orchestrator must name its folder in `workflow_name`, and `initial_agent` must be
 a declared agent or `user`. An app without a workflow registry launches every
 loaded workflow, so initial registry entries are skipped there with a warning.

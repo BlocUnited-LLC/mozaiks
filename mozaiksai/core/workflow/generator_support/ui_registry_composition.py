@@ -609,7 +609,7 @@ def _tree_has_error(source: str) -> bool:
 def _component_exports(
     path: str, files: dict[str, str], exists: Callable[[str], bool] | None = None,
 ) -> dict[str, str]:
-    """Each component one module UI file exports, with the file that implements it.
+    """Each component one module UI file exports, with the binding that implements it (``file#name``).
 
     Follows ECMAScript export resolution: a module's own export wins over
     ``export *``; a name two ``export *`` sources bind differently is absent
@@ -621,7 +621,8 @@ def _component_exports(
     for name in graph.names_of(path, set()):
         binding = graph.resolve(path, name, set())
         if isinstance(binding, _Binding) and binding.component:
-            result[name] = path if binding.path.startswith(("package:", "unread:")) else binding.path
+            # What cannot be read is known only to the file that names it.
+            result[name] = f"{path}#{name}" if binding.path.startswith("unread:") else f"{binding.path}#{binding.name}"
     graph.check_links(path)
     return result
 
@@ -642,7 +643,7 @@ def module_ui_components(
 
     Mirrors ``web_shell/moduleUi.js``: a module with a manifest and one
     ``ui/index.js`` or ``ui/index.jsx`` contributes every component its barrel
-    exports. The first result maps a module id to its exports and the files that
+    exports. The first result maps a module id to its exports and the bindings that
     implement them, the second a module id to why its barrel does not resolve.
     """
     barrels: dict[str, list[str]] = {}
@@ -697,7 +698,8 @@ def _workflow_exports(
         key = member.child_by_field_name("key") if member.type == "pair" else member
         if member.type not in {"pair", "shorthand_property_identifier"} or key.type == "computed_property_name":
             raise ValueError(f"{path}: the default export cannot be read; export each component by name")
-        names[_string(key) if key.type == "string" else _text(key)] = path
+        name = _string(key) if key.type == "string" else _text(key)
+        names[name] = f"{path}#{name}"
     return names
 
 
@@ -738,7 +740,7 @@ def workflow_ui_components(
 def module_ui_registrations(
     components: Mapping[str, Mapping[str, str]], app_components: Collection[str] = (),
 ) -> dict[str, dict[str, str]]:
-    """Registry keys module UI barrels add, each with its providing modules and implementation files.
+    """Registry keys module UI barrels add, each with its providing modules and implementing bindings.
 
     Mirrors ``web_shell/moduleUiRegistration.js``: every export registers as
     ``<module_id>:<Export>`` and as ``<Export>``, and never replaces a key the
