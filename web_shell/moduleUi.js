@@ -23,11 +23,37 @@ export function resolveModuleUiBarrels(appDir) {
   return barrels;
 }
 
+/** Whether a file decides which barrels exist: modules/<module_id>/module.yaml or ui/index.js(x). */
+function decidesModuleUi(modulesDir, filename) {
+  const parts = path.relative(modulesDir, path.resolve(filename)).split(path.sep);
+  return /^[^._]/.test(parts[0]) && ['module.yaml', 'ui/index.js', 'ui/index.jsx'].includes(parts.slice(1).join('/'));
+}
+
 export function moduleUiPlugin({ appDir }) {
   const publicId = 'virtual:mozaiks-module-ui';
   const resolvedId = `\0${publicId}`;
   return {
     name: 'mozaiks-module-ui',
+    configureServer(server) {
+      // The watcher follows the folder, so a module installed later is seen; the virtual
+      // module itself still depends on barrel files only.
+      const modulesDir = path.resolve(appDir, 'modules');
+      const roots = fs.existsSync(modulesDir) ? [modulesDir, fs.realpathSync(modulesDir)] : [modulesDir];
+      server.watcher.add([...new Set(roots)]);
+      const refreshModules = (filename) => {
+        if (!roots.some((root) => decidesModuleUi(root, filename))) return;
+        const module = server.moduleGraph.getModuleById(resolvedId);
+        if (!module) return;
+        server.moduleGraph.invalidateModule(module);
+        server.ws.send({ type: 'full-reload', path: '*' });
+      };
+      server.watcher.on('add', refreshModules);
+      server.watcher.on('unlink', refreshModules);
+      server.httpServer?.once('close', () => {
+        server.watcher.off('add', refreshModules);
+        server.watcher.off('unlink', refreshModules);
+      });
+    },
     resolveId(id) { return id === publicId ? resolvedId : undefined; },
     load(id) {
       if (id !== resolvedId) return undefined;

@@ -754,7 +754,7 @@ on what it introduces:
 | --- | --- |
 | `route_path_conflict` | Two pages claim one path on one surface: route manifest, `ui/pages` schemas, workflow entrypoints, admin pages, and the shell's core chat and profile routes. A pack may route its own admin page. |
 | `app_contract_error` | A new error from the shared app contract and functional checks, such as a page that calls a module action the upgrade removes. |
-| `unresolved_workflow_reference` | An app declaration names a workflow, transition or sequence the plan removes, or one of the pack's own routes targets a workflow the runtime cannot launch. |
+| `unresolved_workflow_reference` | An app declaration names a workflow, transition or sequence the plan removes, or one of the pack's own routes or schema page actions targets one the runtime cannot launch. |
 | `invalid_module` | The runtime would refuse to load one of the pack's modules. Its declarations are read with the runtime's own rules and its handler source is parsed; no pack code runs. |
 
 A handler method counts as missing only where the module's own source shows the
@@ -812,7 +812,8 @@ upgrade keeps every other pack's recorded entries, including workflow registry
 entries.
 
 The workspace pin, its source sidecar, the provenance and the app's files are
-written as one transaction. Each file is replaced atomically; a failure attempts
+written as one transaction. Each file is replaced atomically and keeps its
+permissions; a new file follows the umask. A failure attempts
 to restore files and remove newly created directories, and reports any incomplete
 rollback. A
 lock file at `build_context/.mozaiks/lifecycle.lock` refuses concurrent
@@ -826,6 +827,10 @@ device name, a trailing dot or space, or two names that differ only in case.
 Rendered template outputs follow the same rule: two templates that render to
 names differing only in case, or a file and a folder at one destination
 (`config/x.j2` beside `config/x/`), block the plan before anything is written.
+Ownership is compared the same way: a path that differs from another pack's file
+only in case or Unicode form is that file (`owned_by_other_pack`), and one that so
+differs from an existing app path, or from the file an upgrade would replace, is a
+`path_spelling_conflict`.
 The pin records `git+<origin>@<commit>#<folder>`, with any credentials in the
 origin URL removed.
 

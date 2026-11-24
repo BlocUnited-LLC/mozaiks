@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 
 from mozaiksai.core.runtime.persistence.intent_loader import load_data_contract
+from mozaiksai.core.semantics.portable_path import PortablePathError, collision_key
 from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     SHARED_PACK_OUTPUT_PATHS,
@@ -409,6 +410,18 @@ def _current_owner_by_path(app_root: Path) -> dict[str, str]:
     return owner_by_path
 
 
+def _path_key(path: str) -> str:
+    """The key under which two spellings of a path are one file on some supported host."""
+    try:
+        return collision_key(path)
+    except PortablePathError:
+        return path.casefold()
+
+
+def _other_owners_by_key(app_root: Path, pack_id: str) -> dict[str, str]:
+    return {_path_key(path): owner for path, owner in _current_owner_by_path(app_root).items() if owner != pack_id}
+
+
 def _exclusive_shared_root_claims(app_root: Path) -> list[dict[str, str]]:
     """Every pack entry that claims a shared composition root as an exclusive file, whatever the order."""
     return sorted(
@@ -492,6 +505,7 @@ def _plan_upgrade(
     app_root = Path(workspace_app_root).resolve() if workspace_app_root else None
     if app_root:
         owner_by_path = _current_owner_by_path(app_root)
+        other_owners = _other_owners_by_key(app_root, pack_id)
         # Provenance that claims a shared root as one pack's file predates composition.
         # Nothing is planned on it: the app is reassembled first, whichever pack claims it.
         legacy_claims = _exclusive_shared_root_claims(app_root)
@@ -507,8 +521,9 @@ def _plan_upgrade(
                 potential_conflicts.append({"path": path, "kind": "composed_output_requires_reassembly"})
         for path in sorted(added + changed):
             owner = owner_by_path.get(path)
-            if owner and owner != pack_id:
-                potential_conflicts.append({"path": path, "kind": "owned_by_other_pack", "owner": owner})
+            other = other_owners.get(_path_key(path))
+            if other:
+                potential_conflicts.append({"path": path, "kind": "owned_by_other_pack", "owner": other})
             target = app_root / path
             if target.exists() and not owner:
                 potential_conflicts.append({"path": path, "kind": "workspace_owned_file"})

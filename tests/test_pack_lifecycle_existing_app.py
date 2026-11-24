@@ -2876,3 +2876,296 @@ def test_route_targets_that_were_already_unresolved_do_not_block(tmp_path):
     (candidate / "workflows/extended_orchestration/extension_registry.json").write_text(json.dumps({"workflows": []}), encoding="utf-8")
     _edit(candidate / "templates/ui/route_manifest.json", '"component": "StockLedgerPage"', '"transition": "app-choice"')
     assert plan_workspace_upgrade(source=PackSource(directory=candidate), roots=roots).conflicts == []
+
+
+# --------------------------------------------------------------------------------------
+# Portable ownership
+# --------------------------------------------------------------------------------------
+
+
+def _file_pack(tmp_path: Path, name: str, path: str, *, owner: str = "templates", workflow: bool = False) -> Path:
+    """A library that ships one file, as its own, as a seed, or as a workflow file."""
+    pack = _capability_pack(tmp_path, name)
+    if workflow:
+        context = yaml.safe_load((pack / "context.yaml").read_text(encoding="utf-8"))
+        context["assets"].append({"path": "workflows/", "kind": "workflows"})
+        (pack / "context.yaml").write_text(yaml.safe_dump(context), encoding="utf-8")
+        target = pack / "workflows" / path
+    else:
+        contract = yaml.safe_load((pack / "contract.yaml").read_text(encoding="utf-8"))
+        contract["required_outputs"] = [{"path": path, "owner": owner}]
+        (pack / "contract.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
+        target = pack / "templates" / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("shared: content\n", encoding="utf-8")
+    return pack
+
+
+SPELLINGS = [
+    ("services/MyConfig.yaml", "services/myconfig.yaml"),
+    ("services/Area/item.yaml", "services/area/item.yaml"),
+    ("services/caf\u00e9.yaml", "services/CAFE\u0301.yaml"),
+]
+
+
+@pytest.mark.parametrize("adopt", [False, True], ids=["install", "adopt"])
+@pytest.mark.parametrize("owner", ["templates", "workspace"])
+@pytest.mark.parametrize(("first", "second"), SPELLINGS, ids=["file", "folder", "normalization"])
+def test_a_spelling_of_another_packs_file_is_that_file(tmp_path, first, second, owner, adopt):
+    roots = _ordinary_app(tmp_path / "shop")
+    apply_component_install(source=PackSource(directory=_file_pack(tmp_path, "first", first)), roots=roots)
+    before = _tree(tmp_path / "shop")
+    source = PackSource(directory=_file_pack(tmp_path, "second", second, owner=owner))
+    plan = plan_component_install(source=source, roots=roots, adopt=adopt)
+    assert [(row["kind"], row["owner"]) for row in plan.conflicts] == [("owned_by_other_pack", "library.first")]
+    with pytest.raises(CommunityComponentConflictError):
+        apply_component_install(source=source, roots=roots, adopt=adopt)
+    assert _tree(tmp_path / "shop") == before
+
+
+@pytest.mark.parametrize("adopt", [False, True], ids=["install", "adopt"])
+def test_a_spelling_of_another_packs_workflow_file_is_that_file(tmp_path, adopt):
+    roots = _ordinary_app(tmp_path / "shop")
+    first = _file_pack(tmp_path, "first", "_shared/Lookup.yaml", workflow=True)
+    apply_component_install(source=PackSource(directory=first), roots=roots)
+    second = _file_pack(tmp_path, "second", "_shared/lookup.yaml", workflow=True)
+    plan = plan_component_install(source=PackSource(directory=second), roots=roots, adopt=adopt)
+    assert [(row["kind"], row["path"], row["owner"]) for row in plan.conflicts] == [
+        ("owned_by_other_pack", "workflows/_shared/lookup.yaml", "library.first"),
+    ]
+
+
+@pytest.mark.parametrize(("first", "second"), [("services/area", "services/Area/item"), ("services/Area/item", "services/area")])
+def test_a_pack_file_and_another_packs_folder_cannot_share_a_path(tmp_path, first, second):
+    roots = _ordinary_app(tmp_path / "shop")
+    apply_component_install(source=PackSource(directory=_file_pack(tmp_path, "first", first)), roots=roots)
+    plan = plan_component_install(source=PackSource(directory=_file_pack(tmp_path, "second", second)), roots=roots)
+    assert [(row["kind"], row["owner"]) for row in plan.conflicts] == [("owned_by_other_pack", "library.first")]
+
+
+@pytest.mark.parametrize("adopt", [False, True], ids=["install", "adopt"])
+@pytest.mark.parametrize(("existing", "path"), SPELLINGS, ids=["file", "folder", "normalization"])
+def test_a_library_file_must_spell_an_existing_app_path_as_the_app_does(tmp_path, existing, path, adopt):
+    roots = _ordinary_app(tmp_path / "shop")
+    target = roots.app_root / existing
+    target.parent.mkdir(parents=True)
+    target.write_text("shared: content\n", encoding="utf-8")
+    plan = plan_component_install(source=PackSource(directory=_file_pack(tmp_path, "second", path)), roots=roots, adopt=adopt)
+    assert [(row["kind"], row["path"]) for row in plan.conflicts] == [("path_spelling_conflict", path)]
+    same = _file_pack(tmp_path, "same", existing)
+    assert apply_component_install(source=PackSource(directory=same), roots=roots, adopt=True).status == "applied"
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+
+
+def test_an_upgrade_cannot_only_respell_a_file(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    apply_component_install(source=PackSource(directory=_file_pack(tmp_path, "first", "services/Config.yaml")), roots=roots)
+    candidate = _file_pack(tmp_path / "v2", "first", "services/config.yaml")
+    _edit(candidate / "context.yaml", "version: 1.0.0", "version: 2.0.0")
+    before = _tree(tmp_path / "shop")
+    plan = plan_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+    assert [(row["kind"], row["path"]) for row in plan.conflicts] == [("path_spelling_conflict", "services/config.yaml")]
+    assert _tree(tmp_path / "shop") == before
+
+
+def test_a_generator_upgrade_cannot_take_a_spelling_of_another_packs_file(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    _materialize(roots, _generator_pack(tmp_path, "1.0.0", modules=("ledger",)))
+    apply_component_install(source=PackSource(directory=_file_pack(tmp_path, "first", "services/Extra.yaml")), roots=roots)
+    candidate = _generator_pack(tmp_path, "2.0.0", modules=("ledger",))
+    (candidate / "templates/services/extra.yaml").write_text("shared: content\n", encoding="utf-8")
+    plan = plan_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+    assert ("owned_by_other_pack", "library.first") in {(row["kind"], row.get("owner")) for row in plan.conflicts}
+
+
+# --------------------------------------------------------------------------------------
+# File permissions
+# --------------------------------------------------------------------------------------
+
+
+def _mode(path: Path) -> int:
+    return path.stat().st_mode & 0o7777
+
+
+@pytest.fixture
+def _umask():
+    previous = os.umask(0o027)
+    yield 0o027
+    os.umask(previous)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+def test_replaced_files_keep_their_mode_and_new_files_follow_the_umask(tmp_path, _umask):
+    roots = _ordinary_app(tmp_path / "shop")
+    modes = {"data/contract.json": 0o664, "ui/route_manifest.json": 0o604, "admin/admin_registry.yaml": 0o600}
+    for path, mode in modes.items():
+        (roots.app_root / path).chmod(mode)
+    apply_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots)
+    assert {path: _mode(roots.app_root / path) for path in modes} == modes
+    state = roots.build_context_root / ".mozaiks"
+    created = [
+        roots.app_root / "modules/stock_ledger/backend/handler.py", roots.workflows_root / "StockReview/agents.yaml",
+        roots.app_root / ".mozaiks/pack_provenance.json", state / "installed_components.json",
+        state / "installed_component_sources.json",
+    ]
+    assert {_mode(path) for path in created} == {0o640}
+    assert _mode(roots.app_root / "modules/stock_ledger") == 0o750
+    # An upgrade keeps what the operator set on files the first install created.
+    handler = created[0]
+    handler.chmod(0o755)
+    created[2].chmod(0o644)
+    apply_workspace_upgrade(source=PackSource(directory=_version_two(tmp_path)), roots=roots)
+    assert (_mode(handler), _mode(created[2])) == (0o755, 0o644)
+    assert {path: _mode(roots.app_root / path) for path in modes} == modes
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+@pytest.mark.parametrize("failing_call", [1, 3, 6])
+def test_rollback_restores_every_mode(tmp_path, monkeypatch, _umask, failing_call):
+    roots = _install(tmp_path)
+    for index, path in enumerate(sorted(roots.app_root.rglob("*"))):
+        if path.is_file():
+            path.chmod([0o644, 0o600, 0o755, 0o664][index % 4])
+    before = {path: (_mode(path), path.read_bytes()) for path in (tmp_path / "shop").rglob("*") if path.is_file()}
+    calls = 0
+    replace = os.replace
+
+    def failing_replace(source, destination):
+        nonlocal calls
+        calls += 1
+        if calls == failing_call:
+            raise OSError("disk full")
+        replace(source, destination)
+
+    monkeypatch.setattr(workspace_module.os, "replace", failing_replace)
+    with pytest.raises(OSError, match="disk full"):
+        apply_workspace_upgrade(source=PackSource(directory=_version_two(tmp_path)), roots=roots)
+    assert calls >= failing_call
+    assert {path: (_mode(path), path.read_bytes()) for path in (tmp_path / "shop").rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+def test_a_private_file_is_never_readable_by_others_while_it_is_replaced(tmp_path, monkeypatch, _umask):
+    roots = _ordinary_app(tmp_path / "shop")
+    manifest = roots.app_root / "ui/route_manifest.json"
+    manifest.chmod(0o600)
+    seen: list[int] = []
+    replace = os.replace
+
+    def watching_replace(source, destination):
+        if Path(destination) == manifest:
+            seen.append(_mode(Path(source)))
+        replace(source, destination)
+
+    monkeypatch.setattr(workspace_module.os, "replace", watching_replace)
+    apply_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots)
+    assert seen == [0o600]
+    assert _mode(manifest) == 0o600
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+def test_a_generator_upgrade_keeps_file_modes(tmp_path, _umask):
+    roots = _ordinary_app(tmp_path / "shop")
+    _materialize(roots, _generator_pack(tmp_path, "1.0.0", modules=("ledger", "journal")))
+    state = roots.build_context_root / ".mozaiks"
+    paths = [
+        roots.app_root / "data/contract.json", roots.app_root / "services/generated_marker.py",
+        roots.app_root / ".mozaiks/pack_provenance.json", state / "installed_components.json",
+        state / "installed_component_sources.json",
+    ]
+    for path in paths:
+        path.chmod(0o664)
+    candidate = PackSource(directory=_generator_pack(tmp_path, "2.0.0", modules=("ledger",)))
+    assert apply_workspace_upgrade(source=candidate, roots=roots).status == "applied"
+    assert {_mode(path) for path in paths} == {0o664}
+
+
+# --------------------------------------------------------------------------------------
+# Workflows a library page launches
+# --------------------------------------------------------------------------------------
+
+
+def _action_page(pack: Path, workflow_id: str, *, nested: bool = False, name: str = "stock_actions") -> None:
+    button = {
+        "id": "launch", "primitive": "ActionButton",
+        "config": {"actions": [{
+            "label": "Review", "action_type": "workflow", "workflow_id": workflow_id,
+            # Keys of the workflow's own context are not references.
+            "context_variables": {"workflow_id": "FreeForm", "action_type": "workflow"},
+        }]},
+    }
+    section = {"id": "grid", "primitive": "Grid", "config": {"columns": 1, "children": [button]}} if nested else button
+    target = pack / "templates/ui/pages" / f"{name}.yaml"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(yaml.safe_dump({
+        "schema_version": "mozaiks.app_page.v1", "name": name, "route": f"/{name}", "title": "Actions",
+        "page_type": "record_list", "layout": "full-width", "sections": [section],
+    }), encoding="utf-8")
+
+
+@pytest.mark.parametrize("nested", [False, True], ids=["section", "grid"])
+@pytest.mark.parametrize("operation", ["install", "upgrade"])
+def test_a_library_page_must_launch_a_workflow_that_exists(tmp_path, operation, nested):
+    if operation == "upgrade":
+        roots, pack = _install(tmp_path), _version_two(tmp_path)
+        plan_for, apply = plan_workspace_upgrade, apply_workspace_upgrade
+    else:
+        roots, pack = _ordinary_app(tmp_path / "shop"), _pack(tmp_path)
+        plan_for, apply = plan_component_install, apply_component_install
+    _action_page(pack, "DoesNotExist", nested=nested)
+    before = _tree(tmp_path / "shop")
+    plan = plan_for(source=PackSource(directory=pack), roots=roots)
+    assert [(row["kind"], row["key"], row["path"]) for row in plan.conflicts] == [
+        ("unresolved_workflow_reference", "DoesNotExist", "ui/pages/stock_actions.yaml"),
+    ]
+    with pytest.raises(CommunityComponentConflictError):
+        apply(source=PackSource(directory=pack), roots=roots)
+    assert _tree(tmp_path / "shop") == before
+
+
+def test_a_library_page_may_launch_its_own_workflow_and_verify_reports_a_lost_one(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    pack = _pack(tmp_path)
+    _action_page(pack, "StockReview")
+    apply_component_install(source=PackSource(directory=pack), roots=roots)
+    assert verify_installed_components(roots=roots)["status"] == "clean"
+    registry = roots.workflows_root / "extended_orchestration/extension_registry.json"
+    original = registry.read_text(encoding="utf-8")
+    document = json.loads(original)
+    document["workflows"] = []
+    registry.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    [report] = verify_installed_components(roots=roots)["packs"]
+    assert ("unresolved_workflow_reference", "StockReview", "ui/pages/stock_actions.yaml") in {
+        (row["kind"], row.get("key"), row.get("path")) for row in report["findings"]
+    }
+
+
+def test_a_page_target_that_was_already_unresolved_does_not_block_an_upgrade(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    _entrypoint(roots, "/own")
+    pack = _pack(tmp_path)
+    _action_page(pack, "Own")
+    apply_component_install(source=PackSource(directory=pack), roots=roots)
+    shutil.rmtree(roots.workflows_root / "Own")
+    registry = roots.workflows_root / "extended_orchestration/extension_registry.json"
+    document = json.loads(registry.read_text(encoding="utf-8"))
+    document["workflows"] = [row for row in document["workflows"] if row["id"] != "Own"]
+    document["entrypoints"] = []
+    registry.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    candidate = _version_two(tmp_path)
+    _action_page(candidate, "Own")
+    # The same broken target stays the app's; a new one is the plan's.
+    assert plan_workspace_upgrade(source=PackSource(directory=candidate), roots=roots).conflicts == []
+    _action_page(candidate, "Ghost", name="more_actions")
+    plan = plan_workspace_upgrade(source=PackSource(directory=candidate), roots=roots)
+    assert [(row["kind"], row["key"]) for row in plan.conflicts] == [("unresolved_workflow_reference", "Ghost")]
+
+
+def test_an_app_page_with_a_missing_workflow_does_not_block(tmp_path):
+    roots = _ordinary_app(tmp_path / "shop")
+    app_page = tmp_path / "app-page"
+    _action_page(app_page, "NeverExisted")
+    target = roots.app_root / "ui/pages/stock_actions.yaml"
+    target.parent.mkdir(parents=True)
+    shutil.copy(app_page / "templates/ui/pages/stock_actions.yaml", target)
+    assert plan_component_install(source=PackSource(directory=_pack(tmp_path)), roots=roots).conflicts == []

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createServer } from 'vite';
 import { moduleUiPlugin, resolveModuleUiBarrels } from '../moduleUi.js';
 import { registerModuleUi } from '../moduleUiRegistration.js';
 
@@ -89,4 +90,82 @@ test('module exports cannot take the shell authentication page names', () => {
   assert.equal(target.components.has('AuthCallbackPage'), false);
   assert.equal(target.components.get('stock:LoginPage'), login);
   assert.equal(target.components.get('stock:AuthCallbackPage'), callback);
+});
+
+test('modules installed or removed while the dev server runs are rediscovered', async (t) => {
+  const f = fixture(t);
+  f.write('web/index.html', '<!doctype html>');
+  f.write('modules/first/module.yaml');
+  const server = await createServer({
+    configFile: false, root: path.join(f.appDir, 'web'), logLevel: 'silent', appType: 'custom', optimizeDeps: { noDiscovery: true },
+    server: { middlewareMode: true, ws: false, fs: { strict: false } }, plugins: [moduleUiPlugin({ appDir: f.appDir })],
+  });
+  t.after(() => server.close());
+  const ids = async () => Object.keys((await server.ssrLoadModule('virtual:mozaiks-module-ui')).default).sort();
+  const settles = async (expected, change) => {
+    change();
+    const deadline = Date.now() + 15000;
+    for (;;) {
+      const found = await ids();
+      if (JSON.stringify(found) === JSON.stringify(expected) || Date.now() > deadline) return assert.deepEqual(found, expected);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  };
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.deepEqual(await ids(), []);
+  // A barrel added to a module that had none.
+  await settles(['first'], () => f.write('modules/first/ui/index.js', 'export const First = () => null;'));
+  // A module installed after the server started: its barrel may arrive before its manifest.
+  await settles(['first', 'second'], () => {
+    f.write('modules/second/ui/index.js', 'export const Second = () => null;');
+    f.write('modules/second/module.yaml');
+  });
+  await settles(['second'], () => fs.rmSync(path.join(f.appDir, 'modules/first/ui/index.js')));
+  await settles([], () => fs.rmSync(path.join(f.appDir, 'modules/second'), { recursive: true }));
+});
+
+test('the dev server rediscovers modules an app gains its first of', async (t) => {
+  const f = fixture(t);
+  f.write('web/index.html', '<!doctype html>');
+  const server = await createServer({
+    configFile: false, root: path.join(f.appDir, 'web'), logLevel: 'silent', appType: 'custom', optimizeDeps: { noDiscovery: true },
+    server: { middlewareMode: true, ws: false, fs: { strict: false } }, plugins: [moduleUiPlugin({ appDir: f.appDir })],
+  });
+  t.after(() => server.close());
+  const ids = async () => Object.keys((await server.ssrLoadModule('virtual:mozaiks-module-ui')).default);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.deepEqual(await ids(), []);
+  f.write('modules/stock/module.yaml');
+  f.write('modules/stock/ui/index.jsx', 'export const Stock = () => null;');
+  const deadline = Date.now() + 15000;
+  while ((await ids()).length === 0 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.deepEqual(await ids(), ['stock']);
+});
+
+test('only manifests and barrels invalidate the virtual module, which watches no folder', (t) => {
+  const f = fixture(t);
+  f.write('modules/stock/module.yaml');
+  f.write('modules/stock/ui/index.js');
+  const handlers = {};
+  const added = [];
+  const invalidated = [];
+  const sent = [];
+  moduleUiPlugin({ appDir: f.appDir }).configureServer({
+    watcher: { add: (paths) => added.push(...paths), on: (event, handler) => { handlers[event] = handler; }, off() {} },
+    moduleGraph: { getModuleById: (id) => ({ id }), invalidateModule: (module) => invalidated.push(module.id) },
+    ws: { send: (message) => sent.push(message.type) },
+  });
+  const modules = path.join(f.appDir, 'modules');
+  for (const file of ['stock/backend/handler.py', 'stock/ui/Page.jsx', 'stock/ui/deep/index.js', '_shared/ui/index.js', '.x/module.yaml', 'module.yaml']) {
+    handlers.add(path.join(modules, file));
+  }
+  handlers.add(path.join(f.appDir, 'elsewhere/stock/module.yaml'));
+  assert.deepEqual(invalidated, []);
+  for (const file of ['stock/module.yaml', 'stock/ui/index.js', 'stock/ui/index.jsx']) {
+    handlers.add(path.join(modules, file));
+    handlers.unlink(path.join(modules, file));
+  }
+  assert.equal(invalidated.length, 6);
+  assert.deepEqual([...new Set(sent)], ['full-reload']);
+  assert.ok(added.every((entry) => fs.realpathSync(entry) === fs.realpathSync(modules)));
 });

@@ -19,12 +19,14 @@ import copy
 import json
 import os
 import re
+import secrets
 import stat
+import sys
 import tempfile
 import time
 from collections import Counter
-from collections.abc import Callable, Iterator, Mapping, Set
-from contextlib import contextmanager
+from collections.abc import Callable, Iterable, Iterator, Mapping, Set
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -33,9 +35,15 @@ from typing import Any
 import yaml
 
 from mozaiksai.core.runtime.app.auth_contract import APP_AUTH_COMPONENTS
+from mozaiksai.core.runtime.app.page_schema import (
+    PageSchemaValidationError,
+    page_workflow_ids,
+    validate_page_schema,
+)
 from mozaiksai.core.runtime.app.provenance import resolve_build_timestamp
 from mozaiksai.core.semantics.portable_path import (
     PortablePathError,
+    collision_key,
     detect_collisions,
     validate_portable_path,
 )
@@ -378,6 +386,7 @@ def _recorded(manifest: Mapping[str, Any], pack_id: str) -> _Recorded:
 
 
 def _other_owners(manifest: Mapping[str, Any], pack_id: str) -> tuple[dict[str, str], dict[str, str], dict[str, dict[tuple[str, str], str]]]:
+    """What other packs own: files by portable collision key, entries by shared root and address."""
     files: dict[str, str] = {}
     workflow_files: dict[str, str] = {}
     entries: dict[str, dict[tuple[str, str], str]] = {}
@@ -387,10 +396,10 @@ def _other_owners(manifest: Mapping[str, Any], pack_id: str) -> tuple[dict[str, 
             continue
         for row in entry.get("materialized_owned_files") or []:
             if isinstance(row, dict) and row.get("path") and row.get("owner") != "workspace":
-                files[str(row["path"])] = owner
+                files[collision_key(str(row["path"]))] = owner
         for row in entry.get("materialized_workflow_files") or []:
             if isinstance(row, dict) and row.get("path"):
-                workflow_files[str(row["path"])] = owner
+                workflow_files[collision_key(str(row["path"]))] = owner
     for field_name in ("composed_outputs", "composed_workflow_outputs"):
         composed = manifest.get(field_name)
         for path, contributors in (composed.items() if isinstance(composed, dict) else ()):
@@ -1069,6 +1078,26 @@ def _app_workflow_targets(app: _ProspectiveApp) -> dict[tuple[str, str], list[st
     return targets
 
 
+_SCHEMA_PAGE = re.compile(r"ui/pages/(?:[^/]+|[^/]+/page)\.ya?ml")
+
+
+def _page_targets(app: _ProspectiveApp, paths: Iterable[str]) -> set[tuple[str, str]]:
+    """The workflows that actions on these schema pages launch."""
+    found: set[tuple[str, str]] = set()
+    for path in paths:
+        if path not in app.texts or not _SCHEMA_PAGE.fullmatch(path):
+            continue
+        try:
+            document = yaml.safe_load(app.texts[path])
+            page = validate_page_schema(document) if isinstance(document, dict) else None
+        except (yaml.YAMLError, PageSchemaValidationError):
+            # The contract scan reports a page the runtime refuses.
+            continue
+        if page is not None:
+            found.update(("workflow", workflow_id) for workflow_id in page_workflow_ids(page))
+    return found
+
+
 def _workflow_reference_conflict(target: tuple[str, str], paths: list[str]) -> dict[str, str]:
     kind, name = target
     return {
@@ -1099,10 +1128,12 @@ def _check_prospective_app(
     if state.ambiguous or state.unresolved or state.barrel_errors or state.workflow_barrel_errors:
         _module_component_conflicts(owned_paths, routes, state, plan, before=_component_state(before))
     available = _workflow_inventory(app, roots)
-    known = _workflow_inventory(before, roots)
-    lost = known - available
-    # A target the pack's own route already had, and that already did not resolve, is not this plan's.
-    missing = own_targets - available - (previous_targets - known)
+    launchable = _workflow_inventory(before, roots)
+    lost = launchable - available
+    own_targets = own_targets | _page_targets(app, owned_paths)
+    # A target the pack already named, and that already did not resolve, is not this plan's.
+    already_missing = (previous_targets | _page_targets(before, owned_paths)) - launchable
+    missing = own_targets - available - already_missing
     if lost or missing:
         for target, paths in sorted(_app_workflow_targets(app).items()):
             if target in lost or target in missing:
@@ -1315,11 +1346,50 @@ def _check_dependencies(
 # --------------------------------------------------------------------------------------
 
 
+def _existing_spellings(root: Path) -> dict[str, set[str]]:
+    """How each file and folder under a root is spelled, by portable collision key."""
+    spellings: dict[str, set[str]] = {}
+    for path in root.rglob("*") if root.is_dir() else ():
+        try:
+            portable = validate_portable_path(path.relative_to(root).as_posix())
+        except PortablePathError:
+            continue
+        spellings.setdefault(portable.collision_key, set()).add(portable.text)
+    return spellings
+
+
+def _respelled(path: str, spellings: Mapping[str, set[str]]) -> str | None:
+    """The existing file or folder a new path names with another spelling: one file on some hosts, two on others."""
+    portable = validate_portable_path(path)
+    for count in range(1, len(portable.segments) + 1):
+        prefix = "/".join(portable.segments[:count])
+        existing = spellings.get(collision_key(prefix), {prefix})
+        if prefix not in existing:
+            return min(existing)
+    return None
+
+
+def _new_path_conflict(
+    path: str, label: str, other_files: Mapping[str, str], spellings: Mapping[str, set[str]],
+) -> dict[str, str] | None:
+    """Why a path the pack does not own yet cannot become its own, whatever the file holds."""
+    key = collision_key(path)
+    nested = next((other for other in other_files if other.startswith(f"{key}/") or key.startswith(f"{other}/")), None)
+    owner = other_files.get(key) or (other_files[nested] if nested is not None else None)
+    if owner is not None:
+        return {"kind": "owned_by_other_pack", "path": label, "owner": owner}
+    existing = _respelled(path, spellings)
+    if existing is not None:
+        return {"kind": "path_spelling_conflict", "path": label, "detail": f"{existing!r} exists and differs only in spelling"}
+    return None
+
+
 def _plan_owned_files(
     outcome: _Outcome, rendered: _RenderedPack, recorded: _Recorded, roots: WorkspaceRoots,
     other_files: dict[str, str], *, adopt: bool,
 ) -> None:
     plan = outcome.plan
+    spellings = _existing_spellings(roots.app_root)
     for path in sorted(set(rendered.owned) | set(recorded.owned)):
         target = _destination(roots.app_root, path)
         current = _read_text(target)
@@ -1328,8 +1398,9 @@ def _plan_owned_files(
         if new is not None:
             outcome.owned_rows.append({"path": path, "owner": "templates", "sha256": content_sha256(new)})
         if new is not None and old_hash is None:
-            if path in other_files:
-                plan.conflicts.append({"kind": "owned_by_other_pack", "path": path, "owner": other_files[path]})
+            conflict = _new_path_conflict(path, path, other_files, spellings)
+            if conflict is not None:
+                plan.conflicts.append(conflict)
             elif current is None:
                 plan.files["write"].append(path)
                 outcome.writes[target] = new
@@ -1364,8 +1435,9 @@ def _plan_owned_files(
         target = _destination(roots.app_root, path)
         current = _read_text(target)
         old_hash = recorded.seeds.get(path)
-        if path in other_files:
-            plan.conflicts.append({"kind": "owned_by_other_pack", "path": path, "owner": other_files[path]})
+        conflict = None if path in recorded.owned or old_hash is not None else _new_path_conflict(path, path, other_files, spellings)
+        if conflict is not None:
+            plan.conflicts.append(conflict)
         elif current is None and old_hash is None and path not in recorded.owned:
             plan.files["seed"].append(path)
             outcome.writes[target] = new
@@ -1383,6 +1455,7 @@ def _plan_workflow_files(
     other_files: dict[str, str], *, adopt: bool,
 ) -> None:
     plan = outcome.plan
+    spellings = _existing_spellings(roots.workflows_root)
     for path in sorted(set(rendered.workflow_files) | set(recorded.workflow)):
         target = _destination(roots.workflows_root, path)
         current = _read_text(target)
@@ -1391,8 +1464,9 @@ def _plan_workflow_files(
         if new is not None:
             outcome.workflow_rows.append({"path": path, "owner": "templates", "sha256": content_sha256(new)})
         if new is not None and old_hash is None:
-            if path in other_files:
-                plan.conflicts.append({"kind": "owned_by_other_pack", "path": f"workflows/{path}", "owner": other_files[path]})
+            conflict = _new_path_conflict(path, f"workflows/{path}", other_files, spellings)
+            if conflict is not None:
+                plan.conflicts.append(conflict)
             elif current is None:
                 plan.workflow_files["write"].append(path)
                 outcome.writes[target] = new
@@ -1717,15 +1791,45 @@ def _missing_parents(path: Path) -> list[Path]:
     return missing
 
 
+_CREATE = os.O_CREAT | os.O_WRONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+
+
+def _temporary_file(parent: Path, previous: os.stat_result | None) -> tuple[int, Path]:
+    """An unpredictable new file beside a destination.
+
+    ``mkstemp`` would leave the destination owner-only. A new file gets ordinary
+    permissions under the umask; one that replaces a file takes its access first,
+    before it holds any content.
+    """
+    while True:
+        path = parent / f".mz-{secrets.token_hex(8)}.tmp"
+        try:
+            descriptor = os.open(path, _CREATE | os.O_EXCL, 0o666 if previous is None else 0o600)
+        except FileExistsError:
+            continue
+        return descriptor, path
+
+
+def _keep_access(path: Path, previous: os.stat_result) -> None:
+    """Give a file the mode, and where permitted the owner, another had. Windows inherits both from the folder."""
+    if sys.platform == "win32":
+        return
+    current = path.stat()
+    if (current.st_uid, current.st_gid) != (previous.st_uid, previous.st_gid):
+        with suppress(PermissionError):
+            os.chown(path, previous.st_uid, previous.st_gid)
+    os.chmod(path, stat.S_IMODE(previous.st_mode))
+
+
 def _commit(
     writes: Mapping[Path, str | bytes | None], roots: WorkspaceRoots, *, directories: tuple[Path, ...] = (),
 ) -> None:
-    """Replace files atomically and restore their prior contents after failure.
+    """Replace files atomically and restore their prior contents and access after failure.
 
     Unsafe or unwritable rollback destinations remain untouched; exception
     notes report cleanup failures without replacing the original exception.
     """
-    backups: list[tuple[Path, bytes | None]] = []
+    backups: list[tuple[Path, tuple[bytes, os.stat_result] | None]] = []
     created: list[Path] = []
     temporary: Path | None = None
     for path in (*writes, *directories):
@@ -1737,7 +1841,8 @@ def _commit(
             directory.mkdir(parents=True, exist_ok=True)
         for path, text in writes.items():
             path = _write_destination(path, roots)
-            backups.append((path, path.read_bytes() if path.is_file() else None))
+            replaced = path.stat() if path.is_file() else None
+            backups.append((path, None if replaced is None else (path.read_bytes(), replaced)))
             if text is None:
                 if path.is_file():
                     path.unlink()
@@ -1745,9 +1850,10 @@ def _commit(
             created.extend(_missing_parents(path))
             path.parent.mkdir(parents=True, exist_ok=True)
             _write_destination(path, roots)
-            descriptor, temporary_name = tempfile.mkstemp(prefix=".mz-", suffix=".tmp", dir=path.parent)
-            temporary = Path(temporary_name)
+            descriptor, temporary = _temporary_file(path.parent, replaced)
             with os.fdopen(descriptor, "wb") as stream:
+                if replaced is not None:
+                    _keep_access(temporary, replaced)
                 stream.write(text if isinstance(text, bytes) else text.encode("utf-8"))
             os.replace(_write_destination(temporary, roots), _write_destination(path, roots))
             temporary = None
@@ -1764,8 +1870,11 @@ def _commit(
                     if path.is_file():
                         path.unlink()
                 else:
+                    content, access = previous
                     path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_bytes(previous)
+                    with os.fdopen(os.open(path, _CREATE | os.O_TRUNC, 0o600), "wb") as stream:
+                        _keep_access(path, access)
+                        stream.write(content)
             except (OSError, CommunityComponentLifecycleError) as exc:
                 failure.add_note(f"Rollback could not restore {path}: {exc}")
         for directory in sorted(set(created), key=lambda item: len(item.parts), reverse=True):
@@ -1797,7 +1906,7 @@ def _lifecycle_lock(build_context_root: Path) -> Iterator[None]:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            descriptor = os.open(_destination(build_context_root, _LOCK_PATH), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            descriptor = os.open(_destination(build_context_root, _LOCK_PATH), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666)
         except FileExistsError as exc:
             raise CommunityComponentLockedError(
                 f"Another pack operation holds {path}. If none is running, delete that file and try again."
@@ -2199,6 +2308,7 @@ def verify_installed_components(*, roots: WorkspaceRoots) -> dict[str, Any]:
     app_errors = _app_contract_errors(app) if installed else []
     collisions = _shell_path_collisions(app, roots) if installed else {}
     launchable = _workflow_inventory(app, roots)
+    targets = _app_workflow_targets(app)
     for entry in sorted(_pack_entries(manifest), key=lambda item: str(item.get("pack_id") or "")):
         pack_id = str(entry.get("pack_id") or "")
         entries_seen.add(pack_id)
@@ -2224,9 +2334,10 @@ def verify_installed_components(*, roots: WorkspaceRoots) -> dict[str, Any]:
                     _workflow_registry_conflicts(registry_document, roots, checked)
                 except CompositionFormatError as exc:
                     checked.conflicts.append({"kind": "invalid_workflow_registry", "detail": str(exc)})
+        named = _recorded_route_targets(recorded, roots) | _page_targets(app, recorded.owned)
         checked.conflicts.extend(
-            _workflow_reference_conflict(target, [_ROUTE_MANIFEST_PATH])
-            for target in sorted(_recorded_route_targets(recorded, roots) - launchable)
+            _workflow_reference_conflict(target, targets.get(target, [_ROUTE_MANIFEST_PATH]))
+            for target in sorted(named - launchable)
         )
         route_paths = _recorded_values(recorded, roots, _ROUTE_MANIFEST_PATH, "path")
         admin_paths = _recorded_values(recorded, roots, _ADMIN_REGISTRY_PATH, "path")

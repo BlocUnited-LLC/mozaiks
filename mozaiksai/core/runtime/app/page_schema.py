@@ -770,6 +770,23 @@ def load_and_validate_page_schema(
     )
 
 
+def page_workflow_ids(page: AppPageSchema) -> set[str]:
+    """Every workflow a page's actions launch: the one page key that names a workflow."""
+    found: set[str] = set()
+    pending: list[Any] = [page.model_dump()]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, list | tuple):
+            pending.extend(value)
+        elif isinstance(value, dict):
+            workflow_id = value.get("workflow_id")
+            if value.get("action_type") == "workflow" and isinstance(workflow_id, str) and workflow_id:
+                found.add(workflow_id)
+            # An action's payload and context are the app's own keys.
+            pending.extend(item for key, item in value.items() if key not in {"payload", "context_variables"})
+    return found
+
+
 def validate_page_schema(
     schema: Mapping[str, Any],
     *,

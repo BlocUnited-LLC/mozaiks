@@ -390,7 +390,10 @@ def _loaded_files(statements: list[Any]) -> list[tuple[str, str | None]]:
         if node.type in {"import_statement", "export_statement"} and node.child_by_field_name("source") is not None:
             source = _string(node.child_by_field_name("source"))
             names = {name for _source, name in _import_entries(node).values()} if node.type == "import_statement" else set()
-            loaded.extend((source, name) for name in (names - {"*"} or {None}))
+            named = sorted(names - {"*"})
+            loaded.extend((source, name) for name in named)
+            if not named:
+                loaded.append((source, None))
             continue
         if node.type == "call_expression" and node.child_by_field_name("function").type == "import":
             arguments = node.child_by_field_name("arguments")
@@ -558,7 +561,8 @@ class _ModuleGraph:
 
     def check_links(self, entry: str) -> None:
         """Every file a barrel loads must exist, and provide each name that is taken from it."""
-        pending, checked = [entry], set()
+        pending = [entry]
+        checked: set[str] = set()
         while pending:
             module = pending.pop()
             if module in checked:
@@ -573,13 +577,13 @@ class _ModuleGraph:
                 targets = (self.locate(module, source) for source in forwarded if source.startswith("."))
                 pending.extend(target for target in targets if target is not None)
                 continue
-            for source, original in exports.imports:
+            for source, imported in exports.imports:
                 target = self.locate(module, source)
                 if target is None:
                     continue
                 pending.append(target)
-                if original is not None and not isinstance(self._provided(module, source, original), _Binding):
-                    raise ValueError(f"{module}: imports {original!r}, which {source!r} does not provide")
+                if imported is not None and not isinstance(self._provided(module, source, imported), _Binding):
+                    raise ValueError(f"{module}: imports {imported!r}, which {source!r} does not provide")
 
     def _links_of(self, module: str) -> _ModuleExports:
         """A module's links; a file that cannot be read statically is not judged."""
