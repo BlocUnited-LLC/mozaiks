@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
@@ -45,6 +46,7 @@ from mozaiksai.core.adapters.ag2_network_runner import (
     _json_safe_dict,
     _require_current_build_context,
     _resume_pending_agent_turns,
+    model_change_checkpoint,
 )
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
@@ -271,8 +273,15 @@ async def test_recovered_turn_settles_before_a_new_user_message_is_sent() -> Non
         "Worker": _DeterministicAgent("Worker", "unused"),
     }, "Start"))
     assert failed.status is RunStatus.FAILED
+    assert await model_change_checkpoint(store, "RecoverPendingSmoke") == "busy"
     planner = _DeterministicAgent("Planner", "Recovered plan")
     worker = SlowWorker("Worker", "Ready for approval")
+    rejected = await AG2NetworkRunner().run(replace(
+        request({"Planner": planner, "Worker": worker}, None), resume_existing_only=True, rebind_model=True,
+    ))
+    assert rejected.status is RunStatus.FAILED
+    assert not planner.ask_calls
+    assert not worker.ask_calls
     recovered = await AG2NetworkRunner().run(request({"Planner": planner, "Worker": worker}, "Approve"))
     try:
         assert recovered.status is RunStatus.COMPLETED, recovered.error
@@ -282,6 +291,47 @@ async def test_recovered_turn_settles_before_a_new_user_message_is_sent() -> Non
     finally:
         if recovered.live_run is not None:
             await recovered.live_run.close()
+
+
+@pytest.mark.anyio
+async def test_new_clients_take_over_same_idle_channel_without_replaying_a_turn():
+    store = MemoryKnowledgeStore()
+    assert await model_change_checkpoint(store, "SelectModel") == "new"
+    prompt = _DeterministicAgent("Prompt", "Which group?")
+    request = AG2NetworkRunnerRequest(
+        workflow_name="SelectModel", chat_id="chat-model", app_id="app-model", knowledge_store=store,
+        initial_agent_name="Prompt", initial_message="Compare cohorts", idle_timeout_seconds=4.0,
+        agents={"Prompt": prompt, "Answer": _DeterministicAgent("Answer", "old model")},
+        transition_rules=[
+            {"source_agent": "Prompt", "target_agent": "user", "transition_type": "after_turn"},
+            {"source_agent": "user", "target_agent": "Answer", "transition_type": "after_turn"},
+            {"source_agent": "Answer", "target_agent": "terminate", "transition_type": "after_turn"},
+        ],
+    )
+    original = await AG2NetworkRunner().run(request)
+    try:
+        assert original.status is RunStatus.PAUSED
+        assert await original.live_run.can_rebind_model()
+        assert await model_change_checkpoint(store, "SelectModel") == "idle"
+        assert await model_change_checkpoint(store, "OtherWorkflow") == "busy"
+    finally:
+        await original.live_run.close()
+    alternate = _DeterministicAgent("Answer", "alternate result")
+    replacement = await AG2NetworkRunner().run(replace(
+        request, initial_message=None, resume_existing_only=True, rebind_model=True,
+        agents={"Prompt": prompt, "Answer": alternate},
+    ))
+    try:
+        assert replacement.channel_id == original.channel_id
+        assert replacement.status is RunStatus.PAUSED
+        assert len(prompt.ask_calls) == 1
+        assert not alternate.ask_calls
+        reply = await replacement.live_run.continue_with_user_message("Managers")
+        assert reply.status is RunStatus.COMPLETED
+        assert len(alternate.ask_calls) == 1
+        assert len(prompt.ask_calls) == 1
+    finally:
+        await replacement.live_run.close()
 
 
 @pytest.mark.anyio
@@ -2039,6 +2089,39 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
         "workflow_review_approved": True,
         "workflow_review_revision_requested": False,
     }
+
+    # A model switch restores provider-bound clients without publishing a new
+    # result or replacing the original context/interaction on a failed attempt.
+    from unittest.mock import AsyncMock, Mock
+
+    from mozaiksai.core.workflow.execution import lifecycle
+
+    original_agent = object()
+    transport.connections["chat-reentry"] = {"agents": original_agent}
+    register_context = Mock()
+    register_live = Mock()
+    monkeypatch.setattr(transport, "register_derived_context_manager", register_context, raising=False)
+    monkeypatch.setattr(transport, "register_live_ag2_workflow_run", register_live, raising=False)
+    current_manager = Mock()
+    monkeypatch.setattr(orchestration_patterns_module, "DerivedContextManager", lambda *_: current_manager)
+    hooks = SimpleNamespace(trigger_before_chat=AsyncMock())
+    monkeypatch.setattr(lifecycle, "get_lifecycle_manager", lambda _: hooks)
+    old_events = list(transport.events)
+    staged = SimpleNamespace(status=RunStatus.FAILED, live_run=None)
+    monkeypatch.setattr(orchestration_patterns_module, "_run_ag2_network_phase", AsyncMock(return_value=staged))
+    failed = await run_workflow_orchestration(**run_kwargs, resume_existing_only=True, rebind_model=True)
+    assert failed["failed"]
+    register_context.assert_not_called()
+    register_live.assert_not_called()
+    assert transport.connections["chat-reentry"]["agents"] is original_agent
+    staged.status, staged.live_run = RunStatus.PAUSED, SimpleNamespace()
+    restored = await run_workflow_orchestration(**run_kwargs, resume_existing_only=True, rebind_model=True)
+    assert restored["awaiting_user_input"]
+    register_live.assert_called_once_with("chat-reentry", staged.live_run)
+    register_context.assert_called_once_with("chat-reentry", current_manager)
+    assert transport.connections["chat-reentry"]["agents"] is not original_agent
+    hooks.trigger_before_chat.assert_not_awaited()
+    assert transport.events == old_events
 
 
 @pytest.mark.anyio

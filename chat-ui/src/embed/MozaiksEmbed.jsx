@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { WebSocketApiAdapter } from '../adapters/api';
+import { useWorkflowModelPicker } from '../components/chat/WorkflowModelPicker';
 import BrowserConsoleBridge from '../components/debug/BrowserConsoleBridge.jsx';
 
 function normalizeRuntimeBaseUrl(runtimeUrl) {
@@ -268,6 +269,7 @@ function EmbedChatPanel({
   sendMessage,
   isTyping,
   connected,
+  workflowModel,
   theme,
   error,
   workflowName,
@@ -275,6 +277,7 @@ function EmbedChatPanel({
   const messagesEndRef = useRef(null);
   const colors = theme?.colors || {};
   const fonts = theme?.fonts || {};
+  const canSend = connected && !workflowModel.saving && Boolean(input.trim());
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -342,6 +345,7 @@ function EmbedChatPanel({
             {message.content}
           </div>
         ))}
+        {error && messages.length > 0 && <p role="alert">{error}</p>}
         {isTyping && (
           <div
             style={{
@@ -361,6 +365,9 @@ function EmbedChatPanel({
         <div ref={messagesEndRef} />
       </div>
 
+      {workflowModel.picker && <div style={{ padding: '4px 16px', backgroundColor: colors.background?.surface || '#0f1724' }}>
+        {workflowModel.picker}
+      </div>}
       <div
         style={{
           padding: '12px 16px',
@@ -390,13 +397,13 @@ function EmbedChatPanel({
         />
         <button
           onClick={sendMessage}
-          disabled={!input.trim() || !connected}
+          disabled={!canSend}
           style={{
             padding: '10px 16px',
             borderRadius: '8px',
             border: 'none',
-            cursor: input.trim() && connected ? 'pointer' : 'default',
-            backgroundColor: input.trim() && connected
+            cursor: canSend ? 'pointer' : 'default',
+            backgroundColor: canSend
               ? (colors.primary?.main || '#06b6d4')
               : (colors.border?.subtle || '#1e293b'),
             color: colors.text?.onAccent || '#ffffff',
@@ -417,7 +424,7 @@ function EmbedChatPanel({
   );
 }
 
-const MozaiksEmbed = ({
+const EmbedSession = ({
   appId,
   runtimeUrl,
   theme = null,
@@ -431,13 +438,14 @@ const MozaiksEmbed = ({
   mode = 'floating',
   width = '400px',
   height = '600px',
-  defaultOpen = false,
+  isOpen,
+  setIsOpen,
   onReady = null,
   onMessage = null,
   onError = null,
+  onComplete = null,
   className = '',
 }) => {
-  const [isOpen, setIsOpen] = useState(defaultOpen);
   const [resolvedTheme, setResolvedTheme] = useState(theme);
   const [resolvedWorkflowName, setResolvedWorkflowName] = useState(workflowName);
   const [chatId, setChatId] = useState(null);
@@ -449,6 +457,7 @@ const MozaiksEmbed = ({
 
   const containerRef = useRef(null);
   const connectionRef = useRef(null);
+  const pendingUser = useRef(null);
   const resolvingWorkflowRef = useRef(false);
   const startingChatRef = useRef(false);
 
@@ -471,16 +480,14 @@ const MozaiksEmbed = ({
     });
   }, [authToken, runtimeBaseUrl, wsBaseUrl]);
 
+  const workflowModel = useWorkflowModelPicker({
+    api: apiAdapter, appId, workflow: resolvedWorkflowName, chatId: apiAdapter && surfaceOpen ? chatId : null,
+    userId: effectiveUserId, disabled: isTyping || connectionStatus !== 'connected',
+  });
+
   useEffect(() => {
     setResolvedWorkflowName(workflowName);
   }, [workflowName]);
-
-  useEffect(() => {
-    setChatId(null);
-    setMessages([]);
-    setError(null);
-    setIsTyping(false);
-  }, [appId, effectiveUserId, workflowName]);
 
   useEffect(() => {
     if (theme) {
@@ -652,6 +659,7 @@ const MozaiksEmbed = ({
             case 'print':
             case 'message':
             case 'agent_message':
+              pendingUser.current = null;
               setIsTyping(false);
               appendAssistantMessage(setMessages, event);
               return;
@@ -660,8 +668,13 @@ const MozaiksEmbed = ({
               appendStreamChunk(setMessages, event);
               return;
             case 'stream_end':
+              pendingUser.current = null;
               setIsTyping(false);
               finalizeStream(setMessages, event);
+              return;
+            case 'awaiting_reply':
+            case 'input_request':
+              setIsTyping(false);
               return;
             case 'run_complete':
             case 'workflow_complete':
@@ -678,6 +691,12 @@ const MozaiksEmbed = ({
               return;
             case 'error': {
               const message = event.message || 'Workflow error';
+              if (event.error_code === 'WORKFLOW_MODEL_UNAVAILABLE' && pendingUser.current) {
+                const refused = pendingUser.current;
+                pendingUser.current = null;
+                setInput(current => current || refused.content);
+                setMessages(previous => previous.filter(item => item !== refused));
+              }
               setIsTyping(false);
               setError(message);
               onError?.(new Error(message));
@@ -721,6 +740,7 @@ const MozaiksEmbed = ({
     appId,
     chatId,
     effectiveUserId,
+    onComplete,
     onError,
     onMessage,
     onReady,
@@ -730,19 +750,15 @@ const MozaiksEmbed = ({
 
   const sendMessage = useCallback(async () => {
     const trimmed = input.trim();
-    if (!trimmed || !apiAdapter || !chatId || !resolvedWorkflowName || connectionStatus !== 'connected') {
+    if (!trimmed || !apiAdapter || !chatId || !resolvedWorkflowName || connectionStatus !== 'connected'
+      || workflowModel.saving) {
       return;
     }
 
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `user-${Date.now()}`,
-        role: 'user',
-        content: trimmed,
-        timestamp: Date.now(),
-      },
-    ]);
+    const message = { id: `user-${Date.now()}`, role: 'user', content: trimmed, timestamp: Date.now() };
+    pendingUser.current = message;
+    setMessages(prev => [...prev, message]);
+    setError(null);
     setInput('');
     setIsTyping(true);
 
@@ -760,11 +776,11 @@ const MozaiksEmbed = ({
       setError(message);
       onError?.(new Error(message));
     }
-  }, [apiAdapter, appId, chatId, connectionStatus, effectiveUserId, input, onError, resolvedWorkflowName]);
+  }, [apiAdapter, appId, chatId, connectionStatus, effectiveUserId, input, onError, resolvedWorkflowName, workflowModel.saving]);
 
   const toggleOpen = useCallback(() => {
     setIsOpen((prev) => !prev);
-  }, []);
+  }, [setIsOpen]);
 
   const positionStyles = {
     'bottom-right': { bottom: '20px', right: '20px' },
@@ -801,6 +817,7 @@ const MozaiksEmbed = ({
           sendMessage={sendMessage}
           isTyping={isTyping}
           connected={connected}
+          workflowModel={workflowModel}
           theme={resolvedTheme}
           error={error}
           workflowName={resolvedWorkflowName}
@@ -926,6 +943,7 @@ const MozaiksEmbed = ({
             sendMessage={sendMessage}
             isTyping={isTyping}
             connected={connected}
+            workflowModel={workflowModel}
             theme={resolvedTheme}
             error={error}
             workflowName={resolvedWorkflowName}
@@ -935,5 +953,11 @@ const MozaiksEmbed = ({
     </>
   );
 };
+
+function MozaiksEmbed(props) {
+  const scope = JSON.stringify([normalizeRuntimeBaseUrl(props.runtimeUrl), props.appId, props.workflowName, props.userId]);
+  const [isOpen, setIsOpen] = useState(props.defaultOpen ?? false);
+  return <EmbedSession key={scope} {...props} isOpen={isOpen} setIsOpen={setIsOpen}/>;
+}
 
 export { applyThemeToContainer, MozaiksEmbed };

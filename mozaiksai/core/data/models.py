@@ -126,6 +126,8 @@ class ChatSessionDoc(BaseModel):
     app_id: str
     workflow_name: str
     user_id: str
+    workflow_model: str | None = None
+    workflow_model_rebind_pending: bool = False
     status: WorkflowStatus  # stored as int (0/1/2)
     created_at: datetime
     last_updated_at: datetime

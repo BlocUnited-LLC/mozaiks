@@ -10,25 +10,42 @@ Routes:
 from __future__ import annotations
 
 import os
-from typing import Any, get_args
+from collections import Counter
+from typing import Annotated, Any, get_args
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
+from pydantic import BaseModel, ConfigDict, Field
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.auth.dependencies import (
     is_shared_development_identity,
+    validate_path_app_id,
+    validate_path_chat_id,
     validate_path_id,
     validate_user_id_against_principal,
 )
 from mozaiksai.core.chat_attachments.attachments import handle_chat_upload
 from mozaiksai.core.multitenant import build_app_scope_filter
-from mozaiksai.core.session.build_binding import RefinementModel
+from mozaiksai.core.runtime.persistence.distributed_lock import (
+    ChatLeaseLostError,
+    ChatLockAuthorityUnavailableError,
+    LockAcquisitionError,
+    assert_chat_mutable,
+    chat_execution_lease,
+)
+from mozaiksai.core.session.build_binding import RefinementModel, refinement_model_config
 from mozaiksai.core.transport.ui_tools import project_ui_tool_response_state
 from mozaiksai.hosts import runtime as runtime_app
 
 router = APIRouter(tags=["chat"])
 logger = get_workflow_logger("chat_router")
+
+
+class WorkflowModelSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model: str | None = Field(max_length=512)
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +308,112 @@ async def chat_meta(
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Failed to load chat meta") from exc
+
+
+async def _workflow_model_options(
+    app_id: str, workflow_name: str, chat_id: str, principal: UserPrincipal,
+    selection: WorkflowModelSelection | None = None,
+    user_hint: str | None = None,
+) -> dict[str, Any]:
+    from mozaiksai.core.workflow.llm_config import workflow_model_catalog
+
+    validate_path_id(app_id, "app_id")
+    validate_path_id(workflow_name, "workflow_name")
+    validate_path_id(chat_id, "chat_id")
+    validate_path_app_id(principal, app_id)
+    validate_path_chat_id(principal, chat_id)
+    owner = validate_user_id_against_principal(principal, path_user_id=user_hint or principal.user_id)
+    scope = {
+        "_id": chat_id, **build_app_scope_filter(app_id), "workflow_name": workflow_name,
+        "user_id": owner, "transport_purpose": {"$ne": "ask_carrier"},
+    }
+    coll = await runtime_app._chat_coll()
+    doc = await coll.find_one(scope, {"workflow_model": 1, "run_build_binding.refinement_model": 1, "status": 1})
+    if doc is None:
+        raise HTTPException(404, "Workflow chat not found.")
+    bound = (doc.get("run_build_binding") or {}).get("refinement_model")
+    if bound is not None:
+        if selection is not None:
+            raise HTTPException(409, "The model for this build is already set.")
+        provider = refinement_model_config(bound)
+        model_id = f"{provider['api_type']}:{provider['model']}"
+        return {
+            "models": [{"id": model_id, "label": provider["model"]}],
+            "default": model_id, "selected": model_id, "locked": True,
+        }
+
+    default, catalog = await workflow_model_catalog()
+    selected = doc.get("workflow_model")
+    counts = Counter(entry["model"] for entry in catalog.values())
+    options = [
+        {"id": key, "label": entry["model"] if counts[entry["model"]] == 1 else f"{entry['model']} ({key.split(':', 1)[0]})"}
+        for key, entry in catalog.items()
+    ]
+    if selection is not None:
+        selected = selection.model
+        if selected is not None and selected not in catalog:
+            raise HTTPException(422, "Choose a model configured for this workflow host.")
+        try:
+            async with chat_execution_lease(app_id=app_id, chat_id=chat_id):
+                from mozaiksai.core.adapters.ag2_knowledge_store import MongoAG2KnowledgeStore
+                from mozaiksai.core.adapters.ag2_network_runner import model_change_checkpoint
+
+                # Re-read under the lease, including simultaneous saves from another tab.
+                current = await coll.find_one(scope, {"workflow_model": 1, "status": 1, "run_build_binding.refinement_model": 1})
+                if current is None:
+                    raise HTTPException(404, "Workflow chat not found.")
+                if current.get("status") != 0 or (current.get("run_build_binding") or {}).get("refinement_model"):
+                    raise HTTPException(409, "This workflow chat's model is fixed.")
+                if selected == current.get("workflow_model"):
+                    return {"models": options, "default": default, "selected": selected, "locked": False}
+                transport = runtime_app.simple_transport
+                if transport and transport._input_request_registries.get(chat_id):
+                    raise HTTPException(409, "Finish the current workflow interaction before changing models.")
+                live = transport.get_live_ag2_workflow_run(chat_id) if transport else None
+                checkpoint = await model_change_checkpoint(MongoAG2KnowledgeStore(app_id=app_id, chat_id=chat_id), workflow_name)
+                started = await runtime_app.persistence_manager.chat_has_resumable_run(chat_id, app_id, workflow_name)
+                if (
+                    checkpoint != ("idle" if started else "new")
+                    or live is not None and (not started or not await live.can_rebind_model())
+                ):
+                    raise HTTPException(409, "Finish the current workflow interaction before changing models.")
+                assert_chat_mutable(app_id=app_id, chat_id=chat_id)
+                result = await coll.update_one(
+                    {
+                        **scope,
+                        "status": 0,
+                        "run_build_binding.refinement_model": None,
+                        "workflow_ui_state.pending_input_request": None,
+                    },
+                    {"$set": {"workflow_model": selected, "workflow_model_rebind_pending": started}},
+                )
+                if not result.matched_count:
+                    raise HTTPException(409, "Finish the current interaction or reload this workflow chat.")
+        except LockAcquisitionError as exc:
+            raise HTTPException(409, "Wait for the current workflow turn to finish before changing models.") from exc
+        except (ChatLockAuthorityUnavailableError, ChatLeaseLostError) as exc:
+            raise HTTPException(503, "Model selection is temporarily unavailable.") from exc
+    return {
+        "models": options,
+        "default": default, "selected": selected, "locked": False,
+    }
+
+
+@router.get("/api/chats/model/{app_id}/{workflow_name}/{chat_id}")
+async def get_workflow_model(
+    app_id: str, workflow_name: str, chat_id: str, principal: UserPrincipal = Depends(require_user_scope),
+    user_hint: Annotated[str | None, Header(alias="X-User-ID")] = None,
+):
+    return await _workflow_model_options(app_id, workflow_name, chat_id, principal, user_hint=user_hint)
+
+
+@router.put("/api/chats/model/{app_id}/{workflow_name}/{chat_id}")
+async def set_workflow_model(
+    app_id: str, workflow_name: str, chat_id: str, selection: WorkflowModelSelection,
+    principal: UserPrincipal = Depends(require_user_scope),
+    user_hint: Annotated[str | None, Header(alias="X-User-ID")] = None,
+):
+    return await _workflow_model_options(app_id, workflow_name, chat_id, principal, selection, user_hint)
 
 
 __all__ = ["router"]
