@@ -941,7 +941,7 @@ def test_a_file_survives_every_result(tmp_path, holder, workflow):
     _record_holder(roots, tmp_path, holder, path, workflow=workflow)
     kind = "seed" if holder.endswith("seed") else "owned"
     respelled = target.with_name("SHARED.yaml")
-    for writes in ({target: None}, {target: CHANGED}, {respelled: CHANGED}, {target: None, respelled: CHANGED}, {target / "in": "x"}, {target.parent: "x"}):
+    for writes in ({target: None}, {target: CHANGED}, {respelled: CHANGED}, {respelled: TEXT}, {target: None, respelled: CHANGED}, {target / "in": "x"}, {target.parent: "x"}):
         assert _losses(roots, writes) == [kind], writes
     assert _losses(roots, {target: TEXT}) == []
     # A pack's own record settles what a seed or a pin leaves open, and never a deletion.

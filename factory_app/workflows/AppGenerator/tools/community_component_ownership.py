@@ -390,6 +390,9 @@ class Holdings:
         self, holding: Holding, key: str, before: Any, touching: list[tuple[Path, str | bytes | None]],
         own_files: Set[str], own_entries: Set[tuple[str, Address]],
     ) -> bool:
+        if any(value is not None and str(path) != str(holding.path) for path, value in touching):
+            # A second spelling of the file: one file on some hosts, two on others.
+            return False
         if all(_same(value, before) for _path, value in touching):
             return True
         after = touching[0][1] if len(touching) == 1 and touching[0][0] == holding.path else None

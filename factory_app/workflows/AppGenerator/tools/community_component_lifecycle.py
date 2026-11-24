@@ -323,7 +323,7 @@ def _render_pack(
 
 def _recompose_data_contract(
     app_root: Path, old: list[dict[str, Any]], new: list[dict[str, Any]],
-    other_owners: Mapping[str, str], pinned_only: Mapping[str, str],
+    other_owners: Mapping[str, str] | None = None, pinned_only: Mapping[str, str] | None = None,
 ) -> tuple[str | None, str | None]:
     """Swap one pack's data contribution in the app contract.
 
@@ -333,6 +333,7 @@ def _recompose_data_contract(
     another pack records stays as it is: this pack may stop contributing it, and
     may not change it.
     """
+    other_owners, pinned_only = other_owners or {}, pinned_only or {}
     try:
         current = load_data_contract(app_root)
         if current is None and not new:
