@@ -50,6 +50,16 @@ export function useWorkflowModelPicker({ api, appId, workflow, chatId, userId, d
     return () => controller.abort();
   }, [path, userId, config, attempt]);
 
+  // Another tab can change this same conversation while it is in the background.
+  useEffect(() => {
+    if (!state?.catalog || state.saving || state.signal.aborted) return;
+    const refresh = () => {
+      if (document.visibilityState === 'visible') setAttempt(value => value + 1);
+    };
+    document.addEventListener('visibilitychange', refresh);
+    return () => document.removeEventListener('visibilitychange', refresh);
+  }, [state]);
+
   // A route change renders before effects run. Never expose the previous chat's choice or controls.
   if (!path || state?.path !== path || state.userId !== userId || state.config !== config || state.signal.aborted) {
     return { picker: null, saving: false };

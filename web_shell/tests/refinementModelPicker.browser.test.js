@@ -110,8 +110,9 @@ test('the AppReview composer lets the user select a model and preserves it acros
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
   for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
-    const page = await browser.newPage({ viewport });
-    t.after(() => page.close());
+    const context = await browser.newContext({ viewport });
+    const page = await context.newPage();
+    t.after(() => context.close());
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     const origin = `http://127.0.0.1:${server.address().port}/`;
@@ -125,12 +126,21 @@ test('the AppReview composer lets the user select a model and preserves it acros
     await expect(select.locator('option:checked')).toHaveText('Workflow default · First model');
     await select.selectOption('local:m2');
     await expect(select).toHaveValue('local:m2');
-    const peer = await page.context().newPage();
+    const peer = await context.newPage();
     await peer.goto(origin);
     await peer.evaluate(() => { window.changeChat('parallel'); window.changeWorkflow('Other'); });
     const peerSelect = peer.getByRole('combobox', {name:'AI model'});
     await peerSelect.selectOption('local:m1');
     await expect(peerSelect).toHaveValue('local:m1');
+    await expect(select).toHaveValue('local:m2');
+    await peer.evaluate(() => window.changeChat('fixture-chat'));
+    await expect(peerSelect).toHaveValue('local:m2');
+    await peerSelect.selectOption('local:m1');
+    await expect(peerSelect).toHaveValue('local:m1');
+    await page.bringToFront();
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await expect(select).toHaveValue('local:m1');
+    await select.selectOption('local:m2');
     await expect(select).toHaveValue('local:m2');
     await peer.close();
     await page.evaluate(() => window.changeChat('sibling'));
