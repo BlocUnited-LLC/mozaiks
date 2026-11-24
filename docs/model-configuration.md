@@ -64,6 +64,18 @@ provider-specific and should be omitted for Google. For Anthropic, install
 explicit model. Provider/model capabilities must match the workflow's tools and
 structured-output requirements.
 
+### Choosing a model in a workflow chat
+
+The workflow composer offers the models configured for the running app. A user
+can choose a model for subsequent workflow replies and reopen the conversation
+with that choice. Each conversation keeps its own selection. The full chat page
+and embedded `WorkflowChat` use the same control.
+
+The choice applies to the agents answering in that workflow. Background jobs
+with their own model configuration continue to use it. Factory builds and
+refinements retain the model bound to their run. See the
+[Studio model settings](guides/configs/refinement.md#studio-ai-models).
+
 ## Refinement requests
 
 `app/config/refinement_policy.yaml` owns named `llm_profiles`. The shipped
