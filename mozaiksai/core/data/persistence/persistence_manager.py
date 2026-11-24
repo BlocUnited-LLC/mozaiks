@@ -24,6 +24,7 @@ import json
 import os
 from collections.abc import Callable
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -195,6 +196,12 @@ def find_non_string_keys(value: Any, *, _path: str = "") -> list[str]:
         for index, item in enumerate(value):
             found.extend(find_non_string_keys(item, _path=f"{_path}[{index}]"))
     return found
+
+
+@dataclass(frozen=True)
+class ChatModelPreference:
+    selected: str | None
+    rebind_pending: bool
 
 
 class ChatSessionTerminalError(RuntimeError):
@@ -549,13 +556,15 @@ class AG2PersistenceManager:
                     "last_sequence",
                     "messages",
                     "workflow_ui_state",
+                    "workflow_model",
+                    "workflow_model_rebind_pending",
                     "last_artifact",
                     "pending_input_request",
                 }
                 for k, v in list(extra_fields.items()):
                     if not isinstance(k, str) or not k.strip():
                         continue
-                    if k in protected:
+                    if k in protected or k.split(".", 1)[0] in {"workflow_model", "workflow_model_rebind_pending"}:
                         continue
                     # This guard was top-level only, so a nested non-string key
                     # reached the driver and failed the whole insert -- on a
@@ -629,6 +638,8 @@ class AG2PersistenceManager:
             "chat_id",
             "app_id",
             "ag2_stream_id",
+            "workflow_model",
+            "workflow_model_rebind_pending",
             "workflow_name",
             "user_id",
             "status",
@@ -756,6 +767,8 @@ class AG2PersistenceManager:
         candidate_updates: dict[str, Any] = {}
         for key, value in variables.items():
             if not isinstance(key, str) or not key.strip() or key in protected:
+                continue
+            if key.split(".", 1)[0] in {"workflow_model", "workflow_model_rebind_pending"}:
                 continue
             if key in SERVER_OWNED_SESSION_FIELDS:
                 # Server-owned lifecycle authority fields are never writable
@@ -955,18 +968,31 @@ class AG2PersistenceManager:
             logger.error("Failed to create general chat session app_id=%s user=%s: %s", resolved_app_id, user_id, e, exc_info=True)
             raise
 
-    async def assert_chat_resumable(self, chat_id: str, app_id: str) -> None:
-        """Fail closed on storage errors; an absent session may be created."""
+    async def assert_chat_resumable(self, chat_id: str, app_id: str) -> ChatModelPreference | None:
+        """Return the chat's model selection at this execution boundary, or the default."""
         if not app_id:
             raise ValueError("app_id is required")
         coll = await self._coll()
         doc = await coll.find_one(
-            {"_id": chat_id, **build_app_scope_filter(app_id)}, {"status": 1},
+            {"_id": chat_id, **build_app_scope_filter(app_id)},
+            {"status": 1, "workflow_model": 1, "workflow_model_rebind_pending": 1, "run_build_binding.refinement_model": 1},
         )
         if doc is not None:
             status = WorkflowStatus(doc["status"])
             if status is not WorkflowStatus.IN_PROGRESS:
                 raise ChatSessionTerminalError(status)
+            if not (doc.get("run_build_binding") or {}).get("refinement_model"):
+                if doc.get("workflow_model") is not None or doc.get("workflow_model_rebind_pending"):
+                    return ChatModelPreference(doc.get("workflow_model"), bool(doc.get("workflow_model_rebind_pending")))
+        return None
+
+    async def finish_chat_model_rebind(self, chat_id: str, app_id: str, selected: str | None) -> None:
+        assert_chat_mutable(app_id=app_id, chat_id=chat_id)
+        coll = await self._coll()
+        await coll.update_one(
+            {"_id": chat_id, **build_app_scope_filter(app_id), "workflow_model": selected},
+            {"$unset": {"workflow_model_rebind_pending": ""}},
+        )
 
     async def chat_has_resumable_run(
         self,
