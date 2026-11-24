@@ -68,8 +68,13 @@ structured-output requirements.
 
 Open **AI model** in the workflow composer to select a model for subsequent
 replies. Reopening the conversation restores the selection. Choose **Workflow
-default** to use the runtime default again. The full chat page and embedded
-`WorkflowChat` use the same control.
+default** to use the runtime default again. The full chat page, `WorkflowChat`,
+and the inline or floating `MozaiksEmbed` widget use the same control.
+
+Change models before the workflow starts or when it is waiting for your next
+message. If a tool interaction is open, finish it first. If the host removes a
+saved model, choose another available model or **Workflow default** and resend
+your message. Switching models preserves the chat history and its artifacts.
 
 The options come from the runtime's configured providers. For an environment
 using OpenAI, for example, `LLM_PRIMARY_MODEL=gpt-4o-mini` and
