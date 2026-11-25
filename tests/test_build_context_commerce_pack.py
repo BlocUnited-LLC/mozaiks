@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -81,6 +83,30 @@ def test_commerce_contract_required_outputs_exist_under_templates() -> None:
         "modules/payment_provider/",
         "services/adapters/payments/",
     } <= forbidden
+
+
+def test_commerce_pack_pin_matches_across_git_line_endings(tmp_path: Path) -> None:
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        verify_pack_integrity,
+    )
+
+    repo = tmp_path / "source"
+    pack_path = COMMERCE.relative_to(WORKSPACE)
+    shutil.copytree(COMMERCE, repo / pack_path, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    shutil.copyfile(WORKSPACE / ".gitattributes", repo / ".gitattributes")
+    git = ["git", "-C", str(repo)]
+    subprocess.run([*git, "init", "--quiet"], check=True)
+    subprocess.run([*git, "-c", "core.autocrlf=false", "add", "."], check=True)
+
+    pins = []
+    for autocrlf in ("false", "true"):
+        output = tmp_path / autocrlf
+        subprocess.run(
+            [*git, "-c", f"core.autocrlf={autocrlf}", "checkout-index", "--all", f"--prefix={output.as_posix()}/"],
+            check=True,
+        )
+        pins.append(verify_pack_integrity(output / pack_path, "commerce")["digest"])
+    assert pins[0] == pins[1]
 
 
 def test_commerce_module_declares_expected_actions_and_internal_checkout_callback() -> None:

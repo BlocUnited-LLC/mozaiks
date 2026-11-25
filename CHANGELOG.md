@@ -623,7 +623,8 @@ This project follows a practical pre-1.0 changelog format:
   the payment module's `contracts/reactions.yaml` in the same reviewed upgrade.
   Keep its workflow trigger and capability declaration. The upgrade preview
   lists the changed file. Verify that the receiving module owns exactly one
-  subscription before activating the upgraded app.
+  subscription before activating the upgraded app. Fresh Windows and Linux
+  checkouts use the same line endings for the Commerce pack's integrity pin.
 - Failed automatic workflow steps now show a safe conversation notice without
   enabling debug messages, exposing result details, or changing retry eligibility.
 
