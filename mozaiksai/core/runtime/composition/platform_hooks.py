@@ -30,6 +30,13 @@ Bundle keys (all optional):
         Gate check before creating a chat session.  First hook that returns
         (False, reason) wins.
 
+    chat_input_authority  async (*, app_id, user_id, workflow_name, chat_id)
+                              -> Tuple[bool, Optional[str]]
+        Asked before a message or reply continues a stored chat, for the
+        workflow it was created with. It runs on every one of them, so it must
+        only check. First hook that returns (False, reason) wins; an error
+        refuses. A host without it lets the chat's owner continue.
+
     chat_session_fields   async (*, app_id, user_id, workflow_name, chat_id)
                               -> Dict[str, Any]
         Extra fields to merge into the chat session document at creation time
@@ -164,6 +171,7 @@ class PlatformExtensionBundle:
     on_startup: Callable | None = None
     chat_prereqs: Callable | None = None
     chat_session_fields: Callable | None = None
+    chat_input_authority: Callable | None = None
     module_permission_resolver: Callable | None = None
     module_scope_resolver: Callable | None = None
     notification_scope_resolver: Callable | None = None
@@ -194,6 +202,7 @@ _BUNDLE_KEYS = (
     "on_startup",
     "chat_prereqs",
     "chat_session_fields",
+    "chat_input_authority",
     "module_permission_resolver",
     "module_scope_resolver",
     "notification_scope_resolver",
@@ -223,6 +232,7 @@ def _normalize_bundle(bundle: Any) -> PlatformExtensionBundle:
             on_startup=bundle.get("on_startup"),
             chat_prereqs=bundle.get("chat_prereqs"),
             chat_session_fields=bundle.get("chat_session_fields"),
+            chat_input_authority=bundle.get("chat_input_authority"),
             module_permission_resolver=bundle.get("module_permission_resolver"),
             module_scope_resolver=bundle.get("module_scope_resolver"),
             notification_scope_resolver=bundle.get("notification_scope_resolver"),
@@ -248,6 +258,7 @@ def _normalize_bundle(bundle: Any) -> PlatformExtensionBundle:
         on_startup=getattr(bundle, "on_startup", None),
         chat_prereqs=getattr(bundle, "chat_prereqs", None),
         chat_session_fields=getattr(bundle, "chat_session_fields", None),
+        chat_input_authority=getattr(bundle, "chat_input_authority", None),
         module_permission_resolver=getattr(bundle, "module_permission_resolver", None),
         module_scope_resolver=getattr(bundle, "module_scope_resolver", None),
         notification_scope_resolver=getattr(bundle, "notification_scope_resolver", None),
@@ -285,6 +296,7 @@ class PlatformHookRegistry:
         self._startup_hooks: list[Callable] = []
         self._chat_prereqs_hooks: list[Callable] = []
         self._chat_session_fields_hooks: list[Callable] = []
+        self._chat_input_authority_hooks: list[Callable] = []
         self._module_permission_resolver_hooks: list[Callable] = []
         self._module_scope_resolver_hooks: list[Callable] = []
         self._notification_scope_resolver_hooks: list[Callable] = []
@@ -355,6 +367,7 @@ class PlatformHookRegistry:
             "on_startup": self._startup_hooks,
             "chat_prereqs": self._chat_prereqs_hooks,
             "chat_session_fields": self._chat_session_fields_hooks,
+            "chat_input_authority": self._chat_input_authority_hooks,
             "module_permission_resolver": self._module_permission_resolver_hooks,
             "module_scope_resolver": self._module_scope_resolver_hooks,
             "notification_scope_resolver": self._notification_scope_resolver_hooks,
@@ -420,6 +433,24 @@ class PlatformHookRegistry:
                 return False, "Chat prerequisite check failed"
         return True, None
 
+    async def call_chat_input_authority(
+        self, *, app_id: str, user_id: str, workflow_name: str, chat_id: str,
+    ) -> tuple[bool, str | None]:
+        """Ask whether this person may still continue a stored chat, failing closed."""
+        for hook in self._chat_input_authority_hooks:
+            try:
+                res = hook(app_id=app_id, user_id=user_id, workflow_name=workflow_name, chat_id=chat_id)
+                if inspect.isawaitable(res):
+                    res = await res
+                if not (isinstance(res, tuple) and len(res) == 2 and isinstance(res[0], bool)):
+                    raise TypeError("chat_input_authority must return (bool, reason)")
+            except Exception as exc:
+                logger.warning("PLATFORM_HOOKS_INPUT_AUTHORITY_ERROR: %s", exc)
+                return False, None
+            if not res[0]:
+                return False, str(res[1]) if res[1] else None
+        return True, None
+
     async def call_chat_session_fields(
         self,
         app_id: str,
@@ -438,8 +469,6 @@ class PlatformHookRegistry:
         References are requests, not authority. Hooks see a detached snapshot;
         a later extension may inspect but cannot replace an earlier binding.
         Resume validates persisted facts and cannot install a different value.
-        It is asked again for every message and reply to a run, so a hook must
-        only check there: no single-use claim, charge or other state change.
         Route resolves an owned target without creating a build or chat.
         """
         from mozaiksai.core.session.build_binding import BuildTargetReference
@@ -785,6 +814,10 @@ class PlatformHookRegistry:
     @property
     def has_session_fields(self) -> bool:
         return bool(self._chat_session_fields_hooks)
+
+    @property
+    def has_chat_input_authority(self) -> bool:
+        return bool(self._chat_input_authority_hooks)
 
     @property
     def has_module_permission_resolver(self) -> bool:

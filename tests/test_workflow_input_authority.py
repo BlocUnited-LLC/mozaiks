@@ -43,12 +43,22 @@ def _session(workflow_name="OperatorOnly", **fields):
     return {"_id": CHAT, "user_id": USER, "app_id": APP, "workflow_name": workflow_name, **fields}
 
 
+def _unexpected(**_kwargs):
+    raise AssertionError("chat_session_fields is not an input check")
+
+
+def _admit(**_kwargs):
+    return True, None
+
+
 @pytest.fixture
 def hooked(monkeypatch):
     def install(hook):
         registry = platform_hooks.PlatformHookRegistry()
+        # The factory's session hook must neither be asked nor matter here.
+        registry.register_bundle({"chat_session_fields": _unexpected}, source="factory")
         if hook is not None:
-            registry._chat_session_fields_hooks.append(hook)
+            registry.register_bundle({"chat_input_authority": hook}, source="host")
         monkeypatch.setattr(platform_hooks, "get_platform_hooks", lambda: registry)
 
     return install
@@ -81,7 +91,7 @@ async def _send(transport, *, message="continue", **overrides):
 def _refuse(calls):
     def hook(**kwargs):
         calls.append(kwargs)
-        raise PermissionError("not any more")
+        return False, "Operators only."
 
     return hook
 
@@ -110,8 +120,8 @@ async def test_refused_text_changes_nothing_in_a_live_run(hooked, bridge):
     assert live_run.continued == []
     _untouched(transport, adapter)
     # The stored workflow decides, not the one the request names.
-    assert [(call["workflow_name"], call["user_id"], call["phase"]) for call in calls] == [
-        ("OperatorOnly", USER, "resume")]
+    assert calls == [{"app_id": APP, "user_id": USER, "workflow_name": "OperatorOnly", "chat_id": CHAT}]
+    assert result["message"] == "Operators only."
 
 
 @pytest.mark.asyncio
@@ -156,7 +166,7 @@ async def test_a_background_refusal_is_not_a_run_outcome(hooked, bridge):
 
 @pytest.mark.asyncio
 async def test_a_live_run_whose_chat_cannot_be_read_is_refused(hooked, bridge):
-    hooked(lambda **_kwargs: {})
+    hooked(_admit)
     transport, _adapter = bridge(None)
     live_run = _FakeLiveRun(result=_LiveRunResult(status=RunStatus.PAUSED))
     transport.register_live_ag2_workflow_run(CHAT, live_run)
@@ -174,17 +184,43 @@ async def test_a_first_start_without_a_stored_chat_is_left_to_orchestration(hook
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("bound", [False, True])
-@pytest.mark.parametrize("hook", [None, "empty", "same_fields"])
-async def test_admitted_text_continues(hooked, bridge, hook, bound):
-    fields = {"run_build_binding": {"target_app_id": "build-1"}} if bound else {}
-    hooked({"empty": lambda **_kwargs: {}, "same_fields": lambda **kwargs: dict(kwargs["session_fields"])}.get(hook))
-    transport, _adapter = bridge(_session("ValueEngine", **fields))
+@pytest.mark.parametrize("hook", [None, _admit])
+@pytest.mark.parametrize("document", [_session("ValueEngine"), _session(None)])
+async def test_admitted_text_continues(hooked, bridge, hook, document):
+    hooked(hook)
+    transport, _adapter = bridge(document)
     live_run = _FakeLiveRun(result=_LiveRunResult(status=RunStatus.PAUSED))
     transport.register_live_ag2_workflow_run(CHAT, live_run)
     assert (await _send(transport, workflow_name="ValueEngine"))["status"] == "success"
     assert len(live_run.continued) == 1
     assert transport.errors == []
+
+
+@pytest.mark.asyncio
+async def test_a_host_without_the_hook_reads_nothing(hooked, bridge):
+    hooked(None)
+    transport, _adapter = bridge(_session())
+
+    async def no_read():
+        raise AssertionError("no chat read without a hook")
+
+    transport._persistence_manager._coll = no_read
+    live_run = _FakeLiveRun(result=_LiveRunResult(status=RunStatus.PAUSED))
+    transport.register_live_ag2_workflow_run(CHAT, live_run)
+    assert (await _send(transport))["status"] == "success"
+
+
+def _raises(**_kwargs):
+    raise RuntimeError("authority store down")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("hook", [_raises, lambda **_kwargs: None, lambda **_kwargs: True, lambda **_kwargs: ("yes", None)])
+async def test_an_unusable_answer_refuses(hooked, bridge, hook):
+    hooked(hook)
+    transport, adapter = bridge(_session())
+    assert (await _send(transport))["error_code"] == DENIED
+    _untouched(transport, adapter)
 
 
 @pytest.mark.asyncio
@@ -227,7 +263,7 @@ async def test_a_refused_reply_is_not_delivered(hooked, monkeypatch):
     assert delivered == []
     assert [(call["workflow_name"], call["user_id"]) for call in calls] == [("OperatorOnly", USER)]
 
-    hooked(lambda **_kwargs: {})
+    hooked(_admit)
     assert await transport.submit_tool_call_response_for_user("evt-1", "continue", principal=_principal()) is True
     assert len(delivered) == 1
 
@@ -256,7 +292,7 @@ async def test_refused_feedback_is_neither_stored_nor_delivered(hooked, monkeypa
     assert await transport.submit_tool_call_response_for_user("evt-1", reply, principal=_principal()) is False
     assert stored == delivered == []
 
-    hooked(lambda **_kwargs: {})
+    hooked(_admit)
     assert await transport.submit_tool_call_response_for_user("evt-1", reply, principal=_principal()) is True
     assert len(stored) == len(delivered) == 1
 
@@ -278,7 +314,7 @@ async def test_the_shared_development_identity_replies_as_the_chat_owner(hooked,
 
     def admit(**kwargs):
         calls.append(kwargs)
-        return {}
+        return True, None
 
     hooked(admit)
     transport = _reply_transport(_session())

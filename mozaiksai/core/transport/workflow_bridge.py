@@ -32,7 +32,7 @@ from mozaiksai.core.runtime.persistence.distributed_lock import (
     chat_execution_lease,
     chat_lock_resource,
 )
-from mozaiksai.core.transport.input_authority import WORKFLOW_ACCESS_DENIED, input_refused
+from mozaiksai.core.transport.input_authority import WORKFLOW_ACCESS_DENIED, input_refusal
 from mozaiksai.core.transport.session_registry import session_registry
 
 if TYPE_CHECKING:
@@ -717,12 +717,12 @@ class WorkflowBridgeMixin:
     async def _reject_unauthorized_input(
         self, *, chat_id: str, app_id: str, user_id: str | None, require_session: bool = True,
     ) -> dict[str, Any] | None:
-        if not await input_refused(
+        reason = await input_refusal(
             self._get_or_create_persistence_manager(), chat_id=chat_id, app_id=app_id, user_id=user_id,
             require_session=require_session,
-        ):
+        )
+        if reason is None:
             return None
-        reason = "You can no longer continue this workflow."
         await self.send_error(error_message=reason, error_code=WORKFLOW_ACCESS_DENIED, chat_id=chat_id)
         return {
             "status": "error", "chat_id": chat_id, "route": "access_denied", "input_accepted": False,
