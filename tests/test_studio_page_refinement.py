@@ -152,11 +152,14 @@ def test_selected_page_design_uses_verified_registry_and_bounded_worker(page_ref
     case.generator.assert_awaited_once()
     prompt = case.generator.await_args.kwargs["user_prompt"]
     case.assessment.assert_awaited_once()
-    assert case.assessment.await_args.kwargs["usage_context"].run_build_binding == _BINDING
+    graph_call = case.assessment.await_args.kwargs
+    assert graph_call["usage_context"].run_build_binding == _BINDING
+    assert "Return only the JSON object" in graph_call["system_prompt"]
+    assert all(field in graph_call["system_prompt"] for field in graph_call["response_schema"].model_fields)
     graph = json.loads(prompt.splitlines()[-1])
     assert graph["build_record_id"] == case.payload["trigger_payload"]["refinement_request"]["build_record_id"]
     assert graph["bundle_digest"] == "sha256:" + hashlib.sha256(case.archive.read_bytes()).hexdigest()
-    assert json.loads(case.assessment.await_args.kwargs["user_prompt"])["evidence"]["graph_hash"] == graph["graph_hash"]
+    assert json.loads(graph_call["user_prompt"])["evidence"]["graph_hash"] == graph["graph_hash"]
     assert {"source_path": _PAGE, "target_path": _LABELS, "kind": "imports"} in graph["dependencies"]
     assert graph["recommended_paths"] == [_LABELS]
     assert "Saved dashboard" in prompt
