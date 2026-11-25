@@ -204,7 +204,11 @@ function WorkspaceSidebar({
 
       <nav aria-label={navigationLabel} className="space-y-5">
         {navGroups.map((group) => (
-          <div key={group.id || group.label || 'workspace'}>
+          <div
+            key={group.id || group.label || 'workspace'}
+            role={group.label ? 'group' : undefined}
+            aria-label={group.label || undefined}
+          >
             {group.label ? (
               <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground/72">
                 {group.label}
