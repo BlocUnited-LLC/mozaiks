@@ -227,6 +227,38 @@ async def test_ordinary_saved_review_does_not_recover_a_waiter(continuation, ord
 
 
 @pytest.mark.asyncio
+async def test_review_opens_result_saved_by_selected_workflow_without_an_inline_session(continuation):
+    fixture = continuation
+    _saved_refinement(fixture)
+    child = fixture.versions["child"]
+    child.source_workflow, child.source_chat_id = "ThemeCapture", "theme-chat"
+    fixture.record.update(active_chat_id=child.source_chat_id, active_workflow_id=child.source_workflow)
+    store = fixture.request["artifact_store"]
+    store.list_refinement_sessions.return_value = []
+
+    assert await _recover(fixture) is None
+    store.list_refinement_sessions.assert_not_awaited()
+    fixture.registry.update_build_status.assert_not_awaited()
+    fixture.settle.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chat,workflow", [("other-chat", "ThemeCapture"), ("theme-chat", "OtherWorkflow")])
+async def test_unselected_writer_cannot_skip_saved_refinement_verification(continuation, chat, workflow):
+    fixture = continuation
+    _saved_refinement(fixture)
+    child = fixture.versions["child"]
+    child.source_workflow, child.source_chat_id = "ThemeCapture", "theme-chat"
+    fixture.record.update(active_chat_id=chat, active_workflow_id=workflow)
+    fixture.request["artifact_store"].list_refinement_sessions.return_value = []
+
+    with pytest.raises(ValueError, match="no unique result session"):
+        await _recover(fixture)
+    fixture.registry.update_build_status.assert_not_awaited()
+    fixture.settle.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_partial_saved_successor_marker_cannot_fall_through_to_another_chat(continuation):
     fixture = continuation
     fixture.record.update(active_chat_id="saved", active_workflow_id="AppReview")

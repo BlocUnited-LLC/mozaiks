@@ -11,3 +11,4 @@ content: |
   Use empty lists when the evidence is insufficient. Partial coverage means
   other dependencies may exist. Recommendations are advisory and do not grant
   edit permission.
+  Return only the JSON object with recommended_paths and test_paths. Use an array of paths for each field. Omit Markdown fences and commentary.

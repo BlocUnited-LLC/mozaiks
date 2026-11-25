@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -8,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from mozaiksai.control_plane import CodingWorkerResult, ControlPlaneConfig
+from mozaiksai.control_plane.context_graph.assessment import DependencyGraphAssessment
 from mozaiksai.control_plane.implementations.contract_surface_planner import (
     ContractSurfaceClassification,
 )
@@ -24,6 +26,7 @@ from tests.test_studio_workflow_trigger import (
 )
 
 _PAGE = "ui/pages/custom/dashboard.jsx"
+_LABELS = "ui/labels.js"
 
 
 @pytest.fixture
@@ -49,12 +52,15 @@ def page_refinement(monkeypatch, tmp_path, request):
             "  registerComponent('Help', Help);\n"
             "}\n"
         ),
-        _PAGE: 'export default function Dashboard() { return <h1>Saved dashboard</h1>; }',
+        _PAGE: "import { heading } from '../../labels.js';\n"
+               'export default function Dashboard() { return <h1>{heading("Saved dashboard")}</h1>; }',
+        _LABELS: "export const heading = text => text;\n",
         "ui/pages/custom/help.jsx": 'export default function Help() { return <h1>Help</h1>; }',
     }
     archive = tmp_path / "registered-page.zip"
-    _make_bundle_zip(archive, files)
+    _make_bundle_zip(archive, {f"{archive.stem}/{path}": content for path, content in files.items()})
     version = _artifact_version(artifact_version_id="av_page_1", zip_path=archive)
+    version.commit_metadata.author_user_id = "demo-user"
     _BaselineStore.versions[version.id] = version
 
     class Store(_BaselineStore):
@@ -74,6 +80,7 @@ def page_refinement(monkeypatch, tmp_path, request):
         llm_profiles={"codegen": {"llm_config": {"model": "test-model"}}},
         classifier={"enabled": True, "llm_profile": "codegen"},
         coding={"enabled": True, "llm_profile": "codegen"},
+        dependency_graph={"enabled": True, "llm_profile": "codegen"},
         contract_surface={"enabled": True, "llm_profile": "codegen", "regeneration_llm_profile": "codegen"},
     ))
     classifier = AsyncMock(side_effect=_async_classifier(
@@ -96,6 +103,11 @@ def page_refinement(monkeypatch, tmp_path, request):
     ))
     monkeypatch.setattr(harness._contract_surface_planner, "_agent_runner", SimpleNamespace(run=planner))
     monkeypatch.setattr(harness._surface_regeneration_worker, "_agent_runner", SimpleNamespace(run=generator))
+    specialist = harness._surface_regeneration_worker._dependency_graph_agent
+    assessment = AsyncMock(return_value=DependencyGraphAssessment(recommended_paths=[_LABELS], test_paths=[]))
+    monkeypatch.setattr(specialist, "_config_loader", harness._config_loader)
+    monkeypatch.setattr(specialist, "_artifact_store", Store())
+    monkeypatch.setattr(specialist, "_agent_runner", SimpleNamespace(run=assessment))
     finalized = []
 
     async def finalize(**kwargs):
@@ -126,6 +138,7 @@ def page_refinement(monkeypatch, tmp_path, request):
         client=TestClient(studio.app), payload=payload, files=files, archive=archive,
         classification=classification, classifier=classifier, planner=planner, generator=generator,
         finalized=finalized, launcher=launcher, registry=registry,
+        specialist=specialist, assessment=assessment,
     )
 
 
@@ -138,6 +151,17 @@ def test_selected_page_design_uses_verified_registry_and_bounded_worker(page_ref
     case.planner.assert_awaited_once()
     case.generator.assert_awaited_once()
     prompt = case.generator.await_args.kwargs["user_prompt"]
+    case.assessment.assert_awaited_once()
+    graph_call = case.assessment.await_args.kwargs
+    assert graph_call["usage_context"].run_build_binding == _BINDING
+    assert "Return only the JSON object" in graph_call["system_prompt"]
+    assert all(field in graph_call["system_prompt"] for field in graph_call["response_schema"].model_fields)
+    graph = json.loads(prompt.splitlines()[-1])
+    assert graph["build_record_id"] == case.payload["trigger_payload"]["refinement_request"]["build_record_id"]
+    assert graph["bundle_digest"] == "sha256:" + hashlib.sha256(case.archive.read_bytes()).hexdigest()
+    assert json.loads(graph_call["user_prompt"])["evidence"]["graph_hash"] == graph["graph_hash"]
+    assert {"source_path": _PAGE, "target_path": _LABELS, "kind": "imports"} in graph["dependencies"]
+    assert graph["recommended_paths"] == [_LABELS]
     assert "Saved dashboard" in prompt
     assert "UNTRUSTED_BROWSER" not in prompt
     assert "ui/route_manifest.json" in prompt and "ui/index.js" in prompt
@@ -147,6 +171,19 @@ def test_selected_page_design_uses_verified_registry_and_bounded_worker(page_ref
     case.registry.begin_refinement_run.assert_awaited_once()
     case.registry.promote_build.assert_not_awaited()
     case.launcher.assert_not_awaited()
+
+
+def test_graph_disabled_preserves_scoped_page_generation(page_refinement, monkeypatch):
+    case = page_refinement
+    policy = case.specialist._config_loader()
+    policy.dependency_graph.enabled = False
+    monkeypatch.setattr(case.specialist, "_config_loader", lambda: policy)
+    response = case.client.post("/api/workflows/trigger", json=case.payload)
+    assert response.status_code == 200, response.text
+    assert response.json()["surface_result"]["status"] == "success"
+    case.assessment.assert_not_awaited()
+    assert "dependency_graph" not in case.generator.await_args.kwargs["user_prompt"]
+    assert set(case.finalized[0]["result"].all_files) == {_PAGE}
 
 
 @pytest.mark.parametrize("unresolved", ["unknown_page", "outside_scope", "migration", "fallback", "planner_failure"])
@@ -164,6 +201,7 @@ def test_selected_page_design_never_falls_through_to_unapproved_generation(page_
     assert response.status_code == 409, response.text
     assert "selected files" in response.json()["detail"]
     case.generator.assert_not_awaited()
+    case.assessment.assert_not_awaited()
     case.registry.begin_refinement_run.assert_not_awaited()
     case.launcher.assert_not_awaited()
     assert not case.finalized
@@ -175,6 +213,7 @@ def test_selected_page_corrupt_archive_stops_before_classification_or_planning(p
     response = case.client.post("/api/workflows/trigger", json=case.payload)
     assert response.status_code == 409, response.text
     case.classifier.assert_not_awaited()
+    case.assessment.assert_not_awaited()
     case.planner.assert_not_awaited()
     case.generator.assert_not_awaited()
     case.registry.begin_refinement_run.assert_not_awaited()
