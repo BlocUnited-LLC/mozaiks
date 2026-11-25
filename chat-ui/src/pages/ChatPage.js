@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useSyncExternalStore } from "react";
 import Header from "../components/layout/Header";
 import Footer from "../components/layout/Footer";
 import ChatInterface from '../components/chat/ChatInterface';
@@ -138,7 +138,7 @@ const ChatPage = () => {
   }, []);
   const LOCAL_STORAGE_KEY = 'mozaiks.current_chat_id';
   const [, setConnectionInitialized] = useState(false);
-  const [workflowConfigLoaded, setWorkflowConfigLoaded] = useState(false); // becomes true once workflow config resolved
+  const workflowConfigLoaded = useSyncExternalStore(workflowConfig.subscribe, workflowConfig.hasWorkflows, workflowConfig.hasWorkflows);
   const [cacheSeed, setCacheSeed] = useState(null); // per-chat cache seed for unified backend/frontend caching
   const [chatExists, setChatExists] = useState(null); // tri-state: null=unknown, true=exists, false=new
   const connectionInProgressRef = useRef(false);
@@ -4051,9 +4051,7 @@ const ChatPage = () => {
     }
     // Fetch workflow configs first; only signal ready once the registry is populated.
     // This prevents connectWithCorrectTransport from firing against an empty registry.
-    workflowConfig.fetchWorkflowConfigs().finally(() => {
-      setWorkflowConfigLoaded(true);
-    });
+    void workflowConfig.fetchWorkflowConfigs();
     // When the URL explicitly targets a chat or requests a fresh start,
     // clear any stale activeChatId that was hydrated from localStorage so it
     // doesn't drive the first WS connection before the URL params are consumed.
@@ -4946,7 +4944,11 @@ const ChatPage = () => {
 
   // Retry connection function
   const retryConnection = useCallback(() => {
-    if (currentChatId && workflowConfigLoaded) setConnectionRetryNonce(value => value + 1);
+    if (!workflowConfigLoaded) {
+      void workflowConfig.fetchWorkflowConfigs();
+    } else if (currentChatId) {
+      setConnectionRetryNonce(value => value + 1);
+    }
   }, [currentChatId, workflowConfigLoaded]);
 
   // Subscribe to DynamicUIHandler updates and insert tool_call render events into chat messages
@@ -5758,7 +5760,6 @@ const ChatPage = () => {
     navigate,
     setIsInWidgetMode,
     workflowConfigLoaded,
-    setWorkflowConfigLoaded,
     workflowConfig,
     urlWorkflowName,
     restoreViewSnapshot,

@@ -1,0 +1,78 @@
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { chromium, expect } from '@playwright/test';
+import { build } from 'esbuild';
+import { reactAlias } from './artifactPreviewFixture.js';
+
+const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const src = file => JSON.stringify(path.resolve(shell, '../chat-ui/src', file));
+
+test('a saved workflow opens after catalog discovery recovers', async t => {
+  const bundle = await build({
+    stdin: { resolveDir: shell, loader: 'jsx', contents: `
+      import React from 'react';
+      import { createRoot } from 'react-dom/client';
+      import { BrowserRouter } from 'react-router-dom';
+      import ChatPage from ${src('pages/ChatPage.js')};
+      import { ChatUIProvider } from ${src('context/ChatUIContext.jsx')};
+      import NavigationProvider from ${src('providers/NavigationProvider.jsx')};
+      import { WebSocketApiAdapter } from ${src('adapters/api.js')};
+      import catalog from ${src('config/workflowConfig.js')};
+      const auth = { getAccessToken: () => 'fixture', getCurrentUser: async () => ({id:'owner'}) };
+      window.mozaiksAuth = auth;
+      window.refreshCatalog = () => catalog.fetchWorkflowConfigs();
+      const api = new WebSocketApiAdapter({baseUrl:location.origin, wsUrl:'ws://catalog.test', auth});
+      createRoot(document.querySelector('main')).render(
+        <BrowserRouter><NavigationProvider config={{appId:'sample', chat_startup_mode:'workflow', entry_point:'Study'}}>
+          <ChatUIProvider authAdapter={auth} apiAdapter={api} uiConfig={{chat:{defaultAppId:'sample'}}}>
+            <ChatPage/>
+          </ChatUIProvider>
+        </NavigationProvider></BrowserRouter>);
+    ` },
+    bundle: true, write: false, format: 'esm', outdir: 'out', jsx: 'automatic',
+    loader: { '.js': 'jsx', '.png': 'dataurl' },
+    nodePaths: [path.join(shell, 'node_modules')],
+    alias: { ...reactAlias, 'react-router-dom':path.join(shell, 'node_modules/react-router-dom') },
+    define: { 'process.env.NODE_ENV':'"test"', 'process.env':'{}', 'import.meta.env':'{}' },
+    plugins: [{ name: 'test-workflows', setup(builder) {
+      builder.onResolve({filter:/^virtual:mozaiks-workflow-ui$/}, () => ({path:'registry',namespace:'fixture'}));
+      builder.onLoad({filter:/.*/,namespace:'fixture'}, () => ({contents:'export default {}; export const transitionComponents={};'}));
+    } }],
+  });
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  for (const recovery of ['Reconnect', 'background discovery']) {
+    await t.test(recovery, async t => {
+      const page = await browser.newPage();
+      t.after(() => page.close());
+      const errors = [], sockets = [], starts = [];
+      let available = false, discoveryFailed = false;
+      page.on('pageerror', error => errors.push(error.message));
+      page.on('console', entry => {
+        if (entry.text().includes('All workflow fetch attempts failed')) discoveryFailed = true;
+      });
+      await page.route('**/*', async route => {
+        const { pathname } = new URL(route.request().url());
+        if (pathname === '/chat') return route.fulfill({ contentType:'text/html', body:'<!doctype html><main></main>' });
+        if (pathname === '/api/workflows') return route.fulfill(available
+          ? { json:{workflows:[{name:'Study', startup_mode:'AgentDriven'}]} } : {status:503});
+        if (pathname.includes('/api/chats/exists/')) return route.fulfill({json:{exists:true,workflow_name:'Study'}});
+        if (pathname.includes('/api/chats/meta/')) return route.fulfill({json:{chat_id:'saved-study',workflow_name:'Study',status:0}});
+        if (pathname.endsWith('/start') && route.request().method() === 'POST') starts.push(pathname);
+        return route.fulfill({json:{}});
+      });
+      await page.routeWebSocket('**/ws/**', socket => sockets.push(new URL(socket.url()).pathname));
+      await page.goto('http://catalog.test/chat?workflow=Study&chat_id=saved-study&mode=workflow');
+      await page.addScriptTag({type:'module',content:bundle.outputFiles.find(file => file.path.endsWith('.js')).text});
+      await expect.poll(() => errors[0] || discoveryFailed).toBe(true);
+      assert.deepEqual(sockets, []);
+      available = true;
+      if (recovery === 'Reconnect') await page.getByRole('button', {name:'Reconnect'}).click();
+      else await page.evaluate(() => window.refreshCatalog());
+      await expect.poll(() => errors[0] || sockets).toEqual(['/ws/Study/sample/saved-study/owner']);
+      assert.deepEqual(starts, []);
+    });
+  }
+});

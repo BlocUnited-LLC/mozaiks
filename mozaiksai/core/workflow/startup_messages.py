@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
+
+if TYPE_CHECKING:
+    from mozaiksai.core.workflow.pack.schema import WorkflowEntry
 
 WorkflowInteractionMode = Literal["agent_directed", "user_guided", "backend_only"]
 WorkflowLaunchBehavior = Literal["auto_start", "wait_for_user", "none"]
@@ -72,21 +75,15 @@ def _normalize_contract_value(value: Any, allowed: set[str]) -> str | None:
     return None
 
 
-def _registry_workflow_entry(workflow_name: str | None) -> Any | None:
-    if not workflow_name:
-        return None
+def load_workflow_launch_entries() -> dict[str, WorkflowEntry]:
+    """Read the current registry once for all workflows in a catalog response."""
     try:
-        from mozaiksai.core.workflow.pack.config import (
-            get_workflow_entry,
-            load_global_pack_graph,
-        )
+        from mozaiksai.core.workflow.pack.config import load_global_pack_graph
 
         pack = load_global_pack_graph()
-        if pack is None:
-            return None
-        return get_workflow_entry(pack, str(workflow_name))
+        return {entry.id: entry for entry in pack.workflows} if pack is not None else {}
     except Exception:
-        return None
+        return {}
 
 
 def resolve_workflow_startup_mode(workflow_name: str | None) -> str | None:
@@ -144,9 +141,12 @@ def resolve_workflow_launch_taxonomy(
     workflow_name: str | None,
     *,
     workflow_startup_mode: str | None = None,
+    registry_entries: dict[str, WorkflowEntry] | None = None,
 ) -> WorkflowLaunchTaxonomy:
     """Resolve the first-party conversation launch contract for a workflow."""
-    entry = _registry_workflow_entry(workflow_name)
+    if registry_entries is None:
+        registry_entries = load_workflow_launch_entries() if workflow_name else {}
+    entry = registry_entries.get(str(workflow_name or "").strip())
     startup_mode = (
         workflow_startup_mode
         or getattr(entry, "startup_mode", None)
