@@ -453,8 +453,8 @@ visual identity, or a request to generate a logo. The Factory harness maps
 these intents to a theme-file patch, the `app_theme_revision` sequence running
 ThemeCapture, or the `logo_revision` sequence running BrandAssetGeneratorWorkflow.
 ThemeCapture applies its visual tokens to a copy of the selected bundle and validates
-the complete app. The app's identity, images, Notes-style actions and other files
-carry forward from that build.
+the complete app. It preserves the app's identity, images, actions and other files.
+Later app-bundle revisions read their starting theme from the selected build.
 The specialist workflows receive the original request and the theme from the
 verified parent archive. The user selects generated logo artwork before it is
 staged for app-build review. A later coding refinement passes the saved logo

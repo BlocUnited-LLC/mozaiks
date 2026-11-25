@@ -16,7 +16,9 @@ from mozaiksai.core.workflow.context.frozen import detach
 
 def apply_visual_tokens(parent: dict[str, Any], captured: dict[str, Any]) -> dict[str, Any]:
     """Only a visual change was approved. Keep identity, assets and other app settings."""
-    tokens = {key: captured[key] for key in ("theme", "colors", "fonts", "primitives", "shadows", "ui") if key in captured}
+    tokens: dict[str, Any] = {
+        key: captured[key] for key in ("theme", "colors", "fonts", "primitives", "shadows", "ui") if key in captured
+    }
     if isinstance(tokens.get("theme"), dict):
         tokens["theme"] = {key: value for key, value in tokens["theme"].items() if key != "branding"}
     theme = merge_config_mapping(parent, tokens)
