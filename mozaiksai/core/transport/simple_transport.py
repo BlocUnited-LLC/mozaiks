@@ -351,6 +351,9 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         websocket: WebSocket,
         message: str,
         error_code: str,
+        *,
+        chat_id: str | None = None,
+        client_message_id: str | None = None,
     ) -> None:
         """Send a standardized error response to the WebSocket client."""
         if getattr(websocket, "application_state", None) is not WebSocketState.CONNECTED:
@@ -361,7 +364,9 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             await send_event_envelope(websocket, {
                 "schema_version": "mozaiks.ui.event.v1",
                 "type": "chat.error",
-                "data": {"message": message, "error_code": error_code},
+                "data": {"message": message, "error_code": error_code,
+                         **({"chat_id": chat_id} if chat_id else {}),
+                         **({"client_message_id": client_message_id} if client_message_id else {})},
                 "timestamp": _utc_timestamp(),
             })
         except RuntimeError:
@@ -656,6 +661,9 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         Serializes and sends a raw AG2 event to the UI.
         This is the primary method for forwarding AG2 native events.
         """
+        if self._defer_pause_event(event, chat_id):
+            return
+
         is_transport_envelope = (
             isinstance(event, dict) and 'type' in event and 'data' in event and 'kind' not in event
         )

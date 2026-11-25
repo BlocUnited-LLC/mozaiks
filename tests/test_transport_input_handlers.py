@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from starlette.websockets import WebSocketState
 
 from mozaiksai.core.transport.handlers import input_handlers as input_handlers_module
 from mozaiksai.core.transport.handlers.input_handlers import handle_user_input_submit
@@ -141,9 +142,14 @@ async def test_handle_user_input_submit_routes_workflow_mode_messages_back_to_or
 
 
 @pytest.mark.asyncio
-async def test_workflow_input_releases_receiver_while_tool_response_is_pending(monkeypatch) -> None:
+@pytest.mark.parametrize("message_id,valid", [("sent-123", True), ("x" * 129, False), ([], False), (" ", False)])
+async def test_workflow_input_releases_receiver_while_tool_response_is_pending(message_id, valid) -> None:
+    from mozaiksai.core.transport.simple_transport import SimpleTransport
+
     transport = _FakeTransport({"workflow_name": "Smoke", "app_id": "app-1", "user_id": "user-1"})
+    transport._send_ws_error = SimpleTransport._send_ws_error.__get__(transport)
     websocket = _FakeWebSocket()
+    websocket.application_state = websocket.client_state = WebSocketState.CONNECTED
     entered, approval = asyncio.Event(), asyncio.Event()
 
     async def resume(**kwargs):
@@ -151,16 +157,23 @@ async def test_workflow_input_releases_receiver_while_tool_response_is_pending(m
         await approval.wait()
 
     transport.handle_user_input_from_api = resume
+    context = {"client_message_id": message_id}
     await asyncio.wait_for(handle_user_input_submit(
-        transport, {"text": "Continue"}, "chat-1", websocket,
+        transport, {"text": "Continue", "context": context}, "chat-1", websocket,
     ), timeout=1)
     task = transport._background_tasks["chat-1"]
     try:
         await asyncio.wait_for(entered.wait(), timeout=1)
         assert not task.done()
         assert websocket.sent[-1]["type"] == "chat.input_ack"
-        await handle_user_input_submit(transport, {"text": "Duplicate"}, "chat-1", websocket)
-        assert transport.errors[-1][1] == "CHAT_BUSY"
+        assert websocket.sent[-1]["data"].get("client_message_id") == (message_id if valid else None)
+        await handle_user_input_submit(transport, {
+            "text": "Duplicate", "chat_id": "wrong-chat", "context": context,
+        }, "chat-1", websocket)
+        err = websocket.sent[-1]
+        assert err["type"] == "chat.error" and err["data"]["error_code"] == "CHAT_BUSY"
+        assert err["data"]["chat_id"] == "chat-1"
+        assert err["data"].get("client_message_id") == (message_id if valid else None)
         assert transport._background_tasks["chat-1"] is task
         approval.set()
         await asyncio.wait_for(task, timeout=1)

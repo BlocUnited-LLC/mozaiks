@@ -111,6 +111,9 @@ async def handle_user_input_submit(
         # orchestration bridge when workflow context exists. Startup mode only
         # decides who speaks first at session launch; it must not block later
         # human turns after a pause or review checkpoint.
+        client_message_id = ui_context_payload.get("client_message_id") if has_workflow_context else None
+        if not isinstance(client_message_id, str) or len(client_message_id) > 128 or not client_message_id.strip():
+            client_message_id = None
         if has_workflow_context:
             if not target_app_id or not target_workflow_name:
                 await transport._send_ws_error(
@@ -121,7 +124,8 @@ async def handle_user_input_submit(
                 return
             existing = transport._background_tasks.get(target_chat_id)
             if existing is not None and not existing.done():
-                await transport._send_ws_error(websocket, "Workflow is already running", "CHAT_BUSY")
+                await transport._send_ws_error(websocket, "Workflow is already running", "CHAT_BUSY",
+                                               chat_id=target_chat_id, client_message_id=client_message_id)
                 return
 
             async def continue_workflow() -> None:
@@ -156,7 +160,8 @@ async def handle_user_input_submit(
         await send_event_envelope(websocket, {
             "schema_version": "mozaiks.ui.event.v1",
             "type": "chat.input_ack",
-            "data": {"chat_id": target_chat_id, "status": "accepted"},
+            "data": {"chat_id": target_chat_id, "status": "accepted",
+                     **({"client_message_id": client_message_id} if client_message_id else {})},
             "timestamp": utc_timestamp()
         })
     except Exception as e:

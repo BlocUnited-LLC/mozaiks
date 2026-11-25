@@ -132,6 +132,14 @@ Mozaiks now preserves that as explicit runtime state:
 This is not a second rendered workflow UI lane. It is the canonical signal that
 the workflow paused for another free-form human turn.
 
+For a native AG2 workflow, the transport publishes the free-form pause after
+the current run slice releases its admission lease. A client can reply as soon
+as it sees the pause. A workflow `user.input.submit` may include a
+`context.client_message_id`. The runtime echoes this identifier and the
+authenticated chat ID in `chat.input_ack` or a `CHAT_BUSY` error. ChatUI uses
+the matching refusal to return the message to its original composer. The user
+can edit and send it when the workflow is ready.
+
 ## The key difference from AG-UI and CopilotKit
 
 AG-UI and CopilotKit make the tool call itself the UI interaction contract.

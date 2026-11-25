@@ -1199,7 +1199,8 @@ const ChatPage = () => {
     setMessagesWithLogging(previous => previous.filter(message => message.id !== id && message.id !== `thinking-${id}`));
   }, [setMessagesWithLogging]);
   const { text: composerDraft, changeDraft, refused: recoveredWorkflowDraft, submitted: submittedWorkflowMessage,
-    remember: rememberWorkflowSubmission, restore: restoreRefusedDraft, handleAdmission } =
+    remember: rememberWorkflowSubmission, restore: restoreRefusedDraft, handleAdmission,
+    isActiveScope: isActiveComposerScope, isCurrent: isCurrentSubmission } =
     useWorkflowSubmission(composerScope, removeRefusedMessage);
   const workflowSocket = wsRef.current?.socket;
   const waitingForWorkflowSocket = conversationMode === 'workflow' && Boolean(currentChatId) && (!transportType || transportType === 'websocket')
@@ -3940,10 +3941,9 @@ const ChatPage = () => {
         const errorMsg = data.message || data.data?.message || 'Unknown error';
         const errorCode = data.error_code || data.data?.error_code;
         if (errorCode === 'CHAT_BUSY') {
-          const chatId = data.data?.chat_id || data.chat_id;
           const messageId = data.data?.client_message_id || data.client_message_id;
           if (messageId) {
-            if (handleAdmission(false, chatId, messageId)) setLoading(true);
+            if (handleAdmission(false, data)) setLoading(true);
             return;
           }
         }
@@ -3968,7 +3968,7 @@ const ChatPage = () => {
       }
       case 'input_ack': {
         const messageId = data.data?.client_message_id || data.client_message_id;
-        if (messageId && !handleAdmission(true, data.data?.chat_id || data.chat_id, messageId)) return;
+        if (messageId && !handleAdmission(true, data)) return;
         setPendingWorkflowReply(null);
         return;
       }
@@ -3992,7 +3992,7 @@ const ChatPage = () => {
       default:
         return;
     }
-  }, [restoreRefusedDraft, adoptInlineRefinement, findRevisionArtifact, activeChatId, activeWorkflowName, appId, auth, config, user, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, urlWorkflowName, observeSessionMeta, hydrateServerArtifactForChat]);
+  }, [handleAdmission, restoreRefusedDraft, adoptInlineRefinement, findRevisionArtifact, activeChatId, activeWorkflowName, appId, auth, config, user, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, urlWorkflowName, observeSessionMeta, hydrateServerArtifactForChat]);
   useEffect(() => {
     handleIncomingRef.current = handleIncoming;
   }, [handleIncoming]);
@@ -5495,6 +5495,7 @@ const ChatPage = () => {
 
       // Deferred workflow launch: create the runtime chat only when the user
       // sends the first real message, then route that message into the run.
+      let submitted;
       try {
       let targetChatId = currentChatId;
       let targetWorkflowName = resolveKnownWorkflowName(currentWorkflowName)
@@ -5516,6 +5517,7 @@ const ChatPage = () => {
           { trigger_source: queryTriggerSource },
           { forceNew: queryFreshStart },
         );
+        if (!isActiveComposerScope(composerScope)) return;
         targetChatId = startResult?.chat_id || startResult?.id || null;
         targetWorkflowName = startResult?.workflow_name || targetWorkflowName;
         if (!targetChatId) {
@@ -5541,7 +5543,7 @@ const ChatPage = () => {
         navigate(location.pathname + (nextSearch ? `?${nextSearch}` : ''), { replace: true });
       }
       
-      const submitted = rememberWorkflowSubmission(
+      submitted = rememberWorkflowSubmission(
         JSON.stringify(['workflow', currentAppId, currentUserId, targetWorkflowName, targetChatId]), targetChatId, userMessage
       );
       const success = await api.sendMessageToWorkflow(
@@ -5552,7 +5554,7 @@ const ChatPage = () => {
         targetChatId,
         { client_message_id: userMessage.id, ...(artifactContextPayload ? { artifact_context: artifactContextPayload } : {}) }
       );
-      if (submitted.rejected) return;
+      if (!isCurrentSubmission(submitted) || submitted.rejected) return;
       if (success && success.success !== false) {
         if (pendingWorkflowReply) {
           setPendingWorkflowReply(null);
@@ -5576,10 +5578,10 @@ const ChatPage = () => {
         throw error;
       }
     } catch (error) {
+      if (submitted ? !isCurrentSubmission(submitted) : !isActiveComposerScope(composerScope)) return;
       console.error('❌ [SEND] Failed to send message to workflow:', error);
       setLoading(false);
-      const submitted = submittedWorkflowMessage.current;
-      if (error?.deliveryState === 'refused' && submitted?.message.id === userMessage.id) restoreRefusedDraft(submitted);
+      if (error?.deliveryState === 'refused') restoreRefusedDraft(submitted);
       setMessagesWithLogging(prev => [
         ...prev.filter(message => !message.isThinking),
         {

@@ -20,6 +20,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import OrderedDict
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, get_args
 
@@ -43,6 +45,7 @@ logger = logging.getLogger("simple_transport.workflow")
 # Failed runs whose reason this process keeps for refusing later input. Input
 # for an ended run follows its end closely, so the most recent ones suffice.
 _RUN_END_REASON_LIMIT = 256
+_turn_pause: ContextVar[dict | None] = ContextVar("workflow_turn_pause", default=None)
 
 
 def _persist_context_kwargs(
@@ -298,6 +301,43 @@ class WorkflowBridgeMixin:
             "error_code": "WORKFLOW_REOPEN_UNAVAILABLE", "message": message,
         }
 
+    @asynccontextmanager
+    async def _workflow_turn_lease(self, *, app_id: str, chat_id: str):
+        """Publish a human-wait boundary only after the turn has released its execution lease."""
+        pause: dict[str, dict[str, Any]] = {}
+        scope = {(self, chat_id): pause}
+        async with chat_execution_lease(app_id=app_id, chat_id=chat_id):
+            token = _turn_pause.set(scope)
+            try:
+                yield
+            finally:
+                scope.clear()  # AG2 tasks may outlive the turn which created their context.
+                _turn_pause.reset(token)
+        if pause:
+            tasks = self._background_tasks
+            if tasks.get(chat_id) is asyncio.current_task():
+                tasks.pop(chat_id)
+            # The pause outcome precedes the actionable invitation, so it cannot
+            # clear a new turn's activity after the user has already replied.
+            if "run_complete" in pause:
+                await self.send_event_to_ui(pause["run_complete"], chat_id)
+            if "awaiting_reply" in pause and chat_id not in tasks:
+                await self.send_event_to_ui(pause["awaiting_reply"], chat_id)
+
+    def _defer_pause_event(self, event: Any, chat_id: str | None) -> bool:
+        scope = _turn_pause.get()
+        if not scope or (self, chat_id) not in scope or not isinstance(event, dict):
+            return False
+        pause = scope[self, chat_id]
+        kind = event.get("kind")
+        if kind == "awaiting_reply" or (kind == "run_complete" and event.get("awaiting_user_input")):
+            pause[kind] = event
+            return True
+        if kind == "run_complete":
+            # Cold recovery may pause and then settle the submitted turn under the same lease.
+            pause.clear()
+        return False
+
     async def handle_user_input_from_api(
         self,
         chat_id: str,
@@ -408,7 +448,7 @@ class WorkflowBridgeMixin:
             # return exactly at a durably persisted terminal or human-waiting
             # boundary, so releasing on context exit lands on that boundary.
             try:
-                async with chat_execution_lease(app_id=app_id, chat_id=chat_id):
+                async with self._workflow_turn_lease(app_id=app_id, chat_id=chat_id):
                     if passive_start:
                         rejection = await self._passive_start_rejection(
                             chat_id=chat_id, app_id=app_id, user_id=user_id, workflow_name=workflow_name,
@@ -1195,14 +1235,6 @@ class WorkflowBridgeMixin:
                             )
                         except Exception as _ev_exc:
                             logger.debug("PROCESS_COMPLETED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
-                    # A paused run is resumable as soon as AG2 has returned its
-                    # checkpoint. Release the background-task slot before the
-                    # pause event reaches the UI so an immediate user reply is
-                    # not rejected as CHAT_BUSY.
-                    if run_status in {"paused", "in_progress"}:
-                        current_task = asyncio.current_task()
-                        if self._background_tasks.get(chat_id) is current_task:
-                            self._background_tasks.pop(chat_id, None)
                     return result
                 except Exception:
                     # Emit failed run_complete before re-raising so listeners can react
@@ -1274,11 +1306,8 @@ class WorkflowBridgeMixin:
             except Exception as _send_exc:
                 logger.debug("WORKFLOW_BACKGROUND_ERROR_SEND_FAILED chat=%s: %s", chat_id, _send_exc)
         finally:
-            # Drop task handle
-            try:
+            if self._background_tasks.get(chat_id) is asyncio.current_task():
                 self._background_tasks.pop(chat_id, None)
-            except Exception:
-                pass
 
             # Only an accepted, completed execution can complete the workflow.
             try:

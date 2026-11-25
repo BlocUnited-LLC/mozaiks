@@ -19,35 +19,42 @@ export default function useWorkflowSubmission(scope, removeRefusedMessage) {
     setDraft({ scope, text });
   }, [scope]);
 
+  const isActiveScope = useCallback(expectedScope => activeScope.current === expectedScope, []);
+  const isCurrent = useCallback(entry => Boolean(entry && entry === submitted.current &&
+    (isActiveScope(entry.scope) || isActiveScope(entry.originScope))), [isActiveScope]);
+
   const remember = useCallback((targetScope, chatId, message) => {
-    const entry = { scope: targetScope, chatId, message, accepted: false, rejected: false };
+    // A deferred chat can refuse its first send before its new route renders.
+    const entry = { scope: targetScope, originScope: scope, chatId, message, accepted: false, rejected: false };
     submitted.current = entry;
     setRefused(null);
     return entry;
-  }, []);
+  }, [scope]);
 
   const restore = useCallback(entry => {
-    if (!entry || entry !== submitted.current || entry.rejected || entry.scope !== activeScope.current) return false;
+    if (!isCurrent(entry) || entry.rejected) return false;
     entry.rejected = true;
     const unsent = { scope: entry.scope, text: entry.message.content };
     setRefused(unsent);
     setDraft(previous => previous?.scope === entry.scope && previous.text ? previous : unsent);
     removeRefusedMessage(entry.message.id);
     return true;
-  }, [removeRefusedMessage]);
+  }, [isCurrent, removeRefusedMessage]);
 
-  const handleAdmission = useCallback((accepted, chatId, messageId) => {
+  const handleAdmission = useCallback((accepted, receipt) => {
+    const chatId = receipt.data?.chat_id || receipt.chat_id;
+    const messageId = receipt.data?.client_message_id || receipt.client_message_id;
     const entry = submitted.current;
-    if (!entry || entry.scope !== activeScope.current || entry.chatId !== chatId ||
+    if (!isCurrent(entry) || entry.chatId !== chatId ||
         entry.message.id !== messageId || entry.accepted || entry.rejected) return false;
     if (accepted) entry.accepted = true;
     else restore(entry);
     return true;
-  }, [restore]);
+  }, [isCurrent, restore]);
 
   return {
     text: draft?.scope === scope ? draft.text : '',
     refused: refused?.scope === scope ? refused : null,
-    changeDraft, submitted, remember, restore, handleAdmission,
+    changeDraft, submitted, remember, restore, handleAdmission, isActiveScope, isCurrent,
   };
 }
