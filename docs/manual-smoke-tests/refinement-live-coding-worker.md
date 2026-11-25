@@ -168,6 +168,9 @@ For acceptance, continue a real AppReview conversation and verify:
    connecting its websocket starts the review through the existing launch owner.
    The previous run's immutable build binding is never rewritten. Verify a
    second chat edit addresses the new saved version.
+   Also open **Continue in chat** after accepting a redesign from ThemeCapture.
+   Check that chat opens on the redesigned build while the older generation's
+   workbench is still pending. This workflow saves its result in its own chat.
 4. Reject cross-app/version bundle responses and late responses from an abandoned
    chat. A failed review handoff must show an error rather than implying that
    another chat is ready. Acceptance must refetch the canonical saved review
