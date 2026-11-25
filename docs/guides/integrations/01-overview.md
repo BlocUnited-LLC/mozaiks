@@ -43,9 +43,17 @@ raw secrets.
 8. Apps read the resulting declarations/status and show whether each required
    service is ready, needs setup, or is app-specific.
 
-Mozaiks Pay is the default removable payment integration for monetizable apps.
-It is represented as a Mozaiks-managed service in the catalog and generated app
-metadata.
+For a new app with approved paid memberships or usage billing, Factory proposes
+MozaiksPay. The owner reviews the provider in DesignDocs before AppGenerator
+installs the billing pages and facade. The owner can choose another provider or
+self-managed entitlements. An ordinary Store cart uses Commerce and needs a
+merchant integration to confirm payment against its order.
+
+The bundled Factory and fresh CLI workspaces offer MozaiksPay through
+`build_context/billing_offering/context.yaml`. Self-hosters can remove this
+registry or supply their own. Existing workspace registries keep their
+configured offerings. App Zero declares MozaiksPay in its own workspace
+registry. The connector requires configuration before it can process a payment.
 
 Internal app messaging is not configured as a workspace integration. Support
 desks, social replies, and app-to-user conversations use the app's `messages`

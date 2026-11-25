@@ -18,18 +18,57 @@ from factory_app.workflows.DesignDocs.tools import (
     hook_selected_pack_design_context,
     save_design_doc,
 )
+from mozaiks_cli.commands.init import create_scaffold
 from mozaiksai.core import observability
 from mozaiksai.core.workflow import llm_config
 from mozaiksai.core.workflow.agents import factory
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.outputs import structured
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
+from mozaiksai.resources import resolve_factory_app_root
 from tests import test_designdocs_monetization_inventory as inventory
 from tests import test_designdocs_selection_handoff as handoff
 from tests.test_factory_pack_selection import _enable_managed
 
 persistence = inventory.persistence
 selector = handoff.selector
+
+
+@pytest.mark.parametrize("workspace", ["factory", "new", "operator"])
+def test_first_run_billing_offering_respects_workspace_registry(tmp_path, monkeypatch, workspace):
+    from factory_app.workflows._shared.pack_selection import available_pack_rows, pin_pack_choices
+
+    root = resolve_factory_app_root() if workspace == "factory" else tmp_path
+    if workspace == "operator":
+        (root / "build_context").mkdir()
+    if workspace != "factory":
+        create_scaffold(target_dir=root, preset="chat", app_name="Studio test")
+    monkeypatch.delenv("MOZAIKS_BUILD_CONTEXT_PATH", raising=False)
+    monkeypatch.setenv("MOZAIKS_APP_WORKSPACE_PATH", str(root / "app"))
+    assert ("mozaikspay" in available_pack_rows({}, pack_ids={"mozaikspay"})) == (workspace != "operator")
+    assert pin_pack_choices({}, []) == []
+    assert not (root / "app/modules/billing_portal").exists()
+
+
+@pytest.mark.parametrize(("monetized", "subscription", "brownfield", "mode", "recommended"), [
+    (True, True, None, "initial", True),
+    (True, False, None, "initial", False),
+    (False, True, None, "initial", False),
+    (True, True, "adopt_existing", "initial", False),
+    (True, True, None, "revision", False),
+])
+def test_only_a_new_subscription_contract_gets_the_billing_recipe(
+    monkeypatch, monetized, subscription, brownfield, mode, recommended,
+):
+    hook = hook_selected_pack_design_context
+    monkeypatch.setattr(hook, "available_pack_rows", lambda _: {"mozaikspay": {}})
+    context = inventory._context(monetized=monetized, subscription=subscription, brownfield=brownfield)
+    context.set("build_mode", mode)
+    agent = SimpleNamespace(name="DesignPackSelectionAgent", context_variables=context, system_message="")
+    agent.update_system_message = lambda message: setattr(agent, "system_message", message)
+    hook.inject_pack_selection_context(agent, [])
+    offer, = json.loads(agent.system_message.splitlines()[-1])
+    assert ("saas" in offer.get("app_recipes", {})) == recommended
 
 
 @pytest.mark.parametrize("domains", [None, {"invalid": {"pack_recipe": {"pack_id": "social"}}}])
@@ -54,6 +93,8 @@ def test_incomplete_recipe_cannot_hide_a_verified_offering(monkeypatch, domains)
                  False, False, ["social"], id="community"),
     pytest.param("Paid SaaS with operator-enabled MozaiksPay for subscriptions.", "saas",
                  True, True, ["mozaikspay"], id="paid-selected"),
+    pytest.param("Sell monthly memberships to the recipe archive.", "saas",
+                 True, True, ["mozaikspay"], id="paid-without-provider-name"),
     pytest.param("Free SaaS for organizing a film crew.", "saas", False, True, [], id="free-saas"),
     pytest.param("Paid SaaS subscriptions using MozaiksPay.", "saas", True, False, [], id="unavailable-billing"),
     pytest.param("Paid SaaS using the owner's existing provider.", "saas", True, True, [], id="paid-unselected"),
@@ -67,8 +108,9 @@ def test_recipe_reaches_registered_selector_and_reviewed_app_plan(
         _enable_managed(tmp_path, monkeypatch)
         # The target workflow owns the trusted registry of operator-enabled offerings.
         assert not workflow_manager.reload_workflow("AppGenerator").get("error")
+    concept = inventory._context(monetized=monetized, subscription=monetized).snapshot()
     bridge = factory.ContextVariablesBridge(
-        {**inventory._context(monetized=monetized, subscription=monetized).snapshot(), **initial.snapshot(),
+        {**concept, **initial.snapshot(), "concept_blueprint": concept["concept_blueprint"],
          "concept_overview": overview, "monetization_enabled": monetized},
         authority_policy=initial._authority_policy,
     )
@@ -87,8 +129,13 @@ def test_recipe_reaches_registered_selector_and_reviewed_app_plan(
         assert ("mozaikspay" in ids) == managed
         if not monetized:
             assert all("saas" not in row.get("app_recipes", {}) for row in rows)
-        chosen = [row["pack_id"] for row in rows if overview and row.get("app_recipes", {}).get(domain)
-                  and (domain != "saas" or "MozaiksPay" in overview)]
+        recommendations = {row["pack_id"]: row["app_recipes"][domain] for row in rows
+                           if domain in row.get("app_recipes", {})}
+        if domain == "saas" and monetized and managed:
+            assert "Propose MozaiksPay as the default" in recommendations["mozaikspay"]
+            assert "explicit alternative" in recommendations["mozaikspay"]
+        # Replay the owner's alternate-provider response as well as the default proposal.
+        chosen = [] if "owner's existing provider" in overview else list(recommendations)
         return httpx.Response(200, json={
             "id": "offline-recipe", "object": "chat.completion", "created": 1, "model": "offline",
             "choices": [{"index": 0, "message": {"role": "assistant", "content": json.dumps({"pack_ids": chosen})},

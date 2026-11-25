@@ -630,6 +630,11 @@ This project follows a practical pre-1.0 changelog format:
 - MozaiksPay pack `0.1.13` shows the approved recurring plan price on the
   app's Pricing and Billing pages. Fresh Windows and Linux checkouts produce
   the same integrity pins for both Commerce and MozaiksPay.
+- The bundled Factory and newly initialized workspaces offer MozaiksPay for
+  owner review when an app needs paid memberships or usage billing. Explicit
+  alternatives and existing workspace registries are respected. The
+  subscription designer can include a recurring price for the owner to
+  confirm before the Factory writes it to the app's subscription catalog.
 - Failed automatic workflow steps now show a safe conversation notice without
   enabling debug messages, exposing result details, or changing retry eligibility.
 

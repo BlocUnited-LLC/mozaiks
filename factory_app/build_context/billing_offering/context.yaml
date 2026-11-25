@@ -1,0 +1,9 @@
+context_id: billing_offering
+applies_to_workflows: [AppGenerator]
+assets: []
+values:
+  operator_capabilities: [mozaikspay]
+projections:
+  context_variables:
+    operator_capabilities:
+      from: operator_capabilities
