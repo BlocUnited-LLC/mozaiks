@@ -30,16 +30,16 @@ test('an early workflow message is recoverable in its own chat and resends only 
       import { createRoot } from 'react-dom/client';
       import {WebSocketApiAdapter, RestApiAdapter} from ${JSON.stringify(path.join(ui, 'adapters/api.js'))};
       import ChatInterface from ${JSON.stringify(path.join(ui, 'components/chat/ChatInterface.jsx'))};
+      import {buildComposerArtifactContext} from ${JSON.stringify(path.join(ui, 'components/chat/inlineSurfaces.js'))};
       import useWorkflowSubmission, {withoutWorkflowSubmission} from ${JSON.stringify(path.join(ui, 'pages/hooks/useWorkflowSubmission.js'))};
       import {readStoredWorkflowTranscriptSnapshot,writeStoredWorkflowTranscriptSnapshot} from ${JSON.stringify(path.join(ui, 'session/chatSessionStorage.js'))};
       const ws = new WebSocket('ws://workflow.test/workflow');
       const noop = () => {};
       const resolveKnownWorkflowName = name => name;
       const sanitizeVisibleWorkflowMessages = rows => rows;
-      const buildComposerArtifactContext = () => null;
       const findPendingComposerInputRequestToolCall = () => null;
       const setChatStatusUsage = noop, setChatStatusProgress = noop;
-      const currentArtifactContext = null, activeGeneralChatId = null, urlWorkflowName = null;
+      const currentArtifactContext = { artifact_id: 'survey-map' }, activeGeneralChatId = null, urlWorkflowName = null;
       const queryContext = {}, queryTriggerSource = null, queryFreshStart = false;
       const socketApi = new WebSocketApiAdapter({baseUrl:location.origin});
       const restApi = new RestApiAdapter({baseUrl:location.origin});
@@ -154,6 +154,7 @@ test('an early workflow message is recoverable in its own chat and resends only 
   await send.click();
   await expect.poll(() => attempts.length).toBe(1);
   assert.equal(attempts[0].text, text);
+  assert.equal(attempts[0].context.artifact_context.artifact_id, 'survey-map');
   await expect(message).toHaveCount(1);
   await receipt(attempts[0], false, 'other-chat');
   await expect(input).toHaveValue('');
