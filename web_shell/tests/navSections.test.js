@@ -1,8 +1,51 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { groupItemsIntoSections, resolveSectionLabel } from '../../chat-ui/src/navigation/navSections.js';
+import { activeWorkspacePath, withAppSections } from '../../chat-ui/src/workspace/appSections.js';
 
 const item = (label, order, section = null) => ({ id: label, label, order, section });
+
+test('the portfolio chooser preserves the visible app menu order and its actual routes', () => {
+  const workspace = [{ label: null, items: [
+    { label: 'My Apps', component: 'AppsPage', path: '/apps' },
+    { label: 'Integrations', path: '/integrations' },
+  ] }];
+  const navigation = withAppSections(workspace, [
+    { label: 'Manage', items: [{ label: 'Revenue', path: '/apps/:appId/revenue' }] },
+    { label: 'Connect', items: [{ label: 'Adapters', path: '/apps/:appId/settings/adapters' }] },
+  ]);
+  assert.deepEqual(navigation.sections, [
+    { key: 'revenue', label: 'Revenue', route: '/apps/:appId/revenue' },
+    { key: 'settings/adapters', label: 'Adapters', route: '/apps/:appId/settings/adapters' },
+  ]);
+  assert.equal(navigation.groups[0], workspace[0]);
+  assert.equal(navigation.groups[1].label, 'Manage an app');
+  assert.deepEqual(navigation.groups[1].items.map(item => item.path), [
+    '/apps?section=revenue', '/apps?section=settings%2Fadapters',
+  ]);
+  const active = (pathname, search) => activeWorkspacePath({ pathname, search }, navigation.sections);
+  assert.equal(active('/apps', '?sort=date&section=settings%2Fadapters'), '/apps?section=settings%2Fadapters');
+  assert.equal(active('/apps', '?section=foreign'), '/apps');
+  assert.equal(active('/apps', '?section=revenue&section=settings%2Fadapters'), '/apps');
+  assert.equal(active('/apps/', '?section=revenue'), '/apps?section=revenue');
+  assert.equal(active('/apps', '?sort=date'), '/apps');
+  assert.equal(active('/integrations', '?section=revenue'), '/integrations');
+  assert.equal(active('/apps/one/revenue', '?section=settings%2Fadapters'), '/apps/one/revenue');
+});
+
+test('only the Studio directory and concrete selected-app sections can create chooser links', () => {
+  const directory = [{ items: [{ component: 'AppsPage', path: '/apps' }] }];
+  const unusablePaths = [
+    '/apps/:appId', '/apps/:appId/', '/apps/new', '/apps/:appId/reports/:id', '/apps/:appId/*',
+    '/apps/:appId/settings?', '/apps/:appId/../admin', '/apps/:appId/%2e%2e/admin', '/settings',
+  ];
+  const appGroups = [{ items: unusablePaths.map(path => ({ path, label: 'Other' })) }];
+  assert.deepEqual(withAppSections(directory, appGroups), { groups: directory, sections: [] });
+  const appPage = [{ items: [{ path: '/apps/:appId/usage', label: 'Usage' }] }];
+  for (const pages of [[], [{ items: [{ path: '/apps', component: 'ProductCatalog' }] }]]) {
+    assert.deepEqual(withAppSections(pages, appPage), { groups: pages, sections: [] });
+  }
+});
 
 test('a manifest declaring no sections renders as one unlabeled group', () => {
   const items = [item('Apps', 0), item('Usage', 10), item('Billing', 30)];
