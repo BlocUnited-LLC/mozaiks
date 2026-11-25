@@ -27,6 +27,7 @@ test('an early workflow message is recoverable in its own chat and resends only 
   const { outputFiles } = await build({
     stdin: { resolveDir: shell, loader: 'jsx', contents: `
       import React, { useCallback, useEffect, useRef, useState } from 'react';
+      import { flushSync } from 'react-dom';
       import { createRoot } from 'react-dom/client';
       import {WebSocketApiAdapter, RestApiAdapter} from ${JSON.stringify(path.join(ui, 'adapters/api.js'))};
       import ChatInterface from ${JSON.stringify(path.join(ui, 'components/chat/ChatInterface.jsx'))};
@@ -78,7 +79,10 @@ test('an early workflow message is recoverable in its own chat and resends only 
         window.switchRoom = next => {
           const rows = readStoredWorkflowTranscriptSnapshot(next[4])?.messages || [];
           workflowMessagesCacheRef.current = rows;
-          setScope(next); setMessagesWithLogging(rows); setLoading(false); setPendingWorkflowReply(null);
+          // Complete fixture-driven navigation before the browser types into the destination.
+          flushSync(() => {
+            setScope(next); setMessagesWithLogging(rows); setLoading(false); setPendingWorkflowReply(null);
+          });
         };
         useEffect(() => {
           ws.onmessage = event => {
@@ -257,6 +261,7 @@ test('an early workflow message is recoverable in its own chat and resends only 
   await page.getByText('View unsent message').click();
   await expect(page.getByText('First turn in a new study', {exact:true})).toHaveCount(1);
   await page.evaluate(() => window.switchRoom(['workflow','app','owner','Study','chat-b']));
+  await expect(input).toHaveValue('');
   await page.evaluate(() => { window.useHttp = true; });
   const requests = [];
   await page.route('**/chat/app/chat-b/owner/input', route => { requests.push(route); });
