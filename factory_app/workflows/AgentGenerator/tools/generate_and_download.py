@@ -352,8 +352,8 @@ async def _record_context_and_artifacts(
 
 
 async def generate_and_download(
-    DownloadRequest: Annotated[dict[str, Any], "Download configuration"],
-    agent_message: Annotated[str, "Concise message (≤140 chars) shown to user in download UI"],
+    DownloadRequest: Annotated[dict[str, Any] | None, "Download configuration"] = None,
+    agent_message: Annotated[str, "Concise message (≤140 chars) shown to user in download UI"] = "",
     context_variables: Annotated[Any | None, "Injected runtime context."] = None,
 ) -> dict[str, Any]:
     """
@@ -364,8 +364,9 @@ async def generate_and_download(
     context_variables["workflow_bundle_results"] — no converter or persistence
     assembly needed.
     """
-    confirmation_only = DownloadRequest.get("confirmation_only", True)
-    storage_backend = DownloadRequest.get("storage_backend", "none")
+    options = DownloadRequest or {}
+    confirmation_only = options.get("confirmation_only", True)
+    storage_backend = options.get("storage_backend", "none")
 
     chat_id: str | None = None
     app_id: str | None = None
