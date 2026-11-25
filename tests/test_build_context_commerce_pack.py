@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 WORKSPACE = Path(__file__).resolve().parents[1]
@@ -63,7 +64,6 @@ def test_commerce_contract_required_outputs_exist_under_templates() -> None:
     assert contract["contract_id"] == "commerce"
     assert contract["contract_type"] == "build_pack_instructions"
     assert contract["facades"] == []
-    assert "mozaikspay" in {item["pack"] for item in contract["cross_pack_integrations"]}
 
     missing = [
         output["path"]
@@ -196,6 +196,27 @@ def test_commerce_backend_templates_compile_and_use_runtime_persistence() -> Non
     assert "services.integrations.mozaikspay_client" not in service_text
 
 
+def test_standalone_commerce_registers_reactions_without_a_payment_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from factory_app.workflows.AppGenerator.tools.app_validation import _write_files_to_dir
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        resolve_managed_capability_templates,
+    )
+    from mozaiksai.core.account import account_data_registry
+    from mozaiksai.core.runtime.app.module_loader import ModuleLoader
+    from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
+
+    monkeypatch.setattr(account_data_registry, "_handlers", {})
+    files = resolve_managed_capability_templates([{"id": "commerce", "capability_source": "operator_pack"}])
+    _write_files_to_dir(tmp_path, {file["filename"]: file["content"] for file in files})
+    commerce = ModuleLoader(str(tmp_path)).load("commerce")
+    router = ModuleEventRouter([commerce])
+
+    assert "domain.commerce.checkout.requested" not in router.event_types
+    assert {"domain.commerce.order.paid", "domain.commerce.checkout.failed"} <= set(router.event_types)
+
+
 def test_commerce_contracts_declare_events_admin_settings_and_reactions() -> None:
     contracts_root = TEMPLATES / "modules" / "commerce" / "contracts"
 
@@ -220,9 +241,13 @@ def test_commerce_contracts_declare_events_admin_settings_and_reactions() -> Non
     assert "commerce.checkout.default_provider" in {item["id"] for item in settings["settings"]}
 
     reactions = _read_yaml(contracts_root / "reactions.yaml")
-    bridge = reactions["reactions"][0]
-    assert bridge["event_type"] == "domain.commerce.checkout.requested"
-    assert bridge["target"]["capability_id"] == "mozaikspay.checkout.create_session"
+    assert {
+        (row["event_type"], row["target"]["notification_id"])
+        for row in reactions["reactions"] if row["target"]["kind"] == "notification"
+    } == {
+        ("domain.commerce.order.paid", "commerce_order_receipt"),
+        ("domain.commerce.checkout.failed", "commerce_checkout_failed"),
+    }
 
 
 def test_commerce_page_templates_use_canonical_primitives_and_app_owned_endpoints() -> None:

@@ -616,6 +616,14 @@ This project follows a practical pre-1.0 changelog format:
   approved build inputs while rejecting changes to verified implementations.
   Commerce no longer requires fixed pricing gates, uses current schema admin panels,
   and declares the product response envelopes used by its mutation actions.
+- Stores built with Commerce pack `0.1.17` can browse and edit products without a
+  payment integration. Checkout creates a pending order and emits
+  `domain.commerce.checkout.requested`. If your workflow used the `0.1.16`
+  `commerce_checkout_requested_payment_facade` reaction, move that single row into
+  the payment module's `contracts/reactions.yaml` in the same reviewed upgrade.
+  Keep its workflow trigger and capability declaration. The upgrade preview
+  lists the changed file. Verify that the receiving module owns exactly one
+  subscription before activating the upgraded app.
 - Failed automatic workflow steps now show a safe conversation notice without
   enabling debug messages, exposing result details, or changing retry eligibility.
 
