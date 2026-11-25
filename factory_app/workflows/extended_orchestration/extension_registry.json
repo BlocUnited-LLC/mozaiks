@@ -97,6 +97,14 @@
       ]
     },
     {
+      "id": "BrandAssetGeneratorWorkflow",
+      "description": "Generates selectable brand artwork for the registered app.",
+      "startup_mode": "AgentDriven",
+      "interaction_mode": "user_guided",
+      "launch_behavior": "auto_start",
+      "handoff_style": "continuous_chat"
+    },
+    {
       "id": "DesignDocs",
       "description": "Frontend, backend, database design docs",
       "startup_mode": "AgentDriven",
@@ -750,6 +758,28 @@
         {
           "workflows": [
             "AppMediaGenerator"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "app_theme_revision",
+      "description": "Apply a ThemeCapture redesign to the selected app bundle and stage it for review.",
+      "affected_declarative_families": ["theme_capture", "app_bundle"],
+      "steps": [
+        {"workflows": ["ThemeCapture"]}
+      ]
+    },
+    {
+      "id": "logo_revision",
+      "description": "Generate logo options for the selected app build and stage the chosen logo for review.",
+      "affected_declarative_families": [
+        "app_bundle"
+      ],
+      "steps": [
+        {
+          "workflows": [
+            "BrandAssetGeneratorWorkflow"
           ]
         }
       ]

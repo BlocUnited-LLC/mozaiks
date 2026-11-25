@@ -439,6 +439,17 @@ async def test_revision_reads_verified_archive_and_preserves_resumed_changes(bas
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("sequence", ["app_revision", "theme_revision"])
+async def test_revision_uses_selected_app_theme_unless_the_sequence_recaptures_it(baseline, sequence):
+    accepted = {"assets": {"logo": "selected.png"}, "colors": {"accent": {"main": "#D97706"}}}
+    recaptured = {"colors": {"accent": {"main": "#2DD4BF"}}}
+    _replace_archive(baseline, {"brand/theme_config.json": json.dumps(accepted)})
+    baseline.context.update(artifact_kind="app_bundle", workflow_sequence=sequence, captured_theme_config=recaptured)
+    await revision.hydrate_app_revision_context(baseline.context)
+    assert baseline.context["captured_theme_config"] == (recaptured if sequence == "theme_revision" else accepted)
+
+
+@pytest.mark.asyncio
 async def test_scoped_assembly_hydrates_verified_archive_and_preserves_baseline(baseline):
     page = {
         "schema_version": "mozaiks.app_page.v1", "name": "records", "route": "/records",

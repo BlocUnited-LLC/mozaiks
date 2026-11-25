@@ -304,6 +304,7 @@ class OrchestrationControlHarness:
         refinement_request: RefinementRequest, routing_decision: RefinementRoutingDecision,
         workspace_files: dict[str, str], run_build_binding: RunBuildBinding,
         allowed_paths: list[str] | None = None, registry_run_state: RegistryRunState | None = None,
+        preserved_assets: dict[str, bytes] | None = None,
     ) -> CodingWorkerResult:
         """Admit, validate and store a surface run's output through the coding worker's finalizer.
 
@@ -316,6 +317,7 @@ class OrchestrationControlHarness:
                 routing_decision=routing_decision, workspace_files=workspace_files,
                 run_build_binding=run_build_binding, allowed_paths=allowed_paths,
                 registry_run_state=registry_run_state,
+                preserved_assets=preserved_assets,
             )
         except (Exception, CancelledError) as exc:
             with CancelScope(shield=True):
@@ -340,6 +342,7 @@ class OrchestrationControlHarness:
         refinement_request: RefinementRequest, routing_decision: RefinementRoutingDecision,
         workspace_files: dict[str, str], run_build_binding: RunBuildBinding,
         allowed_paths: list[str] | None = None, registry_run_state: RegistryRunState | None = None,
+        preserved_assets: dict[str, bytes] | None = None,
     ) -> CodingWorkerResult:
         if result.status != "success" or plan.requires_schema_migration or plan.build_family != "app_bundle":
             return CodingWorkerResult(eligible=True, status="failed", error="Surface output requires workflow completion")
@@ -373,7 +376,7 @@ class OrchestrationControlHarness:
             owned_paths=sorted(owned_paths), needs_human_review=True,
             changed_files=[ProposedFileChange(path=path, content=content) for path, content in result.all_files.items()],
         )
-        return await self._coding_worker.finalize_proposal(request, proposal)
+        return await self._coding_worker.finalize_proposal(request, proposal, preserved_assets=preserved_assets)
 
     def build_coding_request(
         self,
@@ -504,7 +507,9 @@ class OrchestrationControlHarness:
             return None, decision
         return request.model_copy(update={"files": resolved_files, "metadata": metadata}), decision
 
-    async def execute_coding_request(self, request: CodingWorkerRequest) -> CodingWorkerResult:
+    async def execute_coding_request(
+        self, request: CodingWorkerRequest, *, preserved_assets: dict[str, bytes] | None = None,
+    ) -> CodingWorkerResult:
         if not self.coding_enabled():
             raise RuntimeError("Refinement coding worker is disabled in app/config/refinement_policy.yaml")
 
@@ -516,7 +521,9 @@ class OrchestrationControlHarness:
                 request_id=request_id,
                 app_id=request.app_id,
             ):
-                result = await self._coding_worker.execute(request)
+                result = await self._coding_worker.execute(
+                    request, **({"preserved_assets": preserved_assets} if preserved_assets else {}),
+                )
         except CancelledError:
             with CancelScope(shield=True):
                 await record_refinement_event(

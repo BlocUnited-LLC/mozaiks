@@ -4,5 +4,5 @@ tools:
     function: promote_brand_asset
     tool_type: Agent_Tool
     description: >
-      Promote a generated brand asset to the deterministic asset_manifest.json,
-      making it the canonical brand asset for this role (logo, icon, hero, etc.).
+      Apply the user's selected logo to a validated app build draft. In a standalone
+      workspace, publish the selected brand asset to that workspace's asset manifest.

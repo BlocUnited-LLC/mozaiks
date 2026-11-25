@@ -787,6 +787,7 @@ class BuildRecordStore:
         app_id: str,
         build_family: str | None = None,
         build_key: str | None = None,
+        source_chat_id: str | None = None,
         lineage_root_id: str | None = None,
         lifecycle_status: ArtifactLifecycleStatus | None = None,
         updated_since: datetime | None = None,
@@ -803,6 +804,8 @@ class BuildRecordStore:
         if not resolved_app_id:
             raise ValueError("app_id is required")
         query: dict[str, Any] = {"app_id": resolved_app_id}
+        if source_chat_id is not None:
+            query["source_chat_id"] = source_chat_id
         if build_family:
             # Handle both build_family (new docs) and artifact_kind (prior docs)
             query["$or"] = [{"build_family": build_family}, {"artifact_kind": build_family}]

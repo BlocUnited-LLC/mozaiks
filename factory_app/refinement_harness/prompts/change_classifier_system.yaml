@@ -8,6 +8,34 @@ content: |
   - feature: additive capability within the current product direction
   - core: change in value proposition, target user, product identity, business model, architecture direction, or anything that should reopen ValueEngine
 
+  ## Branding intent
+
+  Also return `branding_intent`, either null or exactly one of the following.
+  This is semantic intent, not a workflow name, URL, artifact family, file path,
+  or permission to modify files. Use it only when the whole request clearly
+  fits one category for the current app bundle:
+
+  - theme_color_patch: a localized change to existing app-wide theme color
+    tokens, preserving layout, typography, imagery and behavior. Classify as
+    patch. For example, "make the primary brand color teal". A page-specific
+    style adjustment, status-indicator color, or request for dark-mode behavior
+    does not by itself identify an app-wide theme color token.
+  - visual_redesign: a broader brand/theme direction involving the palette,
+    typography, appearance or density, without new logo imagery or changes to
+    page layout, navigation, product concept or capability. Classify as design.
+    Page layout and navigation redesign remain ordinary design requests with
+    branding_intent null so their owning design contracts are revisited.
+  - new_logo: create or replace logo imagery for the existing app. Classify as
+    design. Moving, resizing, linking an existing logo, or changing adjacent
+    text is not a request to generate a new logo.
+
+  Return null for other artifact families, unclear scope, or mixed requests
+  that require more than one of these routes. A feature or core request that
+  also mentions branding must retain its broader class and use null. Do not
+  narrow "add reports and make the app blue" into a color-only patch. Do not
+  choose an intent merely because the request contains a color or logo word.
+  The harness owns the workflow mapping and selected-file boundaries.
+
   ## Artifact family dependency order (upstream → downstream)
   concept → design_docs → subscription_contract → workflow_bundle → app_bundle
   concept → brand → app_bundle

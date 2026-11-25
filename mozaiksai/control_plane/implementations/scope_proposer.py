@@ -18,6 +18,7 @@ from mozaiksai.control_plane.loader import load_selected_refinement_harness
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
 from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
 from mozaiksai.core.artifacts.store import get_artifact_store
+from mozaiksai.core.runtime.app.theme_contract import APP_THEME_PATH
 from mozaiksai.core.usage.context import resolve_auxiliary_usage_context
 
 from .dependency_graph_agent import DependencyGraphAgent
@@ -55,6 +56,15 @@ class ArtifactScopeProposer:
         routing_decision: RefinementRoutingDecision,
         payload: dict[str, Any] | None = None,
     ) -> ScopeProposal:
+        if routing_decision.change_intent.branding_intent == "theme_color_patch":
+            return self._apply_scope_policy(ScopeProposal(
+                resolution="scoped_files",
+                selected_paths=[APP_THEME_PATH],
+                rationale="The app's shared color tokens belong to its saved theme.",
+                confidence=routing_decision.change_intent.confidence,
+                signals=["theme_color_patch"],
+                clarification_question=None,
+            ))
         pack = self._load_pack()
         checkpoint = pack.checkpoint_by_event(_CHECKPOINT_EVENT)
         if checkpoint is None or not checkpoint.prompt_id:
