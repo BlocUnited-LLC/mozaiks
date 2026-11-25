@@ -212,7 +212,7 @@ async def test_historical_producer_schema_is_recovered_only_from_verified_workfl
     with zipfile.ZipFile(path, "w") as archive:
         for file in rendered["files"]:
             archive.writestr(f"ReviewWorkflow/{file['filename']}", file["content"])
-    record = _record("legacy-result-workflow", {"artifact_path": str(path), "workflow_integration_metadata": metadata})
+    record = _record("archived-result-workflow", {"artifact_path": str(path), "workflow_integration_metadata": metadata})
     raw = path.read_bytes()
     record.files_manifest = [BuildRecordFileEntry(path="TicketOps/TicketOps.zip", sha256=hashlib.sha256(raw).hexdigest(),
                                                   size_bytes=len(raw), content_type="application/zip")]

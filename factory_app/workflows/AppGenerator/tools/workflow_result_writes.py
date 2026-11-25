@@ -50,7 +50,10 @@ def workflow_result_files(files: dict[str, str], metadata: dict[str, Any] | None
         for index, reaction in enumerate(reactions.reactions):
             target = reaction.target
             key = (reaction.event_type, target.capability_id)
-            approved = expected.get(key) if target.kind == "capability" else None
+            approved = (
+                expected.get((reaction.event_type, target.capability_id))
+                if target.kind == "capability" and target.capability_id is not None else None
+            )
             if target.result_write is not None and target.result_write.model_dump(mode="json") != approved:
                 raise ValueError(f"{path}: result_write does not match its pinned workflow plan for {key}")
             if approved is None:

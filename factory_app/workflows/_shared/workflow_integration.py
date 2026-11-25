@@ -192,7 +192,7 @@ def _normalize_workflow_item(raw: Mapping[str, Any]) -> dict[str, Any] | None:
         )
         if event is not None
     ]
-    workflow = {
+    workflow: dict[str, Any] = {
         "workflow_name": workflow_name,
         "capability_id": capability_id,
         "startup_mode": startup_mode,
@@ -523,11 +523,11 @@ def _restore_archived_result_schemas(record: BuildRecord, catalog: Mapping[str, 
     expected = canonical_bundle_archive_path(record.build_key)
     entries = [entry for entry in record.files_manifest if entry.content_type == "application/zip"]
     archive_path = metadata.get("artifact_path")
-    if (len(entries) != 1 or entries[0].path != expected or not entries[0].size_bytes or not entries[0].sha256
-            or entries[0].size_bytes > APP_BUNDLE_MAX_TOTAL_BYTES or not isinstance(archive_path, str)
+    entry = entries[0] if len(entries) == 1 else None
+    if (entry is None or entry.path != expected or entry.size_bytes is None or not entry.sha256
+            or not 0 < entry.size_bytes <= APP_BUNDLE_MAX_TOTAL_BYTES or not isinstance(archive_path, str)
             or not Path(archive_path).is_absolute()):
         raise ValueError("Cannot verify the recorded workflow archive for the result schema")
-    entry = entries[0]
     try:
         with Path(archive_path).open("rb") as source:
             raw = source.read(entry.size_bytes + 1)

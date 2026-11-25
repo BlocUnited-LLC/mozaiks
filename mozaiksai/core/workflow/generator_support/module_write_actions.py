@@ -203,9 +203,10 @@ def _write_action(shape: dict[str, Any], operation: str) -> dict[str, Any]:
 
 def _operation_fields(shape: dict[str, Any], operation: str) -> list[dict[str, Any]]:
     policy = shape["write_policy"]
+    writable: list[dict[str, Any]] = shape["writable"]
     if policy is None:
-        return shape["writable"]
-    return [field for field in shape["writable"] if field["name"] in policy.get(operation, ())]
+        return writable
+    return [field for field in writable if field["name"] in policy.get(operation, ())]
 
 
 def _write_collections(module_id: str, plan: dict[str, Any], contract: Any) -> list[dict[str, Any]]:

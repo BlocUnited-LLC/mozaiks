@@ -5,7 +5,7 @@ import inspect
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 from uuid import uuid4
 
 from pydantic import TypeAdapter
@@ -37,6 +37,11 @@ if TYPE_CHECKING:
 
 logger = get_core_logger("session_launcher")
 _PERSISTENCE_MANAGER = AG2PersistenceManager()
+
+
+class _SessionOptions(TypedDict, total=False):
+    run_model: RefinementModel
+    workflow_result_grant: WorkflowResultGrant
 
 
 @dataclass(slots=True)
@@ -272,14 +277,18 @@ async def create_routed_chat_session(
     policy = _context_authority_policy_for_workflow(workflow_id)
     extra_fields = revalidate_build_context(policy, extra_fields, reject_overrides=True)
 
+    options: _SessionOptions = {}
+    if run_model is not None:
+        options["run_model"] = run_model
+    if workflow_result_grant is not None:
+        options["workflow_result_grant"] = workflow_result_grant
     await persistence.create_chat_session(
         chat_id=chat_id,
         app_id=app_id,
         workflow_name=workflow_id,
         user_id=user_id,
         extra_fields=extra_fields or None,
-        **({"run_model": run_model} if run_model is not None else {}),
-        **({"workflow_result_grant": workflow_result_grant} if workflow_result_grant is not None else {}),
+        **options,
     )
     server_fields = {key: value for key, value in session_fields.items() if key in SERVER_OWNED_SESSION_FIELDS}
     if server_fields:

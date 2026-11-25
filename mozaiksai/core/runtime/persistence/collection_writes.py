@@ -73,7 +73,7 @@ def canonical_write_input_schema(
 
 
 def canonical_write_fields(collection: Mapping[str, Any]) -> dict[str, tuple[str, ...]] | None:
-    """Return an explicit operation-to-input mapping, or None for legacy defaults."""
+    """Return the declared writable fields per operation, or None when omitted."""
     lifecycle = collection.get("lifecycle")
     if not isinstance(lifecycle, Mapping) or lifecycle.get("module_writes") is None:
         return None

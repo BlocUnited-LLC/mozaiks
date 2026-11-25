@@ -23,7 +23,7 @@ from mozaiksai.core.runtime.composition.module_dispatch import (
     ModuleDispatchScope,
     dispatch_module_action,
 )
-from mozaiksai.core.runtime.composition.module_executor import ModuleResult
+from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleResult
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 from mozaiksai.core.runtime.persistence.adapter import PersistencePrincipal
 from mozaiksai.core.workflow.agents.factory import active_workflow_tool_run
@@ -57,7 +57,8 @@ async def commit_workflow_result(result: dict[str, Any]) -> dict[str, str]:
     if producer != grant.result_agent:
         raise PermissionError("Workflow result requires the registered producer for this run")
     verify_invocation()
-    return await _resolve_module_executor(None).apply_workflow_result(
+    executor: ModuleExecutor = _resolve_module_executor(None)
+    return await executor.apply_workflow_result(
         grant=grant, run_identity=identity, values=validated, verify_invocation=verify_invocation,
     )
 
