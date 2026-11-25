@@ -69,7 +69,9 @@ original request's `build_record_id` identifies the implementation parent until
 the baseline loader pins one explicitly. Intermediate exports may advance
 `artifact_version_id`. Assembly reads workspace-owned files from the verified
 parent archive, while the newly generated workflow bundle remains a separate
-input to the child app.
+input to the child app. The dependency graph loader and each agent's prompt
+hook check this same implementation parent before attaching bounded graph
+evidence. A workflow export cannot replace the app as the graph source.
 
 This selection rule does not repair previously persisted lineage. Existing
 records and their acceptance evidence remain unchanged.

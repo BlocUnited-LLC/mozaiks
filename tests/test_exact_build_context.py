@@ -332,7 +332,10 @@ async def test_verified_archive_keeps_source_above_legacy_80kb_limit(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("content", [b"\xff\xfe", "#" + "x" * (default_context_graph_scan_policy().max_file_bytes + 1)])
+@pytest.mark.parametrize("content", [
+    pytest.param(b"\xff\xfe", id="undecodable"),
+    pytest.param("#" + "x" * (default_context_graph_scan_policy().max_file_bytes + 1), id="oversized"),
+])
 async def test_omitted_supported_source_is_reported_to_specialist_and_graph_tools(tmp_path, content):
     record = _record(tmp_path, files={
         "src/report.py": "from .helpers import render\ndef report():\n    return render()\n",

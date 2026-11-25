@@ -63,7 +63,16 @@ def forbid_current(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_workflow_loads_pinned_snapshot_and_server_specialist_with_execution_usage(monkeypatch, forbid_current):
+@pytest.mark.parametrize("source_context", [
+    {},
+    {
+        "artifact_version_id": "generated-workflow", "artifact_kind": "app_bundle", "artifact_key": "app_bundle",
+        "revision_source_artifact_version_id": None, "workflow_sequence": "full_rebuild",
+        "refinement_request_meta": {"build_family": "app_bundle", "build_record_id": "baseline"},
+        "workflow_bundle_artifact_version_id": "generated-workflow",
+    },
+], ids=["pinned-design-revision", "app-rebuild-after-workflow-export"])
+async def test_workflow_loads_pinned_snapshot_and_server_specialist_with_execution_usage(monkeypatch, forbid_current, source_context):
     snapshot = _snapshot()
     source = AsyncMock(return_value=snapshot)
     monkeypatch.setattr(loader, "load_context_graph_for_tool", source)
@@ -74,7 +83,7 @@ async def test_workflow_loads_pinned_snapshot_and_server_specialist_with_executi
     )
     analyze = AsyncMock(return_value=assessment)
     monkeypatch.setattr(loader, "DependencyGraphAgent", lambda: SimpleNamespace(analyze=analyze))
-    context = _context(dependency_graph={"recommended_paths": ["caller-injection.py"]})
+    context = _context(dependency_graph={"recommended_paths": ["caller-injection.py"]}, **source_context)
 
     await loader.load_context_graph_context(context)
 
@@ -94,6 +103,8 @@ async def test_workflow_loads_pinned_snapshot_and_server_specialist_with_executi
     assert "Specialist assessment (advisory JSON)" in agent.system_message
     assert "modules/tasks/backend/service.py" in agent.system_message
     assert "caller-injection.py" not in agent.system_message
+    assert "generated-workflow" not in agent.system_message
+    assert len(agent.system_message.encode("utf-8")) <= MAX_CONTEXT_GRAPH_PROMPT_BYTES
 
 
 @pytest.mark.asyncio

@@ -54,7 +54,7 @@ def _context_data(context_variables: Any) -> dict[str, Any]:
         for key in (
             "context_graph_pack", "run_build_binding", "artifact_version_id",
             "revision_source_artifact_version_id", "revision_first_generation",
-            "build_mode", "workflow_sequence", "artifact_kind",
+            "build_mode", "workflow_sequence", "artifact_kind", "refinement_request_meta",
             "workflow_name",
         ):
             try:
@@ -62,8 +62,8 @@ def _context_data(context_variables: Any) -> dict[str, Any]:
             except Exception:
                 value = None
             if value is not None:
-                # Live containers freeze reads; the formatter type-tests a dict.
-                out[key] = detach(value)
+                # Only the formatter needs a detached pack. Source selection reads frozen metadata.
+                out[key] = detach(value) if key == "context_graph_pack" else value
         return out
     return {}
 
