@@ -83,6 +83,29 @@ provider support, so Gemini's distinct `max_output_tokens` field must be supplie
 through explicit config or a stored provider entry. No provider default changes
 when the environment setting is absent.
 
+### Returning a tool's exact text
+
+A local agent can delegate its entire reply to one declared workflow function. For example,
+add the following entry to `agents.yaml`:
+
+```yaml
+- name: Receipt
+  structured_outputs_required: false
+  reply_tool: render_receipt
+```
+
+Declare `render_receipt` as this agent's sole bound `Agent_Tool` in `tools.yaml`, with
+`auto_tool_call: false`. Omit the model prompt and use a null structured-output registry entry.
+The Python function can take `context_variables` for runtime-bound scope, or take no arguments.
+It returns the nonempty text the user should see. The workflow still owns authorization and
+which records the function reads. Include the agent in `ui_config.yaml`'s `visual_agents` and
+route to `user` for follow-up questions when appropriate.
+
+AG2 invokes the declared function once per turn without a model provider or credentials.
+Its native final tool result becomes the workflow packet and follows normal transcript replay.
+An exception, empty result, or non-text result fails the turn. A reply that needs to communicate
+missing information should return an appropriate message from the function.
+
 ### `transition_graph.yaml`
 
 Maps to AG2 1.0 Network transition conditions and targets. Mozaiks compiles
