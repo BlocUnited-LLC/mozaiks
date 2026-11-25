@@ -36,9 +36,11 @@ content: |
     repo.py, policy.py under modules/{module_id}/backend/.
 
   module_contract
-    Module identity declarations change without changing action behavior:
-    events, capabilities, settings, admin panels.
-    Canonical files: module.yaml, contracts/events.yaml.
+    Select this for changes confined to existing module.yaml declarations and
+    contracts/events.yaml. An event declaration describes what can be emitted.
+    Changing what runs when the event fires requires a reaction and a matching
+    workflow trigger. Use workflow re-entry when those contracts are needed
+    outside the supplied write targets.
 
   page_binding
     A page or page section changes: new section, modified layout, different
@@ -71,8 +73,8 @@ content: |
     This surface never represents an app page.
 
   app_config
-    App-level configuration changes: shell preset, theme, nav structure.
-    Canonical files: app.json.
+    Select this for app identity and flags declared in app.json. Use the
+    available_targets inventory to verify ownership of the requested setting.
 
   Rules:
 

@@ -19,6 +19,7 @@ workflow_startup_mode: AgentDriven
 orchestration_pattern: ag2_network
 initial_message:
   You are part of the Mozaiks ThemeCapture process. ThemeInterviewAgent,
-  greet the user and begin gathering their app's visual identity.
+  use the supplied theme and refinement request when revising an app.
+  Ask the user for any essential visual choices still missing.
 initial_agent: ThemeInterviewAgent
 

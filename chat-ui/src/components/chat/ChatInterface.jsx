@@ -163,6 +163,8 @@ const ModernChatInterface = ({
   refinementModelPicker,
   modelPicker = refinementModelPicker,
   modelSaving = false,
+  onStartWorkflow = null,
+  startWorkflowDisabled = false,
   waitingForConnection = false,
   workflowHasChildren = false,
   conversationMode = 'workflow',
@@ -357,7 +359,7 @@ const ModernChatInterface = ({
        pendingComposerInputToolCall.tool_name !== 'UserInputRequest')
     )
   );
-  const composerPlaceholder = hasPendingHarnessDecision
+  const composerPlaceholder = onStartWorkflow ? 'Choose a model and start the workflow' : hasPendingHarnessDecision
     ? 'Choose an action to continue...'
     : (pendingComposerInputToolCall || pendingComposerReply)
       ? 'Reply to continue the workflow...'
@@ -376,6 +378,10 @@ const ModernChatInterface = ({
 
   const onSubmitClick = (event) => {
     event.preventDefault();
+    if (onStartWorkflow) {
+      if (!startWorkflowDisabled) onStartWorkflow();
+      return;
+    }
     if (composerDisabled || modelSaving) return;
     if (buttonText === 'NEXT') {
       const envDefaultAppId =
@@ -1027,17 +1033,19 @@ const ModernChatInterface = ({
             {modelPicker && <div className="ml-auto flex min-w-0 items-center">{modelPicker}</div>}
             <button
               type="submit"
-              aria-label={buttonText === 'NEXT' ? 'Continue' : 'Send message'}
-              disabled={!message.trim() || hasPendingHarnessDecision || composerDisabled || modelSaving || (waitingForConnection && buttonText !== 'NEXT')}
+              aria-label={onStartWorkflow ? 'Start' : buttonText === 'NEXT' ? 'Continue' : 'Send message'}
+              disabled={onStartWorkflow ? startWorkflowDisabled : !message.trim() || hasPendingHarnessDecision || composerDisabled || modelSaving || (waitingForConnection && buttonText !== 'NEXT')}
               className={`
                 px-2 py-1.5 rounded-md transition-all duration-300 min-w-[36px] sm:min-w-[40px] w-auto h-8 sm:h-9 oxanium font-bold text-[13px] flex items-center justify-center letter-spacing-wide border-2 flex-shrink-0
-                ${(!message.trim())
+                ${(onStartWorkflow ? startWorkflowDisabled : !message.trim())
                   ? 'bg-gray-800/50 text-gray-400 cursor-not-allowed border-gray-600/50'
                   : 'bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.8)] to-[rgba(var(--color-primary-dark-rgb),0.8)] hover:from-[rgba(var(--color-primary-light-rgb),0.9)] hover:to-[rgba(var(--color-primary-light-rgb),0.9)] text-white border-[rgba(var(--color-primary-light-rgb),0.5)] hover:border-[rgba(var(--color-primary-light-rgb),0.7)] shadow-sm [box-shadow:0_0_0_rgba(var(--color-primary-rgb),0.1)] hover:[box-shadow:0_0_0_rgba(var(--color-primary-light-rgb),0.2)] active:scale-95'
                 }
               `}
             >
-              {buttonText === 'NEXT' ? (
+              {onStartWorkflow ? (
+                <span>Start</span>
+              ) : buttonText === 'NEXT' ? (
                 <span className="text-[11px] font-bold tracking-widest" aria-label="Continue">NEXT</span>
               ) : (
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 sm:w-5 sm:h-5" aria-hidden="true">

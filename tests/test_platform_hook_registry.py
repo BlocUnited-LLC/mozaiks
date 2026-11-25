@@ -696,3 +696,27 @@ async def test_notification_scope_does_not_confuse_oidc_directory_with_app_tenan
     assert await registry.call_notification_scope(
         principal=_notification_principal(tenant_id="oidc-directory-b"), app_id="loaded-app",
     ) == _notification_membership(roles=["viewer"], permissions=["support.read"])
+
+
+def test_bundle_positional_order_is_stable():
+    from dataclasses import fields
+
+    from mozaiksai.core.runtime.composition.platform_hooks import PlatformExtensionBundle
+
+    # Hosts may build a bundle positionally: append new fields, never insert them.
+    assert [field.name for field in fields(PlatformExtensionBundle)] == [
+        "schema_version", "on_startup", "chat_prereqs", "chat_session_fields", "module_permission_resolver",
+        "module_scope_resolver", "notification_scope_resolver", "workflow_ordering", "workflow_name_resolver",
+        "before_module_execution", "module_dispatch_audit", "module_reaction_audit", "ask_context",
+        "chat_input_authority",
+    ]
+
+
+def test_input_authority_is_registered_and_counted():
+    from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
+
+    registry = PlatformHookRegistry()
+    assert not registry.has_chat_input_authority
+    registry.register_bundle({"chat_input_authority": lambda **_kwargs: (True, None)}, source="host")
+    assert registry.has_chat_input_authority
+    assert registry.summary()["chat_input_authority_hooks"] == 1

@@ -447,6 +447,21 @@ user request
   -> refinement or rebuild flow runs
 ```
 
+For a Studio app-review chat, the saved app bundle remains the source of the
+revision. The classifier can identify a bounded app-wide color edit, a new
+visual identity, or a request to generate a logo. The Factory harness maps
+these intents to a theme-file patch, the `app_theme_revision` sequence running
+ThemeCapture, or the `logo_revision` sequence running BrandAssetGeneratorWorkflow.
+ThemeCapture applies its visual tokens to a copy of the selected bundle and validates
+the complete app. It preserves the app's identity, images, actions and other files.
+Later app-bundle revisions read their starting theme from the selected build.
+The specialist workflows receive the original request and the theme from the
+verified parent archive. The user selects generated logo artwork before it is
+staged for app-build review. A later coding refinement passes the saved logo
+bytes directly to validation and packaging. The coding model receives only
+the editable text and its bounded context. Page layout changes and mixed feature requests
+continue through the ordinary app routes.
+
 Canonical app-build events:
 
 - `app.patch_requested`

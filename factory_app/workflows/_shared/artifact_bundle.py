@@ -13,7 +13,7 @@ from mozaiksai.core.artifacts.content_store import read_verified_artifact_bundle
 from mozaiksai.core.artifacts.models import BuildRecord
 from mozaiksai.core.runtime.app.paths import APP_BINARY_ASSET_SUFFIXES
 
-_MAX_FILE_BYTES = 8_000_000
+APP_BUNDLE_MAX_FILE_BYTES = 8_000_000
 APP_BUNDLE_MAX_TOTAL_BYTES = 64_000_000
 APP_BUNDLE_MAX_FILES = 4096
 
@@ -67,7 +67,7 @@ async def read_artifact_bundle(
                     reason = "duplicate_path"
                 elif len(seen) >= APP_BUNDLE_MAX_FILES:
                     reason = "file_limit"
-                elif info.file_size > _MAX_FILE_BYTES:
+                elif info.file_size > APP_BUNDLE_MAX_FILE_BYTES:
                     reason = "file_too_large"
                 elif total_bytes + info.file_size > APP_BUNDLE_MAX_TOTAL_BYTES:
                     reason = "total_size_limit"

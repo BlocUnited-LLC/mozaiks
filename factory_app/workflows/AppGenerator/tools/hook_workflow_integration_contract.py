@@ -1,203 +1,89 @@
-"""
-Hook: Inject Workflow Integration Contract
-
-Fires as an prompt middleware function on AppPlanAgent and ConfigMiddlewareAgent.
-
-When AgentGenerator has produced a workflow for this app, this hook injects a
-typed [WORKFLOW INTEGRATION CONTRACT] section directly into the agent system
-message — before every reply — so the agent uses the correct capability_id,
-startup_mode, and trigger_events without relying on prompt instructions alone.
-
-Why a hook instead of prompt injection via context_variables:
-- Context variables are interpolated at prompt-build time as plain text in a
-  bulleted list. The LLM can drift, paraphrase, or ignore them.
-- This hook fires unconditionally before every reply. It appends a directive
-  block with exact values and explicit hard-constraint rules. The agent sees
-  it as part of its system message — not as contextual background info.
-- For AppPlanAgent: emits the exact capability_id to use in workflow_capability_ids
-  and the exact trigger_events to pass downstream.
-- For ConfigMiddlewareAgent: emits the exact contracts/reactions.yaml entries to generate,
-  pre-formatted, so the agent only needs to copy the structure.
-"""
+"""Project the generated workflow bundle's bindings into AppGenerator worker prompts."""
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import Any
 
+from factory_app.workflows._shared.hook_utils import update_agent_section
 from factory_app.workflows._shared.workflow_integration import (
-    apply_workflow_integration_context,
     workflow_integration_metadata_from_context,
+    workflow_integration_source_error,
+    workflow_integration_source_pin,
 )
-from mozaiksai.core.workflow.context.frozen import detach
-
-logger = logging.getLogger(__name__)
 
 SECTION_HEADER = "[WORKFLOW INTEGRATION CONTRACT]"
 
 
 def inject_workflow_integration_contract(agent, messages: list[dict[str, Any]]) -> None:
-    """
-    prompt middleware function: inject the AgentGenerator workflow integration contract.
+    """Render the event and launch contracts from every orchestrator in the bundle."""
+    context = agent.context_variables
+    metadata = workflow_integration_metadata_from_context(context)
+    pin = workflow_integration_source_pin(context)
+    if workflow_integration_source_error(context) or (pin and pin != (metadata or {}).get("source_artifact_version_id")):
+        update_agent_section(
+            agent, SECTION_HEADER, "The pinned workflow bundle is unavailable. Leave workflow targets empty until it is loaded."
+        )
+        return
+    workflows = metadata["workflows"] if metadata else []
+    if not workflows:
+        if metadata is not None or SECTION_HEADER in agent.system_message:
+            update_agent_section(agent, SECTION_HEADER, "No generated workflows are bound to this build.")
+        return
 
-    Reads generated_workflow_* context variables and appends a [WORKFLOW INTEGRATION
-    CONTRACT] block to the agent system message. The block contains the exact
-    capability_id, startup_mode, and trigger_events the agent must use — no inference
-    or derivation allowed.
-
-    Exits silently when no AgentGenerator workflow exists for this app.
-    """
-    try:
-        context_variables = getattr(agent, "context_variables", {})
-        metadata = workflow_integration_metadata_from_context(context_variables)
-        if metadata:
-            apply_workflow_integration_context(context_variables, metadata)
-
-        capability_id: str | None = context_variables.get("generated_workflow_capability_id")
-        if not capability_id:
-            return  # No workflow generated for this app — nothing to inject.
-
-        workflow_name: str = context_variables.get("generated_workflow_name") or capability_id
-        startup_mode: str = context_variables.get("generated_workflow_startup_mode") or "UserDriven"
-        # Live containers freeze reads: the block builders type-test each event as a dict.
-        trigger_events: list = detach(context_variables.get("generated_workflow_trigger_events")) or []
-
+    blocks = []
+    for workflow in workflows:
+        name = workflow["workflow_name"]
+        capability_id = workflow["capability_id"]
+        startup_mode = workflow["startup_mode"] or "UserDriven"
+        events = workflow["trigger_events"]
         if agent.name == "AppPlanAgent":
-            content = _build_app_plan_block(workflow_name, capability_id, startup_mode, trigger_events)
+            block = _build_app_plan_block(name, capability_id, startup_mode, events)
         elif agent.name == "ConfigMiddlewareAgent":
-            content = _build_config_middleware_block(capability_id, trigger_events)
+            block = f"module.yaml workflow target: {name}\n" + _build_config_middleware_block(capability_id, events)
         else:
-            content = _build_generic_block(workflow_name, capability_id, startup_mode)
-
-        current = agent.system_message
-
-        if SECTION_HEADER in current:
-            # Replace the existing section (idempotent across repeated hook calls).
-            pre, _, rest = current.partition(SECTION_HEADER)
-            next_section = rest.find("\n\n[")
-            after = rest[next_section:] if next_section > 0 else ""
-            new_message = f"{pre.rstrip()}\n\n{SECTION_HEADER}\n{content}{after}"
-        else:
-            new_message = f"{current}\n\n{SECTION_HEADER}\n{content}"
-
-        if new_message != current:
-            agent.update_system_message(new_message)
-            logger.info(
-                "[%s] Injected workflow integration contract (capability_id=%s, startup_mode=%s, trigger_events=%d)",
-                agent.name,
-                capability_id,
-                startup_mode,
-                len(trigger_events),
-            )
-
-    except Exception as exc:
-        logger.error("[%s] Failed to inject workflow integration contract: %s", agent.name, exc)
+            block = _build_generic_block(name, capability_id, startup_mode)
+        blocks.append(block)
+    update_agent_section(agent, SECTION_HEADER, "\n\n".join(blocks))
 
 
-# ---------------------------------------------------------------------------
-# Per-agent content builders
-# ---------------------------------------------------------------------------
-
-def _build_app_plan_block(
-    workflow_name: str,
-    capability_id: str,
-    startup_mode: str,
-    trigger_events: list,
-) -> str:
-    """
-    Contract block for AppPlanAgent.
-
-    Provides the exact capability_id to embed in workflow_capability_ids, the
-    direct workflow_name to use for persistent page launch actions, and the
-    trigger_events list to forward in every module_contract build task
-    initial_message.
-    """
-    launch_expectation = (
-        "agent speaks first after launch"
-        if startup_mode == "AgentDriven"
-        else "user speaks first after launch"
-    )
-
+def _build_app_plan_block(workflow_name: str, capability_id: str, startup_mode: str, trigger_events: list) -> str:
+    expectation = {
+        "AgentDriven": "agent speaks first after launch",
+        "UserDriven": "user speaks first after launch",
+        "BackendOnly": "background workflow with no direct page launch",
+    }.get(startup_mode, startup_mode)
     lines = [
-        "A workflow has been produced by AgentGenerator. Use the values below verbatim.",
-        "Do not derive, infer, rename, or alter them.",
-        "",
-        f"  workflow_name  : {workflow_name}",
-        f"  capability_id  : {capability_id}",
-        f"  startup_mode   : {startup_mode}",
-        f"  launch_expectation: {launch_expectation}",
+        f"workflow_name  : {workflow_name}",
+        f"capability_id  : {capability_id}",
+        f"startup_mode   : {startup_mode} ({expectation})",
+        "HARD CONSTRAINTS",
+        "Include this capability_id in workflow_capability_ids only for the following event types.",
     ]
-
-    if trigger_events:
-        lines += [
-            "",
-            "  trigger_events (include this full list in every module_contract build task initial_message):",
-        ]
-        for ev in trigger_events:
-            event_type = ev.get("event_type", str(ev)) if isinstance(ev, dict) else str(ev)
-            lines.append(f"    - event_type: {event_type}  →  workflow capability: {capability_id}")
-    else:
-        lines += [
-            "",
-            "  trigger_events: (none declared — no workflow reactions are required)",
-        ]
-
-    lines += [
-        "",
-        "HARD CONSTRAINTS — violating any of these is an error:",
-        f'  1. workflow_capability_ids in ALL event_flows MUST be ["{capability_id}"].',
-        f'     Never use the raw workflow name "{workflow_name}" in workflow_capability_ids.',
-        f'  2. Direct page launch actions MUST use workflow_id: "{workflow_name}" (not "{capability_id}").',
-        "  3. Every module_contract build task initial_message MUST include the trigger_events list above.",
-        "  4. startup_mode affects launch expectations only. The runtime owns who speaks first after session launch.",
-    ]
-
+    for event in trigger_events:
+        event_type = event["event_type"] if isinstance(event, dict) else event
+        lines.append(f"  - event_type: {event_type}  →  workflow capability: {capability_id}")
+    if not trigger_events:
+        lines.append("  trigger_events: (none declared)")
     return "\n".join(lines)
 
 
 def _build_config_middleware_block(capability_id: str, trigger_events: list) -> str:
-    """
-    Contract block for ConfigMiddlewareAgent.
-
-    Provides the exact contracts/reactions.yaml entries to generate, pre-formatted,
-    so the agent does not need to derive them from natural-language instructions.
-    """
     lines = [
-        "An AgentGenerator workflow must be wired into this module's contracts/reactions.yaml.",
-        "",
-        f"  capability_id (reaction target): {capability_id}",
-        "  Use this value as target.capability_id — never the raw workflow name.",
+        f"Workflow capability_id: {capability_id}",
+        "HARD CONSTRAINT: emit these reaction entries only in the module contract assigned the binding.",
     ]
-
-    if trigger_events:
-        lines += [
-            "",
-            "  contracts/reactions.yaml entries to generate (one per trigger event listed below):",
-        ]
-        for index, ev in enumerate(trigger_events):
-            event_type = ev.get("event_type", str(ev)) if isinstance(ev, dict) else str(ev)
-            reaction_id = _reaction_id_for_event(capability_id, event_type, index)
-            lines += [
-                f"    - id: {reaction_id}",
-                f"    - event_type: {event_type}",
-                "      target:",
-                "        kind: capability",
-                f"        capability_id: {capability_id}",
-            ]
-    else:
-        lines += [
-            "",
-            "  trigger_events: (none declared — no workflow reaction entries are needed)",
-        ]
-
-    lines += [
-        "",
-        "HARD CONSTRAINT: reaction targets that invoke a workflow MUST use",
-        f'  target.kind: capability and target.capability_id: "{capability_id}".',
-        "  Do not use a raw workflow name as a target.",
-    ]
-
+    for index, event in enumerate(trigger_events):
+        event_type = event["event_type"] if isinstance(event, dict) else event
+        lines.extend([
+            f"  - id: {_reaction_id_for_event(capability_id, event_type, index)}",
+            f"    event_type: {event_type}",
+            "    target:",
+            "      kind: capability",
+            f"      capability_id: {capability_id}",
+        ])
+    if not trigger_events:
+        lines.append("  trigger_events: (none declared)")
     return "\n".join(lines)
 
 
@@ -216,5 +102,3 @@ def _build_generic_block(workflow_name: str, capability_id: str, startup_mode: s
 
 
 __all__ = ["inject_workflow_integration_contract"]
-
-

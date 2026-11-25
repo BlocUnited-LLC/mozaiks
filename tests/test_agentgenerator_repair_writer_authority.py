@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -167,13 +168,17 @@ async def test_real_auto_tool_merge_preserves_passing_workflows_through_export(r
     assert resolve_next_agent(graph, current_agent_name=MERGE_AGENT, context_variables=context.snapshot()) == "PackMetadataAgent"
 
     monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
-    for method in ("record_workflow_export", "record_workflow_artifacts", "_register_workflow_bundle_artifact_version"):
+    for method in ("record_workflow_export", "record_workflow_artifacts"):
         monkeypatch.setattr(download, method, AsyncMock())
+    monkeypatch.setattr(download, "_register_workflow_bundle_artifact_version", AsyncMock(
+        return_value=SimpleNamespace(id="av_repaired_workflows"),
+    ))
     monkeypatch.setattr(download, "use_ui_tool", AsyncMock(return_value={"status": "completed", "data": {}, "agentContext": {}}))
     result = await _wrap_tool_with_context(download.generate_and_download, context)(
         DownloadRequest={"confirmation_only": False, "storage_backend": "none"}, agent_message="Pack ready.",
     )
     assert result["status"] == "success"
+    assert context.get("workflow_integration_metadata")["source_artifact_version_id"] == "av_repaired_workflows"
     with zipfile.ZipFile(result["ui_files"][0]["path"]) as archive:
         names = archive.namelist()
     for workflow_name in ("GoodWorkflow", "BrokenWorkflow"):

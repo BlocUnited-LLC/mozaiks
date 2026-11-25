@@ -338,7 +338,10 @@ def test_module_pricing_contract_does_not_change_workflow_metadata(
         "startup_mode": "AgentDriven",
         "trigger_events": [],
     }]
-    assert registration.await_args.kwargs["workflow_integration_metadata"] == metadata
+    assert metadata == {
+        **registration.await_args.kwargs["workflow_integration_metadata"],
+        "source_artifact_version_id": "av_priced",
+    }
     assert context.get("generated_workflow_capability_id") == "priced-workflow"
 
     class AppPlanAgent:
@@ -700,6 +703,55 @@ def test_generate_and_download_blocks_missing_required_workflow_file_before_ui(
     ui_mock.assert_not_awaited()
 
 
+def test_duplicate_event_binding_routes_to_the_conflicting_workflow_for_repair(monkeypatch, tmp_path: Path) -> None:
+    trigger = {
+        "type": "event", "event": "domain.orders.submitted", "capability_id": "review-order",
+        "description": "Review submitted orders before releasing shipments.",
+    }
+    names = ["ReviewOrder", "NotifyOwner"]
+    context = _Context({
+        "chat_id": "review-orders", "app_id": "orders", "pack_name": "Orders",
+        "workflows_spec": [{"name": name} for name in names],
+        "workflow_bundle_results": _make_bundle_results([
+            {"workflow_name": name, "files": _minimal_workflow_files(name, startup_mode="BackendOnly", triggers=[trigger])}
+            for name in names
+        ]),
+    })
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
+    ui = AsyncMock()
+    monkeypatch.setattr(generate_and_download_module, "use_ui_tool", ui)
+    result = asyncio.run(generate_and_download_module.generate_and_download(
+        DownloadRequest={"confirmation_only": False, "storage_backend": "none"},
+        agent_message="Ready.", context_variables=context,
+    ))
+    assert result["status"] == "blocked"
+    assert result["outcome"] == "needs_revision", result
+    assert result["workflow_bundle_repair"]["failed_workflows"] == ["NotifyOwner"]
+    assert any("Duplicate event binding" in issue and "domain.orders.submitted" in issue for issue in result["validation_errors"])
+    ui.assert_not_awaited()
+
+
+def test_unknown_event_namespace_returns_the_owning_workflow_for_repair(monkeypatch, tmp_path: Path) -> None:
+    name = "ReviewOrder"
+    trigger = {"type": "event", "event": "orders.future", "capability_id": "review",
+               "description": "Review an order before it is sent to fulfillment."}
+    context = _Context({
+        "chat_id": "review-orders", "app_id": "orders", "pack_name": "Orders",
+        "workflows_spec": [{"name": name}],
+        "workflow_bundle_results": _make_bundle_results([{
+            "workflow_name": name, "files": _minimal_workflow_files(name, startup_mode="BackendOnly", triggers=[trigger]),
+        }]),
+    })
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
+    result = asyncio.run(generate_and_download_module.generate_and_download(
+        DownloadRequest={"confirmation_only": False, "storage_backend": "none"},
+        agent_message="Ready.", context_variables=context,
+    ))
+    assert result["outcome"] == "needs_revision"
+    assert result["workflow_bundle_repair"]["failed_workflows"] == [name]
+    assert any("orders.future" in issue and "must use" in issue for issue in result["validation_errors"])
+
+
 def test_generate_and_download_blocks_event_trigger_semantic_drift_before_ui(
     monkeypatch,
     tmp_path: Path,
@@ -753,6 +805,38 @@ def test_generate_and_download_blocks_event_trigger_semantic_drift_before_ui(
     assert "event_trigger_capability_id_semantic_drift" in check_ids
     assert "event_trigger_description_semantic_drift" in check_ids
     ui_mock.assert_not_awaited()
+
+
+def test_expected_event_does_not_hide_a_sibling_without_a_capability_id(monkeypatch, tmp_path: Path) -> None:
+    named = "domain.orders.submitted"
+    sibling = "domain.orders.escalated"
+    review = "OrderReview"
+    valid = {"type": "event", "event": named, "capability_id": "review-order",
+             "description": "Review submitted orders for fulfillment."}
+    unbound = {"type": "event", "event": sibling, "description": "Review escalated orders for fulfillment."}
+    context = _Context({
+        "chat_id": "orders-repair", "app_id": "orders", "pack_name": "Orders",
+        "workflows_spec": [
+            {"name": review, "context_variables": {"expected_event_trigger": named, "expected_workflow_capability_id": "review-order"}},
+            {"name": "OrderSearch"},
+        ],
+        "workflow_bundle_results": _make_bundle_results([
+            {"workflow_name": review, "files": _minimal_workflow_files(review, startup_mode="BackendOnly", triggers=[valid, unbound])},
+            {"workflow_name": "OrderSearch", "files": _minimal_workflow_files("OrderSearch")},
+        ]),
+    })
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
+    ui, register = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(generate_and_download_module, "use_ui_tool", ui)
+    monkeypatch.setattr(generate_and_download_module, "_register_workflow_bundle_artifact_version", register)
+    result = asyncio.run(generate_and_download_module.generate_and_download(
+        DownloadRequest={"confirmation_only": False, "storage_backend": "none"}, agent_message="Ready.", context_variables=context,
+    ))
+    assert (result["status"], result["outcome"]) == ("blocked", "needs_revision")
+    assert result["workflow_bundle_repair"]["failed_workflows"] == [review]
+    assert any("event_trigger_capability_id_semantic_drift" in issue and sibling in issue for issue in result["validation_errors"])
+    register.assert_not_awaited()
+    ui.assert_not_awaited()
 
 
 def test_generate_and_download_blocks_single_worker_conveyor_before_ui(

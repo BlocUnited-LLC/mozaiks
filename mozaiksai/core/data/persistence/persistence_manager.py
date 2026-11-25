@@ -29,12 +29,14 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from pydantic import TypeAdapter
 from pymongo import ReturnDocument, UpdateOne
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.core_config import current_mongo_client, get_mongo_client
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id, dual_write_app_scope
 from mozaiksai.core.runtime.persistence.distributed_lock import assert_chat_mutable
+from mozaiksai.core.session.build_binding import RefinementModel
 from mozaiksai.core.workflow.outputs.runtime_validation import normalize_json_candidate_text
 
 from ..models import WorkflowStatus, WorkflowUIState
@@ -146,6 +148,7 @@ SERVER_OWNED_SESSION_FIELDS = frozenset({
     "build_terminal_receipt",
     "run_build_binding",
     "workflow_run_id",
+    "workflow_run_model",
 })
 
 
@@ -492,10 +495,15 @@ class AG2PersistenceManager:
         user_id: str = "",
         *,
         extra_fields: dict[str, Any] | None = None,
+        run_model: RefinementModel | None = None,
     ) -> None:
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
+        if run_model is not None:
+            if not user_id or not workflow_name:
+                raise ValueError("user_id and workflow_name are required when binding a run model")
+            run_model = TypeAdapter(RefinementModel).validate_python(run_model)
         # Server-owned lifecycle authority fields are never accepted from a
         # direct caller. This is pure input validation and must run BEFORE
         # the idempotent existing-session return: a request carrying a
@@ -509,8 +517,7 @@ class AG2PersistenceManager:
             if injected_server_owned:
                 logger.warning(
                     "[CREATE_CHAT_SESSION] Rejected creation with "
-                    "server-owned session fields %s (chat_id=%s app_id=%s): "
-                    "only persist_server_owned_session_fields may write them",
+                    "server-owned session fields %s (chat_id=%s app_id=%s)",
                     injected_server_owned,
                     chat_id,
                     resolved_app_id,
@@ -523,7 +530,14 @@ class AG2PersistenceManager:
         try:
             coll = await self._coll()
             # Scope the duplicate check to this app to maintain tenant isolation.
-            if await coll.find_one({"_id": chat_id, **build_app_scope_filter(resolved_app_id)}):
+            existing = await coll.find_one({"_id": chat_id, **build_app_scope_filter(resolved_app_id)})
+            if existing:
+                if run_model is not None and (
+                    existing.get("workflow_run_model") != run_model
+                    or existing.get("user_id") != user_id
+                    or existing.get("workflow_name") != workflow_name
+                ):
+                    raise ValueError("The existing workflow session has a different run binding")
                 return
             now = datetime.now(UTC)
             session_doc: dict[str, Any] = {
@@ -540,6 +554,10 @@ class AG2PersistenceManager:
                 "workflow_ui_state": build_default_workflow_ui_state(),
                 "messages": [],
             }
+            if run_model is not None:
+                # Publish the model and session together so a simultaneous list
+                # or websocket request can never observe an unbound run.
+                session_doc["workflow_run_model"] = run_model
 
             if isinstance(extra_fields, dict) and extra_fields:
                 # Prevent callers from overwriting canonical identifiers/state.
@@ -564,7 +582,9 @@ class AG2PersistenceManager:
                 for k, v in list(extra_fields.items()):
                     if not isinstance(k, str) or not k.strip():
                         continue
-                    if k in protected or k.split(".", 1)[0] in {"workflow_model", "workflow_model_rebind_pending"}:
+                    if k in protected or k.split(".", 1)[0] in {
+                        "workflow_model", "workflow_model_rebind_pending", "workflow_run_model",
+                    }:
                         continue
                     # This guard was top-level only, so a nested non-string key
                     # reached the driver and failed the whole insert -- on a
@@ -640,6 +660,7 @@ class AG2PersistenceManager:
             "ag2_stream_id",
             "workflow_model",
             "workflow_model_rebind_pending",
+            "workflow_run_model",
             "workflow_name",
             "user_id",
             "status",
@@ -839,8 +860,8 @@ class AG2PersistenceManager:
     ) -> None:
         """Write server-owned lifecycle authority fields for a chat session.
 
-        This is the only durable write path for SERVER_OWNED_SESSION_FIELDS
-        (run identity, run/build binding, terminal build receipt). It bypasses
+        This is the durable update path for runtime lifecycle fields such as
+        run identity, the build binding and the terminal build receipt. It bypasses
         workflow-declared context policy because these are runtime
         infrastructure facts, not workflow context variables — but it writes
         into the same session document through the same authority; there is
@@ -867,6 +888,8 @@ class AG2PersistenceManager:
                 if not user_id:
                     raise ValueError("user_id is required to persist a build binding")
                 value = RunBuildBinding.model_validate(value).model_dump()
+            if key == "workflow_run_model":
+                raise ValueError("A workflow run model can only be bound when its session is created")
             updates[key] = deepcopy(value)
         if not updates:
             return
@@ -975,13 +998,21 @@ class AG2PersistenceManager:
         coll = await self._coll()
         doc = await coll.find_one(
             {"_id": chat_id, **build_app_scope_filter(app_id)},
-            {"status": 1, "workflow_model": 1, "workflow_model_rebind_pending": 1, "run_build_binding.refinement_model": 1},
+            {
+                "status": 1,
+                "workflow_model": 1,
+                "workflow_model_rebind_pending": 1,
+                "workflow_run_model": 1,
+                "run_build_binding.refinement_model": 1,
+            },
         )
         if doc is not None:
             status = WorkflowStatus(doc["status"])
             if status is not WorkflowStatus.IN_PROGRESS:
                 raise ChatSessionTerminalError(status)
             if not (doc.get("run_build_binding") or {}).get("refinement_model"):
+                if doc.get("workflow_run_model") is not None:
+                    return ChatModelPreference(doc["workflow_run_model"], False)
                 if doc.get("workflow_model") is not None or doc.get("workflow_model_rebind_pending"):
                     return ChatModelPreference(doc.get("workflow_model"), bool(doc.get("workflow_model_rebind_pending")))
         return None

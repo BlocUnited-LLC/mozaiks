@@ -18,8 +18,10 @@ from typing import Any
 import yaml
 
 from factory_app.workflows._shared.workflow_integration import (
+    WorkflowEventBindingError,
     extract_workflow_integration_metadata_from_bundle_entries,
     workflow_name_to_capability_id,
+    workflow_trigger_event_type,
 )
 from mozaiksai.core.workflow.context.frozen import detach
 
@@ -37,7 +39,6 @@ REQUIRED_WORKFLOW_FILES = {
     "ui_config.yaml",
 }
 SUPPORTED_TRANSITION_CONDITIONS = {"context_equals", "context_expression", "tool_called"}
-EVENT_PREFIXES = ("domain.", "platform.", "hosted.")
 WORKFLOW_BUNDLE_BUILDER_PROMPT_SURFACE = (
     "factory_app/workflows/AgentGenerator/agents.yaml#WorkflowBundleBuilderAgent"
 )
@@ -196,6 +197,7 @@ def _read_agent_names(agents_payload: Any) -> list[str]:
 
 def _validate_bundle_implementations(
     files: dict[str, str], tools: dict[str, Any], ui_config: dict[str, Any] | None = None,
+    reply_tools: set[tuple[str, str]] | None = None,
 ) -> list[str]:
     from mozaiksai.core.validation.functional_generated_app import scan_placeholder_implementations
 
@@ -257,6 +259,11 @@ def _validate_bundle_implementations(
         if function is None:
             errors.append(f"{filename} does not define declared tool function {function_name!r}")
             continue
+        if reply_tools and (filename, function_name) in reply_tools:
+            args = function.args
+            parameters = [arg.arg for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs)]
+            if parameters not in ([], ["context_variables"]) or args.vararg or args.kwarg:
+                errors.append(f"{filename}: reply_tool {function_name} can only take runtime context_variables")
         if (binding.get("ui") or {}).get("workflow_primitive") == "outcome_feedback":
             errors.extend(_validate_feedback_implementation(filename, module, function, binding))
         body = [node for node in function.body if not (
@@ -298,19 +305,6 @@ def _validate_feedback_implementation(filename, module, function, binding) -> li
     if ui.get("component") != "OutcomeFeedback" or ui.get("realization") != "shipped_component":
         errors.append(f"{filename}: outcome feedback must reuse the shipped OutcomeFeedback component")
     return errors
-
-
-def _event_type_from_trigger(trigger: Any) -> str | None:
-    if not isinstance(trigger, dict):
-        return None
-    for key in ("event", "event_type"):
-        value = str(trigger.get(key) or "").strip()
-        if value.startswith(EVENT_PREFIXES):
-            return value
-    trigger_type = str(trigger.get("type") or "").strip()
-    if trigger_type.startswith(EVENT_PREFIXES):
-        return trigger_type
-    return None
 
 
 def _is_generic_trigger_description(value: Any) -> bool:
@@ -513,8 +507,11 @@ def validate_workflow_bundle_structure(
         except ValueError as exc:
             report["errors"].append(str(exc))
 
+        reply_agents = {name for name, agent in parsed_payloads["agents.yaml"]["agents"].items() if agent.get("reply_tool")}
+        reply_tools = {(tool["file"], tool["function"]) for tool in parsed_payloads["tools.yaml"]["tools"]
+                       if reply_agents.intersection([tool["agent"]] if isinstance(tool["agent"], str) else tool["agent"])}
         report["errors"].extend(_validate_bundle_implementations(
-            files, parsed_payloads["tools.yaml"], parsed_payloads.get("ui_config.yaml"),
+            files, parsed_payloads["tools.yaml"], parsed_payloads.get("ui_config.yaml"), reply_tools,
         ))
 
         orchestrator = payloads.get("orchestrator.yaml")
@@ -718,27 +715,24 @@ def validate_agentgenerator_semantic_drift(
 
         triggers = orchestrator.get("triggers") if isinstance(orchestrator.get("triggers"), list) else []
         expected_event = str(spec_context.get("expected_event_trigger") or "").strip()  # type: ignore[union-attr]
-        if expected_event:
-            matching_triggers = [trigger for trigger in triggers if _event_type_from_trigger(trigger) == expected_event]  # type: ignore[union-attr]
-            if not matching_triggers:
-                issue = _issue(
-                    check_id="event_trigger_missing",
-                    file="orchestrator.yaml",
-                    expected=expected_event,
-                    observed=triggers,
-                    fix_suggestion=(
-                        "Make WorkflowBundleBuilderAgent copy the exact event trigger from "
-                        "the generation brief into orchestrator.yaml triggers[]."
-                    ),
-                )
-                report["semantic_drifts"].append(issue)
-                errors.append(_issue_summary(workflow_name, issue))
-        else:
-            matching_triggers = [trigger for trigger in triggers if _event_type_from_trigger(trigger)]  # type: ignore[union-attr]
+        named_triggers = [trigger for trigger in triggers if workflow_trigger_event_type(trigger)]  # type: ignore[union-attr]
+        if expected_event and not any(workflow_trigger_event_type(trigger) == expected_event for trigger in named_triggers):
+            issue = _issue(
+                check_id="event_trigger_missing",
+                file="orchestrator.yaml",
+                expected=expected_event,
+                observed=triggers,
+                fix_suggestion=(
+                    "Make WorkflowBundleBuilderAgent copy the exact event trigger from "
+                    "the generation brief into orchestrator.yaml triggers[]."
+                ),
+            )
+            report["semantic_drifts"].append(issue)
+            errors.append(_issue_summary(workflow_name, issue))
 
         explicit_expected_capability_id = str(spec_context.get("expected_workflow_capability_id") or "").strip()  # type: ignore[union-attr]
         expected_capability_id = explicit_expected_capability_id or workflow_name_to_capability_id(workflow_name)
-        for matching_trigger in matching_triggers:
+        for matching_trigger in named_triggers:
             trigger_type = str(matching_trigger.get("type") or "").strip()
             if trigger_type != "event":
                 issue = _issue(
@@ -759,7 +753,7 @@ def validate_agentgenerator_semantic_drift(
                 issue = _issue(
                     check_id="event_trigger_capability_id_semantic_drift",
                     file="orchestrator.yaml",
-                    expected="non-empty stable workflow capability id",
+                    expected=f"non-empty stable workflow capability id for {workflow_trigger_event_type(matching_trigger)}",
                     observed=None,
                     fix_suggestion=(
                         "Prompt WorkflowBundleBuilderAgent to include the stable workflow "
@@ -800,7 +794,7 @@ def validate_agentgenerator_semantic_drift(
                 report["semantic_drifts"].append(issue)
                 errors.append(_issue_summary(workflow_name, issue))
             else:
-                expected_tokens = _semantic_tokens(_event_type_from_trigger(matching_trigger), spec.get("description"))
+                expected_tokens = _semantic_tokens(workflow_trigger_event_type(matching_trigger), spec.get("description"))
                 matched_tokens = {
                     token
                     for token in expected_tokens
@@ -886,6 +880,12 @@ def run_workflow_bundle_quality_gate(
             )
         except ValueError as exc:
             errors.append(str(exc))
+            if isinstance(exc, WorkflowEventBindingError):
+                structure["valid"] = False
+                structure["errors"].append(str(exc))
+                for report in structure["workflows"]:
+                    if report["workflow_name"] == exc.workflow_name:
+                        report["errors"].append(str(exc))
     warnings = list(semantic_drift.get("warnings") or [])
     result = {
         "status": "passed" if not errors else "failed",

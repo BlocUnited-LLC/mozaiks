@@ -13,6 +13,7 @@ from xml.etree import ElementTree
 import pytest
 import yaml
 
+from factory_app.workflows._shared import media_draft
 from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
 from factory_app.workflows._shared.platform import current_build
 from factory_app.workflows.AppMediaGenerator.tools import publish_app_media as publisher
@@ -107,7 +108,8 @@ def media_build(monkeypatch, tmp_path):
     monkeypatch.setattr(current_build, "get_artifact_store", lambda: store)
     monkeypatch.setattr(publisher, "AppRegistryService", lambda: registry)
     monkeypatch.setattr(publisher, "get_artifact_store", lambda: store)
-    monkeypatch.setattr(publisher, "get_artifact_content_store", lambda: SimpleNamespace(backend_name="local"))
+    monkeypatch.setattr(media_draft, "get_artifact_store", lambda: store)
+    monkeypatch.setattr(media_draft, "get_artifact_content_store", lambda: SimpleNamespace(backend_name="local"))
     monkeypatch.setattr(publisher, "get_media_asset_store", lambda: media)
     monkeypatch.setattr(publisher, "active_workflow_tool_run", lambda: ("AppMediaGenerator", "factory-host", "chat_1", "owner_1"))
     validation = AsyncMock(return_value={
@@ -202,14 +204,14 @@ async def test_publish_refuses_unsafe_manifest_ids_before_any_output(media_build
 def test_stage_checks_every_path_before_writing_any_file(tmp_path, path):
     app_dir = tmp_path / "app"
     with pytest.raises(ValueError):
-        publisher._stage(app_dir, {"app.json": "{}", path: b"bad"})
+        media_draft._stage(app_dir, {"app.json": "{}", path: b"bad"})
     assert not app_dir.exists()
     assert not (tmp_path / "outside.svg").exists()
 
 
 def test_stage_refuses_case_collisions_before_writing(tmp_path):
     with pytest.raises(ValueError):
-        publisher._stage(tmp_path / "app", {"ui/assets/hero.webp": b"one", "ui/assets/HERO.webp": b"two"})
+        media_draft._stage(tmp_path / "app", {"ui/assets/hero.webp": b"one", "ui/assets/HERO.webp": b"two"})
     assert not (tmp_path / "app").exists()
 
 

@@ -361,6 +361,15 @@ their own end-user feature gates.
 5. `contracts/subscriptions.yaml` is not supported. Runtime rejects it so
   modules have one reaction-routing source of truth.
 
+For a workflow capability, the platform reads
+`workflows/{workflow_name}/orchestrator.yaml` in the same workspace. It first
+looks for a trigger with the reaction's `capability_id` and exact `event`.
+A unique `type: event` trigger with that ID and no event can serve as the
+default when no named event matches. A named event may omit the optional
+`type`. Other trigger families cannot receive module events. Missing matches
+and multiple matches at the same precedence leave the capability unresolved
+and create no workflow session.
+
 #### Canonical Example
 
 `app/modules/tasks/contracts/events.yaml`

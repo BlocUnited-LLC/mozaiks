@@ -458,6 +458,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch,
             },
             "change_intent": {
                 "change_class": "feature",
+                "branding_intent": None,
                 "source": "llm",
                 "signals": ["new_capability", "app_extension"],
                 "rationale": "Adding an export action extends the existing app bundle.",
@@ -2686,6 +2687,75 @@ def _async_classifier(*, change_class: str, rationale: str, confidence: float, s
     return _run
 
 
+@pytest.mark.parametrize(("intent", "words", "workflow", "sequence"), [
+    ("visual_redesign", "Give the whole app a warm, quiet visual identity.", "ThemeCapture", "app_theme_revision"),
+    ("new_logo", "Design me a folded-paper logo for my notes.", "BrandAssetGeneratorWorkflow", "logo_revision"),
+])
+@pytest.mark.parametrize("source_status", [ArtifactLifecycleStatus.CURRENT, ArtifactLifecycleStatus.DRAFT])
+def test_app_chat_brand_workflow_uses_selected_build_theme(
+    monkeypatch, _owned_build_target, tmp_path, intent, words, workflow, sequence, source_status,
+):
+    from mozaiksai.control_plane.implementations.change_classifier import ChangeClassifierResult
+    from mozaiksai.core.auth import reset_auth_adapter
+    from mozaiksai.hosts import studio
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    theme = {"colors": {"accent": {"main": "#2dd4bf"}}}
+    archive = tmp_path / "brand.zip"
+    _make_bundle_zip(archive, {"app/app.json": "{}", "app/brand/theme_config.json": json.dumps(theme)})
+    source = _artifact_version(artifact_version_id="av_123", zip_path=archive, lifecycle_status=source_status)
+    _BaselineStore.versions[source.id] = source
+    before = source.model_dump(mode="json")
+    store = _BaselineStore()
+    store.create_change_request = AsyncMock(return_value=SimpleNamespace(id="branding-request"))
+    store.update_change_request_router_decision = AsyncMock()
+    monkeypatch.setattr(studio, "get_artifact_store", lambda: store)
+    harness = studio.get_orchestration_control_harness()
+    invalidate = AsyncMock()
+    monkeypatch.setattr(harness, "persist_revision_invalidation", invalidate)
+    monkeypatch.setattr(harness, "contract_surface_enabled", lambda: True)
+    classifier = AsyncMock(return_value=ChangeClassifierResult(
+        change_class="design", branding_intent=intent, rationale=words, confidence=0.96, signals=[],
+    ))
+    monkeypatch.setattr(harness._refinement_resolver, "_classifier", SimpleNamespace(classify=classifier))
+    surface = AsyncMock(side_effect=AssertionError("Brand workflow was intercepted by the surface planner"))
+    monkeypatch.setattr(harness, "prepare_contract_surface_request", surface)
+    decision = SimpleNamespace(requested_workflow_id=None, explanation=words, is_full_restart=False, rerouted_by_dependency=False)
+    prepare = AsyncMock(return_value=SimpleNamespace(workflow_id=workflow, routing_decision=decision))
+    launch = AsyncMock(return_value=SimpleNamespace(
+        chat_id="brand-chat", workflow_id=workflow, requested_workflow_id=None, journey_id=sequence,
+        websocket_url="/ws/brand-chat", trigger_source="refinement", routing_explanation=words, rerouted_by_dependency=False,
+    ))
+    monkeypatch.setattr(studio, "prepare_routed_workflow_launch", prepare)
+    monkeypatch.setattr(studio, "launch_prepared_workflow", launch)
+    client = TestClient(studio.app)
+    payload = {
+        "trigger_source": "refinement", "build_registry_id": "appreg_1",
+        "trigger_payload": {"coding_request": {}, "refinement_request": {
+            "artifact_kind": "app_bundle", "artifact_version_id": "av_123", "raw_user_request": words,
+            "source_surface": "app_review", "extra": {"parent_theme_config": {"forged": True}},
+        }},
+    }
+    tampered = client.post("/api/workflows/trigger", json={**payload, "context_variables": {"parent_theme_config": {"forged": True}}})
+    assert tampered.status_code == 400, tampered.text
+    prepare.assert_not_awaited()
+    response = client.post("/api/workflows/trigger", json=payload)
+    assert response.status_code == 200, response.text
+    assert response.json()["execution_mode"] == "workflow"
+    contribution = prepare.await_args.kwargs["routing_contribution"]
+    assert (contribution.workflow_id, contribution.journey_id) == (workflow, sequence)
+    assert contribution.context_seed["parent_theme_config"] == theme
+    assert contribution.context_seed["artifact_version_id"] == "av_123"
+    assert contribution.context_seed["refinement_request"] == words
+    store.create_change_request.assert_awaited_once()
+    invalidate.assert_not_awaited()
+    assert store.versions[source.id].model_dump(mode="json") == before
+    surface.assert_not_awaited()
+    launch.assert_awaited_once()
+
+
 def _async_coding_worker(result: dict):
     async def _run(request):  # noqa: ANN001
         result_id = result["metadata"]["build_record_id"]
@@ -2697,6 +2767,72 @@ def _async_coding_worker(result: dict):
         return CodingWorkerResult.model_validate(result)
 
     return _run
+
+
+@pytest.mark.parametrize("source_status", [ArtifactLifecycleStatus.CURRENT, ArtifactLifecycleStatus.DRAFT])
+@pytest.mark.parametrize("validation", [ArtifactValidationStatus.PASSED, ArtifactValidationStatus.PENDING])
+def test_color_proposal_preserves_source_lifecycle(monkeypatch, tmp_path, source_status, validation):
+    from mozaiksai.control_plane.implementations.change_classifier import ChangeClassifierResult
+    from mozaiksai.core.auth import reset_auth_adapter
+    from mozaiksai.hosts import studio
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    theme_path = "brand/theme_config.json"
+    files = {theme_path: '{"colors":{"primary":{"main":"#336699"}}}'}
+    archive = tmp_path / "color.zip"
+    _make_bundle_zip(archive, {"color/app.json": "{}", f"color/{theme_path}": files[theme_path]})
+    source = _artifact_version(artifact_version_id="av_123", zip_path=archive, lifecycle_status=source_status)
+    store = _BaselineStore()
+    store.versions[source.id] = source
+    store.create_change_request = AsyncMock(return_value=SimpleNamespace(id="color-change"))
+    store.create_refinement_session = AsyncMock(return_value=SimpleNamespace(id="color-session"))
+    monkeypatch.setattr(studio, "get_artifact_store", lambda: store)
+    harness = studio.get_orchestration_control_harness()
+    monkeypatch.setattr(harness, "coding_enabled", lambda: True)
+    classifier = AsyncMock(return_value=ChangeClassifierResult(
+        change_class="patch", branding_intent="theme_color_patch", rationale="App-wide color", confidence=0.99, signals=[],
+    ))
+    monkeypatch.setattr(harness._refinement_resolver, "_classifier", SimpleNamespace(classify=classifier))
+    monkeypatch.setattr(harness._scope_proposer, "materialize_files", AsyncMock(return_value=files))
+    invalidate = AsyncMock()
+    monkeypatch.setattr(harness, "persist_revision_invalidation", invalidate)
+
+    async def save_draft(request):
+        assert request.files == files
+        child = source.model_copy(deep=True, update={
+            "id": "color-child", "parent_build_record_id": source.id,
+            "lifecycle_status": ArtifactLifecycleStatus.DRAFT, "validation_status": validation,
+        })
+        child.commit_metadata.metadata.update(request.run_build_binding.model_dump())
+        store.versions[child.id] = child
+        return CodingWorkerResult(
+            eligible=True, status="validated" if validation == ArtifactValidationStatus.PASSED else "planned",
+            metadata={"build_record_id": child.id},
+        )
+
+    monkeypatch.setattr(harness._coding_worker, "execute", save_draft)
+    response = TestClient(studio.app).post("/api/workflows/trigger", json={
+        "trigger_source": "refinement", "build_registry_id": "appreg_1",
+        "trigger_payload": {"coding_request": {}, "refinement_request": {
+            "artifact_kind": "app_bundle", "artifact_version_id": source.id, "source_surface": "app_review",
+            "raw_user_request": "Make our primary brand color teal.",
+        }},
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["execution_mode"] == "coding_worker"
+    assert store.versions["color-child"].lifecycle_status == ArtifactLifecycleStatus.DRAFT
+    assert store.versions[source.id].lifecycle_status == source_status
+    store.create_change_request.assert_awaited_once()
+    invalidate.assert_not_awaited()
+    unresolved = response.json()["unresolved_change"]
+    if validation == ArtifactValidationStatus.PENDING:
+        assert unresolved["reason"] == "validation_pending"
+        assert unresolved["baseline_invalidation_recorded"] is False
+        assert "unchanged" in unresolved["detail"]
+    else:
+        assert unresolved is None
 
 
 
