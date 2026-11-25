@@ -351,6 +351,7 @@ models:
         - AlertBanner
         - ActionButton
         - FileList
+        - PricingCatalog
         description: Primitive type from the shipped UI primitive registry.
       intent:
         type: str
