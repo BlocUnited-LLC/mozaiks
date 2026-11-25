@@ -72,7 +72,7 @@ def test_pricing_sections_round_trip_through_the_worker_and_page_loader():
 @pytest.mark.parametrize("config", [
     {"plans": [{"plan_id": "studio", "label": "Studio", "unknown_field": True}]},
     {"groups": [{"group_id": "studio", "label": "Studio", "kind": "unknown"}]},
-    {"add_ons": [{"id": "legacy", "add_on_id": "archive", "label": "Archive"}]},
+    {"add_ons": [{"id": "extra-storage", "add_on_id": "archive", "label": "Archive"}]},
     {"api_endpoint": "/api/modules/membership/list_plans"},
 ])
 def test_worker_rejects_undeclared_pricing_fields_and_raw_endpoint(config):
