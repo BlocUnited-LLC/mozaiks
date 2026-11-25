@@ -1933,6 +1933,32 @@ test('app Studio root redirects to manifest default portal', async ({ page }) =>
   await expect(page.locator('main').getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
 });
 
+test('app Launch keeps Studio navigation and downloads only the displayed build', async ({ page, isMobile }) => {
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', route =>
+    route.fulfill({ json: buildOnboardingStatusPayload({ dismissed: true }) }));
+  const launch = `/api/studio/apps/${APP_ID}/launch`;
+  let status = 'validation_required';
+  await page.route('**' + launch, route => route.fulfill({
+    json: { status, artifact_version_id: 'av_1', filename: 'workbench-av_1.zip' },
+  }));
+  await page.route('**' + launch + '/av_1/download', route => route.fulfill({
+    contentType: 'application/zip', body: Buffer.from('test bundle'),
+  }));
+  await page.goto(`/apps/${APP_ID}/launch`);
+  await expect(page.getByText('Build validation required', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download app bundle' })).toHaveCount(0);
+  if (isMobile) {
+    await page.getByRole('button', { name: 'Open Studio navigation' }).click();
+  }
+  await expect(page.getByRole('navigation').getByRole('link', { name: 'Launch', exact: true }).filter({ visible: true })).toHaveAttribute('aria-current', 'page');
+  status = 'ready';
+  await page.reload();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download app bundle' }).click();
+  expect((await download).suggestedFilename()).toBe('workbench-av_1.zip');
+  await expectNoHorizontalOverflow(page);
+});
+
 test('app overview route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.goto(`/apps/${APP_ID}/overview`);
   const main = page.locator('main');
