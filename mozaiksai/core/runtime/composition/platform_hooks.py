@@ -171,7 +171,6 @@ class PlatformExtensionBundle:
     on_startup: Callable | None = None
     chat_prereqs: Callable | None = None
     chat_session_fields: Callable | None = None
-    chat_input_authority: Callable | None = None
     module_permission_resolver: Callable | None = None
     module_scope_resolver: Callable | None = None
     notification_scope_resolver: Callable | None = None
@@ -181,6 +180,8 @@ class PlatformExtensionBundle:
     module_dispatch_audit: Callable | None = None
     module_reaction_audit: Callable | None = None
     ask_context: Callable | None = None
+    # Keep new fields last: this constructor accepts positional arguments.
+    chat_input_authority: Callable | None = None
 
 
 def _clean_optional(value: Any) -> str | None:
@@ -856,6 +857,7 @@ class PlatformHookRegistry:
             "startup_hooks": len(self._startup_hooks),
             "chat_prereqs_hooks": len(self._chat_prereqs_hooks),
             "chat_session_fields_hooks": len(self._chat_session_fields_hooks),
+            "chat_input_authority_hooks": len(self._chat_input_authority_hooks),
             "module_permission_resolver_hooks": len(self._module_permission_resolver_hooks),
             "module_scope_resolver_hooks": len(self._module_scope_resolver_hooks),
             "notification_scope_resolver_hooks": len(self._notification_scope_resolver_hooks),
