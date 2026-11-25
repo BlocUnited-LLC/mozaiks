@@ -708,9 +708,15 @@ async def _register_app_bundle_artifact_version(
     artifact_store = artifact_store or get_artifact_store()
     canonical_inputs_version = await resolve_latest_artifact_version_refs(
         app_id=str(app_id),
-        artifact_kinds=("design_docs", "subscription_contract", "workflow_bundle", "theme_capture"),
+        artifact_kinds=("design_docs", "subscription_contract", "theme_capture"),
         artifact_store=artifact_store,
     )
+    # A different workflow bundle may become current between acceptance and registration.
+    workflow_check = (acceptance_result or {}).get("workflow_integration") or {}
+    workflow_metadata = workflow_check.get("metadata") or {}
+    workflow_source_id = workflow_metadata.get("source_artifact_version_id")
+    if workflow_check.get("passed") is True and isinstance(workflow_source_id, str) and workflow_source_id:
+        canonical_inputs_version["workflow_bundle"] = workflow_source_id
     if validation_status == ArtifactValidationStatus.PASSED:
         from mozaiksai.core.validation.compilation_inputs import capture_app_compilation_inputs
 

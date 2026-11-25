@@ -2128,10 +2128,13 @@ def _load_workflow_capability_routes(app_root: Path) -> dict[str, list[dict[str,
         for trigger in triggers:
             if not isinstance(trigger, dict):
                 continue
+            event_type = str(trigger.get("event") or "").strip() or None
+            family = trigger.get("type")
+            if family != "event" and not (family is None and event_type):
+                continue
             capability_ids = _trigger_capability_ids(trigger)
             if not capability_ids:
                 continue
-            event_type = str(trigger.get("event") or "").strip() or None
             route = {
                 "workflow_id": workflow_id,
                 "event_type": event_type,
@@ -2176,6 +2179,8 @@ async def _invoke_workflow_capability(
         )
         return {
             "status": "unresolved",
+            "success": False,
+            "error_code": "WORKFLOW_CAPABILITY_UNRESOLVED",
             "capability_id": capability_id,
             "event_type": source_event.get("type"),
         }
@@ -2335,15 +2340,16 @@ def _select_workflow_capability_route(
     source_event_type: str,
     routes: dict[str, list[dict[str, Any]]],
 ) -> dict[str, Any] | None:
-    candidates = routes.get(capability_id) or []
-    for route in candidates:
-        event_type = route.get("event_type")
-        if event_type and event_type == source_event_type:
-            return route
-    for route in candidates:
-        if not route.get("event_type"):
-            return route
-    return candidates[0] if candidates else None
+    candidates = routes.get(capability_id, [])
+    matches = [route for route in candidates if route.get("event_type") == source_event_type]
+    if not matches:
+        matches = [route for route in candidates if route.get("event_type") is None]
+    if len(matches) > 1:
+        logger.warning(
+            "WORKFLOW_CAPABILITY_ROUTE_AMBIGUOUS: capability_id=%s event_type=%s workflows=%s",
+            capability_id, source_event_type, [route["workflow_id"] for route in matches],
+        )
+    return matches[0] if len(matches) == 1 else None
 
 
 def _build_workflow_trigger_context(

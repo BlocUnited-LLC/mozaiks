@@ -189,6 +189,8 @@ def build_context_graph_from_file_map(
             owner_node_by_key=owner_node_by_key,
         )
 
+    _add_workflow_reaction_references(graph, extracted_by_path, file_node_by_path)
+
     for path, file_context in extracted_by_path.items():
         file_node_id = file_node_by_path[path]
         symbol_occurrences: dict[tuple[str, str], int] = defaultdict(int)
@@ -1154,6 +1156,33 @@ def _module_action_ids_by_module(extracted_by_path: dict[str, ExtractedFileConte
     return out
 
 
+def _add_workflow_reaction_references(
+    graph: _GraphDraft, files: dict[str, ExtractedFileContext], file_nodes: dict[str, str],
+) -> None:
+    """Link named reaction references to the declarations present in this snapshot."""
+    capabilities: dict[str, set[str]] = defaultdict(set)
+    triggers: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for path, context in files.items():
+        for capability_id in context.structured_metadata.get("workflow_capabilities", []):
+            capabilities[capability_id].add(path)
+        for pair in context.structured_metadata.get("workflow_event_triggers", []):
+            triggers[pair].append(path)
+
+    for path, context in files.items():
+        for reaction in context.structured_metadata.get("reactions", []):
+            capability_id = reaction.get("capability_id")
+            if not capability_id:
+                continue
+            event_type = reaction["event_type"]
+            declarations = capabilities.get(capability_id, set())
+            matching_triggers = triggers.get((event_type, capability_id), [])
+            for candidates in (declarations, matching_triggers):
+                if len(candidates) == 1:
+                    target = next(iter(candidates))
+                    graph.add_edge(file_nodes[path], file_nodes[target], GraphEdgeType.REFERENCES,
+                                   metadata={"source_path": path, "resolved": True})
+
+
 def _extract_structured_metadata(path: str, content: str) -> dict[str, Any]:
     try:
         data = json.loads(content) if path.endswith(".json") else yaml.safe_load(content)
@@ -1164,6 +1193,7 @@ def _extract_structured_metadata(path: str, content: str) -> dict[str, Any]:
 
     metadata: dict[str, Any] = {}
     contract_path = _contract_path(path)
+    parts = contract_path.split("/")
     if path.endswith("module.yaml"):
         _raw_module = data.get("module")
         module_block: dict[str, Any] = _raw_module if isinstance(_raw_module, dict) else {}
@@ -1175,10 +1205,27 @@ def _extract_structured_metadata(path: str, content: str) -> dict[str, Any]:
         )
         metadata["action_ids"] = _extract_action_ids(data)
         metadata["event_producers"] = _extract_action_event_producers(data)
+        if parts == ["modules", module_block.get("id"), "module.yaml"]:
+            capabilities = data.get("capabilities")
+            if isinstance(capabilities, list):
+                metadata["workflow_capabilities"] = [
+                    cap_id for item in capabilities
+                    if isinstance(item, dict) and item.get("kind") == "workflow"
+                    and (cap_id := _first_text(item, "capability_id")) and _first_text(item, "target")
+                ]
     elif contract_path.startswith("modules/") and contract_path.endswith("contracts/events.yaml"):
         metadata["event_types"] = _extract_event_types(data)
-    elif contract_path.startswith("modules/") and contract_path.endswith("contracts/reactions.yaml"):
+    elif len(parts) == 4 and parts[0] == "modules" and parts[2:] == ["contracts", "reactions.yaml"]:
         metadata["reactions"] = _extract_reactions(data)
+    elif path.split("/") == ["workflows", data.get("workflow_name"), "orchestrator.yaml"]:
+        triggers = data.get("triggers")
+        if isinstance(triggers, list):
+            metadata["workflow_event_triggers"] = [
+                (event, cap_id) for item in triggers
+                if isinstance(item, dict) and item.get("type") in (None, "event")
+                and (event := _first_text(item, "event")) and (cap_id := _first_text(item, "capability_id"))
+            ]
+        metadata["schema_version"] = _first_text(data, "schema_version", "schemaVersion")
     elif path.endswith("agents.yaml"):
         metadata["agent_names"] = _extract_named_items(data.get("agents"))
     elif path.endswith("tools.yaml"):
@@ -1244,7 +1291,8 @@ def _extract_event_types(data: dict[str, Any]) -> list[str]:
 
 
 def _extract_reactions(data: dict[str, Any]) -> list[dict[str, str]]:
-    reactions = data.get("reactions") or data.get("handlers") or data.get("consumers")
+    declared_reactions = data.get("reactions")
+    reactions = declared_reactions or data.get("handlers") or data.get("consumers")
     if not isinstance(reactions, list):
         return []
     out: list[dict[str, str]] = []
@@ -1258,6 +1306,12 @@ def _extract_reactions(data: dict[str, Any]) -> list[dict[str, str]]:
             target_action = target_action or _first_text(target, "action", "action_id", "target_action_id")
         if event_type:
             candidate = {"event_type": event_type}
+            if (
+                reactions is declared_reactions and item.get("event_type") == event_type
+                and isinstance(target, dict) and target.get("kind") == "capability"
+                and (capability_id := _first_text(target, "capability_id"))
+            ):
+                candidate["capability_id"] = capability_id
             if target_action:
                 candidate["target_action_id"] = target_action
             if candidate not in out:

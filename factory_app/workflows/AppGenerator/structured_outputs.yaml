@@ -645,7 +645,7 @@ models:
       workflow_capability_ids:
         type: optional_list
         items: str
-        description: Capability ids invoked from this event, never raw workflow names.
+        description: Stable capability IDs from the supplied workflow integration contract whose named triggers match this event. Leave empty for events with no workflow binding.
   AppContextVariable:
     type: model
     fields:
