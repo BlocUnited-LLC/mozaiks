@@ -25,14 +25,16 @@ POST_BASELINE_FAMILY_PATHS = SERVICE_PACKAGE_MARKER_PATHS | frozenset({
     "config/profile.yaml",
     # Build-time smoke fixtures were registered after these historical captures.
     "modules/{module_id}/contracts/fixtures.yaml",
+    # App-owned journeys were registered after the smoke-fixture migration.
+    "config/journeys.json",
 })
 
 
-def registry_before_service_package_markers() -> AppLayoutRegistry:
+def registry_without_families(*excluded_paths: str) -> AppLayoutRegistry:
     current = build_app_layout_registry(())
     families = tuple(
         family for family in current.families
-        if family.path_template not in POST_BASELINE_FAMILY_PATHS
+        if family.path_template not in excluded_paths
     )
     return AppLayoutRegistry(
         families=families,
@@ -41,6 +43,10 @@ def registry_before_service_package_markers() -> AppLayoutRegistry:
             "families": [family.identity_payload for family in families],
         }),
     )
+
+
+def registry_before_service_package_markers() -> AppLayoutRegistry:
+    return registry_without_families(*POST_BASELINE_FAMILY_PATHS)
 
 
 def corpus_plan_before_service_package_markers():

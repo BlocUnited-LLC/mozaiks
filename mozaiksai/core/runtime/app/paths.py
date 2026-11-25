@@ -13,6 +13,7 @@ APP_SECURITY_SECRETS_PATH = "security/secrets.yaml"
 APP_AUTH_CONFIG_PATH = "config/auth.yaml"
 APP_REFINEMENT_POLICY_CONFIG_PATH = "config/refinement_policy.yaml"
 APP_METRICS_CONFIG_PATH = "config/metrics.yaml"
+APP_JOURNEY_CATALOG_PATH = "config/journeys.json"
 APP_PROVENANCE_PATH = "provenance.yaml"
 
 # Non-source bundle files preserved by artifact readers and contained validation.
@@ -27,6 +28,7 @@ CANONICAL_APP_CONFIG_FILES = frozenset(
         APP_AUTH_CONFIG_PATH,
         "config/asset_manifest.json",
         "config/integrations.yaml",
+        APP_JOURNEY_CATALOG_PATH,
         APP_METRICS_CONFIG_PATH,
         # Read by the platform's profile-layout endpoint, which resolves
         # app_root / "config" / "profile.yaml" and falls back to "top_nav".
@@ -228,6 +230,7 @@ __all__ = [
     "APP_DATA_MIGRATIONS_DIR",
     "APP_DATA_MIGRATIONS_GLOB",
     "APP_AUTH_CONFIG_PATH",
+    "APP_JOURNEY_CATALOG_PATH",
     "APP_PROVENANCE_PATH",
     "APP_REFINEMENT_POLICY_CONFIG_PATH",
     "APP_SECURITY_SECRETS_PATH",
