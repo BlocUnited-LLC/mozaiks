@@ -6,6 +6,9 @@ Routes:
     GET  /api/chats/{app_id}/{workflow_name}
     GET  /api/chats/exists/{app_id}/{workflow_name}/{chat_id}
     GET  /api/chats/meta/{app_id}/{workflow_name}/{chat_id}
+    GET  /api/chats/model-options/{app_id}/{workflow_name}
+    GET  /api/chats/model/{app_id}/{workflow_name}/{chat_id}
+    PUT  /api/chats/model/{app_id}/{workflow_name}/{chat_id}
 """
 from __future__ import annotations
 
@@ -37,6 +40,7 @@ from mozaiksai.core.runtime.persistence.distributed_lock import (
 from mozaiksai.core.session.build_binding import RefinementModel, refinement_model_config
 from mozaiksai.core.transport.ui_tools import project_ui_tool_response_state
 from mozaiksai.hosts import runtime as runtime_app
+from mozaiksai.hosts.studio_model_policy import studio_model_label, studio_model_options
 
 router = APIRouter(tags=["chat"])
 logger = get_workflow_logger("chat_router")
@@ -328,10 +332,19 @@ async def _workflow_model_options(
         "user_id": owner, "transport_purpose": {"$ne": "ask_carrier"},
     }
     coll = await runtime_app._chat_coll()
-    doc = await coll.find_one(scope, {"workflow_model": 1, "run_build_binding.refinement_model": 1, "status": 1})
+    model_fields = {"workflow_model": 1, "workflow_run_model": 1, "run_build_binding.refinement_model": 1, "status": 1}
+    doc = await coll.find_one(scope, model_fields)
     if doc is None:
         raise HTTPException(404, "Workflow chat not found.")
     bound = (doc.get("run_build_binding") or {}).get("refinement_model")
+    run_model = doc.get("workflow_run_model")
+    if run_model is not None:
+        if selection is not None:
+            raise HTTPException(409, "The model for this workflow run is already set.")
+        return {
+            "models": [{"id": run_model, "label": studio_model_label(run_model)}],
+            "default": run_model, "selected": run_model, "locked": True,
+        }
     if bound is not None:
         if selection is not None:
             raise HTTPException(409, "The model for this build is already set.")
@@ -359,10 +372,14 @@ async def _workflow_model_options(
                 from mozaiksai.core.adapters.ag2_network_runner import model_change_checkpoint
 
                 # Re-read under the lease, including simultaneous saves from another tab.
-                current = await coll.find_one(scope, {"workflow_model": 1, "status": 1, "run_build_binding.refinement_model": 1})
+                current = await coll.find_one(scope, model_fields)
                 if current is None:
                     raise HTTPException(404, "Workflow chat not found.")
-                if current.get("status") != 0 or (current.get("run_build_binding") or {}).get("refinement_model"):
+                if (
+                    current.get("status") != 0
+                    or current.get("workflow_run_model") is not None
+                    or (current.get("run_build_binding") or {}).get("refinement_model")
+                ):
                     raise HTTPException(409, "This workflow chat's model is fixed.")
                 if selected == current.get("workflow_model"):
                     return {"models": options, "default": default, "selected": selected, "locked": False}
@@ -383,6 +400,7 @@ async def _workflow_model_options(
                         **scope,
                         "status": 0,
                         "run_build_binding.refinement_model": None,
+                        "workflow_run_model": None,
                         "workflow_ui_state.pending_input_request": None,
                     },
                     {"$set": {"workflow_model": selected, "workflow_model_rebind_pending": started}},
@@ -397,6 +415,18 @@ async def _workflow_model_options(
         "models": options,
         "default": default, "selected": selected, "locked": False,
     }
+
+
+@router.get("/api/chats/model-options/{app_id}/{workflow_name}")
+async def get_workflow_run_model_options(
+    app_id: str, workflow_name: str, principal: UserPrincipal = Depends(require_user_scope),
+    user_hint: Annotated[str | None, Header(alias="X-User-ID")] = None,
+):
+    validate_path_id(app_id, "app_id")
+    validate_path_id(workflow_name, "workflow_name")
+    validate_path_app_id(principal, app_id)
+    validate_user_id_against_principal(principal, path_user_id=user_hint or principal.user_id)
+    return await studio_model_options(principal)
 
 
 @router.get("/api/chats/model/{app_id}/{workflow_name}/{chat_id}")

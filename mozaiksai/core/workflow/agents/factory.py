@@ -614,10 +614,9 @@ async def create_agents(
             llm_overrides["config_list"] = [{**selected_config, "api_key": key}]
 
     if workflow_model is not None and "config_list" not in llm_overrides:
-        from ..llm_config import workflow_model_catalog
+        from ..llm_config import resolve_workflow_model
 
-        _, catalog = await workflow_model_catalog()
-        provider = catalog.get(workflow_model)
+        provider = await resolve_workflow_model(workflow_model)
         if provider is None:
             raise ValueError("The selected workflow model is no longer configured.")
         llm_overrides["config_list"] = [provider]

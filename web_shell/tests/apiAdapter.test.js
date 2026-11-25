@@ -20,12 +20,13 @@ function fixture({ baseUrl = 'https://runtime.example', platformBase = baseUrl, 
   };
   const context = vm.createContext({
     URL, URLSearchParams, Request, Headers, console, platform,
+    crypto: { randomUUID: () => 'request-id' },
     resolveWorkflow: value => value,
     window: { location: new URL(origin) },
     config: { get: key => key === 'api.baseUrl' ? baseUrl : undefined },
     fetch: async (input, options) => { requests.push({ input, options }); return response; },
   });
-  const api = vm.runInContext(`${withoutImports(apiSource)}\n({ authFetch, ApiAdapter, RestApiAdapter });`, context);
+  const api = vm.runInContext(`${withoutImports(apiSource)}\n({ authFetch, ApiAdapter, RestApiAdapter, WebSocketApiAdapter });`, context);
   context.authFetch = api.authFetch;
   const notifications = vm.runInContext(`${withoutImports(notificationSource)}\n({ fetchNotificationCount, clearNotifications });`, context);
   return {
@@ -34,6 +35,17 @@ function fixture({ baseUrl = 'https://runtime.example', platformBase = baseUrl, 
     tokenReads: () => tokenReads,
   };
 }
+
+test('both workflow adapters send the selected run model only when specified', async () => {
+  for (const adapterName of ['RestApiAdapter', 'WebSocketApiAdapter']) {
+    const f = fixture();
+    const adapter = new f[adapterName]();
+    await adapter.startChat('app-1', 'Workflow', 'owner', {}, null, null, {runModel:'openai'});
+    assert.equal(JSON.parse(f.requests[0].options.body).run_model, 'openai');
+    await adapter.startChat('app-1', 'Workflow', 'owner');
+    assert.equal(Object.hasOwn(JSON.parse(f.requests[1].options.body), 'run_model'), false);
+  }
+});
 
 test('REST workflow input preserves the server delivery outcome on refusal', async () => {
   const f = fixture();
