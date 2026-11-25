@@ -23,9 +23,10 @@ from mozaiksai.control_plane import (
 
 
 class _FakeChangeClassifier:
-    def __init__(self, *, change_class: str, rationale: str) -> None:
+    def __init__(self, *, change_class: str, rationale: str, branding_intent: str | None = None) -> None:
         self._result = SimpleNamespace(
             change_class=change_class,
+            branding_intent=branding_intent,
             rationale=rationale,
             confidence=0.92,
             signals=["test_signal"],
@@ -1482,6 +1483,96 @@ async def test_stale_route_handles_theme_capture_as_persisted_theme_family(
     assert "theme_capture" in decision.change_intent.signals
     assert decision.impact_set.affected_declarative_families == ["theme_capture", "app_bundle"]
     assert decision.is_full_restart is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("text", "family", "classified", "branding", "expected_class", "sequence", "workflow", "expected_branding"),
+    [
+        ("Use teal for the primary brand color.", "app_bundle", "design", "theme_color_patch",
+         "patch", "app_revision", "AppGenerator", "theme_color_patch"),
+        ("Give the brand a warmer palette and softer typography.", "app_bundle", "patch", "visual_redesign",
+         "design", "app_theme_revision", "ThemeCapture", "visual_redesign"),
+        ("Create a new logo for this app.", "app_bundle", "patch", "new_logo",
+         "design", "logo_revision", "BrandAssetGeneratorWorkflow", "new_logo"),
+        ("Move the existing logo and reorganize the navigation.", "app_bundle", "design", None,
+         "design", "app_surface_revision", "DesignDocs", None),
+        ("Change the theme and create a new logo.", "app_bundle", "design", None,
+         "design", "app_surface_revision", "DesignDocs", None),
+        ("Add reports and make the app blue.", "app_bundle", "feature", "theme_color_patch",
+         "feature", "app_revision", "AppGenerator", None),
+        ("Reframe this as a banking product with a new logo.", "app_bundle", "core", "new_logo",
+         "core", "full_rebuild", "ValueEngine", None),
+        ("Change the generated workflow's presentation.", "workflow_bundle", "design", "theme_color_patch",
+         "design", "workflow_revision", "AgentGenerator", None),
+    ],
+)
+async def test_branding_intent_routes_through_declared_policy_without_rewriting_baseline(
+    monkeypatch, text, family, classified, branding, expected_class, sequence, workflow, expected_branding,
+) -> None:
+    from mozaiksai.core.artifacts.models import ChangeRequestDoc
+
+    _patch_artifact_store(monkeypatch, [])
+    resolver = _factory_resolver(_FakeChangeClassifier(
+        change_class=classified, rationale="Classified semantic intent.", branding_intent=branding,
+    ))
+    request = resolver.request_from_payload(
+        payload={"refinement_request": {
+            "build_family": family,
+            "build_key": "saved-key",
+            "build_record_id": "av_exact_baseline",
+            "raw_user_request": text,
+            "extra": {"selected_file_paths": ["brand/theme_config.json"]},
+        }},
+        app_id="studio-owner", target_app_id="target-app", user_id="owner-user",
+    )
+    assert request is not None
+    before = request.model_dump(mode="json")
+
+    decision = await resolver.route(request)
+
+    assert request.model_dump(mode="json") == before
+    assert decision.refinement_request.build_record_id == "av_exact_baseline"
+    assert decision.refinement_request.artifact_app_id == "target-app"
+    assert decision.refinement_request.build_family == family
+    assert decision.change_class == expected_class
+    assert decision.change_intent.branding_intent == expected_branding
+    assert decision.workflow_sequence == sequence
+    assert decision.workflow_id == workflow
+    assert decision.impact_set.workflow_sequence == sequence
+    assert decision.impact_set.affected_workflows[0] == workflow
+    assert decision.context_seed["change_intent"]["branding_intent"] == expected_branding
+    assert decision.context_seed["refinement_request_meta"]["build_record_id"] == "av_exact_baseline"
+
+    stored = ChangeRequestDoc(
+        _id="request-branding", app_id="target-app", build_family=family, build_key="saved-key",
+        build_record_id="av_exact_baseline", raw_user_request=text, classification=decision.change_class,
+        refinement_request=request.model_dump(mode="json"),
+        change_intent=decision.change_intent.model_dump(mode="json"),
+        impact_set=decision.impact_set.model_dump(mode="json"),
+    )
+    assert ChangeRequestDoc.model_validate_json(stored.model_dump_json()).change_intent.branding_intent == expected_branding
+
+
+@pytest.mark.asyncio
+async def test_stale_upstream_precedes_branding_intent(monkeypatch) -> None:
+    _patch_artifact_store(monkeypatch, ["design_docs"])
+    classifier = SimpleNamespace(classify=AsyncMock(side_effect=AssertionError("Classifier must not run")))
+    resolver = _factory_resolver(classifier)
+    request = resolver.request_from_payload(
+        payload={"refinement_request": {
+            "build_family": "app_bundle", "build_record_id": "av_exact_baseline",
+            "raw_user_request": "Create a new logo.",
+        }},
+        app_id="studio-owner", target_app_id="target-app",
+    )
+    decision = await resolver.route(request)
+
+    classifier.classify.assert_not_awaited()
+    assert decision.workflow_sequence == "design_revision"
+    assert decision.change_intent.branding_intent is None
+    assert decision.change_intent.source == "stale_upstream"
+    assert decision.refinement_request.build_record_id == "av_exact_baseline"
 
 
 @pytest.mark.asyncio

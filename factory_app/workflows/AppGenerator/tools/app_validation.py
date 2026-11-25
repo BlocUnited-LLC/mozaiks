@@ -32,7 +32,10 @@ import yaml
 from anyio import CancelScope
 
 from factory_app.workflows._shared.workflow_integration import (
+    hydrate_workflow_integration_context_from_latest_artifact,
     workflow_integration_metadata_from_context,
+    workflow_integration_source_error,
+    workflow_integration_source_pin,
 )
 from factory_app.workflows.AppGenerator.tools import app_runtime_smoke
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
@@ -1467,6 +1470,23 @@ def validate_workflow_integration_contract(
     context_variables: Any | None,
 ) -> dict[str, Any]:
     metadata = workflow_integration_metadata_from_context(context_variables)
+    workflow_ref = workflow_integration_source_pin(context_variables)
+    message = workflow_integration_source_error(context_variables)
+    if not message and workflow_ref and (metadata or {}).get("source_artifact_version_id") != workflow_ref:
+        message = f"Workflow integration metadata must come from the pinned workflow bundle {workflow_ref!r}."
+    if message:
+        return {
+            "contract_version": "1.0",
+            "passed": False,
+            "checks": [_check_result(check_id="workflow_integration_source", passed=False, message=message)],
+            "failed_tests": [{
+                "test": "workflow_integration_source",
+                "path": "workflow_integration_metadata",
+                "error": message,
+                "fix_suggestion": "Hydrate the pinned workflow bundle before validating this app build.",
+            }],
+            "warnings": [],
+        }
     if not metadata:
         return {
             "contract_version": "1.0",
@@ -1490,7 +1510,7 @@ def validate_workflow_integration_contract(
     action_emits = wiring["action_emits"]
     capability_reactions = wiring["capability_reactions"]
     expected_workflow_pairs: set[tuple[str, str]] = set()
-    expected_capability_ids_by_event: dict[str, set[str]] = {}
+    expected_reactions: set[tuple[str, str]] = set()
     declared_workflow_capability_ids = {
         capability["capability_id"]
         for capability in workflow_capabilities
@@ -1510,7 +1530,14 @@ def validate_workflow_integration_contract(
                 continue
             event_type = str(trigger_event.get("event_type") or "").strip()
             if event_type:
-                expected_capability_ids_by_event.setdefault(event_type, set()).add(capability_id)
+                if (event_type, capability_id) in expected_reactions:
+                    failed_tests.append({
+                        "test": "workflow_trigger_duplicate_binding",
+                        "path": "workflow_integration_metadata",
+                        "error": f"Multiple triggers claim event {event_type!r} and capability {capability_id!r}.",
+                        "fix_suggestion": "Declare a unique event and capability pair for each workflow trigger.",
+                    })
+                expected_reactions.add((event_type, capability_id))
 
     for capability in workflow_capabilities:
         capability_id = str(capability.get("capability_id") or "").strip()
@@ -1587,7 +1614,21 @@ def validate_workflow_integration_contract(
                         ),
                     }
                 )
-            if event_type not in declared_events:
+            app_domain_event = event_type.startswith("domain.")
+            if not app_domain_event:
+                failed_tests.append({
+                    "test": "workflow_trigger_external_producer_unverified",
+                    "path": "workflow_integration_metadata",
+                    "error": (
+                        f"Workflow {workflow_name!r} subscribes to {event_type!r}, but the "
+                        "generated app contract cannot verify its external publisher."
+                    ),
+                    "fix_suggestion": (
+                        "Verify delivery through the owning host integration. A local module "
+                        "declaration or emit cannot establish external event delivery."
+                    ),
+                })
+            if app_domain_event and event_type not in declared_events:
                 failed_tests.append(
                     {
                         "test": "workflow_trigger_event_declared",
@@ -1596,12 +1637,12 @@ def validate_workflow_integration_contract(
                             f"Workflow trigger event {event_type!r} is not declared in contracts/events.yaml."
                         ),
                         "fix_suggestion": (
-                            "Declare the domain/platform/hosted event in the owning module's "
+                            "Declare the domain event in the publishing module's "
                             "contracts/events.yaml."
                         ),
                     }
                 )
-            if event_type not in action_emits:
+            if app_domain_event and event_type not in action_emits:
                 failed_tests.append(
                     {
                         "test": "workflow_trigger_event_emitted",
@@ -1630,29 +1671,22 @@ def validate_workflow_integration_contract(
                         ),
                     }
                 )
-            expected_capability_ids = expected_capability_ids_by_event.get(event_type) or {capability_id}
-            for routed_event, routed_capability_id in sorted(capability_reactions):
-                if routed_event != event_type:
-                    continue
-                if routed_capability_id not in declared_workflow_capability_ids:
-                    continue
-                if routed_capability_id in expected_capability_ids:
-                    continue
-                failed_tests.append(
-                    {
-                        "test": "workflow_trigger_ambiguous_workflow_reaction",
-                        "path": "modules/*/contracts/reactions.yaml",
-                        "error": (
-                            f"Workflow trigger event {event_type!r} is also routed to workflow "
-                            f"capability {routed_capability_id!r}, which is not part of the "
-                            "AgentGenerator metadata for that event."
-                        ),
-                        "fix_suggestion": (
-                            "Route AgentGenerator trigger events only to the workflow capability ids "
-                            "declared in workflow_integration_metadata."
-                        ),
-                    }
-                )
+
+    for event_type, capability_id in sorted(capability_reactions - expected_reactions):
+        if capability_id in declared_workflow_capability_ids:
+            failed_tests.append(
+                {
+                    "test": "workflow_trigger_ambiguous_workflow_reaction",
+                    "path": "modules/*/contracts/reactions.yaml",
+                    "error": (
+                        f"Event {event_type!r} routes to workflow capability {capability_id!r} "
+                        "without a matching trigger in the generated workflow bundle."
+                    ),
+                    "fix_suggestion": (
+                        "Use the event and capability pair declared in workflow_integration_metadata."
+                    ),
+                }
+            )
 
     passed = not failed_tests
     return {
@@ -1983,6 +2017,12 @@ async def run_app_bundle_acceptance_gate(
             _context_set(context_variables, "revision_asset_evidence", source_evidence)
         except (OSError, ValueError, zipfile.BadZipFile, ContentNotFoundError) as exc:
             required_bundle_errors.append(f"Revision source assets are unavailable: {exc}")
+        else:
+            # Export and revalidation can call the gate without the before-chat hooks.
+            try:
+                await hydrate_workflow_integration_context_from_latest_artifact(context_variables)
+            except (OSError, ValueError, RuntimeError) as exc:
+                required_bundle_errors.append(f"Revision workflow inputs are unavailable: {exc}")
     if not generated_files:
         required_bundle_errors.append("No generated files were available for app-bundle acceptance.")
     if "app.json" not in generated_files:

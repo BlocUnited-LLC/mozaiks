@@ -213,6 +213,14 @@ async def recover_saved_app_review(
         baseline_id = trigger.get("source_artifact_version_id")
         misrouted_chat_id = trigger.get("source_misrouted_chat_id")
     else:
+        # A workflow can save its own reviewable child while the parent's
+        # AppGenerator workbench is still open. That older waiter belongs to
+        # a different run. The ordinary launch already verified the owned build.
+        if (record.get("lifecycle_state") == "review"
+                and version.source_chat_id and version.source_workflow
+                and record.get("active_chat_id") == version.source_chat_id
+                and record.get("active_workflow_id") == version.source_workflow):
+            return None
         if not version.parent_build_record_id:
             return None
         parent = await artifact_store.get_build_record(

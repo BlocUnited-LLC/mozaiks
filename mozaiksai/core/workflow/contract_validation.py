@@ -99,10 +99,31 @@ def validate_workflow_context_contract(
         joined = "; ".join(missing)
         raise ValueError(f"{workflow_name} context_variables.yaml contract mismatch: {joined}")
 
+    validate_workflow_reply_tools(workflow_config)
     validate_workflow_tool_outcomes(workflow_config, task_batches=task_batches)
     validate_workflow_statusbar_contract(
         workflow_name=workflow_name, workflow_config=workflow_config, task_batches=task_batches,
     )
+
+
+def validate_workflow_reply_tools(workflow_config: dict[str, Any]) -> None:
+    roster = workflow_config.get("agents") or {}
+    if isinstance(roster, dict):
+        roster = roster.get("agents", roster)
+    agents = roster.values() if isinstance(roster, dict) else roster
+    registry = (workflow_config.get("structured_outputs") or {}).get("registry") or {}
+    remote = {item["name"] for item in (workflow_config.get("a2a") or {}).get("agents", []) if item.get("enabled", True)}
+    for agent in agents:
+        if not isinstance(agent, dict) or not (function := agent.get("reply_tool")):
+            continue
+        name = agent["name"]
+        if name in remote or registry.get(name) is not None:
+            raise ValueError(f"{name}: reply_tool requires a local agent with an unstructured text response")
+        bindings = [tool for tool in workflow_config.get("tools", [])
+                    if name in ([tool["agent"]] if isinstance(tool["agent"], str) else tool["agent"])]
+        if (len(bindings) != 1 or bindings[0]["function"] != function or bindings[0]["tool_type"] != "Agent_Tool"
+                or bindings[0].get("auto_tool_call") or bindings[0].get("bind_to_agent") is False):
+            raise ValueError(f"{name}: reply_tool {function!r} must be its only bound, non-auto Agent_Tool")
 
 
 def validate_workflow_statusbar_contract(

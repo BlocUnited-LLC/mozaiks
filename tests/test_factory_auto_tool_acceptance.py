@@ -200,13 +200,14 @@ def _valid_theme_payload() -> dict[str, Any]:
 
 async def _drive_runtime(
     payload: Any, pattern: Any, turn: int = 1, *, workflow: str = WORKFLOW, agent: str = AGENT,
+    chat_id: str = "chat-theme-1",
 ) -> Any:
     _, registry = _so.load_workflow_structured_outputs(workflow)
     return await emit_validated_agent_output(
         current_agent_name=agent,
         last_reply=payload,
         workflow_name=workflow,
-        chat_id="chat-theme-1",
+        chat_id=chat_id,
         app_id="app-theme-1",
         user_id="user-1",
         turn_sequence=turn,
@@ -216,6 +217,40 @@ async def _drive_runtime(
         auto_tool_agents={agent},
         wf_logger=_Logger(),
     )
+
+
+async def test_workflow_bundle_download_asks_for_confirmation_from_typed_agent_output(
+    factory_manager, side_effect_probes, monkeypatch, tmp_path
+):
+    from unittest.mock import AsyncMock
+
+    from tests.test_agentgenerator_generate_and_download_collection import (
+        _make_bundle_results,
+        _minimal_workflow_files,
+    )
+
+    download = AsyncMock(return_value={"status": "cancelled"})
+    monkeypatch.setattr("mozaiksai.core.workflow.ui_tools.use_ui_tool", download)
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path))
+    assert not factory_manager.reload_workflow("AgentGenerator").get("error")
+    pattern = _PatternContext()
+    pattern.data.update(
+        chat_id="workflow-export", user_id="user-1", workflow_name="AgentGenerator",
+        workflow_bundle_results=_make_bundle_results([{
+            "workflow_name": "ReviewWorkflow", "files": _minimal_workflow_files("ReviewWorkflow"),
+        }]),
+        workflow_bundle_export_attempts=0, workflow_bundle_export_outcome="blocked",
+    )
+    payload = {"agent_message": "Review your workflow bundle."}
+    await _drive_runtime(payload, pattern, workflow="AgentGenerator", agent="DownloadAgent", chat_id="workflow-export")
+
+    download.assert_awaited_once()
+    card = download.await_args.kwargs["payload"]
+    assert card["stage"] == "confirm"
+    assert card["files"] == []
+    assert card["agent_message"] == payload["agent_message"]
+    assert pattern.get("workflow_bundle_export_outcome") == "cancelled"
+    assert not list(tmp_path.rglob("*.zip"))
 
 
 async def test_theme_capture_auto_tool_succeeds_through_real_runtime_path(

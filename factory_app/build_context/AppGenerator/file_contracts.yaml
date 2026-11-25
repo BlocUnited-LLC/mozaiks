@@ -60,6 +60,7 @@ task_contracts:
       - brand/theme_config.json
       - dashboard/dashboard.yaml
       - config/shell.json
+      - config/journeys.json
       - config/asset_manifest.json
     hard_constraints:
       - Persistent app pages stay declarative by default.

@@ -12,13 +12,15 @@ import { reactAlias } from './artifactPreviewFixture.js';
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ui = path.resolve(shell, '../chat-ui/src');
 
-async function startWorkflowFixture(t, {localCanvas = false, viewport} = {}) {
+async function startWorkflowFixture(t, {localCanvas = false, viewport, chooseRunModel = false, catalogFailure = false,
+  modelCatalog = {default:'gemini', models:[{id:'gemini',label:'Gemini'},{id:'openai',label:'OpenAI'}]}} = {}) {
   const boundaries = {
     '../../adapters/api': `export {authFetch} from ${JSON.stringify(path.join(ui,'adapters/api.js'))};
     export class WebSocketApiAdapter {
       constructor(config) { this.config = config; }
       async startChat(app, wf, user, {signal}, context, trigger, options) {
         window.starts.push({app, wf, user, context, options, token:this.config.getAccessToken()});
+        if (window.failStart) { window.failStart = false; return {success:false, detail:'Could not start.'}; }
         return {chat_id: 'private-' + context.id};
       }
       async getWorkflowTransport() { return {transport:'websocket'}; }
@@ -77,10 +79,11 @@ async function startWorkflowFixture(t, {localCanvas = false, viewport} = {}) {
         window.select=setId; window.rotateToken=setToken;
         if(location.pathname === '/workflow') return <WorkflowChat workflow="StudyReview" appId="orchard"
           userId="owner" brandName="Orchard Kitchen" logo="/orchard-mark.svg" backgroundImage={null}
-          initialContext={{id}} getAccessToken={()=>token}
+          initialContext={{id}} getAccessToken={()=>token} chooseRunModel={${JSON.stringify(chooseRunModel)}}
           composerLabel="Study message" transcriptLabel="Study conversation"/>;
         return <><WorkflowChat workflow="DesignHelper" appId="design-app" userId="designer"
           initialContext={{id}} getAccessToken={()=>token} freshSession presentation="studio" brandName="Designer"
+          chooseRunModel={${JSON.stringify(chooseRunModel)}}
           composerLabel="Private message" transcriptLabel="Private conversation" showHeader={false}
           onMessage={m=>window.results.push(m.content)} onArtifact={(e,scope)=>{
             window.candidates.push(scope);
@@ -110,11 +113,21 @@ async function startWorkflowFixture(t, {localCanvas = false, viewport} = {}) {
   const componentCss = bundle.outputFiles.find(file => file.path.endsWith('.css'));
   const script = bundle.outputFiles.find(file => file.path.endsWith('.js'));
   const chatModels = new Map();
-  await page.route('http://fixture.test/**', route => {
+  const modelOptionRequests = [];
+  await page.route('http://fixture.test/**', async route => {
     const url = route.request().url();
+    if (url.includes('/api/chats/model-options/')) {
+      modelOptionRequests.push({url, headers:route.request().headers()});
+      if (catalogFailure) return route.fulfill({status:503});
+      return route.fulfill({json:modelCatalog});
+    }
     if (url.includes('/api/chats/model/')) {
       const request = route.request();
       if (request.method() === 'PUT') chatModels.set(url, request.postDataJSON().model);
+      if (chooseRunModel) {
+        const model = await page.evaluate(() => window.starts.at(-1)?.options?.runModel);
+        if (model) return route.fulfill({json:{models:[{id:model,label:model === 'openai' ? 'OpenAI' : 'Gemini'}],selected:model,default:model,locked:true}});
+      }
       return route.fulfill({json:{models:[{id:'local:small',label:'Small'},{id:'local:large',label:'Large'}],
         selected:chatModels.get(url) || null, default:'local:small', locked:false}});
     }
@@ -127,7 +140,7 @@ async function startWorkflowFixture(t, {localCanvas = false, viewport} = {}) {
       <div id="root"></div><script type="module" src="/fixture.js"></script>`});
   });
   await page.goto(localCanvas ? 'http://fixture.test/workflow' : 'http://fixture.test/studio');
-  return {page,errors};
+  return {page,errors,modelOptionRequests,allowCatalog:()=>{catalogFailure=false;}};
 }
 
 test('an embedded Studio conversation renders the Factory chat and scopes preview events to each user turn', async t => {
@@ -225,6 +238,69 @@ test('an embedded Studio conversation renders the Factory chat and scopes previe
   assert.equal(await page.evaluate(() => window.candidates.length),3);
   await expect(transcript.getByText('Here is the design.')).toHaveCount(0);
   assert.deepEqual(errors,[]);
+});
+
+test('opt-in workflow chooses its run model inside the composer before starting', async t => {
+  const {page,errors,modelOptionRequests} = await startWorkflowFixture(t, {localCanvas:true, chooseRunModel:true});
+  const picker = page.getByRole('combobox', {name:'AI model'});
+  const start = page.getByRole('button', {name:'Start', exact:true});
+  await expect(picker).toHaveValue('gemini');
+  await expect(start).toBeEnabled();
+  assert.equal(await page.evaluate(() => window.starts.length), 0);
+  await expect(page.getByRole('group', {name:'Chat status'})).toHaveCount(0);
+  assert.equal(modelOptionRequests[0].headers.authorization, 'Bearer test-scope');
+  assert.equal(modelOptionRequests[0].headers['x-user-id'], 'owner');
+  assert.equal(new URL(modelOptionRequests[0].url).pathname, '/api/chats/model-options/orchard/StudyReview');
+  assert.equal(await picker.evaluate(node => Boolean(node.closest('form'))), true);
+  await picker.selectOption('openai');
+  await start.click();
+  await page.waitForFunction(() => window.starts.length === 1);
+  assert.equal((await page.evaluate(() => window.starts[0].options)).runModel, 'openai');
+  await expect(start).toHaveCount(0);
+  await expect(page.getByLabel('Run model: OpenAI')).toBeVisible();
+  assert.deepEqual(errors, []);
+});
+
+test('model catalog failure leaves start disabled until retry succeeds', async t => {
+  const {page,allowCatalog} = await startWorkflowFixture(t, {localCanvas:true, chooseRunModel:true, catalogFailure:true});
+  const start = page.getByRole('button', {name:'Start', exact:true});
+  await expect(page.getByText('Could not load models.')).toBeVisible();
+  await expect(start).toBeDisabled();
+  assert.equal(await page.evaluate(() => window.starts.length), 0);
+  allowCatalog();
+  await page.getByRole('button', {name:'Reload models'}).click();
+  await expect(page.getByRole('combobox', {name:'AI model'})).toHaveValue('gemini');
+  await expect(start).toBeEnabled();
+  await page.evaluate(() => {window.failStart = true;});
+  await start.click();
+  await expect(page.getByRole('alert')).toHaveText('Could not start.');
+  await expect(start).toBeEnabled();
+  await start.click();
+  await page.waitForFunction(() => window.starts.length === 2);
+  await expect(start).toHaveCount(0);
+});
+
+test('an empty model catalog cannot start a run', async t => {
+  const {page} = await startWorkflowFixture(t, {
+    localCanvas:true, chooseRunModel:true, modelCatalog:{default:null, models:[]},
+  });
+  await expect(page.getByText('No models are available.')).toBeVisible();
+  await expect(page.getByRole('button', {name:'Start', exact:true})).toBeDisabled();
+  assert.equal(await page.evaluate(() => window.starts.length), 0);
+});
+
+test('Studio presentation uses the same prestart composer without affecting ordinary auto-start', async t => {
+  const {page} = await startWorkflowFixture(t, {chooseRunModel:true, viewport:{width:390,height:844}});
+  const picker = page.getByRole('combobox', {name:'AI model'});
+  const start = page.getByRole('button', {name:'Start', exact:true});
+  await expect(picker).toHaveValue('gemini');
+  assert.equal(await page.evaluate(() => window.starts.length), 0);
+  assert.equal(await start.evaluate(node => Boolean(node.closest('form'))), true);
+  await start.click();
+  await page.waitForFunction(() => window.starts.length === 1);
+  assert.equal((await page.evaluate(() => window.starts[0].options)).runModel, 'gemini');
+  await expect(start).toHaveCount(0);
+  await expect(page.getByLabel('Run model: Gemini')).toBeVisible();
 });
 
 test('an embedded workflow persists and restores the model under its host token and chat scope', async t => {

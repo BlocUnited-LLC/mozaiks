@@ -24,6 +24,9 @@ def test_load_default_factory_refinement_harness() -> None:
     assert app_bundle is not None
     assert app_bundle.routes.core.workflow_sequence == "full_rebuild"
     assert app_bundle.routes.patch.workflow_sequence == "app_revision"
+    assert {intent: route.workflow_sequence for intent, route in app_bundle.branding_routes.items()} == {
+        "theme_color_patch": "app_revision", "visual_redesign": "app_theme_revision", "new_logo": "logo_revision",
+    }
     theme_capture = pack.routing_for_artifact("theme_capture")
     assert theme_capture is not None
     assert theme_capture.routes.patch.workflow_sequence == "theme_patch"
@@ -572,6 +575,41 @@ def test_load_refinement_harness_requires_sequence_impact_metadata(tmp_path: Pat
     monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(workflows_root))
 
     with pytest.raises(ControlPlanePackLoadError, match="must declare affected_declarative_families"):
+        load_refinement_harness(app_root=app_root, factory_root=pack_root)
+
+
+@pytest.mark.parametrize(
+    ("branding_routes", "extra_sequence", "error"),
+    [
+        ({"new_logo": {"workflow_sequence": "missing_sequence"}}, None, "unknown workflow_sequence 'missing_sequence'"),
+        ({"new_logo": {"workflow_sequence": "empty_impact"}},
+         {"id": "empty_impact", "steps": [{"workflows": ["AppGenerator"]}]},
+         "must declare affected_declarative_families"),
+        ({"invented_intent": {"workflow_sequence": "app_revision"}}, None, "invented_intent"),
+    ],
+)
+def test_branding_routes_are_finite_and_validate_sequence_references(
+    tmp_path, monkeypatch, branding_routes, extra_sequence, error,
+) -> None:
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    pack_root = tmp_path / "refinement_harness"
+    workflows_root = tmp_path / "workflows"
+    sequences = [{
+        "id": "app_revision", "affected_declarative_families": ["app_bundle"],
+        "steps": [{"workflows": ["AppGenerator"]}],
+    }]
+    if extra_sequence:
+        sequences.append(extra_sequence)
+    _write_registry(workflows_root, sequences=sequences)
+    _write_minimal_refinement_harness(pack_root, route_payload={"workflow_sequence": "app_revision"})
+    manifest_path = pack_root / "config" / "harness.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    manifest["routing"]["artifacts"][0]["branding_routes"] = branding_routes
+    manifest_path.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(workflows_root))
+
+    with pytest.raises(ControlPlanePackLoadError, match=error):
         load_refinement_harness(app_root=app_root, factory_root=pack_root)
 
 

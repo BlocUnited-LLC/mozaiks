@@ -1706,6 +1706,9 @@ def test_every_studio_route_refuses_an_anonymous_visitor(monkeypatch) -> None:
         ("GET", "/api/studio/apps"),
         ("POST", "/api/studio/apps"),
         ("GET", "/api/studio/build/history"),
+        ("GET", "/api/studio/apps/notes/billing"),
+        ("GET", "/api/studio/apps/notes/launch"),
+        ("GET", "/api/studio/apps/notes/launch/version-one/download"),
         ("POST", "/api/studio/build/restore"),
         ("GET", "/api/studio/refinement/models"),
         ("GET", "/api/studio/settings/ai-models"),
@@ -1769,6 +1772,9 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
         "GET /api/studio/analytics/apps/{app_id}/metrics/{metric_id}",
     }
     existing_registry_gates = {
+        "GET /api/studio/apps/{dashboard_app_id}/billing": "_get_owned_dashboard_app_record",
+        "GET /api/studio/apps/{dashboard_app_id}/launch": "_get_owned_dashboard_app_record",
+        "GET /api/studio/apps/{dashboard_app_id}/launch/{artifact_version_id}/download": "_get_owned_dashboard_app_record",
         "GET /api/studio/build/dashboard-link": "get_app_record",
         "GET /api/studio/overview": "get_app_record",
         "GET /api/studio/build": "get_app_record",
@@ -1820,7 +1826,7 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
         | workspace_model_policy_routes.keys()
         | routes_without_app_scope
     )
-    assert len(direct_route_list) == len(direct_routes) == 42
+    assert len(direct_route_list) == len(direct_routes) == 45
     assert direct_routes.keys() == classified
     assert len(owned_app_routes) == 12
     for key in owned_app_routes:

@@ -363,6 +363,7 @@ const ChatPage = () => {
   const defaultWorkflow = resolveWorkflow(urlWorkflowName) || '';
   const [currentWorkflowName, setCurrentWorkflowName] = useState(defaultWorkflow);
   const [refinementModels, setRefinementModels] = useState(null);
+  const [refinementModelsAttempt, setRefinementModelsAttempt] = useState(0);
   const [refinementModel, setRefinementModel] = useState('');
   const [boundChatModels, setBoundChatModels] = useState(() => new Map());
   const refinementModelRef = useRef('');
@@ -384,9 +385,15 @@ const ChatPage = () => {
         setRefinementModel(selected);
         refinementModelRef.current = selected;
       })
-      .catch(() => { if (!controller.signal.aborted) setRefinementModels([]); });
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setRefinementModels([]);
+          setRefinementModel('');
+          refinementModelRef.current = '';
+        }
+      });
     return () => controller.abort();
-  }, [showRefinementModelPicker]);
+  }, [showRefinementModelPicker, refinementModelsAttempt]);
 
   const activeRunModel = conversationMode === 'workflow'
     ? boundChatModels.get(currentChatId)
@@ -404,6 +411,11 @@ const ChatPage = () => {
     >
       {refinementModels.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
     </ModelSelect>
+  ) : showRefinementModelPicker && refinementModels?.length === 0 ? (
+    <span role="status" className="text-xs text-muted-foreground">
+      No models available.{' '}
+      <button type="button" className="underline" onClick={() => setRefinementModelsAttempt(value => value + 1)}>Reload models</button>
+    </span>
   ) : activeRunModelLabel ? (
     <span
       className="rounded-full px-2.5 py-1 text-xs font-medium text-muted-foreground"
@@ -1196,7 +1208,7 @@ const ChatPage = () => {
   }, [setMessagesWithLogging]);
   const workflowModel = useWorkflowModelPicker({
     api, appId: currentAppId, userId: currentUserId, chatId: currentChatId,
-    workflow: conversationMode === 'workflow' && !refinementModelPicker && !(showRefinementModelPicker && refinementModels === null)
+    workflow: conversationMode === 'workflow' && !showRefinementModelPicker && !refinementModelPicker
       ? currentWorkflowName : null,
     disabled: workflowCompleted || Boolean(pendingHarnessDecision),
   });
@@ -6173,7 +6185,7 @@ const ChatPage = () => {
       transportType={transportType}
       workflowName={currentWorkflowName}
       modelPicker={refinementModelPicker || workflowModel.picker}
-      modelSaving={workflowModel.saving}
+      modelSaving={workflowModel.saving || (showRefinementModelPicker && refinementModels === null)}
       rejectedDraft={recoveredWorkflowDraft}
       waitingForConnection={waitingForWorkflowSocket}
       structuredOutputs={getWorkflow(currentWorkflowName)?.structuredOutputs || {}}
@@ -6415,7 +6427,7 @@ const ChatPage = () => {
         transportType={transportType}
         workflowName={currentWorkflowName}
         modelPicker={refinementModelPicker || workflowModel.picker}
-        modelSaving={workflowModel.saving}
+        modelSaving={workflowModel.saving || (showRefinementModelPicker && refinementModels === null)}
         rejectedDraft={recoveredWorkflowDraft}
         waitingForConnection={waitingForWorkflowSocket}
         structuredOutputs={getWorkflow(currentWorkflowName)?.structuredOutputs || {}}

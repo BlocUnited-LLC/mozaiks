@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 from pymongo.errors import PyMongoError
 
 from mozaiksai.control_plane.config import load_control_plane_config
@@ -81,6 +83,10 @@ def _effective_default(policy: StudioModelPolicy, available: list[RefinementMode
     return policy.default if policy.default in available else next(iter(available), None)
 
 
+def studio_model_label(model: RefinementModel) -> str:
+    return _MODEL_LABELS[model]
+
+
 async def studio_model_options(principal: UserPrincipal, *, admin: bool = False) -> dict:
     policy, _ = await _load_policy(principal)
     configured = _configured_models()
@@ -111,6 +117,20 @@ async def select_studio_model(
     if default is None and (require_available or saved):
         raise HTTPException(422, "Configure an allowed model provider key before starting a build.")
     return default
+
+
+async def select_requested_run_model(
+    principal: UserPrincipal, value: Any, *, eligible: bool,
+) -> RefinementModel | None:
+    if value is None:
+        return None
+    if not eligible:
+        raise HTTPException(status_code=422, detail="This chat cannot select a workflow run model.")
+    try:
+        model = TypeAdapter(RefinementModel).validate_python(value)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail="Choose an available workflow run model.") from exc
+    return await select_studio_model(principal, model)
 
 
 async def save_studio_model_policy(principal: UserPrincipal, policy: StudioModelPolicy) -> None:

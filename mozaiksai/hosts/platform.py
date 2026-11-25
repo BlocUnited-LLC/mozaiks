@@ -2128,10 +2128,13 @@ def _load_workflow_capability_routes(app_root: Path) -> dict[str, list[dict[str,
         for trigger in triggers:
             if not isinstance(trigger, dict):
                 continue
+            event_type = str(trigger.get("event") or "").strip() or None
+            family = trigger.get("type")
+            if family != "event" and not (family is None and event_type):
+                continue
             capability_ids = _trigger_capability_ids(trigger)
             if not capability_ids:
                 continue
-            event_type = str(trigger.get("event") or "").strip() or None
             route = {
                 "workflow_id": workflow_id,
                 "event_type": event_type,
@@ -2176,6 +2179,8 @@ async def _invoke_workflow_capability(
         )
         return {
             "status": "unresolved",
+            "success": False,
+            "error_code": "WORKFLOW_CAPABILITY_UNRESOLVED",
             "capability_id": capability_id,
             "event_type": source_event.get("type"),
         }
@@ -2335,15 +2340,16 @@ def _select_workflow_capability_route(
     source_event_type: str,
     routes: dict[str, list[dict[str, Any]]],
 ) -> dict[str, Any] | None:
-    candidates = routes.get(capability_id) or []
-    for route in candidates:
-        event_type = route.get("event_type")
-        if event_type and event_type == source_event_type:
-            return route
-    for route in candidates:
-        if not route.get("event_type"):
-            return route
-    return candidates[0] if candidates else None
+    candidates = routes.get(capability_id, [])
+    matches = [route for route in candidates if route.get("event_type") == source_event_type]
+    if not matches:
+        matches = [route for route in candidates if route.get("event_type") is None]
+    if len(matches) > 1:
+        logger.warning(
+            "WORKFLOW_CAPABILITY_ROUTE_AMBIGUOUS: capability_id=%s event_type=%s workflows=%s",
+            capability_id, source_event_type, [route["workflow_id"] for route in matches],
+        )
+    return matches[0] if len(matches) == 1 else None
 
 
 def _build_workflow_trigger_context(
@@ -2484,11 +2490,19 @@ async def start_chat(
     context_variables = validate_context_for_workflow(workflow_name, requested_context)
     trigger_meta = data.get("trigger_meta") if isinstance(data.get("trigger_meta"), dict) else {}
 
-    # Studio's Factory build picker binds a model to a build session. Generic
-    # platform workflows keep their own provider configuration unchanged.
+    # Factory build sessions use their existing registry-bound model.
     studio_factory_start = (
         "studio" in getattr(getattr(getattr(request, "app", None), "state", None), "mozaiks_repo_host_bootstrap_hosts", set())
         and workflow_name in {"ValueEngine", "ExistingAppDiscovery"}
+    )
+    from mozaiksai.hosts.studio_model_policy import select_requested_run_model
+
+    run_model = await select_requested_run_model(
+        principal,
+        data.get("run_model"),
+        eligible=not studio_factory_start and not (
+            data.get("build_registry_id") or data.get("source_chat_id") or data.get("transport_purpose") == "ask_carrier"
+        ),
     )
     requested_model = None
     if studio_factory_start:
@@ -2523,9 +2537,11 @@ async def start_chat(
         if client_request_id:
             reused_doc = await coll.find_one(
                 {**base_query, "client_request_id": client_request_id},
-                {"chat_id": 1, "run_build_binding": 1},
+                {"chat_id": 1, "run_build_binding": 1, "workflow_run_model": 1},
             )
         if reused_doc:
+            if reused_doc.get("workflow_run_model") != run_model:
+                raise HTTPException(status_code=409, detail="This chat launch already uses a different model.")
             if studio_factory_start and requested_model is not None:
                 from mozaiksai.core.session.build_binding import RunBuildBinding
 
@@ -2619,6 +2635,7 @@ async def start_chat(
         build_registry_id=data.get("build_registry_id"),
         source_chat_id=data.get("source_chat_id"),
         session_fields=session_fields,
+        run_model=run_model,
     )
 
     try:

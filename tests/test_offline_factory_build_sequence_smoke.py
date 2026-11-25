@@ -11,6 +11,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from factory_app.workflows._shared.workflow_integration import (
+    workflow_integration_metadata_from_artifact,
+)
 from factory_app.workflows.AppGenerator.tools import app_runtime_smoke, app_validation
 from mozaiksai.core.artifacts import (
     ArtifactLifecycleStatus,
@@ -179,13 +182,18 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
     }
     archive = tmp_path / "bundle.zip"
     archive.write_bytes(b"archive fixture")
-    await workflow_writer._register_workflow_bundle_artifact_version(
+    reviewed_workflows = await workflow_writer._register_workflow_bundle_artifact_version(
         app_id=app_id,
         chat_id="chat_agentgenerator",
         user_id="user_1",
         workflow_name="AgentGenerator",
         bundle_name="workflow_bundle", zip_path=archive, context_variables=context,
+        workflow_integration_metadata={"workflows": []},
     )
+    context["workflow_integration_metadata"] = workflow_integration_metadata_from_artifact(reviewed_workflows)
+    check = app_validation.validate_workflow_integration_contract({}, context)
+    assert check["passed"] and check["metadata"]["source_artifact_version_id"] == reviewed_workflows.id
+    context["app_bundle_acceptance_result"] = {"workflow_integration": check}
     await app_writer._register_app_bundle_artifact_version(
         app_id=app_id,
         chat_id="chat_appgenerator",

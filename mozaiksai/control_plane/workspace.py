@@ -15,8 +15,9 @@ import hashlib
 import os
 import shutil
 import stat
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -26,6 +27,7 @@ from mozaiksai.control_plane.contracts import (
     is_secret_sensitive_path,
     safe_artifact_relpath,
 )
+from mozaiksai.core.runtime.app.paths import APP_BINARY_ASSET_SUFFIXES
 from mozaiksai.core.secrets.contract import is_secret_contract_path, validate_secret_contract_text
 
 WorkspaceViolationKind = Literal[
@@ -116,7 +118,7 @@ def materialize_coding_workspace(
     files: dict[str, str],
     *,
     workspace_root: Path,
-    read_only_files: dict[str, str] | None = None,
+    read_only_files: Mapping[str, str | bytes] | None = None,
 ) -> StagedCodingWorkspace:
     """Write the scoped files into a fresh workspace and record their hashes.
 
@@ -133,6 +135,8 @@ def materialize_coding_workspace(
             safe = safe_artifact_relpath(raw_path)
             if safe is None or safe != raw_path:
                 raise ValueError(f"WORKSPACE_UNSAFE_PATH: {raw_path!r} is not a canonical relative path")
+            if isinstance(content, bytes) and (role != "read_only" or PurePosixPath(safe).suffix.lower() not in APP_BINARY_ASSET_SUFFIXES):
+                raise ValueError(f"WORKSPACE_BINARY_PATH: {safe!r} is not a read-only app asset")
             if is_secret_sensitive_path(safe) or (
                 role == "read_only" and (is_secret_contract_path(safe) or is_repository_env_template_path(safe))
             ):
@@ -162,7 +166,7 @@ def materialize_coding_workspace(
                 raise ValueError(f"WORKSPACE_ESCAPE: {safe!r} resolves outside the workspace root")
             destination.parent.mkdir(parents=True, exist_ok=True)
             # Byte writes avoid Windows newline translation and preserve hashes.
-            data = content.encode("utf-8")
+            data = content if isinstance(content, bytes) else content.encode("utf-8")
             destination.write_bytes(data)
             manifest[safe] = hashlib.sha256(data).hexdigest()
 

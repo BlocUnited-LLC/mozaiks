@@ -282,13 +282,10 @@ async def _record_context_and_artifacts(
         if isinstance(primary_workflow, dict)
         else []
     )
-    if workflow_integration_metadata:
-        apply_workflow_integration_context(context_variables, workflow_integration_metadata)
-
     # The canonical BuildRecord is the required persistence boundary. Register
     # it before writing optional export/diagnostic projections so a required
     # failure cannot leave those secondary records looking authoritative.
-    await _register_workflow_bundle_artifact_version(
+    workflow_record = await _register_workflow_bundle_artifact_version(
         app_id=str(app_id),
         user_id=user_id,
         workflow_name="AgentGenerator",
@@ -298,6 +295,11 @@ async def _record_context_and_artifacts(
         context_variables=context_variables,
         workflow_integration_metadata=workflow_integration_metadata,
     )
+    if workflow_integration_metadata is not None:
+        workflow_integration_metadata = {
+            **workflow_integration_metadata, "source_artifact_version_id": workflow_record.id,
+        }
+        apply_workflow_integration_context(context_variables, workflow_integration_metadata)
 
     try:
         await record_workflow_export(
@@ -350,8 +352,8 @@ async def _record_context_and_artifacts(
 
 
 async def generate_and_download(
-    DownloadRequest: Annotated[dict[str, Any], "Download configuration"],
-    agent_message: Annotated[str, "Concise message (≤140 chars) shown to user in download UI"],
+    DownloadRequest: Annotated[dict[str, Any] | None, "Download configuration"] = None,
+    agent_message: Annotated[str, "Concise message (≤140 chars) shown to user in download UI"] = "",
     context_variables: Annotated[Any | None, "Injected runtime context."] = None,
 ) -> dict[str, Any]:
     """
@@ -362,8 +364,9 @@ async def generate_and_download(
     context_variables["workflow_bundle_results"] — no converter or persistence
     assembly needed.
     """
-    confirmation_only = DownloadRequest.get("confirmation_only", True)
-    storage_backend = DownloadRequest.get("storage_backend", "none")
+    options = DownloadRequest or {}
+    confirmation_only = options.get("confirmation_only", True)
+    storage_backend = options.get("storage_backend", "none")
 
     chat_id: str | None = None
     app_id: str | None = None

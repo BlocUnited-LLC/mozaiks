@@ -21,7 +21,7 @@ import asyncio
 import logging
 from collections import OrderedDict
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, get_args
 
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.runtime.composition.extensions import get_workflow_lifecycle_hooks
@@ -32,6 +32,7 @@ from mozaiksai.core.runtime.persistence.distributed_lock import (
     chat_execution_lease,
     chat_lock_resource,
 )
+from mozaiksai.core.transport.input_authority import WORKFLOW_ACCESS_DENIED, input_refusal
 from mozaiksai.core.transport.session_registry import session_registry
 
 if TYPE_CHECKING:
@@ -350,6 +351,8 @@ class WorkflowBridgeMixin:
             has_live_text = live_run is not None and isinstance(message, str) and bool(message.strip())
             if not has_live_text and has_active_session and active_callbacks and not passive_start:
                 rejection = await self._reject_terminal_session(chat_id=chat_id, app_id=app_id)
+                if rejection is None:
+                    rejection = await self._reject_unauthorized_input(chat_id=chat_id, app_id=app_id, user_id=user_id)
                 if rejection is not None:
                     return rejection
                 # Route to existing AG2 session via WebSocket callback mechanism
@@ -367,7 +370,7 @@ class WorkflowBridgeMixin:
                         normalized_message = self._build_resume_signal(chat_id, request_id)
                         resume_signal = True
 
-                    success = await self.submit_user_input(request_id, str(normalized_message))
+                    success = await self.submit_user_input(request_id, str(normalized_message), chat_id=chat_id)
 
                     if success:
                         route = "existing_session_resume" if resume_signal else "existing_session"
@@ -412,6 +415,14 @@ class WorkflowBridgeMixin:
                         )
                         if rejection is not None:
                             return rejection
+                    # Before recovery, rebinding or delivery changes anything. A chat with no
+                    # stored session yet has nothing to continue; its start asks the host itself.
+                    rejection = await self._reject_unauthorized_input(
+                        chat_id=chat_id, app_id=app_id, user_id=user_id,
+                        require_session=callable(get_live_run) and get_live_run(chat_id) is not None,
+                    )
+                    if rejection is not None:
+                        return rejection
                     # Another request may have opened or ended the channel
                     # while this request waited for the lease. Resolve its
                     # current state before persisting or delivering new input.
@@ -422,12 +433,17 @@ class WorkflowBridgeMixin:
                     if preference and preference.rebind_pending and is_resume_request:
                         return await self._reject_workflow_model(chat_id, "Send a message to continue with your selected model.")
                     if workflow_model is not None:
-                        from mozaiksai.core.workflow.llm_config import workflow_model_catalog
+                        from mozaiksai.core.session.build_binding import RefinementModel
+                        from mozaiksai.core.workflow.llm_config import resolve_workflow_model
 
-                        _, catalog = await workflow_model_catalog()
-                        if workflow_model not in catalog:
+                        if await resolve_workflow_model(workflow_model) is None:
+                            hint = (
+                                "Restore the configured provider to continue this run."
+                                if workflow_model in get_args(RefinementModel)
+                                else "Choose another model or Workflow default."
+                            )
                             return await self._reject_workflow_model(
-                                chat_id, "The saved chat model is unavailable. Choose another model or Workflow default.",
+                                chat_id, f"The saved chat model is unavailable. {hint}",
                             )
                     if (
                         not is_resume_request
@@ -702,6 +718,21 @@ class WorkflowBridgeMixin:
         code = "WORKFLOW_MODEL_UNAVAILABLE"
         await self.send_error(error_message=reason, error_code=code, chat_id=chat_id)
         return {"status": "error", "chat_id": chat_id, "message": reason, "error_code": code}
+
+    async def _reject_unauthorized_input(
+        self, *, chat_id: str, app_id: str, user_id: str | None, require_session: bool = True,
+    ) -> dict[str, Any] | None:
+        reason = await input_refusal(
+            self._get_or_create_persistence_manager(), chat_id=chat_id, app_id=app_id, user_id=user_id,
+            require_session=require_session,
+        )
+        if reason is None:
+            return None
+        await self.send_error(error_message=reason, error_code=WORKFLOW_ACCESS_DENIED, chat_id=chat_id)
+        return {
+            "status": "error", "chat_id": chat_id, "route": "access_denied", "input_accepted": False,
+            "error_code": WORKFLOW_ACCESS_DENIED, "message": reason,
+        }
 
     async def _reject_terminal_session(self, *, chat_id: str, app_id: str) -> dict[str, Any] | None:
         rejection, _ = await self._resumable_chat_model(chat_id=chat_id, app_id=app_id)
@@ -1110,7 +1141,9 @@ class WorkflowBridgeMixin:
                         app_id=app_id,
                         initial_agent_name_override=initial_agent_name_override,
                     )
-                    if result.get("route") == "passive_reopen" or result.get("error_code") == "WORKFLOW_MODEL_UNAVAILABLE":
+                    if result.get("route") == "passive_reopen" or result.get("error_code") in {
+                        "WORKFLOW_MODEL_UNAVAILABLE", WORKFLOW_ACCESS_DENIED,
+                    }:
                         # Observation/refusal is not an execution outcome.
                         return result
                     run_status = str(result.get("run_status") or "").strip().lower()

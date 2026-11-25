@@ -50,7 +50,8 @@ async def test_platform_app_exposes_console_routes_only_on_studio_surface(monkey
     assert "/apps/:appId/overview" in console_pages
     assert "/apps/:appId/health" in console_pages
     assert "/apps/:appId/support" in console_pages
-    assert "/apps/:appId/billing" not in console_pages
+    assert "/apps/:appId/billing" in console_pages
+    assert "/apps/:appId/launch" in console_pages
     assert "/apps/:appId/hosting" not in console_pages
     assert "/apps/:appId/build" not in console_pages
     assert "/apps/:appId/deploy" not in console_pages

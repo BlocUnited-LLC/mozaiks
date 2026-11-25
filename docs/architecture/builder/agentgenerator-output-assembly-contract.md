@@ -38,8 +38,7 @@ AgentGenerator first validates and reviews the workflow partition:
 Workflow features are excluded from generated pricing until workflow launch
 enforces plan grants (#770). AgentGenerator rejects a saved contract that still
 selects a workflow pricing feature and asks for SubscriptionContractDesigner to
-rerun. Unpriced workflows continue using the workflow name capability
-convention for event routing.
+rerun. Named event triggers carry an explicit capability ID regardless of pricing.
 
 ### Apps Without AI Workflows
 
@@ -87,6 +86,10 @@ step copies them into an active app root's `workflows/` directory.
 | `WorkflowBundleBuilderAgent` | Task batch worker — generates all YAML and code files for one workflow bundle |
 | `PackMetadataAgent` | Produces pack-level `extension_registry.json` metadata after workflow bundles complete |
 | `DownloadAgent` | Triggers `generate_and_download` after pack metadata is ready |
+
+The download agent emits `agent_message`. The export tool reads the completed
+workflow files from `workflow_bundle_results` and asks for confirmation before
+creating the archive. External storage is disabled by default.
 
 ---
 
@@ -261,7 +264,7 @@ During bundle assembly, `generate_and_download` derives
 `orchestrator.yaml`:
 
 - `workflow_name`
-- derived stable `capability_id`
+- stable `capability_id` declared on every named event trigger of a generated workflow. Workflows without named event triggers use their kebab-case workflow name as their capability ID.
 - `workflow_startup_mode`
 - event triggers from the `triggers[]` block
 
@@ -275,10 +278,24 @@ The normalized metadata is written back to context as:
 - `generated_workflow_trigger_events`
 
 AgentGenerator persists the same metadata on the `workflow_bundle` artifact.
-AppGenerator hydrates it from the latest current `workflow_bundle` artifact
-before agents run, then its deterministic acceptance gate blocks export unless
-the generated app wires the workflow through module capabilities, emitted
-events, and `contracts/reactions.yaml`.
+AppGenerator first looks for AgentGenerator output from the same app, registry,
+and build run. A refinement can also select a specific workflow bundle or
+inherit the workflow input recorded by its source app. A source app with no
+workflow input keeps that choice. Only an unbound build can look up the app's
+current workflow bundle. A pinned run must supply metadata from that exact
+workflow bundle to pass app acceptance. Archiving or deleting that input
+blocks subsequent refinements that depend on it.
+The saved app records the workflow source verified at acceptance, including
+when another workflow bundle becomes current before the app is registered.
+AppPlanAgent receives every workflow and assigns each named trigger to a
+module contract task. ConfigMiddlewareAgent declares the corresponding workflow
+capability in `module.yaml` and each assigned event-to-capability pair in
+`contracts/reactions.yaml`. When two workflows subscribe to the same event,
+the module declares both reactions. A workflow with no named event triggers has
+no generated event reaction. AgentGenerator returns unknown event namespaces
+and duplicate event-and-capability pairs to the workflow builder for repair.
+AppGenerator verifies the materialized bindings before export. A generated
+subscription to an external event also needs evidence from its publisher.
 
 Smoke coverage:
 

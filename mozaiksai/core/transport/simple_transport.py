@@ -371,16 +371,22 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
     # USER INPUT COLLECTION (Production-Ready)
     # ==================================================================================
     
-    async def submit_user_input(self, input_request_id: str, user_input: str) -> bool:
+    async def submit_user_input(
+        self, input_request_id: str, user_input: str, *, chat_id: str | None = None,
+    ) -> bool:
         """
         Submit user input response for a pending input request.
-        
-        This method is called by the API endpoint when the frontend submits user input.
+
+        A caller that checked who may answer names that chat: another chat may hold
+        a request with the same id.
         """
         # First try orchestration registry respond callback(s)
         handled = False
         ack_chat_id = None
+        answerable = chat_id
         for chat_id, reg in list(self._input_request_registries.items()):
+            if answerable is not None and chat_id != answerable:
+                continue
             respond_cb = reg.get(input_request_id)
             if respond_cb:
                 try:

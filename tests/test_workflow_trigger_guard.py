@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from mozaiksai.core.runtime.composition.reaction_idempotency_store import LeaseClaim
 from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
@@ -152,6 +154,66 @@ def test_invocation_identity_uses_event_and_capability_authority() -> None:
         {"type": "domain.tasks.created", "payload": {"task_id": "task-1"}}
     )
     assert derived.startswith("derived_")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("declarations", "expected_workflow"),
+    [
+        ([("A", "event", "domain.tasks.archived"), ("B", "event", "domain.tasks.created")], "B"),
+        ([("A", None, "domain.tasks.created")], "A"),
+        ([("A", "event", None), ("B", "event", "domain.tasks.created")], "B"),
+        ([("A", "event", None), ("B", "event", "domain.tasks.archived")], "A"),
+        ([("A", "event", "domain.tasks.archived")], None),
+        ([("A", "chat", None), ("B", "route", "domain.tasks.created")], None),
+        ([("A", None, None)], None),
+        ([("A", "event", "domain.tasks.created"), ("B", "event", "domain.tasks.created"),
+          ("C", "event", None)], None),
+        ([("A", "event", None), ("B", "event", None)], None),
+    ],
+    ids=["specific", "named-event", "specific-over-default", "default", "wrong-event", "other-trigger-family", "bare-capability",
+         "ambiguous-event", "ambiguous-default"],
+)
+async def test_only_unique_admitted_event_routes_create_sessions(
+    tmp_path: Path, declarations, expected_workflow,
+) -> None:
+    from mozaiksai.hosts import platform
+
+    for name, family, event in declarations:
+        folder = tmp_path / "workflows" / name
+        folder.mkdir(parents=True)
+        trigger = {"capability_id": "tasks.review"}
+        if family is not None:
+            trigger["type"] = family
+        if event:
+            trigger["event"] = event
+        (folder / "orchestrator.yaml").write_text(
+            yaml.safe_dump({"workflow_name": name, "triggers": [trigger]}), encoding="utf-8",
+        )
+
+    created = []
+
+    async def create_session(**kwargs):
+        created.append(kwargs["workflow_id"])
+        return "chat-1"
+
+    result = await platform._invoke_workflow_capability(
+        capability_id="tasks.review",
+        source_event=_event("evt-1"),
+        subscription={"id": "review-reaction", "module_id": "tasks"},
+        routes=platform._load_workflow_capability_routes(tmp_path / "app"),
+        create_session=create_session,
+        trigger_guard=_guard(),
+        auto_start=False,
+    )
+    if expected_workflow is None:
+        assert result["status"] == "unresolved"
+        assert result["success"] is False
+        assert result["error_code"] == "WORKFLOW_CAPABILITY_UNRESOLVED"
+        assert created == []
+    else:
+        assert result["status"] == "created"
+        assert created == [expected_workflow]
 
 
 @pytest.mark.asyncio
