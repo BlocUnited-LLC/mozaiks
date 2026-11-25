@@ -603,7 +603,22 @@ def validate_module_result_writes(
                 or set(schema.get("properties", {})) != set(write.fields)
                 or set(schema.get("required", ())) != set(write.fields)):
             raise ValueError("result_write.action input_schema must require exactly its fields and forbid additional properties")
-        resolve_result_write_collection(definition.name, write, data_contract)
+        from mozaiksai.core.runtime.app.result_schema import result_object_schema
+
+        result_schema = result_object_schema(schema)
+        collection = resolve_result_write_collection(definition.name, write, data_contract)
+        fields = {field["name"]: field for field in collection["fields"]
+                  if isinstance(field, dict) and isinstance(field.get("name"), str)}
+        if fields[write.record_key].get("type") != "string":
+            raise ValueError("result_write.record_key must be a string collection field")
+        for name, prop in result_schema["properties"].items():
+            data_field = fields[name]
+            if data_field.get("type") != prop["type"]:
+                raise ValueError(f"result_write field {name!r}: action input type must match the collection field type")
+            domain = data_field.get("enum")
+            if domain is not None and (not isinstance(domain, list) or not prop.get("enum")
+                                       or any(value not in domain for value in prop["enum"])):
+                raise ValueError(f"result_write field {name!r}: action enum must fit the collection field enum")
 
 
 def _check_result_schema(schema: dict[str, Any]) -> None:

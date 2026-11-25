@@ -53,6 +53,7 @@ def inject_workflow_integration_contract(agent, messages: list[dict[str, Any]]) 
             block += (
                 f"\nApproved result for {plan['event_type']} → {capability_id}, owning module {plan['module_id']}:"
                 f"\n  target.result_write: {json.dumps(write, sort_keys=True)}"
+                f"\n  Input schema compiled from the workflow result agent: {json.dumps(workflow['result_output_schema'], sort_keys=True)}"
                 f"\n  {write['source_action']} inserts into private per-user collection {write['collection']},"
                 f" then emits the event. Its payload_schema requires string {write['record_key']} from that insert."
                 f"\n  Declare {write['action']} as internal, permissions [], emits [], no entitlement; its closed"

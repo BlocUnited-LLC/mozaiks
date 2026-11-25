@@ -48,7 +48,14 @@ shows the source module action, event, collection, record key, receiving action,
 local agent, and allowed output fields. The review hash covers those values.
 The builder gives the specified agent a flat structured-output model with exactly
 the required result fields. Factory adds its workflow-local automatic tool and
-pins the result plan in the workflow bundle's integration metadata.
+pins the result plan and the result agent's compiled output schema in the workflow
+bundle's integration metadata. App validation compares the closed receiver input
+with this schema, including nested properties, array items and enum values, and
+checks the result against the private collection's declared field types.
+
+Every successful path goes through the result agent. Factory uses the agent's
+declared continuation after an applied write or an identical replay. A rejected
+write, unavailable receiver, or storage error ends the workflow as failed.
 
 AppGenerator uses that same plan to compile the matching capability reaction
 and the internal module action's handler and service. Assembly checks both

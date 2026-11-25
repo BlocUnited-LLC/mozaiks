@@ -1,6 +1,7 @@
 """Artifact-bound compiler inputs; candidate files never supply approval."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from copy import deepcopy
@@ -332,7 +333,7 @@ async def resolve_app_compilation_inputs(
         workflow_binding = _record_binding(workflow)
         if workflow_binding.target_app_id != app_id or workflow_binding.build_registry_id != build_registry_id:
             raise ValueError(f"Approved workflow bundle {workflow_ref!r} is outside the owned build")
-        metadata = workflow_integration_metadata_from_artifact(workflow)
+        metadata = await asyncio.to_thread(workflow_integration_metadata_from_artifact, workflow)
         if metadata is None:
             raise ValueError(f"Approved workflow bundle {workflow_ref!r} has no verifiable integration metadata")
         context["artifact_version_refs"] = {"workflow_bundle": workflow_ref}

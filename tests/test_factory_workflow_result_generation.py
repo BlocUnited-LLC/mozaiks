@@ -1,5 +1,7 @@
+import hashlib
 import importlib
 import json
+import zipfile
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -24,6 +26,7 @@ from factory_app.workflows.AppGenerator.tools.assembly_phase import (
     compiled_pack_module_templates,
 )
 from factory_app.workflows.AppGenerator.tools.workflow_result_writes import workflow_result_files
+from mozaiksai.core.artifacts.models import BuildRecordFileEntry
 from mozaiksai.core.workflow import module_tools
 from tests.factory_context import factory_context
 from tests.test_module_loader_contracts import _write_canonical_module
@@ -37,15 +40,17 @@ SPEC = {"name": "ReviewWorkflow", "result_write_plans": [
 ]}
 
 
-def entry(*, fields=None, triggers=None):
-    orchestrator = {"workflow_name": "ReviewWorkflow", "workflow_startup_mode": "BackendOnly",
+def entry(*, fields=None, triggers=None, models=None):
+    orchestrator = {"workflow_name": "ReviewWorkflow", "workflow_startup_mode": "BackendOnly", "initial_agent": "ResultAgent",
                     "triggers": [{"type": "event", "event": name, "capability_id": "tasks.review"}
                                  for name in triggers or [EVENT]]}
     outputs = {"schema_version": "mozaiks.structured_outputs.v1", "registry": {"ResultAgent": "Summary"},
-               "models": {"Summary": {"type": "model", "fields": fields or {"summary": {"type": "str"}}}}}
+               "models": {**(models or {}), "Summary": {"type": "model", "fields": fields or {"summary": {"type": "str"}}}}}
     return {"workflow_name": "ReviewWorkflow", "files": [
         {"filename": path, "content": yaml.safe_dump(document)}
         for path, document in [("tools.yaml", {"tools": []}), ("structured_outputs.yaml", outputs),
+                               ("context_variables.yaml", {"definitions": {}}),
+                               ("transition_graph.yaml", {"transition_rules": []}),
                                ("agents.yaml", {"agents": [{"name": "ResultAgent", "system_message": "Summarize the task.",
                                                             "structured_outputs_required": True}]}),
                                ("orchestrator.yaml", orchestrator)]
@@ -122,6 +127,121 @@ def test_builder_cannot_add_an_unreviewed_result_or_leave_an_unbound_trigger():
     rendered = materialize_workflow_result_write(entry(triggers=[EVENT, "domain.tasks.other"]), SPEC)
     with pytest.raises(ValueError, match="each declared"):
         extract_workflow_integration_metadata_from_bundle_entries([rendered])
+
+
+def test_required_result_preserves_the_success_continuation_and_refuses_a_bypass():
+    candidate = entry()
+    files = {file["filename"]: file for file in candidate["files"]}
+    orchestrator = yaml.safe_load(files["orchestrator.yaml"]["content"])
+    files["orchestrator.yaml"]["content"] = yaml.safe_dump({**orchestrator, "initial_agent": "TriageAgent"})
+    rules = [
+        {"source_agent": "TriageAgent", "target_agent": "ResultAgent", "transition_type": "after_turn"},
+        {"source_agent": "ResultAgent", "target_agent": "ClosingAgent", "transition_type": "after_turn"},
+        {"source_agent": "ClosingAgent", "target_agent": "terminate", "transition_type": "after_turn"},
+    ]
+    files["transition_graph.yaml"]["content"] = yaml.safe_dump({"transition_rules": rules})
+    compiled = materialize_workflow_result_write(candidate, SPEC)
+    assert materialize_workflow_result_write(compiled, SPEC) == compiled
+    graph = next(file for file in compiled["files"] if file["filename"] == "transition_graph.yaml")
+    result_routes = [rule for rule in yaml.safe_load(graph["content"])["transition_rules"] if rule["source_agent"] == "ResultAgent"]
+    assert {rule.get("condition_value"): rule["target_agent"] for rule in result_routes} == {
+        "applied": "ClosingAgent", "already_applied": "ClosingAgent", "failed": "terminate", None: "terminate",
+    }
+    assert all(rule["termination_reason"] == "workflow_failed" for rule in result_routes if rule["target_agent"] == "terminate")
+    rules.append({"source_agent": "TriageAgent", "target_agent": "terminate", "transition_type": "condition",
+                  "condition_type": "context_equals", "condition_key": "finish_early", "condition_value": True})
+    files["transition_graph.yaml"]["content"] = yaml.safe_dump({"transition_rules": rules})
+    with pytest.raises(ValueError, match="bypasses the approved result agent"):
+        materialize_workflow_result_write(candidate, SPEC)
+
+
+@pytest.mark.parametrize(("receiver", "storage", "diagnostic"), [
+    ("integer", "integer", "compiled workflow result schema"),
+    ("string", "integer", "collection field type"),
+])
+def test_actual_workflow_artifact_must_match_result_action_and_storage(tmp_path, receiver, storage, diagnostic):
+    context = workflow_context()
+    files = app_files(tmp_path)
+    path = "modules/tasks/module.yaml"
+    module = yaml.safe_load(files[path])
+    module["actions"][-1]["input_schema"]["properties"]["summary"]["type"] = receiver
+    files[path] = yaml.safe_dump(module)
+    contract = json.loads(files["data/contract.json"])
+    field = next(field for field in contract["surfaces"][0]["collections"][0]["fields"] if field["name"] == "summary")
+    field["type"] = storage
+    files["data/contract.json"] = json.dumps(contract)
+    with pytest.raises(ValueError, match=diagnostic):
+        workflow_result_files(files, context["workflow_integration_metadata"])
+    verdict = validate_workflow_integration_contract(files, context)
+    assert verdict["passed"] is False and diagnostic in verdict["failed_tests"][0]["error"]
+
+
+def test_nested_compiled_result_shapes_survive_pinning_and_reject_incompatible_items(tmp_path):
+    local = entry(fields={"summary": {"type": "list", "items": "Review"}}, models={
+        "Review": {"type": "model", "fields": {"rating": {"type": "int", "description": "Review rating"}}},
+    })
+    rendered = materialize_workflow_result_write(local, SPEC)
+    metadata = extract_workflow_integration_metadata_from_bundle_entries([rendered])
+    record = _record("typed-workflow", {"workflow_integration_metadata": metadata})
+    pinned = workflow_integration_metadata_from_artifact(record)
+    expected = {"type": "array", "items": {"type": "object", "properties": {"rating": {"type": "integer"}},
+                                           "required": ["rating"], "additionalProperties": False}}
+    assert pinned["workflows"][0]["result_output_schema"]["properties"]["summary"] == expected
+    files = app_files(tmp_path)
+    data = json.loads(files["data/contract.json"])
+    next(f for f in data["surfaces"][0]["collections"][0]["fields"] if f["name"] == "summary")["type"] = "array"
+    files["data/contract.json"] = json.dumps(data)
+    path = "modules/tasks/module.yaml"
+    module = yaml.safe_load(files[path])
+    props = module["actions"][-1]["input_schema"]["properties"]
+    props["summary"] = deepcopy(expected)
+    files[path] = yaml.safe_dump(module)
+    files.update(workflow_result_files(files, pinned))
+    assert workflow_result_files(files, pinned) == {}
+    props["summary"]["items"]["properties"]["rating"]["type"] = "string"
+    files[path] = yaml.safe_dump(module)
+    with pytest.raises(ValueError, match="compiled workflow result schema"):
+        workflow_result_files(files, pinned)
+
+
+async def test_historical_producer_schema_is_recovered_only_from_verified_workflow_bytes(tmp_path):
+    rendered = materialize_workflow_result_write(entry(), SPEC)
+    metadata = extract_workflow_integration_metadata_from_bundle_entries([rendered])
+    expected = metadata["workflows"][0].pop("result_output_schema")
+    path = tmp_path / "TicketOps.zip"
+    with zipfile.ZipFile(path, "w") as archive:
+        for file in rendered["files"]:
+            archive.writestr(f"ReviewWorkflow/{file['filename']}", file["content"])
+    record = _record("legacy-result-workflow", {"artifact_path": str(path), "workflow_integration_metadata": metadata})
+    raw = path.read_bytes()
+    record.files_manifest = [BuildRecordFileEntry(path="TicketOps/TicketOps.zip", sha256=hashlib.sha256(raw).hexdigest(),
+                                                  size_bytes=len(raw), content_type="application/zip")]
+    for saved in (record, record.model_dump(by_alias=True)):
+        pinned = workflow_integration_metadata_from_artifact(saved)
+        assert pinned["workflows"][0]["result_output_schema"] == expected
+        assert pinned["source_artifact_version_id"] == record.id
+    context = factory_context({"artifact_version_refs": {"workflow_bundle": record.id},
+                               "workflow_integration_metadata": metadata})
+    store = SimpleNamespace(get_build_record=AsyncMock(return_value=record))
+    await hydrate_workflow_integration_context_from_latest_artifact(context, artifact_store=store)
+    assert context["workflow_integration_metadata"]["workflows"][0]["result_output_schema"] == expected
+    assert "result_output_schema" not in metadata["workflows"][0]
+    path.write_bytes(raw + b"tampered")
+    with pytest.raises(ValueError, match="digest differs"):
+        workflow_integration_metadata_from_artifact(record)
+    path.unlink()
+    with pytest.raises(ValueError, match="Could not read"):
+        workflow_integration_metadata_from_artifact(record)
+
+
+def test_a_string_producer_cannot_write_unrestricted_values_to_an_enum_field(tmp_path):
+    files = app_files(tmp_path)
+    data = json.loads(files["data/contract.json"])
+    summary = next(f for f in data["surfaces"][0]["collections"][0]["fields"] if f["name"] == "summary")
+    summary["enum"] = ["draft", "complete"]
+    files["data/contract.json"] = json.dumps(data)
+    with pytest.raises(ValueError, match="action enum must fit"):
+        workflow_result_files(files, workflow_context()["workflow_integration_metadata"])
 
 
 async def test_app_assembly_compiles_the_actual_internal_receiver(tmp_path, monkeypatch):

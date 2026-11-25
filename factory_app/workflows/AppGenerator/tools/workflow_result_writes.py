@@ -15,12 +15,15 @@ from mozaiksai.core.runtime.app.module_loader import (
     ModuleReactionsManifest,
     validate_module_result_writes,
 )
+from mozaiksai.core.runtime.app.result_schema import result_object_schema
+from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
 from mozaiksai.core.workflow.generator_support.module_read_actions import _replace_functions
 
 
 def workflow_result_files(files: dict[str, str], metadata: dict[str, Any] | None) -> dict[str, str]:
     """Return only missing canonical output bytes. Conflicting declarations fail assembly."""
     plans: dict[str, dict[tuple[str, str], dict[str, Any]]] = defaultdict(dict)
+    result_schemas = {}
     for workflow in (metadata or {}).get("workflows", []):
         for plan in workflow.get("result_write_plans", []):
             key = (plan["event_type"], workflow["capability_id"])
@@ -28,6 +31,7 @@ def workflow_result_files(files: dict[str, str], metadata: dict[str, Any] | None
             if key in bindings:
                 raise ValueError(f"Duplicate workflow result plan for {key}")
             bindings[key] = plan["result_write"]
+            result_schemas[plan["module_id"], key] = workflow["result_output_schema"]
     if plans and not (metadata or {}).get("source_artifact_version_id"):
         raise ValueError("A workflow result plan requires the registered workflow bundle ID")
 
@@ -70,6 +74,12 @@ def workflow_result_files(files: dict[str, str], metadata: dict[str, Any] | None
             raise ValueError(f"{root}: module.id must match the result owner")
         events = ModuleEventsManifest.model_validate(yaml.safe_load(files.get(f"{root}/contracts/events.yaml", "")))
         validate_module_result_writes(definition, reactions, events, json.loads(files.get("data/contract.json", "null")))
+        actions = {action.id: action for action in definition.actions}
+        for key, write in expected.items():
+            receiving = result_object_schema(actions[write["action"]].input_schema)
+            producer = result_schemas[module, key]
+            if import_closed_contract_schema(receiving) != import_closed_contract_schema(producer):
+                raise ValueError(f"{root}: input_schema of {write['action']!r} must match the compiled workflow result schema")
         changes.update(_receiver_files(files, definition, {write["action"] for write in expected.values()}))
     if plans:
         raise ValueError(f"Missing owning capability reactions.yaml for result_write in {', '.join(sorted(plans))}")

@@ -75,7 +75,9 @@ def write_result_workflow(root: Path, declaration: dict):
 
 async def deliver_result(chat_id: str, actor: str, value: str, turn: int):
     policy = _context_authority_policy_for_workflow(WORKFLOW)
-    bridge = ContextVariablesBridge({"user_id": actor, "app_id": APP, "chat_id": chat_id}, authority_policy=policy)
+    definitions = workflow_manager.get_config(WORKFLOW)["context_variables"]["definitions"]
+    defaults = {key: spec["source"]["default"] for key, spec in definitions.items()}
+    bridge = ContextVariablesBridge({**defaults, "user_id": actor, "app_id": APP, "chat_id": chat_id}, authority_policy=policy)
     bridge._bind_run((WORKFLOW, APP, chat_id), policy)
     _, registry = load_workflow_structured_outputs(WORKFLOW)
     return await emit_validated_agent_output(
@@ -83,6 +85,81 @@ async def deliver_result(chat_id: str, actor: str, value: str, turn: int):
         app_id=APP, user_id=actor, turn_sequence=turn, context_vars_dict=bridge.snapshot(), context_bridge=bridge,
         structured_registry=registry, auto_tool_agents={AGENT}, wf_logger=logging.getLogger(__name__),
     )
+
+
+@pytest.mark.parametrize("receipt,expected", [("applied", "completed"), ("already_applied", "completed"), (None, "failed")])
+async def test_required_save_controls_the_ag2_run_outcome(tmp_path, monkeypatch, receipt, expected):
+    from unittest.mock import AsyncMock
+
+    from ag2 import Agent
+    from pydantic import BaseModel
+
+    from mozaiksai.core.adapters.ag2_network_runner import AG2NetworkRunner, AG2NetworkRunnerRequest
+    from mozaiksai.core.events import auto_tool_handler, unified_event_dispatcher
+    from mozaiksai.core.workflow import module_tools
+    from mozaiksai.core.workflow.agents import tools as tool_loader
+    from mozaiksai.core.workflow.context.authority import build_context_authority_policy
+    from mozaiksai.core.workflow.declarative.contracts import ToolOutcomeSpec
+    from mozaiksai.core.workflow.orchestration_patterns import _dispatch_agent_packet_output
+    from mozaiksai.core.workflow.workflow_manager import UnifiedWorkflowManager
+
+    write_result_workflow(tmp_path, {"source_action": "create", "action": "save_summary", "collection": "tasks",
+                                     "record_key": "task_id", "fields": ["summary"]})
+    monkeypatch.setattr(UnifiedWorkflowManager, "_instance", None)
+    manager = UnifiedWorkflowManager(workflows_base_path=str(tmp_path))
+    config = manager.get_config(WORKFLOW)
+    outcome = ToolOutcomeSpec.model_validate(config["tools"][0]["outcome"])
+    for module in (tool_loader, auto_tool_handler):
+        monkeypatch.setattr(module, "workflow_manager", manager)
+
+    class Summary(BaseModel):
+        summary: str
+
+    class ResultAgent(Agent):
+        async def ask(self, *args, **kwargs):
+            return SimpleNamespace(body='{"summary":"Reviewed"}')
+
+    registry = {AGENT: Summary}
+    monkeypatch.setattr(auto_tool_handler, "get_structured_outputs_for_workflow", lambda _: registry)
+    commit = AsyncMock(return_value={"status": receipt}, side_effect=None if receipt else OSError("storage unavailable"))
+    monkeypatch.setattr(module_tools, "commit_workflow_result", commit)
+    handler = auto_tool_handler.AutoToolEventHandler()
+    for method in ("_emit_tool_call", "_emit_tool_result", "_persist_context_variables"):
+        monkeypatch.setattr(handler, method, AsyncMock())
+
+    async def dispatch(kind, payload):
+        await handler.handle_tool_dispatch(payload)
+
+    monkeypatch.setattr(unified_event_dispatcher, "get_event_dispatcher", lambda: SimpleNamespace(emit=dispatch))
+    definitions = config["context_variables"]["definitions"]
+    policy = build_context_authority_policy(workflow_name=WORKFLOW, definitions=definitions)
+    defaults = {key: spec["source"]["default"] for key, spec in definitions.items()}
+    if receipt == "already_applied":
+        # A previous save committed before the runner acknowledged its terminal packet.
+        defaults[outcome.context_key] = "applied"
+    bridge = ContextVariablesBridge(defaults, authority_policy=policy)
+    agent = ResultAgent(AGENT, prompt="Summarize the task.")
+    agent._mozaiks_context_bridge = bridge
+    agent._mozaiks_tool_outcome = outcome
+
+    async def before_packet(agent_name, packet):
+        await _dispatch_agent_packet_output(
+            agent_name=agent_name, packet=packet, workflow_name=WORKFLOW, app_id=APP, chat_id="chat",
+            user_id="owner", context_bridge=bridge, structured_registry=registry, auto_tool_agents={AGENT},
+            wf_logger=logging.getLogger(__name__),
+        )
+
+    result = await AG2NetworkRunner().run(AG2NetworkRunnerRequest(
+        workflow_name=WORKFLOW, app_id=APP, chat_id="chat", agents={AGENT: agent}, initial_agent_name=AGENT,
+        transition_rules=config["transition_graph"]["transition_rules"], initial_message="Review the task.",
+        context_variables=bridge.snapshot(), context_authority_policy=policy, max_turns=2, idle_timeout_seconds=5,
+        agent_output_handler=before_packet,
+    ))
+    commit.assert_awaited_once_with({"summary": "Reviewed"})
+    assert result.status.value == expected
+    assert result.error == ("workflow_failed" if expected == "failed" else None)
+    assert result.context_variables[outcome.context_key] == (receipt or outcome.error_value)
+    assert result.context_variables[outcome.attempts_key] == (0 if receipt else 1)
 
 
 @pytest.fixture
