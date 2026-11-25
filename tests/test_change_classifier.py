@@ -174,3 +174,29 @@ async def test_change_classifier_requires_enabled_refinement_engine() -> None:
             raw_user_request="Add exports for reporting",
             app_id="app_1", user_id="user_1",
         )
+
+
+@pytest.mark.parametrize("intent", [None, "theme_color_patch", "visual_redesign", "new_logo"])
+def test_classifier_branding_intent_round_trips_through_persisted_contract(intent) -> None:
+    from mozaiksai.core.artifacts.models import ChangeIntentDoc
+
+    result = ChangeClassifierResult(
+        change_class="design", branding_intent=intent, rationale="Requested brand change.",
+        confidence=0.9, signals=[],
+    )
+    assert ChangeClassifierResult.model_validate_json(result.model_dump_json()).branding_intent == intent
+    document = ChangeIntentDoc.model_validate(result.model_dump())
+    assert ChangeIntentDoc.model_validate_json(document.model_dump_json()).branding_intent == intent
+
+
+def test_branding_intent_omission_and_unknown_values_have_explicit_contracts() -> None:
+    from pydantic import ValidationError
+
+    from mozaiksai.core.artifacts.models import ChangeIntentDoc
+
+    payload = {"change_class": "patch", "rationale": "Fix typo.", "confidence": 1.0, "signals": []}
+    assert ChangeClassifierResult.model_validate(payload).branding_intent is None
+    assert ChangeIntentDoc.model_validate(payload).branding_intent is None
+    for model in (ChangeClassifierResult, ChangeIntentDoc):
+        with pytest.raises(ValidationError, match="branding_intent"):
+            model.model_validate({**payload, "branding_intent": "ThemeCapture"})

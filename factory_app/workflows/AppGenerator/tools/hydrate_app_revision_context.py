@@ -21,6 +21,7 @@ from mozaiksai.core.artifacts.models import (
     BuildRecordValidationStatus,
 )
 from mozaiksai.core.artifacts.store import get_artifact_store
+from mozaiksai.core.runtime.app.theme_contract import APP_THEME_PATH
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     extract_deleted_file_paths_from_payload,
@@ -253,6 +254,13 @@ async def hydrate_app_revision_context(context_variables: Any = None) -> dict[st
     else:
         files = await read_bound_revision_files(context_variables)
         artifact_id = revision_source_artifact_id(context_variables)
+    if context_variables.get("artifact_kind") == "app_bundle" and context_variables.get("workflow_sequence") not in {
+        "theme_revision", "theme_patch",
+    }:
+        saved_theme = json.loads(files[APP_THEME_PATH]) if APP_THEME_PATH in files else None
+        if saved_theme is not None and not isinstance(saved_theme, dict):
+            raise ValueError("revision_baseline_theme_invalid")
+        _set(context_variables, "captured_theme_config", saved_theme)
     current = detach(context_variables.get("generated_files")) or {}
     if not isinstance(current, dict):
         raise ValueError("revision_baseline_generated_files_invalid")
