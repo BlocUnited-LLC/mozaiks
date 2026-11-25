@@ -104,6 +104,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Apps that select the notifications pack can send email through any SMTP
+  service. Self-hosted operators and managed hosts set the same `SMTP_*` names,
+  which the generated env examples and deployment manifest now list. The pack's
+  unfinished push adapter is removed, so apps with this pack pass acceptance; the
+  pack does not deliver push or SMS.
 - A workflow can use `reply_tool` to send a verified receipt or calculation
   directly into chat. The reply stays in the conversation history, accepts
   follow-up questions, and requires no model call to present the result.

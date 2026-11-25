@@ -1064,39 +1064,46 @@ For that reason, a reusable builder pack should be designed in this order:
 
 ## Notifications email delivery
 
-The notifications pack's `services/adapters/notifications/email.py` implements
-the existing `send_email(to, subject, body, template_id, template_data)` interface
-using SMTP. Pass a rendered subject and body; provider-hosted template arguments
-are rejected. The adapter returns `True` only after SMTP acceptance, which does
-not prove delivery to an external inbox.
+The notifications pack delivers email. Its adapter,
+`services/adapters/notifications/email.py`, exposes
+`send_email(to, subject, body)` and speaks SMTP, so the mail service is a
+deployment choice rather than generated code:
 
-Configure the host environment; never put credential values in generated files:
+| Where the app runs | Who supplies the SMTP settings |
+| --- | --- |
+| Self-hosted | The operator, from any SMTP service or their own server |
+| Managed hosting | The host, which injects the same names at deployment |
+
+The app never names a provider or branches on who hosts it. Moving between the
+two changes configuration only.
 
 | Name | Meaning |
 | --- | --- |
-| `SMTP_HOST` | Required SMTP server hostname or address |
-| `SMTP_FROM` | Required sender mailbox |
+| `SMTP_HOST` | SMTP server hostname or address; required to send |
+| `SMTP_FROM` | Sender mailbox, with or without a display name; required to send |
 | `SMTP_SECURITY` | `starttls` (default), `ssl`, or `none` |
-| `SMTP_PORT` | Defaults to 587 for STARTTLS or 465 for SSL |
-| `SMTP_USER`, `SMTP_PASSWORD` | Optional paired authentication handles |
+| `SMTP_PORT` | Defaults to 587, or 465 for `ssl` |
+| `SMTP_USER`, `SMTP_PASSWORD` | Optional pair for servers that authenticate |
 
-`none` permits only a credential-free loopback test sink. Remote connections
-require certificate-verified TLS; failure never falls back to plaintext. The
-operation has a 15-second socket timeout and runs outside the async event loop.
+The pack declares these names in `pack.deployment_env`, so generated env examples
+and the deployment manifest list them. They are optional because an app runs
+without email; sending before configuration raises an error that names what is
+missing. `SMTP_PASSWORD` resolves through the app secret contract: a direct
+environment value first, then a vault entry the app declares. Never put
+credential values in generated files.
 
-The app module owns the triggering domain event, recipient identity, ownership
-and opt-in check. Resolve those from app-owned records before calling the
-adapter; an event's supplied address or opt-in flag is not approval. The SMTP
-adapter does not access app persistence, grant permissions, or store delivery
-records. Canonical handler reactions receive a minimal reaction context, so an
-app must establish its scoped record access explicitly; this pack does not yet
-wire its preference persistence into event delivery.
+`none` permits only a credential-free loopback test server. Other connections
+require certificate-verified TLS and never fall back to plaintext. `True` means
+the SMTP server accepted the message, not that it reached an inbox.
 
-The SMTP tests deliver to a real local sink and exercise the canonical event
-router with explicit in-memory fixture policy. They do not prove external
-inbox delivery or production preference persistence. Push remains an unfinished
-provider integration and still fails placeholder validation. Selecting the
-whole notifications pack is therefore not evidence that every channel works.
+The reacting app module owns the triggering domain event, recipient identity,
+ownership and opt-in check. Resolve those from app-owned records before calling
+the adapter; an address or opt-in flag carried by an event is not approval. The
+[module reaction rules](../modules-systems/module-system.md) describe the scoped
+persistence a handler reaction receives. The pack ships no reaction of its own.
+
+The pack has no push or SMS delivery. Its preference fields for those channels
+only store a user's choice.
 
 ## Cross References
 

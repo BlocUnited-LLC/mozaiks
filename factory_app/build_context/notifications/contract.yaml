@@ -1,32 +1,26 @@
 contract_id: notifications
 contract_type: build_pack_instructions
 
-# The notifications operator_pack is for EXTERNAL notification delivery
-# (email, push, SMS) beyond the runtime in-app notification record.
+# The notifications operator_pack is for EXTERNAL email delivery beyond the
+# runtime in-app notification record. It has no push or SMS delivery.
 #
 # The runtime already provides in-app notification storage and websocket
 # delivery — modules declare these in contracts/notifications.yaml on the
 # event-producing module. Select this pack only when the app must deliver
-# domain-event alerts through a provider-backed external channel.
+# domain-event alerts by email.
 #
-# Templates own preference storage. The email adapter uses configured SMTP.
-# Push remains a provider integration
-# requirement; its unfinished template must not be presented as verified delivery.
+# Templates own preference storage and the email adapter. Any SMTP service works:
+# deployment configuration selects it, so self-hosted and managed hosting run the
+# same generated code. Stored push and SMS choices are preferences only.
 
 selection_rules:
   - id: select_for_external_delivery
     when:
       intent_any:
         - email notifications
-        - push notifications
-        - sms notifications
         - email alerts
         - email delivery
         - transactional email
-        - push alerts
-        - mobile push
-        - text message alerts
-        - external notification delivery
     action: select_pack
   - id: confirm_for_generic_notifications
     when:
@@ -101,18 +95,12 @@ required_outputs:
   - path: services/adapters/notifications/email.py
     owner: templates
     notes: >
-      SMTP email adapter with send_email(to, subject, body, template_id, template_data).
-      Pass rendered subject/body; provider-hosted template arguments are rejected.
-      Configure SMTP_HOST, SMTP_FROM, optional SMTP_PORT and SMTP_SECURITY
-      (starttls by default, ssl, or none for a credential-free loopback sink).
-      SMTP_USER and SMTP_PASSWORD must be configured together when authentication
-      is required. True means SMTP acceptance, not confirmed inbox delivery.
-
-  - path: services/adapters/notifications/push.py
-    owner: templates
-    notes: >
-      Provider-neutral push adapter stub. Declares send_push(token, title, body, data).
-      Operators fill in their chosen push provider (Firebase FCM, APNs, OneSignal).
+      SMTP email adapter with send_email(to, subject, body). Pass a rendered
+      subject and body. Configure SMTP_HOST, SMTP_FROM, optional SMTP_PORT and
+      SMTP_SECURITY (starttls by default, ssl, or none for a credential-free
+      loopback sink). SMTP_USER and SMTP_PASSWORD are configured together when the
+      server authenticates; SMTP_PASSWORD resolves through the app secret contract.
+      True means SMTP acceptance, not confirmed inbox delivery.
 
   - path: data/migrations/001_notification_preferences_collection.json
     owner: templates
@@ -134,7 +122,7 @@ forbidden_outputs:
   - path_prefix: services/email/
     reason: Email mechanics belong in services/adapters/notifications/email.py.
   - path_prefix: services/push/
-    reason: Push mechanics belong in services/adapters/notifications/push.py.
+    reason: This pack has no push provider, and an unfinished adapter fails acceptance.
 
 runtime_boundaries:
   - id: external_delivery_only
@@ -167,9 +155,9 @@ runtime_boundaries:
   - id: no_credentials_in_adapters
     rule: >
       Generated adapters must not include provider API keys, secrets,
-      or credential values. SMTP credentials use SMTP_USER and SMTP_PASSWORD;
-      push provider credentials remain deployment-owned environment handles.
-      env.example must list required credential names.
+      or credential values. SMTP_PASSWORD resolves through the app secret contract.
+      The pack's deployment_env lists every SMTP_* name, so generated env examples
+      and the deployment manifest name what a host must supply.
 
   - id: reactions_not_service_calls
     rule: >
@@ -180,10 +168,10 @@ runtime_boundaries:
 
   - id: provider_neutral_interface
     rule: >
-      Adapter methods (send_email, send_push) must accept only provider-neutral
-      arguments (to, subject, body, data). Provider SDK details are encapsulated
-      in the adapter. Generated service code depends only on the adapter interface,
-      not on a specific SDK.
+      send_email accepts only provider-neutral arguments (to, subject, body).
+      The app never names a mail provider or branches on who hosts it; SMTP_*
+      configuration alone selects the server. Generated service code depends only
+      on the adapter interface, not on a specific SDK.
 
 facades: []
 
@@ -191,15 +179,15 @@ cross_pack_integrations:
   - pack_id: messaging
     description: >
       When the messaging pack is selected alongside notifications, message_sent
-      events may trigger email or push delivery for offline participants.
+      events may trigger email delivery for offline participants.
       The messaging module's contracts/notifications.yaml covers in-app delivery;
       the notification_settings reactions.yaml covers external delivery for
       the same events.
   - pack_id: social
     description: >
       Friend request accepted, post liked, and comment received events may trigger
-      push notifications. Social pack reactions are the source; notification_settings
-      reactions route to the external adapter.
+      email. Social pack reactions are the source; notification_settings reactions
+      route to the email adapter.
   - pack_id: commerce
     description: >
       Order placed, shipped, and delivered events are common transactional email

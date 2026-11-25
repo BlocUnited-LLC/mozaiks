@@ -113,13 +113,7 @@ NOT_MATERIALIZABLE_ALONE = {
 # A pack listed here fails before it can run, for a reason that needs an owner's
 # decision rather than a pack fix: (the failure's own message text, why). The proof
 # must fail with exactly that message, and fails once it passes, so the entry is removed.
-BLOCKED_PACKS: dict[str, tuple[str, str]] = {
-    "notifications": ("contains placeholder/not-implemented marker 'NotImplementedError'", (
-        "The push adapter still raises NotImplementedError "
-        "(test_email_implements_smtp_while_push_remains_an_explicit_provider_gap), and the acceptance gate's "
-        "PLACEHOLDER_IMPLEMENTATION check fails every bundle that contains that marker."
-    )),
-}
+BLOCKED_PACKS: dict[str, tuple[str, str]] = {}
 
 _SUPPORT_CROSS_MODULE_EMIT = (
     "create_support_request creates its thread and first message by calling the messages "
