@@ -377,7 +377,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
     # ==================================================================================
     
     async def submit_user_input(
-        self, input_request_id: str, user_input: str, *, chat_id: str | None = None,
+        self, input_request_id: str, user_input: str, *, chat_id: str | None = None, acknowledge_request: bool = True,
     ) -> bool:
         """
         Submit user input response for a pending input request.
@@ -442,7 +442,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 except Exception as e:
                     logger.debug("Failed to clear pending input request: %s", e)
             # Emit chat.input_ack for B9/B10 protocol compliance
-            if ack_chat_id:
+            if ack_chat_id and acknowledge_request:
                 try:
                     await self.send_event_to_ui({
                         'kind': 'input_ack',

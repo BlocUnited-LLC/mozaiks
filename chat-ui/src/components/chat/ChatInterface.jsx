@@ -399,8 +399,8 @@ const ModernChatInterface = ({
 
     const newMessage = { "sender": "user", "content": message, "artifactContext": artifactContext || null };
     followingRef.current = true;
-    onSendMessage(newMessage);
     setMessage('');
+    onSendMessage(newMessage);
     setTimeout(focusComposer, 60);
   };
 

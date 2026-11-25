@@ -114,6 +114,20 @@ async def handle_user_input_submit(
         client_message_id = ui_context_payload.get("client_message_id") if has_workflow_context else None
         if not isinstance(client_message_id, str) or len(client_message_id) > 128 or not client_message_id.strip():
             client_message_id = None
+
+        async def acknowledge_input() -> None:
+            try:
+                await send_event_envelope(websocket, {
+                    "schema_version": "mozaiks.ui.event.v1",
+                    "type": "chat.input_ack",
+                    "data": {"chat_id": target_chat_id, "status": "accepted",
+                             **({"client_message_id": client_message_id} if client_message_id else {})},
+                    "timestamp": utc_timestamp(),
+                })
+            except Exception:
+                # An already admitted turn continues even if its sender disconnects.
+                logger.debug("Input acknowledgement undelivered for %s", target_chat_id, exc_info=True)
+
         if has_workflow_context:
             if not target_app_id or not target_workflow_name:
                 await transport._send_ws_error(
@@ -130,13 +144,21 @@ async def handle_user_input_submit(
 
             async def continue_workflow() -> None:
                 try:
-                    await transport.handle_user_input_from_api(
+                    result = await transport.handle_user_input_from_api(
                         chat_id=target_chat_id,
                         user_id=str(target_user_id or conn.get("user_id") or ""),
                         workflow_name=str(target_workflow_name),
                         message=text,
                         app_id=str(target_app_id),
+                        on_input_admitted=acknowledge_input,
                     )
+                    if result and result.get("input_accepted") is False and result.get("error_code") in {
+                        "CHAT_LOCK_BUSY", "CHAT_LOCK_UNAVAILABLE", "WORKFLOW_MODEL_UNAVAILABLE",
+                    }:
+                        await transport._send_ws_error(
+                            websocket, result["message"], result["error_code"],
+                            chat_id=target_chat_id, client_message_id=client_message_id,
+                        )
                 except Exception:
                     logger.exception("Workflow input failed for %s", target_chat_id)
                     await transport._send_ws_error(websocket, "User message failed", "USER_MESSAGE_FAILED")
@@ -149,21 +171,12 @@ async def handle_user_input_submit(
             task = asyncio.create_task(continue_workflow(), name=f"workflow-input:{target_chat_id}")
             transport._background_tasks[target_chat_id] = task
             task.add_done_callback(_background_task_failure_callback(str(target_workflow_name), target_chat_id))
-        else:
-            await transport.process_incoming_user_message(
-                chat_id=target_chat_id,
-                user_id=target_user_id or conn.get('user_id'),
-                content=text,
-                source='ws'
-            )
+            return
 
-        await send_event_envelope(websocket, {
-            "schema_version": "mozaiks.ui.event.v1",
-            "type": "chat.input_ack",
-            "data": {"chat_id": target_chat_id, "status": "accepted",
-                     **({"client_message_id": client_message_id} if client_message_id else {})},
-            "timestamp": utc_timestamp()
-        })
+        await transport.process_incoming_user_message(
+            chat_id=target_chat_id, user_id=target_user_id or conn.get("user_id"), content=text, source="ws",
+        )
+        await acknowledge_input()
     except Exception as e:
         logger.error("Failed to process free-form user message for %s: %s", chat_id, e, exc_info=True)
         await transport._send_ws_error(websocket, "User message failed", "USER_MESSAGE_FAILED")

@@ -136,9 +136,14 @@ For a native AG2 workflow, the transport publishes the free-form pause after
 the current run slice releases its admission lease. A client can reply as soon
 as it sees the pause. A workflow `user.input.submit` may include a
 `context.client_message_id`. The runtime echoes this identifier and the
-authenticated chat ID in `chat.input_ack` or a `CHAT_BUSY` error. ChatUI uses
-the matching refusal to return the message to its original composer. The user
-can edit and send it when the workflow is ready.
+authenticated chat ID in `chat.input_ack` after admission. If the local task
+or a different worker holds the chat, the submitting socket receives a
+matching `CHAT_BUSY` or `CHAT_LOCK_BUSY` refusal. If the runtime cannot
+acquire the lease before starting, it returns `CHAT_LOCK_UNAVAILABLE`. When a selected model
+rejects that submission before execution, its `WORKFLOW_MODEL_UNAVAILABLE`
+error identifies the same turn. ChatUI returns the refused text to the
+original composer for the user to edit and send. An unconfirmed socket or HTTP
+outcome requires checking the conversation before trying again.
 
 ## The key difference from AG-UI and CopilotKit
 

@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+export function withoutWorkflowSubmission(messages, id) {
+  return messages.filter(row => row.id !== id && row.id !== `thinking-${id}`);
+}
+
 // Admission is asynchronous. A socket write alone cannot establish that AG2
 // received a turn; use the server receipt to identify the optimistic message.
 export default function useWorkflowSubmission(scope, removeRefusedMessage) {
@@ -8,6 +12,7 @@ export default function useWorkflowSubmission(scope, removeRefusedMessage) {
   const submitted = useRef(null);
   const [draft, setDraft] = useState(null);
   const [refused, setRefused] = useState(null);
+  const [sending, setSending] = useState(null);
 
   useEffect(() => {
     setDraft(previous => previous?.scope === scope ? previous : null);
@@ -19,17 +24,21 @@ export default function useWorkflowSubmission(scope, removeRefusedMessage) {
     setDraft({ scope, text });
   }, [scope]);
 
-  const isActiveScope = useCallback(expectedScope => activeScope.current === expectedScope, []);
   const isCurrent = useCallback(entry => Boolean(entry && entry === submitted.current &&
-    (isActiveScope(entry.scope) || isActiveScope(entry.originScope))), [isActiveScope]);
+    (activeScope.current === entry.scope || activeScope.current === entry.originScope)), []);
 
   const remember = useCallback((targetScope, chatId, message) => {
     // A deferred chat can refuse its first send before its new route renders.
     const entry = { scope: targetScope, originScope: scope, chatId, message, accepted: false, rejected: false };
     submitted.current = entry;
+    setSending(entry);
     setRefused(null);
     return entry;
   }, [scope]);
+
+  const finish = useCallback(entry => {
+    setSending(previous => previous === entry ? null : previous);
+  }, []);
 
   const restore = useCallback(entry => {
     if (!isCurrent(entry) || entry.rejected) return false;
@@ -37,7 +46,7 @@ export default function useWorkflowSubmission(scope, removeRefusedMessage) {
     const unsent = { scope: entry.scope, text: entry.message.content };
     setRefused(unsent);
     setDraft(previous => previous?.scope === entry.scope && previous.text ? previous : unsent);
-    removeRefusedMessage(entry.message.id);
+    removeRefusedMessage(entry.message.id, entry.chatId);
     return true;
   }, [isCurrent, removeRefusedMessage]);
 
@@ -55,6 +64,7 @@ export default function useWorkflowSubmission(scope, removeRefusedMessage) {
   return {
     text: draft?.scope === scope ? draft.text : '',
     refused: refused?.scope === scope ? refused : null,
-    changeDraft, submitted, remember, restore, handleAdmission, isActiveScope, isCurrent,
+    sending: isCurrent(sending) && !sending.rejected,
+    changeDraft, remember, finish, restore, handleAdmission, isCurrent,
   };
 }
