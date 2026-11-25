@@ -123,7 +123,7 @@ async def test_result_is_record_bound_and_atomic_across_concurrent_retry_and_los
 
     source = storage(_OWNER)
     rows = source.collection("tasks", "Task")
-    document = {"task_id": "task-1", "body": "keep"}
+    document = {"task_id": "task-1", "body": "keep", "tags": ["first", "second"]}
     if supplied_id:
         document["_id"] = supplied_id
     try:
@@ -166,6 +166,14 @@ async def test_result_is_record_bound_and_atomic_across_concurrent_retry_and_los
         assert "alias" not in found and "_mz_workflow_result" not in found["copy"] and found["text"] == "review"
         assert await rows.find_many({"_id": inserted.inserted_id}, projection=projection) == [found]
         assert await rows.aggregate([{"$match": {"_id": inserted.inserted_id}}, {"$project": projection}]) == [found]
+        for selector, expected in (({"$slice": 1}, ["first"]), ({"$elemMatch": {"$eq": "second"}}, ["second"])):
+            mixed = {"_id": 0, "tags": selector, "name": "$summary", "copy": "$$ROOT",
+                     "internal": {"$getField": "_mz_workflow_result"}, "explicit": "$$ROOT._mz_workflow_result",
+                     "literal": {"$literal": "$$ROOT"}}
+            found = await rows.find_one({"_id": inserted.inserted_id}, mixed)
+            assert found["tags"] == expected and found["name"] == "review" and found["literal"] == "$$ROOT"
+            assert "internal" not in found and "explicit" not in found and "_mz_workflow_result" not in found["copy"]
+            assert await rows.find_many({"_id": inserted.inserted_id}, projection=mixed) == [found]
         # $slice can evaluate an expression as well as select a field's elements.
         keys = {"$map": {"input": {"$objectToArray": "$$ROOT"}, "in": "$$this.k"}}
         found = await rows.find_one({"_id": inserted.inserted_id}, {"_id": 0, "keys": {"$slice": [keys, 50]}})

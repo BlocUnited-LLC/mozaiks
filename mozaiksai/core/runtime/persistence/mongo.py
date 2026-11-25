@@ -108,10 +108,7 @@ class MongoPersistenceCollection:
     ) -> Mapping[str, Any] | None:
         query = self._scoped_query(query)
         if self._result_metadata_private and projection is not None:
-            projection = _plain_copy(projection)
-        if self._result_metadata_private and _computed_projection(projection):
-            rows = await self._project_private_rows(query, projection, limit=1)
-            return rows[0] if rows else None
+            projection = _private_find_projection(_plain_copy(projection))
         row = await self._collection.find_one(query, projection, **self._options)
         return self._public_document(row) if row is not None else None
 
@@ -126,9 +123,7 @@ class MongoPersistenceCollection:
         safe_limit = max(1, min(int(limit), MAX_FIND_MANY_LIMIT))
         query = self._scoped_query(query)
         if self._result_metadata_private and projection is not None:
-            projection = _plain_copy(projection)
-        if self._result_metadata_private and _computed_projection(projection):
-            return await self._project_private_rows(query, projection, limit=safe_limit, sort=sort)
+            projection = _private_find_projection(_plain_copy(projection))
         cursor = self._collection.find(query, projection, **self._options)
         if sort:
             cursor = cursor.sort(list(sort))
@@ -143,17 +138,6 @@ class MongoPersistenceCollection:
         if self._result_metadata_private and _MARKER in row:
             return {key: value for key, value in row.items() if key != _MARKER}
         return row
-
-    async def _project_private_rows(
-        self, query: Query, projection: Projection | None, *, limit: int, sort: SortSpec | None = None,
-    ) -> list[Mapping[str, Any]]:
-        # A computed Mongo projection can alias any field, including the entire
-        # document. Remove the server marker before evaluating that expression.
-        pipeline: list[dict[str, Any]] = [{"$match": query}, {"$unset": _MARKER}]
-        if sort:
-            pipeline.append({"$sort": dict(sort)})
-        pipeline.extend([{"$limit": limit}, {"$project": dict(projection or {})}])
-        return await self._collection.aggregate(pipeline, **self._options).to_list(length=limit)  # type: ignore[no-any-return]
 
     async def insert_one(self, document: Mapping[str, Any]) -> Any:
         owner_scope = self._owner_scope
@@ -383,11 +367,30 @@ class MongoPersistenceContext:
         return None
 
 
-def _computed_projection(projection: Projection | None) -> bool:
-    for value in (projection or {}).values():
+def _public_root_expression(value: Any) -> Any:
+    # ROOT always denotes the physical row, even inside a $let that rebinds CURRENT.
+    if isinstance(value, str):
+        if value == "$$ROOT":
+            return {"$unsetField": {"field": _MARKER, "input": "$$ROOT"}}
+        if value == f"$$ROOT.{_MARKER}" or value.startswith(f"$$ROOT.{_MARKER}."):
+            return "$$REMOVE"
+    if isinstance(value, dict):
+        return {key: item if key in {"$literal", "$const"} else _public_root_expression(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_public_root_expression(item) for item in value]
+    return value
+
+
+def _private_find_projection(projection: dict[str, Any]) -> dict[str, Any]:
+    # Keep native find selectors (including positional, slice and elemMatch).
+    # Computations see only public fields, including operators with an implicit CURRENT input.
+    for key, value in projection.items():
         if isinstance(value, (int, bool, float)):
             continue
         if isinstance(value, Mapping):
+            if all(not field.startswith("$") for field in value):
+                projection[key] = _private_find_projection(dict(value))
+                continue
             if set(value) in ({"$elemMatch"}, {"$meta"}):
                 continue
             if set(value) == {"$slice"}:
@@ -396,8 +399,8 @@ def _computed_projection(projection: Projection | None) -> bool:
                 args = value["$slice"]
                 if type(args) is int or (isinstance(args, list) and len(args) == 2 and all(type(n) is int for n in args)):
                     continue
-        return True
-    return False
+        projection[key] = {"$let": {"vars": {"CURRENT": _public_root_expression("$$ROOT")}, "in": _public_root_expression(value)}}
+    return projection
 
 
 __all__ = [
