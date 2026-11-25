@@ -29,6 +29,7 @@ class WorkflowResultGrant(BaseModel):
     workflow: str = Field(min_length=1)
     chat_id: str = Field(min_length=1)
     capability_id: str = Field(min_length=1)
+    result_agent: str = Field(min_length=1)
     event_type: str = Field(min_length=1)
     event_id: str = Field(min_length=1)
     invocation_id: str = Field(min_length=1)
@@ -79,8 +80,15 @@ def issue_workflow_result_grant(
     if (subject.user_id != user_id or subject.tenant_id != tenant.get("tenant_id")
             or subject.workspace_id != tenant.get("workspace_id")):
         raise PermissionError("Workflow result event ownership does not match the stored record")
+    from mozaiksai.core.workflow.declarative.contracts import workflow_result_binding
+    from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+    binding = workflow_result_binding(workflow_manager.get_config(workflow).get("tools", []))
+    if binding is None:
+        raise PermissionError("Workflow requires exactly one registered automatic result producer")
     return WorkflowResultGrant(
         module_id=module_id, reaction_id=subscription["id"], workflow=workflow, chat_id=chat_id, capability_id=capability_id,
+        result_agent=binding["agent"],
         event_type=event_type, event_id=event_id, invocation_id=invocation_id, declaration=declaration, subject=subject,
     )
 

@@ -39,20 +39,23 @@ async def commit_workflow_result(result: dict[str, Any]) -> dict[str, str]:
     from mozaiksai.core.workflow.agents.factory import active_workflow_result_input
 
     identity = active_workflow_tool_run()
-    validated = active_workflow_result_input()
+    producer, validated = active_workflow_result_input()
     encoded = json.dumps(validated, sort_keys=True, allow_nan=False)
     if json.dumps(result, sort_keys=True, allow_nan=False) != encoded:
         raise PermissionError("Workflow result must match this tool's validated structured output")
 
     def verify_invocation() -> None:
-        if (active_workflow_tool_run() != identity
-                or json.dumps(active_workflow_result_input(), sort_keys=True, allow_nan=False) != encoded):
+        current_producer, current_value = active_workflow_result_input()
+        if (active_workflow_tool_run() != identity or current_producer != grant.result_agent
+                or json.dumps(current_value, sort_keys=True, allow_nan=False) != encoded):
             raise PermissionError("Workflow result invocation expired")
 
     workflow, app_id, chat_id, user_id = identity
     grant = await AG2PersistenceManager().read_workflow_result_grant(
         workflow=workflow, app_id=app_id, chat_id=chat_id, user_id=user_id,
     )
+    if producer != grant.result_agent:
+        raise PermissionError("Workflow result requires the registered producer for this run")
     verify_invocation()
     return await _resolve_module_executor(None).apply_workflow_result(
         grant=grant, run_identity=identity, values=validated, verify_invocation=verify_invocation,

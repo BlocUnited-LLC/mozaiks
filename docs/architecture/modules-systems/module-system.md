@@ -567,6 +567,7 @@ policy. Keep those in modules or the hosted product that owns them.
 
 A module can authorize a workflow capability to fill specific fields on the private
 record created by its source action. Declare the binding on that action's event reaction.
+The runtime ownership and retry rules are recorded in [ADR 0028](../../adr/0028-workflow-results-on-private-records.md).
 
 ```yaml
 schema_version: mozaiks.reactions.v1

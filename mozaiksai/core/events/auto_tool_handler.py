@@ -14,6 +14,7 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
@@ -32,6 +33,7 @@ from mozaiksai.core.workflow.context.structured_output_overlay import (
     StructuredOutputOverlay,
 )
 from mozaiksai.core.workflow.declarative import parse_tools_config
+from mozaiksai.core.workflow.declarative.contracts import RESULT_TOOL_FILE, workflow_result_binding
 from mozaiksai.core.workflow.outputs.structured import get_structured_outputs_for_workflow
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
@@ -66,6 +68,7 @@ class AutoToolBinding:
     ui_config: dict[str, Any]
     model_cls: Any
     self_emits_ui: bool = False
+    is_result_writer: bool = False
 
 
 @dataclass(frozen=True)
@@ -85,6 +88,7 @@ class AutoToolBindingDescriptor:
     ui_config: dict[str, Any]
     model_cls: Any
     self_emits_ui: bool = False
+    is_result_writer: bool = False
 
 
 #: Per-binding execution checkpoint states. "PENDING" is the absence of a
@@ -414,6 +418,11 @@ class AutoToolEventHandler:
                     descriptor.agent_name,
                 )
                 continue
+            if descriptor.is_result_writer:
+                workflow_path = workflow_manager.resolve_workflow_path(workflow_name)
+                code = getattr(inspect.unwrap(func), "__code__", None)
+                if workflow_path is None or code is None or Path(code.co_filename).resolve() != (workflow_path / RESULT_TOOL_FILE).resolve():
+                    raise PermissionError("Registered result operation resolved to a different implementation")
             sig = inspect.signature(func)
             param_names = tuple(
                 name
@@ -435,6 +444,7 @@ class AutoToolEventHandler:
                     ui_config=descriptor.ui_config,
                     model_cls=descriptor.model_cls,
                     self_emits_ui=descriptor.self_emits_ui,
+                    is_result_writer=descriptor.is_result_writer,
                 )
             )
         return bindings
@@ -552,6 +562,7 @@ class AutoToolEventHandler:
         entries = tools_data.get("tools") or []
         if not isinstance(entries, list):
             entries = []
+        result_binding = workflow_result_binding(entries)
         
         logger.debug("[AUTO_TOOL] Processing %d tool entries for workflow=%s", len(entries), workflow_name)
 
@@ -598,6 +609,7 @@ class AutoToolEventHandler:
                     ui_config=ui_cfg,
                     model_cls=model_cls,
                     self_emits_ui=tool_type in {"UI_TOOL", "UI_SURFACE"},
+                    is_result_writer=entry is result_binding,
                 )
                 mapping.setdefault(model_name, []).append(descriptor)
                 logger.debug("AUTO_TOOL_BINDING_CREATED model=%s agent=%s tool=%s", model_name, agent_name, descriptor.tool_name)
@@ -699,7 +711,10 @@ class AutoToolEventHandler:
         context = kwargs.get("context_variables")
         base = context._base if isinstance(context, StructuredOutputOverlay) else context
         scope = (
-            _workflow_tool_invocation(base, validated_output=context if isinstance(context, StructuredOutputOverlay) else None)
+            _workflow_tool_invocation(
+                base, result_agent=binding.agent_name if binding.is_result_writer else None,
+                validated_output=context if binding.is_result_writer and isinstance(context, StructuredOutputOverlay) else None,
+            )
             if isinstance(base, ContextVariablesBridge) else nullcontext()
         )
         try:
