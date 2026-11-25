@@ -237,6 +237,10 @@ def test_functional_bundle_acceptance_checks_optional_journey_route():
         ),
     }
     assert not scan_functional_generated_app(files)
+    oversized = {**files, "config/journeys.json": " " * (4 * 1024 * 1024) + json.dumps(doc)}
+    assert [issue.code for issue in scan_functional_generated_app(oversized)] == [
+        "INVALID_JOURNEY_CATALOG"
+    ]
     files["ui/route_manifest.json"] = '{"pages": []}'
     assert [issue.code for issue in scan_functional_generated_app(files)] == [
         "MISSING_JOURNEY_ROUTE"
