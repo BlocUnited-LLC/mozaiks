@@ -261,7 +261,7 @@ During bundle assembly, `generate_and_download` derives
 `orchestrator.yaml`:
 
 - `workflow_name`
-- stable `capability_id` shared by the workflow's event triggers, defaulting to its kebab-case workflow name when none is declared
+- stable `capability_id` declared on every named event trigger of a generated workflow. Workflows without named event triggers use their kebab-case workflow name as their capability ID.
 - `workflow_startup_mode`
 - event triggers from the `triggers[]` block
 

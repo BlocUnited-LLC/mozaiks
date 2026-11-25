@@ -273,6 +273,18 @@ def test_workflow_integration_gate_requires_the_pinned_source_even_with_no_workf
         assert result["failed_tests"][0]["test"] == "workflow_integration_source"
 
 
+@pytest.mark.parametrize("external", ["platform.identity.signed_in", "hosted.billing.activated"])
+def test_generated_module_emit_cannot_verify_an_external_workflow_event(external):
+    workflow = default_workflow_integration()
+    workflow["trigger_events"][0]["event_type"] = external
+    files = build_appgenerator_acceptance_files(workflow)
+    result = app_validation.validate_workflow_integration_contract(
+        files, {"workflow_integration_metadata": {"workflows": [workflow]}},
+    )
+    assert result["passed"] is False
+    assert [item["test"] for item in result["failed_tests"]] == ["workflow_trigger_external_producer_unverified"]
+
+
 def test_generated_workflows_cannot_share_the_same_event_and_capability_pair():
     workflow = default_workflow_integration()
     files = build_appgenerator_acceptance_files(workflow)

@@ -263,7 +263,12 @@ def extract_workflow_integration_metadata_from_bundle_entries(
             if isinstance(trigger, Mapping) and trigger.get("type") in (None, "event")
             if (event := _normalize_trigger_event(trigger)) is not None
         ]
-        capability_ids = {event["capability_id"] for event in trigger_events if event["capability_id"]}
+        for event in trigger_events:
+            if not event["capability_id"]:
+                raise WorkflowEventBindingError(
+                    workflow_name, f"Event {event['event_type']!r} in {workflow_name!r} requires its own capability_id."
+                )
+        capability_ids = {event["capability_id"] for event in trigger_events}
         if len(capability_ids) > 1:
             raise WorkflowEventBindingError(
                 workflow_name,

@@ -1610,7 +1610,21 @@ def validate_workflow_integration_contract(
                         ),
                     }
                 )
-            if event_type not in declared_events:
+            app_domain_event = event_type.startswith("domain.")
+            if not app_domain_event:
+                failed_tests.append({
+                    "test": "workflow_trigger_external_producer_unverified",
+                    "path": "workflow_integration_metadata",
+                    "error": (
+                        f"Workflow {workflow_name!r} subscribes to {event_type!r}, but the "
+                        "generated app contract cannot verify its external publisher."
+                    ),
+                    "fix_suggestion": (
+                        "Verify delivery through the owning host integration. A local module "
+                        "declaration or emit cannot establish external event delivery."
+                    ),
+                })
+            if app_domain_event and event_type not in declared_events:
                 failed_tests.append(
                     {
                         "test": "workflow_trigger_event_declared",
@@ -1619,12 +1633,12 @@ def validate_workflow_integration_contract(
                             f"Workflow trigger event {event_type!r} is not declared in contracts/events.yaml."
                         ),
                         "fix_suggestion": (
-                            "Declare the domain/platform/hosted event in the owning module's "
+                            "Declare the domain event in the publishing module's "
                             "contracts/events.yaml."
                         ),
                     }
                 )
-            if event_type not in action_emits:
+            if app_domain_event and event_type not in action_emits:
                 failed_tests.append(
                     {
                         "test": "workflow_trigger_event_emitted",

@@ -783,6 +783,38 @@ def test_generate_and_download_blocks_event_trigger_semantic_drift_before_ui(
     ui_mock.assert_not_awaited()
 
 
+def test_expected_event_does_not_hide_a_sibling_without_a_capability_id(monkeypatch, tmp_path: Path) -> None:
+    named = "domain.orders.submitted"
+    sibling = "domain.orders.escalated"
+    review = "OrderReview"
+    valid = {"type": "event", "event": named, "capability_id": "review-order",
+             "description": "Review submitted orders for fulfillment."}
+    unbound = {"type": "event", "event": sibling, "description": "Review escalated orders for fulfillment."}
+    context = _Context({
+        "chat_id": "orders-repair", "app_id": "orders", "pack_name": "Orders",
+        "workflows_spec": [
+            {"name": review, "context_variables": {"expected_event_trigger": named, "expected_workflow_capability_id": "review-order"}},
+            {"name": "OrderSearch"},
+        ],
+        "workflow_bundle_results": _make_bundle_results([
+            {"workflow_name": review, "files": _minimal_workflow_files(review, startup_mode="BackendOnly", triggers=[valid, unbound])},
+            {"workflow_name": "OrderSearch", "files": _minimal_workflow_files("OrderSearch")},
+        ]),
+    })
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
+    ui, register = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(generate_and_download_module, "use_ui_tool", ui)
+    monkeypatch.setattr(generate_and_download_module, "_register_workflow_bundle_artifact_version", register)
+    result = asyncio.run(generate_and_download_module.generate_and_download(
+        DownloadRequest={"confirmation_only": False, "storage_backend": "none"}, agent_message="Ready.", context_variables=context,
+    ))
+    assert (result["status"], result["outcome"]) == ("blocked", "needs_revision")
+    assert result["workflow_bundle_repair"]["failed_workflows"] == [review]
+    assert any("event_trigger_capability_id_semantic_drift" in issue and sibling in issue for issue in result["validation_errors"])
+    register.assert_not_awaited()
+    ui.assert_not_awaited()
+
+
 def test_generate_and_download_blocks_single_worker_conveyor_before_ui(
     monkeypatch,
     tmp_path: Path,

@@ -82,6 +82,7 @@ workflow_startup_mode: BackendOnly
 triggers:
   - type: event
     event: domain.support_ticket.batch_requested
+    capability_id: ticket-batch-triage-workflow
     description: Requests parallel support-ticket triage.
 """,
                     }
@@ -131,6 +132,23 @@ def test_export_rejects_conflicting_capability_ids_for_one_workflow() -> None:
         extract_workflow_integration_metadata_from_bundle_entries([
             {"workflow_name": "Review", "files": [{"filename": "orchestrator.yaml", "content": yaml.safe_dump(orchestrator)}]}
         ])
+
+
+def test_export_requires_an_explicit_capability_on_each_event_but_reads_older_metadata() -> None:
+    event = "domain.orders.escalated"
+    name = "OrderReview"
+    orchestrator = {"workflow_name": name, "triggers": [
+        {"type": "event", "event": "domain.orders.submitted", "capability_id": "review-order"},
+        {"type": "event", "event": event},
+    ]}
+    with pytest.raises(ValueError, match="domain.orders.escalated.*requires its own capability_id"):
+        extract_workflow_integration_metadata_from_bundle_entries([
+            {"workflow_name": name, "files": [{"filename": "orchestrator.yaml", "content": yaml.safe_dump(orchestrator)}]}
+        ])
+    legacy = normalize_workflow_integration_metadata({
+        "workflow_name": name, "capability_id": "review-order", "trigger_events": [{"event_type": event}],
+    })
+    assert legacy["workflows"][0]["trigger_events"][0]["capability_id"] == "review-order"
 
 
 def test_exported_bindings_use_named_event_triggers_only() -> None:

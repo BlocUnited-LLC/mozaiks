@@ -607,6 +607,7 @@ agents:
         - `event_flows[].producing_action` must name the module action that commits the state before publishing the event.
         - Workflow reactions must reference `workflow_capability_ids`; do not put raw workflow names in event flows or subscriptions.
         - Match event_flows[].event_type to trigger_events[].event_type in workflow_integration_metadata.workflows.
+        - For a platform- or hosted-owned event, preserve the consuming workflow's reaction and identify the required host integration. A generated app module cannot stand in for an external publisher.
         - A workflow with no trigger_events has no event subscription.
         - Workflows may react to domain events and may call module capabilities, but workflows must not directly publish `domain.*` facts.
       12e. **structured contract rule**:

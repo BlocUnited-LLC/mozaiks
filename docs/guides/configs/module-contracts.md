@@ -67,6 +67,12 @@ plan the emitting action and write the module contracts. Two workflows may
 subscribe to the same event through distinct capabilities. AppGenerator's
 acceptance gate checks each generated pair before export.
 
+For a `platform.*` or `hosted.*` event, the external publisher and its
+delivery into this app belong to the host integration. The generic app build
+can check the receiver. Its current contract carries no publisher-delivery
+evidence, so acceptance reports an unverified external producer and blocks
+export even if a generated module lists the event in `emits`.
+
 At runtime the platform resolves the reaction with the event type and capability
 ID. A unique matching declaration can open a workflow session with the source
 event and payload in its declared context. A separate, explicitly unqualified
