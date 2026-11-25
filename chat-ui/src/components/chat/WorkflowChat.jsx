@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { BrowserRouter, useInRouterContext } from 'react-router-dom';
-import { WebSocketApiAdapter } from '../../adapters/api';
+import { authFetch, WebSocketApiAdapter } from '../../adapters/api';
 import { submitToolCallResponse } from '../../adapters/uiToolResponse';
 import platform from '../../platform/index.js';
 import config from '../../config';
@@ -14,7 +14,7 @@ import { applyTheme } from '../../styles/themeProvider';
 import { isArtifactViewDisplay, isCanvasDisplay } from '../../state/uiSurfaceReducer';
 import ArtifactPanel from './ArtifactPanel';
 import ChatInterface from './ChatInterface';
-import { useWorkflowModelPicker } from './WorkflowModelPicker';
+import { ModelSelect, useWorkflowModelPicker } from './WorkflowModelPicker';
 import FluidChatLayout from './FluidChatLayout';
 import {
   buildComposerArtifactContext, buildInlineToolCallMessageFromEvent, buildToolCallMessageFromEvent,
@@ -95,6 +95,7 @@ function WorkflowConversation({
   backgroundImage,
   presentation,
   freshSession = false,
+  chooseRunModel = false,
   getAccessToken,
   onArtifact,
   onReplyActivity,
@@ -103,6 +104,11 @@ function WorkflowConversation({
   transcriptLabel,
 }) {
   const [chatId, setChatId] = useState(null);
+  const [runModels, setRunModels] = useState(null);
+  const [runModel, setRunModel] = useState('');
+  const [runModelError, setRunModelError] = useState('');
+  const [modelLoadAttempt, setModelLoadAttempt] = useState(0);
+  const [requestedRunModel, setRequestedRunModel] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -178,7 +184,45 @@ function WorkflowConversation({
     return submitToolCallResponse(id, response, { baseUrl: workflowApi.getHttpBaseUrl(), token });
   }, [workflowApi]);
 
+  useEffect(() => {
+    if (!chooseRunModel || !resolvedAppId || !workflow || !userId) return undefined;
+    const controller = new AbortController();
+    setRunModels(null);
+    setRunModel('');
+    setRunModelError('');
+    const path = '/api/chats/model-options/' + [resolvedAppId, workflow].map(encodeURIComponent).join('/');
+    authFetch(path, { headers: { 'X-User-ID': userId }, signal: controller.signal }, workflowApi.config)
+      .then(response => {
+        if (!response.ok) throw new Error('Could not load models.');
+        return response.json();
+      })
+      .then(catalog => {
+        if (controller.signal.aborted) return;
+        const models = Array.isArray(catalog?.models) ? catalog.models.filter(model => model?.id && model?.label) : [];
+        const selected = models.some(model => model.id === catalog.default) ? catalog.default : models[0]?.id || '';
+        setRunModels(models);
+        setRunModel(selected);
+        if (!selected) setRunModelError('No models are available.');
+      })
+      .catch(() => { if (!controller.signal.aborted) { setRunModels([]); setRunModelError('Could not load models.'); } });
+    return () => controller.abort();
+  }, [chooseRunModel, resolvedAppId, workflow, userId, workflowApi, modelLoadAttempt]);
+
   const workflowModel = useWorkflowModelPicker({ api: workflowApi, appId: resolvedAppId, userId, chatId, workflow, disabled: ended });
+  const choosingRunModel = chooseRunModel && !chatId;
+  const prestartPicker = runModels?.length ? (
+    <div className="flex items-center gap-2">
+      {runModelError && <span role="alert" className="text-xs text-destructive">{runModelError}</span>}
+      <ModelSelect value={runModel} onChange={setRunModel} disabled={Boolean(requestedRunModel)}>
+        {runModels.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
+      </ModelSelect>
+    </div>
+  ) : runModelError ? (
+    <span role="status" className="text-xs text-muted-foreground">
+      {runModelError}{' '}
+      <button type="button" className="underline" onClick={() => setModelLoadAttempt(value => value + 1)}>Reload models</button>
+    </span>
+  ) : <span role="status" className="text-xs text-muted-foreground">Loading models…</span>;
 
   const handleRuntimeEvent = useCallback((rawEvent) => {
     const event = normalizeWorkflowEvent(rawEvent);
@@ -444,7 +488,7 @@ function WorkflowConversation({
           { signal: controller.signal },
           initialContext || null,
           null,
-          { forceNew: freshSession }
+          { forceNew: freshSession, ...(chooseRunModel ? { runModel: requestedRunModel } : {}) }
         );
 
         if (!mounted) {
@@ -459,10 +503,13 @@ function WorkflowConversation({
         const detail = typeof result?.detail === 'string'
           ? result.detail
           : result?.detail?.message || result?.detail?.error;
-        setError(detail || result?.error || 'Failed to start workflow');
+        const message = detail || result?.error || 'Failed to start workflow';
+        if (chooseRunModel) { setRunModelError(message); setRequestedRunModel(null); }
+        else setError(message);
       } catch (err) {
         if (mounted) {
-          setError(err.message);
+          if (chooseRunModel) { setRunModelError(err.message); setRequestedRunModel(null); }
+          else setError(err.message);
         }
       } finally {
         if (mounted) {
@@ -471,7 +518,9 @@ function WorkflowConversation({
       }
     };
 
-    if (workflow && userId) {
+    if (chooseRunModel && !requestedRunModel) {
+      setLoading(false);
+    } else if (workflow && userId) {
       // StrictMode can dispose the first mount before a new chat is requested.
       queueMicrotask(() => { if (mounted) startWorkflow(); });
     }
@@ -481,7 +530,7 @@ function WorkflowConversation({
       active.current = false;
       controller.abort();
     };
-  }, [workflowApi, workflow, userId, resolvedAppId, initialContext, freshSession]);
+  }, [workflowApi, workflow, userId, resolvedAppId, initialContext, freshSession, chooseRunModel, requestedRunModel]);
 
   const handleSendMessage = useCallback(async (e) => {
     e?.preventDefault?.();
@@ -591,14 +640,16 @@ function WorkflowConversation({
     isOnChatPage
     appDisplayName={appName}
     workflowName={workflow}
-    modelPicker={workflowModel.picker}
+    modelPicker={choosingRunModel ? prestartPicker : workflowModel.picker}
+    onStartWorkflow={choosingRunModel ? () => { if (runModel) { setRunModelError(''); setRequestedRunModel(runModel); } } : null}
+    startWorkflowDisabled={!runModel || Boolean(requestedRunModel)}
     modelSaving={workflowModel.saving}
     chatTheme={chatTheme}
     overlayMode={Boolean(onClose)}
     onOverlayClose={onClose}
     connectionStatus={connectionStatus}
     onRetry={ended ? undefined : retryConnection}
-    chatStatus={{ phase, detail }}
+    chatStatus={choosingRunModel ? null : { phase, detail }}
     composerDisabled={(studio && !canReply) || connectionStatus !== 'connected' || ended || isSending}
     composerLabel={composerLabel}
     composerValue={inputValue}
@@ -643,7 +694,7 @@ function WorkflowConversation({
 
 export default function WorkflowChat(props) {
   const inRouter = useInRouterContext();
-  const identity = JSON.stringify([props.appId, props.userId, props.workflow, props.initialContext, props.freshSession]);
+  const identity = JSON.stringify([props.appId, props.userId, props.workflow, props.initialContext, props.freshSession, props.chooseRunModel]);
   const initialContext = useMemo(() => props.initialContext, [identity]);
   const chat = <WorkflowConversation key={identity} {...props} initialContext={initialContext} />;
   return inRouter ? chat : <BrowserRouter>{chat}</BrowserRouter>;

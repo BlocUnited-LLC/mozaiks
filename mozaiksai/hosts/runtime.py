@@ -75,6 +75,7 @@ from mozaiksai.core.workflow.workflow_manager import (
     workflow_status_summary,
 )
 from mozaiksai.hosts.source_path_policy import authorize_http_workflow_source_paths
+from mozaiksai.hosts.studio_model_policy import select_requested_run_model
 from mozaiksai.version import __version__
 
 env = os.getenv("ENVIRONMENT", "development").lower()
@@ -303,6 +304,7 @@ async def principal_header_middleware(request: Request, call_next):
     path = request.url.path
     app_match = (
         re.fullmatch(r"/api/chats/model/([^/]+)/[^/]+/[^/]+/?", path)
+        or re.fullmatch(r"/api/chats/model-options/([^/]+)/[^/]+/?", path)
         or re.search(r"/api/chats/([^/]+)/", path)
         or re.search(r"/ws/[^/]+/([^/]+)/", path)
     )
@@ -702,6 +704,11 @@ async def start_chat(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid build target reference") from exc
+    run_model = await select_requested_run_model(
+        principal,
+        data.get("run_model"),
+        eligible=transport_purpose != "ask_carrier" and not (reference.build_registry_id or reference.source_chat_id),
+    )
     if client_request_id is not None and (not isinstance(client_request_id, str) or not 1 <= len(client_request_id) <= 128):
         raise HTTPException(status_code=400, detail="Invalid client_request_id")
 
@@ -718,9 +725,11 @@ async def start_chat(
         if client_request_id:
             reused_doc = await coll.find_one(
                 {**base_query, "client_request_id": client_request_id},
-                projection={"chat_id": 1, "created_at": 1},
+                projection={"chat_id": 1, "created_at": 1, "workflow_run_model": 1},
             )
         if reused_doc:
+            if reused_doc.get("workflow_run_model") != run_model:
+                raise HTTPException(status_code=409, detail="This chat launch already uses a different model.")
             chat_id = reused_doc.get("chat_id") or reused_doc.get("_id")
             await get_session_router_for_chat(app_id=app_id, user_id=user_id, chat_id=chat_id)
             try:
@@ -754,6 +763,7 @@ async def start_chat(
         context_variables=extra_fields,
         trigger_meta={"trigger_source": "chat"},
         persistence_manager=persistence_manager,
+        run_model=run_model,
         **reference.model_dump(),
     )
 
