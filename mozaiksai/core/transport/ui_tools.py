@@ -683,6 +683,16 @@ class UIToolsMixin:
             )
             # The waiter may have registered while persistence was awaited.
             waiter = self._resolve_tool_call_future(event_id) or future
+            answered_chat = (metadata or {}).get("chat_id")
+            bound_chat = (self._ui_tool_metadata.get(event_id) or {}).get("chat_id")
+            if answered_chat and bound_chat and bound_chat != answered_chat:
+                # Another chat took the id meanwhile. Only a waiter that is this
+                # chat's alone may have the reply.
+                self._get_resolved_tool_call_registry().pop(event_id, None)
+                if future is None or future is self._resolve_tool_call_future(event_id):
+                    logger.warning("[UI_TOOL] Event %s was bound to another chat before its reply arrived", event_id)
+                    return False
+                waiter = future
             if waiter is not None:
                 self._complete_tool_call_future(waiter, response_data)
             else:

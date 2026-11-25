@@ -262,6 +262,32 @@ async def test_refused_feedback_is_neither_stored_nor_delivered(hooked, monkeypa
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("waiting", ["nobody", "this_chat"])
+async def test_a_reply_does_not_follow_its_event_to_another_chat(hooked, monkeypatch, waiting):
+    hooked(lambda **_kwargs: {})
+    transport = _reply_transport(_session())
+    loop = asyncio.get_running_loop()
+    own, other = loop.create_future(), loop.create_future()
+    if waiting == "this_chat":
+        transport.pending_tool_call_responses["evt-1"] = own
+
+    async def finalize(**_kwargs):
+        transport._ui_tool_metadata["evt-1"] = {"chat_id": "chat-b", "tool_name": "Card"}
+        transport.pending_tool_call_responses["evt-1"] = other
+
+    monkeypatch.setattr(transport, "_finalize_tool_call_response", finalize)
+    accepted = await transport.submit_tool_call_response_for_user("evt-1", {"action": "yes"}, principal=_principal())
+    await asyncio.sleep(0)
+
+    assert accepted is (waiting == "this_chat")
+    assert own.done() is (waiting == "this_chat")
+    assert not other.done()
+    assert "evt-1" not in transport._buffered_tool_call_responses
+    # The other chat's own reply is still accepted.
+    assert not transport._is_tool_call_response_resolved("evt-1")
+
+
+@pytest.mark.asyncio
 async def test_input_is_delivered_only_to_the_chat_that_was_checked():
     transport = object.__new__(SimpleTransport)
     answered = []
