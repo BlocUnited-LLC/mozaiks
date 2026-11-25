@@ -15,7 +15,7 @@ test keeps the two lists equal.
 | Scope | Menu | Purpose |
 | --- | --- | --- |
 | Workspace Dashboard | My Apps `/apps`, Performance `/performance`, Token Usage `/usage`, Integrations `/integrations`, Support `/support`, AI models `/settings/ai-models` | Manage the portfolio: app records, cross-app performance and usage, shared provider setup, support activity, and the AI models builds may use. |
-| App Dashboard | Overview, Revenue, Users, Building, Token Usage, Health, Integrations, Support, each under `/apps/:appId/...` | Manage one app. |
+| App Dashboard | Overview, Revenue, Users, Project, Integrations, Launch, Billing, Token Usage, Health and Support, each under `/apps/:appId/...` | Manage one app. |
 
 Token Usage, Integrations, Support, and AI models are for workspace
 administrators. AI models also needs sign-in to be on: the setting is stored per
