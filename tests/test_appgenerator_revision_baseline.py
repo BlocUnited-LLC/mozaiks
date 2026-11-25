@@ -116,7 +116,7 @@ async def test_existing_compute_field_cannot_silently_become_a_canonical_input(s
     manifest = yaml.safe_load(baseline.files[path])
     action = manifest["actions"][0]
     action.update(description="Create a record", input_schema={
-        "type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"],
+        "type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"], "additionalProperties": False,
     })
     _replace_archive(baseline, {path: yaml.safe_dump(manifest)})
     proposal = json.loads(baseline.files["data/contract.json"])
@@ -126,6 +126,48 @@ async def test_existing_compute_field_cannot_silently_become_a_canonical_input(s
         await validate_implicit_revision_writes(context, proposal, set())
     collection["lifecycle"]["module_writes"] = [{"operation": "create", "fields": ["title"]}]
     await validate_implicit_revision_writes(context, proposal, set())
+
+
+async def test_implicit_revision_preserves_the_full_accepted_write_schema(scoped_module_revision):
+    from factory_app.workflows.DesignDocs.tools.hook_accepted_module_actions import (
+        validate_implicit_revision_writes,
+    )
+
+    baseline = scoped_module_revision.baseline
+    baseline.artifact.lifecycle_status = "current"
+    baseline.artifact.validation_status = "passed"
+    context = {**baseline.context, "refinement_request_meta": {"build_family": "app_bundle", "build_record_id": baseline.artifact.id}}
+    proposal = json.loads(baseline.files["data/contract.json"])
+    title = next(f for f in proposal["surfaces"][0]["collections"][0]["fields"] if f["name"] == "title")
+    title["enum"] = ["public", "private"]
+    path = "modules/records/module.yaml"
+    manifest = yaml.safe_load(baseline.files[path])
+    title_schema = {"type": "string", "enum": ["private", "public"]}
+    key_schema = {"type": "string"}
+    signatures = [
+        ("create_record", {"title": title_schema}, ["title"]),
+        ("update_record", {"title": title_schema, "id": key_schema}, ["id"]),
+        ("delete_record", {"id": key_schema}, ["id"]),
+    ]
+    manifest["actions"] = [{
+        "id": name, "description": name, "handler_method": name, "permissions": [], "emits": [],
+        "input_schema": {"type": "object", "properties": props, "required": required, "additionalProperties": False},
+    } for name, props, required in signatures]
+    _replace_archive(baseline, {path: yaml.safe_dump(manifest)})
+    await validate_implicit_revision_writes(context, proposal, set())
+
+    del title["enum"]
+    with pytest.raises(ValueError, match="create_record.*Set lifecycle.module_writes explicitly"):
+        await validate_implicit_revision_writes(context, proposal, set())
+    title["enum"] = ["public", "private"]
+    title["required"] = False
+    with pytest.raises(ValueError, match="create_record.*Set lifecycle.module_writes explicitly"):
+        await validate_implicit_revision_writes(context, proposal, set())
+    title["required"] = True
+    manifest["actions"][0]["input_schema"]["additionalProperties"] = True
+    _replace_archive(baseline, {path: yaml.safe_dump(manifest)})
+    with pytest.raises(ValueError, match="create_record.*Set lifecycle.module_writes explicitly"):
+        await validate_implicit_revision_writes(context, proposal, set())
 
 
 @pytest.fixture

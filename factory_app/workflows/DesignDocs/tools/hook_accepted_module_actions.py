@@ -13,6 +13,8 @@ from factory_app.workflows._shared.revision_app_source import read_accepted_desi
 from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
 from mozaiksai.core.runtime.persistence.collection_writes import canonical_write_input_schema
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
+from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
+from mozaiksai.core.semantics.closed_contracts import ClosedContractUnsupported
 from mozaiksai.core.workflow.generator_support.data_contract_fields import canonical_write_fields
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     CANONICAL_WRITE_OPERATIONS,
@@ -75,7 +77,14 @@ async def validate_implicit_revision_writes(context: Any, data_contract: dict[st
         for op, action_id in ids.items():
             expected = canonical_write_input_schema(op, shape["fields"], [f["name"] for f in shape["request_fields"]]
                                                     if op != "delete" else [], shape["id_field"])
-            if action_id not in actions or _schema_signature(actions[action_id].input_schema) != _schema_signature(expected):
+            action = actions.get(action_id)
+            try:
+                matches = action is not None and (
+                    import_closed_contract_schema(action.input_schema) == import_closed_contract_schema(expected)
+                )
+            except ClosedContractUnsupported:
+                matches = False
+            if not matches:
                 raise ValueError(
                     f"Default canonical writes would change {owner}.{collection['name']} at {action_id}. "
                     "Set lifecycle.module_writes explicitly with the approved operations and client input fields. "
