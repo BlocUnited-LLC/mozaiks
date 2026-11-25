@@ -280,6 +280,40 @@
       }
     },
     {
+      "path": "/apps/:appId/launch",
+      "component": "AppLaunchPage",
+      "label": "Launch",
+      "order": 27,
+      "meta": {
+        "surfaces": ["studio"],
+        "title": "Launch",
+        "requiresAuth": true,
+        "appShell": true,
+        "navigation": {
+          "group": "app-studio",
+          "scope": "local",
+          "icon": "rocket"
+        }
+      }
+    },
+    {
+      "path": "/apps/:appId/billing",
+      "component": "AppBillingPage",
+      "label": "Billing",
+      "order": 28,
+      "meta": {
+        "surfaces": ["studio"],
+        "title": "Billing",
+        "requiresAuth": true,
+        "appShell": true,
+        "navigation": {
+          "group": "app-studio",
+          "scope": "local",
+          "icon": "billing"
+        }
+      }
+    },
+    {
       "path": "/apps/:appId/support",
       "component": "AppSupportPage",
       "label": "Support",
