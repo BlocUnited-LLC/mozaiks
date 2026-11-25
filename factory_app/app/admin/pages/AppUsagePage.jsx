@@ -146,6 +146,10 @@ function WorkflowGroupRow({ group, expanded, onToggle }) {
 
 export default function AppUsagePage() {
   const { appId = 'workspace-app' } = useParams()
+  return <WorkspaceLayout><SelectedAppUsage key={appId} appId={appId} /></WorkspaceLayout>
+}
+
+function SelectedAppUsage({ appId }) {
   const { data, loading, error, dataMode } = useAppStudioData(appId)
   const [expandedWorkflows, setExpandedWorkflows] = useState(new Set())
   const [chartMetric, setChartMetric] = useState('cost')
@@ -229,103 +233,101 @@ export default function AppUsagePage() {
   ]
 
   return (
-    <WorkspaceLayout>
-      <div className="space-y-6">
-        <AppStudioHero
-          appId={appId}
-          summary={snapshot.summary}
-          dataMode={dataMode}
-          title="Token Usage"
-          currentSection="Token Usage"
-          subtitle="Measured runtime token usage and cost estimates for this app."
-          actions={null}
-          onAction={null}
-        />
+    <div className="space-y-6">
+      <AppStudioHero
+        appId={appId}
+        summary={snapshot.summary}
+        dataMode={dataMode}
+        title="Token Usage"
+        currentSection="Token Usage"
+        subtitle="Measured runtime token usage and cost estimates for this app."
+        actions={null}
+        onAction={null}
+      />
 
-        <UsageTrendPanel
-          title={`${appDisplayName} usage`}
-          subtitle="Spend, token volume, and chat activity for this app."
-          metricLabel={chartConfig.label}
-          metricValue={chartConfig.value}
-          metricDetail={chartConfig.detail}
-          data={trendData}
-          sideItems={sideItems}
-          formatPointValue={chartConfig.formatPointValue}
-          action={(
-            <SegmentedControl
-              options={USAGE_TREND_METRICS}
-              value={chartMetric}
-              onChange={setChartMetric}
-              className="border-b-0"
-            />
-          )}
-        />
-
-        {costSource === 'not_configured' && totalCost === 0 && (
-          <Alert
-            variant="warning"
-            message="Cost estimates show $0.00 because one or more models are not priced. Refresh the provider catalog or set a pricing override."
+      <UsageTrendPanel
+        title={`${appDisplayName} usage`}
+        subtitle="Spend, token volume, and chat activity for this app."
+        metricLabel={chartConfig.label}
+        metricValue={chartConfig.value}
+        metricDetail={chartConfig.detail}
+        data={trendData}
+        sideItems={sideItems}
+        formatPointValue={chartConfig.formatPointValue}
+        action={(
+          <SegmentedControl
+            options={USAGE_TREND_METRICS}
+            value={chartMetric}
+            onChange={setChartMetric}
+            className="border-b-0"
           />
         )}
+      />
 
-        {costSource === 'default_table' && (
-          <Alert
-            variant="info"
-            message="Some costs are estimated from the local fallback table. Refresh the generated provider catalog or add override rates before relying on these numbers."
-          />
-        )}
+      {costSource === 'not_configured' && totalCost === 0 && (
+        <Alert
+          variant="warning"
+          message="Cost estimates show $0.00 because one or more models are not priced. Refresh the provider catalog or set a pricing override."
+        />
+      )}
 
-        <PricingHealthPanel usage={snapshot.usage} />
+      {costSource === 'default_table' && (
+        <Alert
+          variant="info"
+          message="Some costs are estimated from the local fallback table. Refresh the generated provider catalog or add override rates before relying on these numbers."
+        />
+      )}
 
-        <Panel title="Workflow breakdown" subtitle="Expand a workflow to see metered chats.">
-          {workflowGroups.length > 0 ? (
-            <div className="overflow-hidden rounded-2xl border border-border/42">
-              <table className="min-w-full text-sm">
-                <thead className="bg-background/34 border-b border-border/42">
-                  <tr>
-                    <th className={COL_HEADER}>Workflow</th>
-                    <th className={COL_HEADER}>Input</th>
-                    <th className={COL_HEADER}>Output</th>
-                    <th className={COL_HEADER}>Total</th>
-                    <th className={COL_HEADER}>Avg / chat</th>
-                    <th className={COL_HEADER}>Cost</th>
-                    <th className={COL_HEADER}>Avg cost</th>
-                    <th className={COL_HEADER}>LLM calls</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-card/24">
-                  {workflowGroups.map((group) => (
-                    <WorkflowGroupRow
-                      key={group.workflow}
-                      group={group}
-                      expanded={expandedWorkflows.has(group.workflow)}
-                      onToggle={() => toggleExpand(group.workflow)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <StudioInlineEmptyState
-              title="No usage breakdown available yet"
-              description="This view becomes informative once AG2 1.0 workflow agents produce metered LLM calls."
-            />
-          )}
-        </Panel>
+      <PricingHealthPanel usage={snapshot.usage} />
 
-        <Panel title="Runtime posture" subtitle="Lifecycle and usage signals stay separated.">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-3">
-              <div className="text-[12px] font-medium text-muted-foreground/82">Average latency</div>
-              <div className="mt-2 text-2xl font-semibold text-foreground">{averageLatency != null ? `${averageLatency}s` : 'Pending'}</div>
-            </div>
-            <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-3">
-              <div className="text-[12px] font-medium text-muted-foreground/82">Tracked workflows</div>
-              <div className="mt-2 text-2xl font-semibold text-foreground">{formatCompactNumber(snapshot.workflowNames.length, '0')}</div>
-            </div>
+      <Panel title="Workflow breakdown" subtitle="Expand a workflow to see metered chats.">
+        {workflowGroups.length > 0 ? (
+          <div className="overflow-hidden rounded-2xl border border-border/42">
+            <table className="min-w-full text-sm">
+              <thead className="bg-background/34 border-b border-border/42">
+                <tr>
+                  <th className={COL_HEADER}>Workflow</th>
+                  <th className={COL_HEADER}>Input</th>
+                  <th className={COL_HEADER}>Output</th>
+                  <th className={COL_HEADER}>Total</th>
+                  <th className={COL_HEADER}>Avg / chat</th>
+                  <th className={COL_HEADER}>Cost</th>
+                  <th className={COL_HEADER}>Avg cost</th>
+                  <th className={COL_HEADER}>LLM calls</th>
+                </tr>
+              </thead>
+              <tbody className="bg-card/24">
+                {workflowGroups.map((group) => (
+                  <WorkflowGroupRow
+                    key={group.workflow}
+                    group={group}
+                    expanded={expandedWorkflows.has(group.workflow)}
+                    onToggle={() => toggleExpand(group.workflow)}
+                  />
+                ))}
+              </tbody>
+            </table>
           </div>
-        </Panel>
-      </div>
-    </WorkspaceLayout>
+        ) : (
+          <StudioInlineEmptyState
+            title="No usage breakdown available yet"
+            description="This view becomes informative once AG2 1.0 workflow agents produce metered LLM calls."
+          />
+        )}
+      </Panel>
+
+      <Panel title="Runtime posture" subtitle="Lifecycle and usage signals stay separated.">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-3">
+            <div className="text-[12px] font-medium text-muted-foreground/82">Average latency</div>
+            <div className="mt-2 text-2xl font-semibold text-foreground">{averageLatency != null ? `${averageLatency}s` : 'Pending'}</div>
+          </div>
+          <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-3">
+            <div className="text-[12px] font-medium text-muted-foreground/82">Tracked workflows</div>
+            <div className="mt-2 text-2xl font-semibold text-foreground">{formatCompactNumber(snapshot.workflowNames.length, '0')}</div>
+          </div>
+        </div>
+      </Panel>
+    </div>
   )
 }

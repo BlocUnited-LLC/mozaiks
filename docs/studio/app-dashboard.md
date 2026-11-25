@@ -39,9 +39,11 @@ in the app's Studio menu:
 | Token Usage | `/apps/:appId/usage` | App chats, workflows, tokens, and cost. |
 | Health | `/apps/:appId/health` | What needs attention: the latest build's validation result, failed runs, and integrations that are missing a credential or failing their check. |
 | Integrations | `/apps/:appId/integrations` | The app's connections, credentials, and build requirements. |
+| Launch | `/apps/:appId/launch` | Download the selected app's current validated bundle for self-hosting. |
+| Billing | `/apps/:appId/billing` | Review the products, plans and prices declared in the selected app's current validated bundle. |
 | Support | `/apps/:appId/support` | App-scoped support threads and follow-up. |
 
-The default dashboard contract also declares Branding, Launch, Growth, Users
+The default dashboard contract also declares Branding, Growth, Users
 (access), and Settings portals. The first-party Studio has no page for them, so
 its `dashboard/dashboard.yaml` disables them; a host that mounts those pages
 enables them in its own manifest. A portal is never left enabled without a
@@ -50,6 +52,16 @@ manifest and route files.
 
 Apps may hide or extend portals through the dashboard manifest. Capability packs
 can contribute panels without taking over the whole dashboard.
+
+Billing shows the subscription catalog saved with the selected app's current
+validated build. Change plans in the app's subscription configuration and
+validate a new build to update this view. Revenue shows recorded financial
+activity separately.
+
+Launch offers a self-host download when both artifact and app validation pass.
+The download rechecks ownership and the current build when the owner clicks it.
+A host product can add managed hosting to this menu using its own deployment
+service.
 
 The generic factory `DashboardPortalPage` renders manifest-backed lanes such as
 Project. Mount it from `ui/route_manifest.json` with

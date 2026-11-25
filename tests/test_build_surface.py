@@ -58,7 +58,8 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     assert '"path": "/apps/:appId/health"' in manifest_source
     assert '"path": "/apps/:appId/activity"' in manifest_source
     assert '"component": "AppBuildReviewPage"' in manifest_source
-    assert '"path": "/apps/:appId/billing"' not in manifest_source
+    assert '"path": "/apps/:appId/billing"' in manifest_source
+    assert '"path": "/apps/:appId/launch"' in manifest_source
     assert '"path": "/apps/:appId/hosting"' not in manifest_source
     assert '"path": "/apps/:appId/build"' not in manifest_source
     assert '"path": "/apps/:appId/deploy"' not in manifest_source
@@ -270,7 +271,8 @@ def test_workspace_layout_links_studio_and_hosting_sections() -> None:
     assert "Mozaiks Studio" not in source
     assert "App Studio" not in source
     assert '"label": "Users"' in manifest_source
-    assert '"label": "Billing"' not in manifest_source
+    assert '"label": "Billing"' in manifest_source
+    assert '"label": "Launch"' in manifest_source
     assert '"label": "Health"' in manifest_source
     assert '"label": "Hosting"' not in manifest_source
     assert '"label": "Token Usage"' in manifest_source
