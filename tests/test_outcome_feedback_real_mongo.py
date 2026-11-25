@@ -69,7 +69,7 @@ async def test_authenticated_receipt_survives_manager_restart_and_generated_stor
         monkeypatch.setattr(manager, "_coll", AsyncMock(return_value=sessions))
         harness.transport._get_or_create_persistence_manager = Mock(return_value=manager)
         response_ownership._pending(harness)
-        harness.transport._ui_tool_metadata["evt-owned"].update(
+        harness.transport._ui_tool_metadata[("chat-owner", "evt-owned")].update(
             workflow_primitive="outcome_feedback", workflow_name="AnswerFlow",
             feedback_agent_name="AnswerAgent", outcome_id="result-1",
         )
@@ -96,7 +96,7 @@ async def test_authenticated_receipt_survives_manager_restart_and_generated_stor
         assert (await response_ownership._http(
             harness, response_data={"status": "submitted", "rating": 3, "helpful": False},
         )).status_code == 200
-        assert harness.transport.pending_tool_call_responses["evt-owned"].result()["rating"] == 3
+        assert harness.transport.pending_tool_call_responses[("chat-owner", "evt-owned")].result()["rating"] == 3
 
         # A fresh manager resolves the receipt without in-memory transport state.
         restored = manager_type()

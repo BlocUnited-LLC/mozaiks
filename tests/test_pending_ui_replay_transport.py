@@ -145,7 +145,7 @@ async def test_pending_review_emit_persist_and_replay_reaches_actual_socket(repl
     payload = await _emit_review(transport)
     future = asyncio.get_running_loop().create_future() if live else None
     if future is not None:
-        transport.pending_tool_call_responses["original-event"] = future
+        transport.pending_tool_call_responses[("chat", "original-event")] = future
     stored = next(iter(collection.doc["workflow_ui_state"]["tool_calls"].values()))
     assert stored["payload"] == payload
     assert "message_index" not in stored
@@ -168,7 +168,7 @@ async def test_pending_review_emit_persist_and_replay_reaches_actual_socket(repl
     assert event["response_available"] is live
     assert len(transport.pending_tool_call_responses) == int(live)
     if future is not None:
-        assert transport.pending_tool_call_responses["original-event"] is future
+        assert transport.pending_tool_call_responses[("chat", "original-event")] is future
         assert not future.done()
     assert collection.doc == before
     assert all(query["app_id"] == "app" for query in collection.queries)

@@ -191,7 +191,7 @@ async def _emit_tool_call_core(
             "persistence_scope_guard": scope_guard,
         }
 
-    event_id = f"{tool_id}_{str(uuid.uuid4())[:8]}"
+    event_id = f"{tool_id}_{uuid.uuid4().hex}"
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id)
     chat_logger = get_workflow_logger("ui_tools", chat_id=chat_id)
     
@@ -243,13 +243,17 @@ async def _emit_tool_call_core(
         )
         raise UIToolError(f"Failed to emit UI tool event: {e}") from e
 
-async def _wait_for_tool_call_response_internal(event_id: str, timeout: float | None = None) -> dict[str, Any]:
+async def _wait_for_tool_call_response_internal(
+    event_id: str, timeout: float | None = None, *, chat_id: str | None,
+) -> dict[str, Any]:
     from mozaiksai.core.transport.simple_transport import SimpleTransport  # local import
     transport = await SimpleTransport.get_instance()
     try:
         # Always wait indefinitely for user/UI response; ignore provided timeout to avoid premature cancellations.
         # Explicitly pass timeout=None to ensure no default timeout is applied in the transport layer.
-        fut = transport.wait_for_tool_call_response(event_id, timeout=None)  # type: ignore[attr-defined]
+        fut = transport.wait_for_tool_call_response(  # type: ignore[attr-defined]
+            event_id, timeout=None, chat_id=chat_id,
+        )
         return await fut  # type: ignore[no-any-return]
     except Exception as e:  # pragma: no cover
         raise UIToolError(f"UI tool response failure for {event_id}: {e}") from e
@@ -352,7 +356,7 @@ async def use_ui_tool(
         pass
     try:
         # Ignore the timeout parameter to prevent user feedback from timing out; wait until the UI responds
-        resp = await _wait_for_tool_call_response_internal(event_id, timeout=None)
+        resp = await _wait_for_tool_call_response_internal(event_id, timeout=None, chat_id=chat_id)
         duration_ms = (_dt.datetime.now(_dt.UTC) - start).total_seconds() * 1000.0
         # Assemble log message to keep line length under linter limits
         wf_logger.debug("UI_TOOL_ROUNDTRIP tool=%s event=%s duration_ms=%.2f", tool_id, event_id, duration_ms)
@@ -633,7 +637,7 @@ async def handle_tool_call_for_ui_interaction(tool_call_event: Any, chat_id: str
         wf_logger.debug("UI_TOOL_AWAIT_RESPONSE tool_call=%s", tool_call_component)
 
         # Wait for user response using internal primitive
-        response = await _wait_for_tool_call_response_internal(event_id)
+        response = await _wait_for_tool_call_response_internal(event_id, chat_id=chat_id)
         wf_logger.debug("UI_TOOL_RESPONSE_RECEIVED tool_call=%s", tool_call_component)
 
         if isinstance(response, dict) and 'ui_event_id' not in response:

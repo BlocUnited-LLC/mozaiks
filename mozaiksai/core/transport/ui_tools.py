@@ -35,6 +35,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("simple_transport.ui_tools")
 
+# Replies are authorized per chat, so every per-interaction structure is keyed by
+# (chat_id, event_id): one chat's reply can never reach another chat's waiter.
+ToolCallKey = tuple[str, str]
+_RESOLVED_TOOL_CALL_LIMIT = 1024
+
+
+def tool_call_key(chat_id: Any, event_id: Any) -> ToolCallKey | None:
+    """The key of one chat's interaction; None when either part is missing."""
+    if isinstance(chat_id, str) and chat_id and isinstance(event_id, str) and event_id:
+        return (chat_id, event_id)
+    return None
+
+
+def _is_tool_call_key(key: Any) -> bool:
+    return isinstance(key, tuple) and len(key) == 2 and tool_call_key(*key) is not None
+
 
 def project_ui_tool_response_state(
     tool_call: dict[str, Any] | None, *, chat_id: str, transport: Any = None,
@@ -53,16 +69,17 @@ def project_ui_tool_response_state(
     ):
         return dict(tool_call)
     event_id = tool_call.get("tool_call_id")
+    key = tool_call_key(chat_id, event_id)
     available = False
     if (
-        transport is not None and isinstance(event_id, str) and event_id
-        and transport._tool_call_chat_id(event_id) == chat_id
-        and not transport._is_tool_call_response_resolved(event_id)
+        transport is not None and key is not None
+        and transport._tool_call_chat_id(key[1], chat_id=chat_id) == chat_id
+        and not transport._is_tool_call_response_resolved(key)
     ):
-        future = transport._resolve_tool_call_future(event_id)
+        future = transport._resolve_tool_call_future(key)
         available = bool(
             future is not None and not future.done()
-            or event_id in transport._input_request_registries.get(chat_id, {})
+            or key[1] in transport._input_request_registries.get(chat_id, {})
         )
     return {**tool_call, "response_available": available}
 
@@ -71,8 +88,10 @@ class UIToolsMixin:
     """Mixin providing UI tool interaction functionality.
 
     Expects the following attributes on the class:
-        - pending_tool_call_responses: Dict[str, asyncio.Future]
-        - _ui_tool_metadata: Dict[str, Dict[str, Any]]
+        - pending_tool_call_responses: Dict[ToolCallKey, asyncio.Future]
+        - _buffered_tool_call_responses: Dict[ToolCallKey, Dict[str, Any]]
+        - _resolved_tool_call_ids: Dict[ToolCallKey, None]
+        - _ui_tool_metadata: Dict[ToolCallKey, Dict[str, Any]]
         - _derived_context_managers: Dict[str, Any]
         - send_event_to_ui(event, chat_id): method
         - _get_or_create_persistence_manager(): method
@@ -83,33 +102,37 @@ class UIToolsMixin:
     # UI TOOL STATE PERSISTENCE
     # ==================================================================================
 
-    def _get_resolved_tool_call_registry(self) -> dict[str, None]:
+    def _get_resolved_tool_call_registry(self) -> dict[ToolCallKey, None]:
         registry = getattr(self, "_resolved_tool_call_ids", None)
         if not isinstance(registry, dict):
             registry = {}
             self._resolved_tool_call_ids = registry
         return registry
 
-    def _mark_tool_call_response_resolved(self, event_id: str) -> None:
-        if not event_id:
+    def _mark_tool_call_response_resolved(self, key: ToolCallKey) -> None:
+        if not _is_tool_call_key(key):
             return
         registry = self._get_resolved_tool_call_registry()
-        registry[event_id] = None
-        metadata = self._ui_tool_metadata.get(event_id)
+        registry.pop(key, None)
+        registry[key] = None
+        metadata = self._ui_tool_metadata.get(key)
         if metadata:
             # Keep the session binding for authorized, idempotent retries.
-            self._ui_tool_metadata[event_id] = {"chat_id": metadata.get("chat_id")}
-        while len(registry) > 1024:
-            oldest = next(iter(registry), None)
-            if oldest is None:
+            self._ui_tool_metadata[key] = {"chat_id": key[0]}
+        excess = len(registry) - _RESOLVED_TOOL_CALL_LIMIT
+        accepting = getattr(self, "_accepting_tool_call_keys", None) or set()
+        for oldest in list(registry):
+            if excess <= 0:
                 break
+            # A reply being stored, or waiting for its late waiter, keeps its owner binding.
+            if oldest in self._buffered_tool_call_responses or oldest in accepting:
+                continue
             registry.pop(oldest, None)
             self._ui_tool_metadata.pop(oldest, None)
+            excess -= 1
 
-    def _is_tool_call_response_resolved(self, event_id: str) -> bool:
-        if not event_id:
-            return False
-        return event_id in self._get_resolved_tool_call_registry()
+    def _is_tool_call_response_resolved(self, key: ToolCallKey) -> bool:
+        return _is_tool_call_key(key) and key in self._get_resolved_tool_call_registry()
 
     async def _persist_ui_tool_state(
         self,
@@ -222,6 +245,9 @@ class UIToolsMixin:
         persistence_scope_guard: Callable[[], None] | None = None,
     ) -> bool | None:
         """Emit the canonical ``chat.tool_call`` workflow UI event to the frontend."""
+        if awaiting_response and tool_call_key(chat_id, event_id) is None:
+            # A reply is authorized per chat; one without a chat has no owner.
+            raise ValueError("A UI tool that awaits a response requires a chat_id and event_id")
         # Extract agent_name from payload if not explicitly provided
         if not agent_name and isinstance(payload, dict):
             agent_name = payload.get("agent_name")
@@ -303,9 +329,10 @@ class UIToolsMixin:
         if require_persistence and persisted is not True:
             raise RuntimeError("Artifact persistence was not confirmed")
 
-        if event_id and bool(awaiting_response):
-            self._get_resolved_tool_call_registry().pop(event_id, None)
-            self._ui_tool_metadata[event_id] = {
+        key = tool_call_key(chat_id, event_id)
+        if key is not None and bool(awaiting_response):
+            self._get_resolved_tool_call_registry().pop(key, None)
+            self._ui_tool_metadata[key] = {
                 "chat_id": chat_id,
                 "tool_name": tool_name,
                 "display": _display_norm,
@@ -358,22 +385,28 @@ class UIToolsMixin:
     # ==================================================================================
 
     @classmethod
-    async def wait_for_tool_call_response(cls, event_id: str, timeout: float | None = 300.0) -> dict[str, Any]:
-        """Await a UI tool response with an optional timeout.
+    async def wait_for_tool_call_response(
+        cls, event_id: str, timeout: float | None = 300.0, *, chat_id: str,
+    ) -> dict[str, Any]:
+        """Await one chat's UI tool response with an optional timeout.
 
         Args:
             event_id: Correlation id originally sent in the tool_call event.
             timeout: Seconds to wait before raising TimeoutError (None = wait forever).
+            chat_id: The chat the event was sent to; only its replies are delivered.
         """
+        key = tool_call_key(chat_id, event_id)
+        if key is None:
+            raise ValueError("Waiting for a UI tool response requires a chat_id and event_id")
         instance = await cls.get_instance()
         if not instance:
             raise RuntimeError("SimpleTransport instance not available")
 
-        if event_id not in instance.pending_tool_call_responses:
-            instance.pending_tool_call_responses[event_id] = asyncio.get_running_loop().create_future()
+        if key not in instance.pending_tool_call_responses:
+            instance.pending_tool_call_responses[key] = asyncio.get_running_loop().create_future()
 
-        fut = instance.pending_tool_call_responses[event_id]
-        buffered_response = instance._buffered_tool_call_responses.pop(event_id, None)
+        fut = instance.pending_tool_call_responses[key]
+        buffered_response = instance._buffered_tool_call_responses.pop(key, None)
         if buffered_response is not None and not fut.done():
             instance._complete_tool_call_future(fut, buffered_response)
         try:
@@ -382,13 +415,14 @@ class UIToolsMixin:
         except TimeoutError:
             if not fut.done():
                 fut.set_exception(TimeoutError("UI tool response timed out"))
-            logger.error("Tool call response timed out for event %s", event_id)
+            logger.error("Tool call response timed out for event %s in chat %s", event_id, chat_id)
             raise
         finally:
-            instance.pending_tool_call_responses.pop(event_id, None)
+            if instance.pending_tool_call_responses.get(key) is fut:
+                instance.pending_tool_call_responses.pop(key, None)
 
-    def _resolve_tool_call_future(self, event_id: str) -> asyncio.Future | None:
-        future = self.pending_tool_call_responses.get(event_id)
+    def _resolve_tool_call_future(self, key: ToolCallKey) -> asyncio.Future | None:
+        future = self.pending_tool_call_responses.get(key)
         if future is None:
             return None
         if not isinstance(future, asyncio.Future):
@@ -483,19 +517,29 @@ class UIToolsMixin:
             except Exception as dismiss_err:
                 logger.debug("[UI_TOOL] Failed to emit ui.dismiss event for %s: %s", event_id, dismiss_err)
 
-    def _tool_call_chat_id(self, event_id: str) -> str | None:
-        """Resolve one server-owned chat binding, including composer requests."""
-        metadata = self._ui_tool_metadata.get(event_id) or {}
+    def _tool_call_chat_id(self, event_id: str, *, chat_id: str | None = None) -> str | None:
+        """Resolve one server-owned chat binding, including composer requests.
+
+        A caller that knows the chat gets it back only if that chat holds the event;
+        without one, an event held by more than one chat resolves to nobody.
+        """
+        if chat_id is not None:
+            key = tool_call_key(chat_id, event_id)
+            if key is None:
+                return None
+            bound = key in self._ui_tool_metadata or event_id in self._input_request_registries.get(chat_id, {})
+            return chat_id if bound else None
+        if not isinstance(event_id, str) or not event_id:
+            return None
         chat_ids = {
-            chat_id for chat_id, registry in self._input_request_registries.items()
+            registry_chat for registry_chat, registry in self._input_request_registries.items()
             if event_id in registry
         }
-        if metadata.get("chat_id"):
-            chat_ids.add(metadata["chat_id"])
+        chat_ids.update(owner for owner, held in self._ui_tool_metadata if held == event_id)
         if len(chat_ids) != 1:
             return None
-        chat_id = next(iter(chat_ids))
-        return chat_id if isinstance(chat_id, str) and chat_id else None
+        owner = next(iter(chat_ids))
+        return owner if isinstance(owner, str) and owner else None
 
     async def acknowledge_workflow_feedback_render_for_user(
         self, event_id: str, *, principal: UserPrincipal,
@@ -503,11 +547,12 @@ class UIToolsMixin:
         """Record a client's visible-render report without answering the tool."""
         if not isinstance(event_id, str) or not event_id or not isinstance(principal, UserPrincipal):
             return False
-        metadata = self._ui_tool_metadata.get(event_id) or {}
-        if metadata.get("workflow_primitive") != "outcome_feedback":
-            return False
         chat_id = self._tool_call_chat_id(event_id)
-        if not chat_id or metadata.get("chat_id") != chat_id:
+        key = tool_call_key(chat_id, event_id)
+        if key is None:
+            return False
+        metadata = self._ui_tool_metadata.get(key) or {}
+        if metadata.get("workflow_primitive") != "outcome_feedback" or metadata.get("chat_id") != chat_id:
             return False
         try:
             pm = self._get_or_create_persistence_manager()
@@ -525,7 +570,7 @@ class UIToolsMixin:
                 return False
         if not principal.validate_app_id(session["app_id"]) or not principal.validate_chat_id(chat_id):
             return False
-        if self._tool_call_chat_id(event_id) != chat_id or self._ui_tool_metadata.get(event_id) != metadata:
+        if self._tool_call_chat_id(event_id) != chat_id or self._ui_tool_metadata.get(key) != metadata:
             return False
         from pydantic import ValidationError
 
@@ -564,9 +609,11 @@ class UIToolsMixin:
             return False
         if not isinstance(principal, (UserPrincipal, WebSocketUser)):
             return False
-        event_chat_id = self._tool_call_chat_id(event_id)
-        if not event_chat_id or (chat_id is not None and chat_id != event_chat_id):
+        # A server-selected chat narrows the lookup; without one the event must be unambiguous.
+        event_chat_id = self._tool_call_chat_id(event_id, chat_id=chat_id)
+        if not event_chat_id:
             return False
+        key = (event_chat_id, event_id)
 
         try:
             collection = await self._get_or_create_persistence_manager()._coll()
@@ -594,10 +641,10 @@ class UIToolsMixin:
             chat_id=event_chat_id, app_id=session["app_id"], user_id=session["user_id"],
         ) is not None:
             return False
-        # The awaited lookups must not authorize an event rebound to another chat.
-        if self._tool_call_chat_id(event_id) != event_chat_id:
+        # The awaited lookups must not authorize an event this chat no longer holds.
+        if self._tool_call_chat_id(event_id, chat_id=event_chat_id) != event_chat_id:
             return False
-        metadata = self._ui_tool_metadata.get(event_id) or {}
+        metadata = self._ui_tool_metadata.get(key) or {}
         if metadata.get("workflow_primitive") == "outcome_feedback":
             from pydantic import ValidationError
 
@@ -623,17 +670,29 @@ class UIToolsMixin:
             except Exception as exc:
                 logger.warning("[UI_TOOL] Feedback receipt not persisted: %s", type(exc).__name__)
                 return False
-            if not saved or self._tool_call_chat_id(event_id) != event_chat_id:
+            if not saved or self._tool_call_chat_id(event_id, chat_id=event_chat_id) != event_chat_id:
                 return False
-        return await self.submit_tool_call_response(event_id, response_data)
+        return await self.submit_tool_call_response(event_id, response_data, chat_id=event_chat_id)
 
-    async def submit_tool_call_response(self, event_id: str, response_data: dict[str, Any]) -> bool:
-        """Submit a trusted in-process response; HTTP/WS use the owner-checked entry point."""
-        if self._is_tool_call_response_resolved(event_id):
+    async def submit_tool_call_response(
+        self, event_id: str, response_data: dict[str, Any], *, chat_id: str | None = None,
+    ) -> bool:
+        """Submit a trusted in-process response; HTTP/WS use the owner-checked entry point.
+
+        ``chat_id`` names the chat being answered. Without it the event must be bound
+        to exactly one chat, and nothing is delivered otherwise.
+        """
+        if chat_id is None:
+            chat_id = self._tool_call_chat_id(event_id)
+        key = tool_call_key(chat_id, event_id)
+        if key is None:
+            logger.warning("[UI_TOOL] No single chat holds event %s", event_id)
+            return False
+        if self._is_tool_call_response_resolved(key):
             logger.debug("[UI_TOOL] Ignoring duplicate response for already resolved event %s", event_id)
             return True
 
-        metadata = self._ui_tool_metadata.get(event_id) or {}
+        metadata = self._ui_tool_metadata.get(key) or {}
         if metadata.get("workflow_primitive") == "outcome_feedback":
             from pydantic import ValidationError
 
@@ -645,23 +704,21 @@ class UIToolsMixin:
                 # Leave the interaction pending so a corrected response can retry.
                 return False
 
-        future = self._resolve_tool_call_future(event_id)
+        future = self._resolve_tool_call_future(key)
         if future is not None and future.done():
-            self._mark_tool_call_response_resolved(event_id)
+            self._mark_tool_call_response_resolved(key)
             logger.debug("[UI_TOOL] Ignoring duplicate response for completed event %s", event_id)
             return True
-        metadata = self._ui_tool_metadata.get(event_id)
+        metadata = self._ui_tool_metadata.get(key)
         if future is not None or metadata is not None:
-            return await self._accept_tool_call_response(event_id, response_data, metadata, future)
+            return await self._accept_tool_call_response(key, response_data, metadata, future)
         input_request_text = self._coerce_input_request_response_text(response_data)
-        if self._has_pending_input_request(event_id):
-            input_chat_id = self._tool_call_chat_id(event_id)
+        if event_id in self._input_request_registries.get(key[0], {}):
             logger.debug("[UI_TOOL] Routing response-required interaction through submit_user_input for %s", event_id)
-            submitted = await self.submit_user_input(event_id, input_request_text, chat_id=input_chat_id)
+            submitted = await self.submit_user_input(event_id, input_request_text, chat_id=key[0])
             if submitted:
-                if input_chat_id:
-                    self._ui_tool_metadata[event_id] = {"chat_id": input_chat_id}
-                self._mark_tool_call_response_resolved(event_id)
+                self._ui_tool_metadata[key] = {"chat_id": key[0]}
+                self._mark_tool_call_response_resolved(key)
             return submitted
 
         logger.warning("[UI_TOOL] No pending event found for %s", event_id)
@@ -669,24 +726,29 @@ class UIToolsMixin:
 
     async def _accept_tool_call_response(
         self,
-        event_id: str,
+        key: ToolCallKey,
         response_data: dict[str, Any],
         metadata: dict[str, Any] | None,
         future: asyncio.Future | None,
     ) -> bool:
         """Finish an accepted decision even if its HTTP/WS request is cancelled."""
-        self._mark_tool_call_response_resolved(event_id)
+        event_id = key[1]
+        accepting = getattr(self, "_accepting_tool_call_keys", None)
+        if accepting is None:
+            accepting = self._accepting_tool_call_keys = set()
+        accepting.add(key)
+        self._mark_tool_call_response_resolved(key)
 
         async def finalize_and_deliver() -> bool:
             await self._finalize_tool_call_response(
                 event_id=event_id, response_data=response_data, metadata=metadata,
             )
             # The waiter may have registered while persistence was awaited.
-            waiter = self._resolve_tool_call_future(event_id) or future
+            waiter = self._resolve_tool_call_future(key) or future
             if waiter is not None:
                 self._complete_tool_call_future(waiter, response_data)
             else:
-                self._buffered_tool_call_responses[event_id] = response_data
+                self._buffered_tool_call_responses[key] = response_data
             logger.debug("[UI_TOOL] Submitted response for event %s", event_id)
             return True
 
@@ -698,20 +760,15 @@ class UIToolsMixin:
 
         def finished(completed: asyncio.Task) -> None:
             tasks.discard(completed)
+            accepting.discard(key)
             if completed.cancelled() or completed.exception() is not None:
-                self._get_resolved_tool_call_registry().pop(event_id, None)
+                self._get_resolved_tool_call_registry().pop(key, None)
                 if metadata is not None:
-                    self._ui_tool_metadata[event_id] = metadata
+                    self._ui_tool_metadata[key] = metadata
                 logger.warning("[UI_TOOL] Response finalization interrupted for %s; retry remains available", event_id)
 
         task.add_done_callback(finished)
         return await asyncio.shield(task)
-
-    def _has_pending_input_request(self, event_id: str) -> bool:
-        for registry in self._input_request_registries.values():
-            if event_id in registry:
-                return True
-        return False
 
     def _coerce_input_request_response_text(self, response_data: Any) -> str:
         if isinstance(response_data, str):

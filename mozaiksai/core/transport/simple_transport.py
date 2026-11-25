@@ -164,10 +164,11 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         self._pre_connection_buffer_overflow_counts: dict[str, int] = {}
 
         # UI tool response correlation
-        self.pending_tool_call_responses: dict[str, asyncio.Future] = {}
-        self._buffered_tool_call_responses: dict[str, dict[str, Any]] = {}
-        self._ui_tool_metadata: dict[str, dict[str, Any]] = {}
-        self._resolved_tool_call_ids: dict[str, None] = {}
+        # Keyed by (chat_id, event_id): replies are authorized per chat.
+        self.pending_tool_call_responses: dict[tuple[str, str], asyncio.Future] = {}
+        self._buffered_tool_call_responses: dict[tuple[str, str], dict[str, Any]] = {}
+        self._ui_tool_metadata: dict[tuple[str, str], dict[str, Any]] = {}
+        self._resolved_tool_call_ids: dict[tuple[str, str], None] = {}
         self._owner_loop = None
 
         # Runtime context trigger managers (per chat)

@@ -65,11 +65,11 @@ def _pending(harness, kind="future"):
     if kind == "input":
         transport._input_request_registries["chat-owner"] = {"evt-owned": Mock()}
     else:
-        transport._ui_tool_metadata["evt-owned"] = {
+        transport._ui_tool_metadata[("chat-owner", "evt-owned")] = {
             "chat_id": "chat-owner", "tool_name": "ApprovalCard", "display": "artifact",
         }
     if kind == "future":
-        transport.pending_tool_call_responses["evt-owned"] = asyncio.get_running_loop().create_future()
+        transport.pending_tool_call_responses[("chat-owner", "evt-owned")] = asyncio.get_running_loop().create_future()
 
 
 async def _http(harness, *, event_id="evt-owned", **extra):
@@ -122,9 +122,9 @@ async def test_http_owner_can_submit_and_retry_without_reapplying(harness, kind)
     assert first.status_code == second.status_code == 200
     assert first.json() == {"status": "success"}
     if kind == "future":
-        assert harness.transport.pending_tool_call_responses["evt-owned"].result() == {"action": "approve"}
+        assert harness.transport.pending_tool_call_responses[("chat-owner", "evt-owned")].result() == {"action": "approve"}
     elif kind == "early":
-        assert harness.transport._buffered_tool_call_responses == {"evt-owned": {"action": "approve"}}
+        assert harness.transport._buffered_tool_call_responses == {("chat-owner", "evt-owned"): {"action": "approve"}}
     else:
         harness.transport.submit_user_input.assert_awaited_once()
     assert harness.transport._finalize_tool_call_response.await_count == (0 if kind == "input" else 1)
@@ -136,7 +136,7 @@ async def test_http_owner_can_submit_and_retry_without_reapplying(harness, kind)
 @pytest.mark.parametrize("kind", ["unknown", "unbound_future", "ambiguous"])
 async def test_http_rejects_missing_or_ambiguous_event_binding(harness, kind):
     if kind == "unbound_future":
-        harness.transport.pending_tool_call_responses["evt-owned"] = asyncio.get_running_loop().create_future()
+        harness.transport.pending_tool_call_responses[("chat-owner", "evt-owned")] = asyncio.get_running_loop().create_future()
     elif kind == "ambiguous":
         _pending(harness)
         harness.transport._input_request_registries["other-chat"] = {"evt-owned": Mock()}
@@ -150,12 +150,14 @@ async def test_http_rechecks_event_binding_after_awaited_ownership_lookup(harnes
     _pending(harness)
 
     async def rebind(*args, **kwargs):
-        harness.transport._ui_tool_metadata["evt-owned"]["chat_id"] = "other-chat"
+        # The event is no longer this chat's: another chat holds it now.
+        moved = harness.transport._ui_tool_metadata.pop(("chat-owner", "evt-owned"))
+        harness.transport._ui_tool_metadata[("other-chat", "evt-owned")] = {**moved, "chat_id": "other-chat"}
         return harness.session
 
     harness.lookup.side_effect = rebind
     assert (await _http(harness)).status_code == 404
-    assert not harness.transport.pending_tool_call_responses["evt-owned"].done()
+    assert not harness.transport.pending_tool_call_responses[("chat-owner", "evt-owned")].done()
     harness.transport._finalize_tool_call_response.assert_not_awaited()
 
 
@@ -164,7 +166,7 @@ async def test_http_lookup_failure_cannot_complete_or_buffer(harness):
     harness.lookup.side_effect = RuntimeError("ownership unavailable")
     response = await _http(harness)
     assert response.status_code in {404, 503}
-    assert not harness.transport.pending_tool_call_responses["evt-owned"].done()
+    assert not harness.transport.pending_tool_call_responses[("chat-owner", "evt-owned")].done()
     assert harness.transport._buffered_tool_call_responses == {}
 
 
@@ -184,7 +186,7 @@ async def test_http_anonymous_bypass_requires_the_shared_development_identity(
     harness.principal = _principal(user_id, auth_provenance=provenance)
     response = await _http(harness)
     assert response.status_code == (200 if allowed else 404)
-    assert harness.transport.pending_tool_call_responses["evt-owned"].done() is allowed
+    assert harness.transport.pending_tool_call_responses[("chat-owner", "evt-owned")].done() is allowed
     assert harness.transport._finalize_tool_call_response.await_count == int(allowed)
 
 
@@ -208,18 +210,18 @@ async def test_http_waits_for_owner_lookup_before_mutation(harness):
         release.set()
         response = await asyncio.wait_for(request, timeout=2)
     assert response.status_code == 200
-    assert harness.transport.pending_tool_call_responses["evt-owned"].done()
+    assert harness.transport.pending_tool_call_responses[("chat-owner", "evt-owned")].done()
 
 
 def test_resolved_event_owner_bindings_share_the_bounded_retry_registry():
     transport = _Transport()
     for index in range(1025):
-        event_id = f"evt-{index}"
-        transport._ui_tool_metadata[event_id] = {"chat_id": "chat-owner", "tool_name": "ApprovalCard"}
-        transport._mark_tool_call_response_resolved(event_id)
+        key = ("chat-owner", f"evt-{index}")
+        transport._ui_tool_metadata[key] = {"chat_id": "chat-owner", "tool_name": "ApprovalCard"}
+        transport._mark_tool_call_response_resolved(key)
     assert len(transport._resolved_tool_call_ids) == len(transport._ui_tool_metadata) == 1024
-    assert "evt-0" not in transport._ui_tool_metadata
-    assert transport._ui_tool_metadata["evt-1024"] == {"chat_id": "chat-owner"}
+    assert ("chat-owner", "evt-0") not in transport._ui_tool_metadata
+    assert transport._ui_tool_metadata[("chat-owner", "evt-1024")] == {"chat_id": "chat-owner"}
 
 
 @pytest.mark.parametrize("kind", ["future", "early", "input"])
@@ -286,5 +288,5 @@ async def test_websocket_owner_can_answer_server_selected_active_chat(harness, m
         "tool_call_id": "evt-owned", "response": {"action": "approve"},
     }, chat_id, websocket)
 
-    assert harness.transport.pending_tool_call_responses["evt-owned"].result() == {"action": "approve"}
+    assert harness.transport.pending_tool_call_responses[("chat-owner", "evt-owned")].result() == {"action": "approve"}
     assert websocket.send_json.await_args.args[0]["data"]["status"] == "accepted"

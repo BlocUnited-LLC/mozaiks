@@ -236,7 +236,7 @@ def _reply_transport(document):
     transport = _UIToolsTransport()
     persistence = _Persistence(document)
     transport._get_or_create_persistence_manager = lambda: persistence
-    transport._ui_tool_metadata["evt-1"] = {"chat_id": CHAT, "tool_name": "Card", "display": "artifact"}
+    transport._ui_tool_metadata[(CHAT, "evt-1")] = {"chat_id": CHAT, "tool_name": "Card", "display": "artifact"}
     return transport
 
 
@@ -254,7 +254,7 @@ async def test_a_refused_reply_is_not_delivered(hooked, monkeypatch):
     transport = _reply_transport(_session())
     delivered = []
 
-    async def deliver(*args):
+    async def deliver(*args, **_kwargs):
         delivered.append(args)
         return True
 
@@ -272,7 +272,7 @@ async def test_a_refused_reply_is_not_delivered(hooked, monkeypatch):
 async def test_refused_feedback_is_neither_stored_nor_delivered(hooked, monkeypatch):
     hooked(_refuse([]))
     transport = _reply_transport(_session())
-    transport._ui_tool_metadata["evt-1"].update(
+    transport._ui_tool_metadata[(CHAT, "evt-1")].update(
         workflow_primitive="outcome_feedback", workflow_name="OperatorOnly", feedback_agent_name="Reviewer",
         outcome_id="outcome-1",
     )
@@ -282,7 +282,7 @@ async def test_refused_feedback_is_neither_stored_nor_delivered(hooked, monkeypa
         stored.append(receipt)
         return True
 
-    async def deliver(*args):
+    async def deliver(*args, **_kwargs):
         delivered.append(args)
         return True
 
@@ -319,7 +319,7 @@ async def test_the_shared_development_identity_replies_as_the_chat_owner(hooked,
     hooked(admit)
     transport = _reply_transport(_session())
 
-    async def deliver(*_args):
+    async def deliver(*_args, **_kwargs):
         return True
 
     monkeypatch.setattr(transport, "submit_tool_call_response", deliver)
