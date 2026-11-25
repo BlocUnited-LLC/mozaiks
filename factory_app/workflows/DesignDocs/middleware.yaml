@@ -6,6 +6,9 @@ prompt_middleware:
   filename: tools/hook_save_feedback_directive.py
   function: inject_save_feedback_directive
 - agent: DesignDocsAgent
+  filename: tools/hook_accepted_module_actions.py
+  function: inject_accepted_module_actions
+- agent: DesignDocsAgent
   filename: tools/hook_ai_pack_surface_context.py
   function: inject_ai_pack_surface_context
 - agent: DesignDocsAgent

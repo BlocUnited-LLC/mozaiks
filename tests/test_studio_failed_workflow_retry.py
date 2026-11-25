@@ -15,7 +15,6 @@ from fastapi import HTTPException
 from factory_app.app.modules.app_registry.backend.repo import AppRegistryRepo
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
 from factory_app.workflows._shared.platform import build_target
-from factory_app.workflows.AppGenerator.tools import hydrate_app_revision_context as revision
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
 from mozaiksai.core.artifacts.models import BuildRecord, ChangeRequestDoc
 from mozaiksai.core.auth import UserPrincipal
@@ -351,7 +350,7 @@ async def test_retry_seed_runs_canonical_before_chat_baseline_loader(retry, monk
     seed = create_context_container(fresh, authority_policy=policy, writer_id=TRANSITION_ROUTER_WRITER)
     seed.set("artifact_version_id", artifact_id)
     context = create_context_container(seed.snapshot(), authority_policy=policy)
-    monkeypatch.setattr(revision, "get_artifact_store", lambda: retry.store)
+    monkeypatch.setattr("factory_app.workflows._shared.revision_app_source.get_artifact_store", lambda: retry.store)
     monkeypatch.setattr(lifecycle, "resolve_workflow_path", lambda _: ROOT / "factory_app/workflows/AppGenerator")
     manager = lifecycle.get_lifecycle_manager("AppGenerator")
     baseline_hooks = [

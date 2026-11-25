@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, call
 import pytest
 import yaml
 
+from factory_app.workflows._shared import revision_app_source
 from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
 from factory_app.workflows._shared.platform.genesis_import import GenesisImportError
 from factory_app.workflows.AppGenerator.tools import (
@@ -44,6 +45,54 @@ from mozaiksai.core.workflow.task_batches import (
 )
 
 
+async def test_design_prompt_projects_the_original_accepted_actions_after_an_upstream_export(baseline):
+    from factory_app.workflows.DesignDocs.tools.hook_accepted_module_actions import (
+        inject_accepted_module_actions,
+    )
+
+    class Capture:
+        name = "DesignDocsAgent"
+        system_message = "Design this app."
+
+        def update_system_message(self, message):
+            self.system_message = message
+
+    manifest = {
+        "schema_version": "mozaiks.module.v1", "module": {"id": "records", "handler": "backend.handler:RecordsHandler"},
+        "actions": [{
+            "id": "create_record", "handler_method": "create_record", "description": "A private source description.",
+            "input_schema": {"type": "object", "properties": {"body": {"type": "string"}, "label": {"type": "string"}},
+                             "required": ["body"]},
+            "output_schema": {"type": "object", "properties": {"record_id": {"type": "string"}, "summary": {"type": "string"}}},
+        }],
+    }
+    _replace_archive(baseline, {"modules/records/module.yaml": yaml.safe_dump(manifest)})
+    baseline.artifact.lifecycle_status = "current"
+    baseline.artifact.validation_status = "passed"
+    agent = Capture()
+    agent.context_variables = {**baseline.context, "workflow_sequence": "full_rebuild", "artifact_version_id": "upstream-export",
+                               "refinement_request_meta": {"build_family": "app_bundle", "build_record_id": baseline.artifact.id}}
+    await inject_accepted_module_actions(agent, [])
+    assert "Accepted app record artifact_1" in agent.system_message
+    [row] = [json.loads(line) for line in agent.system_message.splitlines() if line.startswith("{")]
+    assert row["module"] == "records" and row["action"] == "create_record"
+    assert row["input"] == {"type": "object", "fields": {"body": "string", "label": "string"}, "required": ["body"]}
+    assert set(row["output"]["fields"]) == {"record_id", "summary"}
+    assert "private source description" not in agent.system_message and "ORIGINAL" not in agent.system_message
+    for failure in ("wrong_owner", "bad_archive", "unaccepted"):
+        agent.system_message = "Design this app."
+        agent.context_variables["user_id"] = "other" if failure == "wrong_owner" else "owner"
+        baseline.artifact.validation_status = "failed" if failure == "unaccepted" else "passed"
+        if failure == "bad_archive":
+            baseline.artifact.files_manifest[0].sha256 = "0" * 64
+        await inject_accepted_module_actions(agent, [])
+        assert "could not be verified" in agent.system_message and "create_record" not in agent.system_message
+    agent.system_message = "Design this app."
+    agent.context_variables = {"build_mode": "genesis"}
+    await inject_accepted_module_actions(agent, [])
+    assert agent.system_message == "Design this app."
+
+
 def _replace_archive(baseline, additions):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
@@ -52,6 +101,31 @@ def _replace_archive(baseline, additions):
     raw = buffer.getvalue()
     baseline.content.get_bundle.return_value = raw
     baseline.artifact.files_manifest[0].sha256 = hashlib.sha256(raw).hexdigest()
+
+
+async def test_existing_compute_field_cannot_silently_become_a_canonical_input(scoped_module_revision):
+    from factory_app.workflows.DesignDocs.tools.hook_accepted_module_actions import (
+        validate_implicit_revision_writes,
+    )
+
+    baseline = scoped_module_revision.baseline
+    context = {**baseline.context, "refinement_request_meta": {"build_family": "app_bundle", "build_record_id": baseline.artifact.id}}
+    baseline.artifact.lifecycle_status = "current"
+    baseline.artifact.validation_status = "passed"
+    path = "modules/records/module.yaml"
+    manifest = yaml.safe_load(baseline.files[path])
+    action = manifest["actions"][0]
+    action.update(description="Create a record", input_schema={
+        "type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"],
+    })
+    _replace_archive(baseline, {path: yaml.safe_dump(manifest)})
+    proposal = json.loads(baseline.files["data/contract.json"])
+    collection = proposal["surfaces"][0]["collections"][0]
+    collection["fields"].append({"name": "summary", "type": "string", "required": False})
+    with pytest.raises(ValueError, match=r"create_record.*Set lifecycle.module_writes explicitly"):
+        await validate_implicit_revision_writes(context, proposal, set())
+    collection["lifecycle"]["module_writes"] = [{"operation": "create", "fields": ["title"]}]
+    await validate_implicit_revision_writes(context, proposal, set())
 
 
 @pytest.fixture
@@ -84,7 +158,7 @@ def baseline(monkeypatch):
         }},
     )
     store = SimpleNamespace(get_build_record=AsyncMock(return_value=artifact))
-    monkeypatch.setattr(revision, "get_artifact_store", lambda: store)
+    monkeypatch.setattr(revision_app_source, "get_artifact_store", lambda: store)
     monkeypatch.setattr("mozaiksai.core.artifacts.get_artifact_store", lambda: store)
     monkeypatch.setattr(content_store, "get_artifact_content_store", lambda: content)
     context = {
@@ -512,7 +586,7 @@ async def test_bad_revision_baseline_fails_without_mutating_generated_files(base
 async def test_imported_genesis_requires_owner_receipt_before_revision_hydration(baseline, monkeypatch):
     baseline.artifact.commit_metadata.metadata["bundle_mode"] = "brownfield_genesis_import"
     check = AsyncMock(side_effect=GenesisImportError("no accepted review receipt"))
-    monkeypatch.setattr(revision, "require_accepted_genesis_baseline", check)
+    monkeypatch.setattr(revision_app_source, "require_accepted_genesis_baseline", check)
     with pytest.raises(GenesisImportError, match="no accepted review receipt"):
         await revision.hydrate_app_revision_context(baseline.context)
     check.assert_awaited_once_with(
@@ -681,7 +755,7 @@ async def test_design_revision_imported_stale_bundle_uses_canonical_receipt(base
     baseline.artifact.commit_metadata.metadata.pop("acceptance")
     baseline.artifact.commit_metadata.metadata["bundle_mode"] = "brownfield_genesis_import"
     check = AsyncMock(side_effect=None if accepted else GenesisImportError("missing receipt"))
-    monkeypatch.setattr(revision, "require_accepted_genesis_baseline", check)
+    monkeypatch.setattr(revision_app_source, "require_accepted_genesis_baseline", check)
     if accepted:
         assert (await revision.hydrate_app_revision_context(baseline.context))["status"] == "hydrated"
     else:

@@ -239,6 +239,72 @@ def test_owner_approval_persists_exact_policy_and_projects_from_summary(monkeypa
     assert "role_id: coordinator" in backend["content"]
 
 
+@pytest.mark.parametrize("writes", [
+    [],
+    [{"operation": "create", "fields": ["status"]}, {"operation": "delete", "fields": []}],
+])
+def test_explicit_module_writes_require_review_and_bind_the_saved_contract(monkeypatch, persistence, writes):
+    bundle = _bundle()
+    bundle["access_policy"] = {"roles": [], "grants": []}
+    bundle["surface_map"]["surfaces"][0]["owned_mutations"] = ["save_review"]
+    collection = bundle["data_contract"]["surfaces"][0]["collections"][0]
+    collection["fields"].append({**collection["fields"][0], "name": "summary", "required": False})
+    collection["lifecycle"]["module_writes"] = writes
+    models, _ = load_workflow_structured_outputs("DesignDocs")
+    lifecycle = models["DataContractLifecycle"]
+    assert lifecycle.model_validate(collection["lifecycle"]).model_dump(mode="json")["module_writes"] == writes
+    assert lifecycle.model_validate({"write_mode": "module_action", "migration_policy": "additive_only"}).module_writes is None
+
+    async def review(_tool, payload, **_kwargs):
+        persistence[0].save_data_contract.assert_not_awaited()
+        persistence[2].assert_not_awaited()
+        points = payload["checkpoints"]
+        if writes:
+            assert "reports.reports allows create_report with client-editable fields status." in points
+            assert "reports.reports allows delete_report with no client-editable fields." in points
+        else:
+            assert "reports.reports has no canonical module write actions." in points
+        return {"action": "approve", "approved": True, "review_id": payload["review_id"]}
+
+    ui = AsyncMock(side_effect=review)
+    monkeypatch.setattr(save_design_doc, "use_ui_tool", ui)
+    context = ownership._context(managed=False)
+    result = inventory._save(context, bundle)
+    assert result["outcome"] == "saved", result
+    ui.assert_awaited_once()
+    summary = persistence[2].await_args.kwargs["summary_payload"]
+    data = persistence[0].save_data_contract.await_args.kwargs["data_contract"]
+    assert data == summary["data_contract"]
+    assert data["surfaces"][0]["collections"][0]["lifecycle"]["module_writes"] == writes
+    assert summary["access_policy_review"]["status"] == "approved"
+    context.set("design_docs_artifact", _record(summary))
+    assert resolve_design_access_policy(context) == bundle["access_policy"]
+    modified = deepcopy(summary)
+    altered = modified["data_contract"]["surfaces"][0]["collections"][0]["lifecycle"]
+    if writes:
+        altered["module_writes"][0]["fields"].append("summary")
+    else:
+        del altered["module_writes"]
+    context.set("design_docs_artifact", _record(modified))
+    with pytest.raises(ValueError, match="review does not match"):
+        resolve_design_access_policy(context)
+
+
+def test_disabled_canonical_mutation_rejected_before_review(monkeypatch, persistence):
+    bundle = _bundle()
+    collection = bundle["data_contract"]["surfaces"][0]["collections"][0]
+    collection["lifecycle"]["module_writes"] = []
+    bundle["surface_map"]["surfaces"][0]["owned_mutations"] = ["save_review", "update_report"]
+    ui = AsyncMock()
+    monkeypatch.setattr(save_design_doc, "use_ui_tool", ui)
+    result = inventory._save(ownership._context(managed=False), bundle)
+    assert result["outcome"] == "revise"
+    assert "update_report" in result["error"] and "owned_mutations" in result["error"]
+    assert "save_review" not in result["error"]
+    ui.assert_not_awaited()
+    persistence[2].assert_not_awaited()
+
+
 def _read_bundle(read_actions):
     bundle = _bundle()
     bundle["surface_map"]["surfaces"][0]["custom_reads"] = ["summarize_reports"]

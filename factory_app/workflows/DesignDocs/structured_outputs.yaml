@@ -182,6 +182,18 @@ models:
         - ui_only
         description: Surface kind that owns the collection.
 
+  DataContractModuleWrite:
+    type: model
+    fields:
+      operation:
+        type: literal
+        values: [create, update, delete]
+        description: Canonical module operation enabled on this collection.
+      fields:
+        type: list
+        items: str
+        description: Exact client-writable field names for this operation. Use an empty list for delete. Exclude identity, ownership, managed timestamps and workflow-computed results.
+
   DataContractLifecycle:
     type: model
     fields:
@@ -192,6 +204,10 @@ models:
         - workflow_write
         - platform_sync
         description: Primary mechanism allowed to write durable records.
+      module_writes:
+        type: optional_list
+        items: DataContractModuleWrite
+        description: For module_action collections, an explicit list enables only the listed operations and input fields. An empty list disables canonical writes. Omit to retain default create, update and delete. Preserve an existing app's approved actions and field inputs when refining it.
       migration_policy:
         type: literal
         values:
@@ -465,8 +481,8 @@ models:
           Do not singularize collection reads or invent a custom alias for them.
           Granting either canonical read requires both across roles; custom read
           grants imply no canonical read grants. Any granted authored collection with
-          module_action writes still requires all three canonical write grants
-          across roles, counted across grant rows rather than per row. For
+          module_action writes requires a grant for each enabled canonical write
+          across roles, counted across grant rows rather than per row. Omitted module_writes enables all three. For
           example, when the approved concept has submitter and approver roles,
           submitter may receive create_<entity> while approver receives
           update_<entity> and delete_<entity> for the same collection. Use this

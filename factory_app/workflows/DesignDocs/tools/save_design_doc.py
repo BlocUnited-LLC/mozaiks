@@ -16,6 +16,9 @@ from factory_app.workflows._shared.surface_ownership import (
     related_entity_name,
     selected_subscription_contract,
 )
+from factory_app.workflows.DesignDocs.tools.hook_accepted_module_actions import (
+    validate_implicit_revision_writes,
+)
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
@@ -27,15 +30,19 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
 from mozaiksai.core.workflow.generator_support.data_contract_fields import (
+    canonical_write_fields,
     normalize_structured_defaults,
     validate_collection_fields,
 )
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
     access_policy_sha256,
+    explicit_module_writes,
     validate_design_page_roles,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    CANONICAL_WRITE_OPERATIONS,
     canonical_read_actions_for_surface,
+    canonical_write_action_id,
 )
 from mozaiksai.core.workflow.generator_support.module_role_grants import (
     PackAuthorization,
@@ -71,21 +78,24 @@ class _AccessPolicyCancellation(BaseModel):
 
 async def _review_access_policy(
     policy: dict[str, Any], *, experience_spec: dict[str, Any], binding: Any, context_variables: Any,
-    pack_authorization: PackAuthorization | None = None,
+    pack_authorization: PackAuthorization | None = None, data_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     page_roles = validate_design_page_roles(experience_spec, policy)
     identities = [row.model_dump() for row in (pack_authorization.identities if pack_authorization else ())]
+    module_writes = explicit_module_writes(data_contract)
     receipt = {
-        "status": "not_required", "policy_sha256": access_policy_sha256(policy, experience_spec, pack_identities=identities),
+        "status": "not_required", "policy_sha256": access_policy_sha256(
+            policy, experience_spec, pack_identities=identities, module_writes=module_writes,
+        ),
         "target_app_id": binding.target_app_id, "build_id": binding.build_id,
         "pack_identities": identities,
     }
-    empty_scope = not identities and not policy["grants"] and not any(page_roles.values())
+    empty_scope = not module_writes and not identities and not policy["grants"] and not any(page_roles.values())
     if empty_scope and not context_variables.get("design_docs_review_requested_changes"):
         return receipt
     user_id, chat_id = _cv_get(context_variables, "user_id"), _cv_get(context_variables, "chat_id")
     if not user_id or not chat_id:
-        raise ValueError("Role grants require an authenticated owner review in this chat")
+        raise ValueError("Design permissions require an authenticated owner review in this chat")
     review_id = uuid4().hex
     labels = {role["role_id"]: role["label"] for role in policy["roles"]}
     checkpoints = [f"{role['label']} ({role['role_id']}): {role['description']}" for role in policy["roles"]]
@@ -95,6 +105,13 @@ async def _review_access_policy(
         f"{labels[grant['role_id']]} may {', '.join(grant['actions'])} on {grant['collection']}."
         for grant in policy["grants"]
     )
+    for row in module_writes:
+        collection = f"{row['module']}.{row['collection']}"
+        if not row["actions"]:
+            checkpoints.append(f"{collection} has no canonical module write actions.")
+        for action, fields in row["actions"].items():
+            inputs = "client-editable fields " + ", ".join(fields) if fields else "no client-editable fields"
+            checkpoints.append(f"{collection} allows {action} with {inputs}.")
     checkpoints.extend(f"Selected pack {row['pack_id']} version {row['version']} ({row['digest']})." for row in identities)
     from factory_app.workflows._shared.pack_selection import rows_for_pack_choices
 
@@ -114,7 +131,7 @@ async def _review_access_policy(
     raw_response = await use_ui_tool(
         "save_design_docs_bundle",
         {
-            "title": "Review app packs and role permissions",
+            "title": "Review app packs, module writes and role permissions" if module_writes else "Review app packs and role permissions",
             "summary": "Approve the selected packs, any explicitly named managed provider, and who may perform the listed read and write actions and open each page. Available offerings are not automatically selected. People without a granted role cannot use restricted actions or pages. Login does not assign roles. Record ownership still applies.",
             "review_id": review_id, "checkpoints": checkpoints,
             "actions": [
@@ -765,6 +782,15 @@ def _validate_design_collections(
             logger.warning(f"DATA_CONTRACT_FIELD_NORMALIZED: {message}")
             field_normalizations.append(message)
         validate_collection_fields(collection, path)
+        writes = canonical_write_fields(collection)
+        if writes is not None:
+            disabled = {canonical_write_action_id(entity, op) for op in CANONICAL_WRITE_OPERATIONS if op not in writes}
+            conflicts = disabled.intersection(surface.get("owned_mutations") or [])
+            if conflicts:
+                raise ValueError(
+                    f"{path}.lifecycle.module_writes disables {sorted(conflicts)} declared in "
+                    f"{surface_id}.owned_mutations. Remove those actions or enable their operations with approved input fields."
+                )
     # One owner/entity and owner/name must identify one collection across both locations.
     list(iter_data_contract_collections(data_contract))
     for surface in surfaces.values():
@@ -1161,6 +1187,7 @@ async def save_design_docs_bundle(
         field_normalizations = _validate_design_collections(
             data_contract, surface_map, context_variables, pack_authorization=pack_authorization,
         )
+        await validate_implicit_revision_writes(context_variables, data_contract, set(pack_authorization.module_packs))
         access_policy = validate_access_policy(
             bundle.get("access_policy"), data_contract=data_contract, design_surface_map=surface_map,
             pack_authorization=pack_authorization,
@@ -1280,7 +1307,7 @@ async def save_design_docs_bundle(
     try:
         access_policy_review = await _review_access_policy(
             access_policy, experience_spec=experience_spec, binding=binding, context_variables=context_variables,
-            pack_authorization=pack_authorization,
+            pack_authorization=pack_authorization, data_contract=data_contract,
         )
         if access_policy_review["status"] == "approve":
             if detach(context_variables.get("pack_selection")) != selection:
