@@ -43,6 +43,8 @@ logger = logging.getLogger("simple_transport.workflow")
 # for an ended run follows its end closely, so the most recent ones suffice.
 _RUN_END_REASON_LIMIT = 256
 
+WORKFLOW_ACCESS_DENIED = "WORKFLOW_ACCESS_DENIED"
+
 
 def _persist_context_kwargs(
     *,
@@ -350,6 +352,8 @@ class WorkflowBridgeMixin:
             has_live_text = live_run is not None and isinstance(message, str) and bool(message.strip())
             if not has_live_text and has_active_session and active_callbacks and not passive_start:
                 rejection = await self._reject_terminal_session(chat_id=chat_id, app_id=app_id)
+                if rejection is None:
+                    rejection = await self._reject_unauthorized_input(chat_id=chat_id, app_id=app_id, user_id=user_id)
                 if rejection is not None:
                     return rejection
                 # Route to existing AG2 session via WebSocket callback mechanism
@@ -703,6 +707,45 @@ class WorkflowBridgeMixin:
         await self.send_error(error_message=reason, error_code=code, chat_id=chat_id)
         return {"status": "error", "chat_id": chat_id, "message": reason, "error_code": code}
 
+    async def _reject_unauthorized_input(
+        self, *, chat_id: str, app_id: str, user_id: str | None,
+    ) -> dict[str, Any] | None:
+        """Refuse input to a running chat its sender may no longer run.
+
+        A start or resume asks the host before executing. Input to a run that is
+        still live starts no new execution, so ask here, for the workflow the chat
+        was created with rather than the one the request names.
+        """
+        from mozaiksai.core.data.persistence.persistence_manager import SERVER_OWNED_SESSION_FIELDS
+        from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+
+        hooks = get_platform_hooks()
+        if not hooks.has_chat_session_fields:
+            return None
+        sender = user_id or "anonymous"
+        try:
+            coll = await self._get_or_create_persistence_manager()._coll()
+            doc = await coll.find_one(
+                {"_id": chat_id, **build_app_scope_filter(app_id)},
+                {"workflow_name": 1, **{key: 1 for key in SERVER_OWNED_SESSION_FIELDS}},
+            )
+            if not isinstance(doc, dict):
+                raise PermissionError("Workflow session is not available")
+            await hooks.call_chat_session_fields(
+                app_id=app_id, user_id=sender, workflow_name=doc["workflow_name"], chat_id=chat_id,
+                phase="resume",
+                session_fields={key: doc[key] for key in SERVER_OWNED_SESSION_FIELDS if key in doc},
+            )
+        except Exception as exc:
+            logger.warning("WORKFLOW_INPUT_REFUSED chat=%s error=%s", chat_id, type(exc).__name__)
+            reason, code = "You can no longer continue this workflow.", WORKFLOW_ACCESS_DENIED
+            await self.send_error(error_message=reason, error_code=code, chat_id=chat_id)
+            return {
+                "status": "error", "chat_id": chat_id, "route": "access_denied", "input_accepted": False,
+                "error_code": code, "message": reason,
+            }
+        return None
+
     async def _reject_terminal_session(self, *, chat_id: str, app_id: str) -> dict[str, Any] | None:
         rejection, _ = await self._resumable_chat_model(chat_id=chat_id, app_id=app_id)
         return rejection
@@ -904,6 +947,8 @@ class WorkflowBridgeMixin:
         )
 
         rejection = await self._reject_terminal_session(chat_id=chat_id, app_id=app_id)
+        if rejection is None:
+            rejection = await self._reject_unauthorized_input(chat_id=chat_id, app_id=app_id, user_id=user_id)
         if rejection is not None:
             return rejection
 
@@ -1110,7 +1155,9 @@ class WorkflowBridgeMixin:
                         app_id=app_id,
                         initial_agent_name_override=initial_agent_name_override,
                     )
-                    if result.get("route") == "passive_reopen" or result.get("error_code") == "WORKFLOW_MODEL_UNAVAILABLE":
+                    if result.get("route") == "passive_reopen" or result.get("error_code") in {
+                        "WORKFLOW_MODEL_UNAVAILABLE", WORKFLOW_ACCESS_DENIED,
+                    }:
                         # Observation/refusal is not an execution outcome.
                         return result
                     run_status = str(result.get("run_status") or "").strip().lower()

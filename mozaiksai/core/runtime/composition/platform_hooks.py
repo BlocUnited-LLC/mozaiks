@@ -420,6 +420,10 @@ class PlatformHookRegistry:
                 return False, "Chat prerequisite check failed"
         return True, None
 
+    @property
+    def has_chat_session_fields(self) -> bool:
+        return bool(self._chat_session_fields_hooks)
+
     async def call_chat_session_fields(
         self,
         app_id: str,
