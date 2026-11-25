@@ -20,6 +20,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.session.build_binding import RefinementModel
 from mozaiksai.core.workflow.outcome_feedback import (
     WorkflowFeedbackEvidence,
     WorkflowFeedbackRenderReceipt,
@@ -128,6 +129,7 @@ class ChatSessionDoc(BaseModel):
     user_id: str
     workflow_model: str | None = None
     workflow_model_rebind_pending: bool = False
+    workflow_run_model: RefinementModel | None = None
     status: WorkflowStatus  # stored as int (0/1/2)
     created_at: datetime
     last_updated_at: datetime

@@ -34,7 +34,7 @@ import json
 import logging
 import os
 import time
-from typing import Any
+from typing import Any, cast, get_args
 
 from pydantic import BaseModel
 
@@ -43,6 +43,7 @@ from mozaiksai.core.adapters.llm_fallback import (
     DEFAULT_MODELS_BY_API_TYPE,
     MODEL_API_KEY_ENV_NAMES,
     build_fallback_config_list,
+    resolve_configured_provider_key,
     resolve_structured_output_mode,
 )
 from mozaiksai.core.core_config import get_mongo_client
@@ -114,6 +115,19 @@ async def workflow_model_catalog() -> tuple[str | None, dict[str, ProviderConfig
             if index == 0:
                 default = model_id
     return default, catalog
+
+
+async def resolve_workflow_model(model: str) -> ProviderConfig | None:
+    """Resolve an immutable run model or an editable chat catalog ID."""
+    from mozaiksai.core.session.build_binding import RefinementModel, refinement_model_config
+
+    if model in get_args(RefinementModel):
+        config = refinement_model_config(cast(RefinementModel, model))
+        key = resolve_configured_provider_key(config["api_type"])
+        return {**config, "api_key": key} if key else None
+
+    _, catalog = await workflow_model_catalog()
+    return catalog.get(model)
 
 
 async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:

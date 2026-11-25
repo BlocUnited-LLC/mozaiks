@@ -21,7 +21,7 @@ import asyncio
 import logging
 from collections import OrderedDict
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, get_args
 
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.runtime.composition.extensions import get_workflow_lifecycle_hooks
@@ -433,12 +433,17 @@ class WorkflowBridgeMixin:
                     if preference and preference.rebind_pending and is_resume_request:
                         return await self._reject_workflow_model(chat_id, "Send a message to continue with your selected model.")
                     if workflow_model is not None:
-                        from mozaiksai.core.workflow.llm_config import workflow_model_catalog
+                        from mozaiksai.core.session.build_binding import RefinementModel
+                        from mozaiksai.core.workflow.llm_config import resolve_workflow_model
 
-                        _, catalog = await workflow_model_catalog()
-                        if workflow_model not in catalog:
+                        if await resolve_workflow_model(workflow_model) is None:
+                            hint = (
+                                "Restore the configured provider to continue this run."
+                                if workflow_model in get_args(RefinementModel)
+                                else "Choose another model or Workflow default."
+                            )
                             return await self._reject_workflow_model(
-                                chat_id, "The saved chat model is unavailable. Choose another model or Workflow default.",
+                                chat_id, f"The saved chat model is unavailable. {hint}",
                             )
                     if (
                         not is_resume_request

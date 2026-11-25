@@ -668,6 +668,9 @@ export class WebSocketApiAdapter extends ApiAdapter {
         if (sessionOptions?.forceNew === true) {
           body.force_new = true;
         }
+        if (typeof sessionOptions?.runModel === 'string' && sessionOptions.runModel.trim()) {
+          body.run_model = sessionOptions.runModel.trim();
+        }
         const response = await authFetch(`${baseUrl}/api/chats/${encodeURIComponent(appId)}/${encodeURIComponent(actualworkflowname)}/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -852,6 +855,9 @@ export class RestApiAdapter extends ApiAdapter {
         }
         if (sessionOptions?.forceNew === true) {
           body.force_new = true;
+        }
+        if (typeof sessionOptions?.runModel === 'string' && sessionOptions.runModel.trim()) {
+          body.run_model = sessionOptions.runModel.trim();
         }
         const response = await authFetch(`${baseUrl}/api/chats/${encodeURIComponent(appId)}/${encodeURIComponent(actualworkflowname)}/start`, {
           method: 'POST',
