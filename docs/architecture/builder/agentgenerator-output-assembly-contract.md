@@ -87,6 +87,10 @@ step copies them into an active app root's `workflows/` directory.
 | `PackMetadataAgent` | Produces pack-level `extension_registry.json` metadata after workflow bundles complete |
 | `DownloadAgent` | Triggers `generate_and_download` after pack metadata is ready |
 
+The download agent emits `agent_message`. The export tool reads the completed
+workflow files from `workflow_bundle_results` and asks for confirmation before
+creating the archive. External storage is disabled by default.
+
 ---
 
 ## Task Batch: `workflow_generation_tasks`
