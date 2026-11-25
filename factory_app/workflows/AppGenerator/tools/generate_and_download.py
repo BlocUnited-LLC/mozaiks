@@ -596,6 +596,9 @@ async def _register_app_bundle_artifact_version(
             if isinstance(validation_result, dict):
                 sandbox_session_id = validation_result.get("sandbox_session_id")
                 sandbox_provider = validation_result.get("sandbox_provider")
+        except ValueError:
+            # An invalid declared parent must not turn a revision into a parentless draft.
+            raise
         except Exception:
             parent_version_id = None
             validation_status_raw = None

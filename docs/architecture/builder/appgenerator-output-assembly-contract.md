@@ -64,6 +64,13 @@ Upstream dependencies remain in `canonical_inputs_version`, separate
 from the app's version lineage. A carried `revision_source_artifact_version_id`
 also cannot turn a non-revision build into an app revision.
 
+For a full rebuild or conceptual replan requested against an app bundle, the
+original request's `build_record_id` identifies the implementation parent until
+the baseline loader pins one explicitly. Intermediate exports may advance
+`artifact_version_id`. Assembly reads workspace-owned files from the verified
+parent archive, while the newly generated workflow bundle remains a separate
+input to the child app.
+
 This selection rule does not repair previously persisted lineage. Existing
 records and their acceptance evidence remain unchanged.
 

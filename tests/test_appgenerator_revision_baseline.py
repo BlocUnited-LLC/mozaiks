@@ -19,7 +19,10 @@ from factory_app.workflows.AppGenerator.tools import (
     generate_and_download,
 )
 from factory_app.workflows.AppGenerator.tools import hydrate_app_revision_context as revision
-from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import (
+    _verified_revision_source,
+    assemble_app_tasks,
+)
 from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
 from factory_app.workflows.AppGenerator.tools.code_file_utils import save_generated_code
 from factory_app.workflows.AppGenerator.tools.generate_and_download import (
@@ -539,6 +542,44 @@ def test_explicit_rebuild_retains_revision_parent_selection(baseline, sequence, 
     assert revision.revision_source_artifact_id(baseline.context) == (
         "pinned_app" if pinned else "original_app"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sequence", ["full_rebuild", "conceptual_replan"])
+async def test_cross_stage_rebuild_reads_original_app_archive_and_keeps_new_workflow(baseline, sequence):
+    context = {
+        **baseline.context, "workflow_sequence": sequence, "artifact_kind": "app_bundle",
+        "artifact_version_id": "new_workflow", "workflow_bundle_artifact_version_id": "new_workflow",
+        "refinement_request_meta": {"build_family": "app_bundle", "build_record_id": baseline.artifact.id},
+    }
+    workflow = baseline.artifact.model_copy(update={
+        "id": "new_workflow", "build_family": "workflow_bundle", "build_key": "new_workflow",
+    })
+    records = {baseline.artifact.id: baseline.artifact, workflow.id: workflow}
+    baseline.store.get_build_record.side_effect = lambda **params: records[params["build_record_id"]]
+
+    assert (await revision.hydrate_app_revision_context(context))["reason"] == "explicit_rebuild"
+    assert await _verified_revision_source({}, context) == baseline.files
+    baseline.store.get_build_record.assert_awaited_once_with(
+        app_id="customer-app", build_record_id=baseline.artifact.id,
+    )
+    assert context["workflow_bundle_artifact_version_id"] == workflow.id
+    assert context["artifact_version_id"] == workflow.id
+    assert context["run_build_binding"]["build_id"] == "new-build"
+    assert "generated_files" not in context
+    context["artifact_version_id"] = "new_app_draft"
+    assert revision.revision_source_artifact_id(context) == baseline.artifact.id
+
+
+@pytest.mark.asyncio
+async def test_rebuild_with_incomplete_original_app_request_cannot_use_workflow_as_parent(baseline):
+    baseline.context.update(
+        workflow_sequence="full_rebuild", artifact_version_id="new_workflow",
+        refinement_request_meta={"build_family": "app_bundle"},
+    )
+    with pytest.raises(ValueError, match="revision_baseline_binding_missing"):
+        await revision.read_bound_revision_files(baseline.context)
+    baseline.store.get_build_record.assert_not_awaited()
 
 
 def _upstream_design_revision(baseline, *, bundles):

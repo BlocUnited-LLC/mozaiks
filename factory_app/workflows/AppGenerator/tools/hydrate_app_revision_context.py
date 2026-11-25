@@ -56,7 +56,15 @@ def revision_source_artifact_id(context_variables: Any) -> str | None:
         return None
     if _first_generation(context_variables):
         return None
-    source = context_variables.get("revision_source_artifact_version_id") or context_variables.get("artifact_version_id")
+    source = context_variables.get("revision_source_artifact_version_id")
+    if not source and context_variables.get("workflow_sequence") in {"conceptual_replan", "full_rebuild"}:
+        # Rebuilds skip app hydration. Their journey ID advances on each upstream export.
+        request = context_variables.get("refinement_request_meta")
+        if isinstance(request, Mapping) and request.get("build_family") == "app_bundle":
+            source = request.get("build_record_id")
+            if not isinstance(source, str) or not source.strip():
+                raise ValueError("revision_baseline_binding_missing")
+    source = source or context_variables.get("artifact_version_id")
     return source if isinstance(source, str) and source else None
 
 
