@@ -153,6 +153,11 @@ class TestScoreDomain:
 # ---------------------------------------------------------------------------
 
 class TestSelectTopDomains:
+    def test_no_unmatched_domains_in_planner_guidance(self):
+        catalog = {"domains": {"ecommerce": {}, "saas": {}}}
+        assert _select_top_domains(catalog, "") == []
+        assert _select_top_domains(catalog, "an ecommerce store") == [("ecommerce", {})]
+
     def test_empty_domains_returns_empty(self):
         catalog = {"domains": {}}
         assert _select_top_domains(catalog, "anything") == []
