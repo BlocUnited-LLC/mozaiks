@@ -1,1 +1,1 @@
-export { WorkspaceLayout, default } from './WorkspaceLayout.jsx'
+export { WorkspaceLayout, useWorkspaceAppSections, default } from './WorkspaceLayout.jsx'
