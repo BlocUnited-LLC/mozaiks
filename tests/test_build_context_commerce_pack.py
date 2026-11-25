@@ -66,6 +66,8 @@ def test_commerce_contract_required_outputs_exist_under_templates() -> None:
     assert contract["contract_id"] == "commerce"
     assert contract["contract_type"] == "build_pack_instructions"
     assert contract["facades"] == []
+    payments = next(item for item in contract["cross_pack_integrations"] if item["pack"] == "mozaikspay")
+    assert payments["optional"] is True
 
     missing = [
         output["path"]
