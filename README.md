@@ -346,6 +346,14 @@ this wall.
 
 </div>
 
+The wall above is generated from GitHub's contributor data, which credits commits
+that have been merged into the default branch and whose author email is linked
+to a GitHub account. A new contribution can take a little while to appear after
+it merges. Issues, bug reports, and reviews are valued just as much, even though
+they do not produce an avatar on their own. See the
+[contributors graph](https://github.com/BlocUnited-LLC/mozaiks/graphs/contributors)
+and [how GitHub counts contributors](https://docs.github.com/en/repositories/viewing-activity-and-data-for-your-repository/viewing-a-projects-contributors).
+
 This project follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
