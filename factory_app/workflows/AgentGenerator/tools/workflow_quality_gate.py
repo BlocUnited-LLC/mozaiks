@@ -26,6 +26,8 @@ from factory_app.workflows._shared.workflow_integration import (
 from mozaiksai.core.workflow.context.frozen import detach
 
 from .outcome_materialization import materialize_workflow_outcomes
+from .pattern_selection import selection_fingerprint
+from .result_write_materialization import materialize_workflow_result_write
 from .statusbar_materialization import materialize_workflow_statusbar
 
 REQUIRED_WORKFLOW_FILES = {
@@ -434,6 +436,10 @@ def validate_workflow_bundle_structure(
         report: dict[str, Any] = {"workflow_name": workflow_name, "errors": []}
         workflow_reports.append(report)
 
+        try:
+            entry = materialize_workflow_result_write(entry, spec)
+        except (ValueError, TypeError, KeyError, yaml.YAMLError) as exc:
+            report["errors"].append(f"result write materialization failed: {exc}")
         try:
             entry = materialize_workflow_outcomes(entry)
         except (ValueError, TypeError, KeyError, yaml.YAMLError) as exc:
@@ -850,6 +856,15 @@ def validate_agentgenerator_semantic_drift(
     }
 
 
+def materialize_bundle_entries(entries: list[dict[str, Any]], expected: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    specs = _expected_by_name(bundle_entries=entries, expected_workflows=expected)
+    result = []
+    for entry in entries:
+        compiled = materialize_workflow_result_write(entry, specs[entry["workflow_name"]])
+        result.append(materialize_workflow_statusbar(materialize_workflow_outcomes(compiled)))
+    return result
+
+
 def run_workflow_bundle_quality_gate(
     *,
     bundle_entries: list[dict[str, Any]],
@@ -862,15 +877,23 @@ def run_workflow_bundle_quality_gate(
         expected_workflows=expected,
     )
     if structure.get("valid"):
-        bundle_entries = [
-            materialize_workflow_statusbar(materialize_workflow_outcomes(entry)) for entry in bundle_entries
-        ]
+        bundle_entries = materialize_bundle_entries(bundle_entries, expected)
     semantic_drift = validate_agentgenerator_semantic_drift(
         bundle_entries=bundle_entries,
         expected_workflows=expected,
         context_variables=context_variables,
     )
     errors = list(structure.get("errors") or []) + list(semantic_drift.get("errors") or [])
+    if context_variables is not None:
+        selection = _context_get(context_variables, "PatternSelection") or {}
+        reviewed = {item["name"]: item["result_write_plans"] for item in selection.get("workflows", [])
+                    if item.get("result_write_plans")}
+        requested = {item["name"]: item["result_write_plans"] for item in expected if item.get("result_write_plans")}
+        if reviewed or requested:
+            receipt = _context_get(context_variables, "workflow_plan_review") or {}
+            if (reviewed != requested or receipt.get("status") != "approved"
+                    or receipt.get("selection_hash") != selection_fingerprint(selection)):
+                errors.append("Workflow result bindings require the exact approved workflow plan review")
     if not errors:
         try:
             extract_workflow_integration_metadata_from_bundle_entries(

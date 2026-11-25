@@ -2629,6 +2629,27 @@ models:
         items: ModuleEvent
         description: Events this module is allowed to publish.
 
+  ModuleReactionResultWrite:
+    type: model
+    description: One host-scoped result action for the private record inserted by a declared source action.
+    fields:
+      source_action:
+        type: str
+        description: Action on this module that inserts the record and emits the triggering event.
+      action:
+        type: str
+        description: Internal action on the same module that commits the validated result.
+      collection:
+        type: str
+        description: Declared per-user collection that owns the triggering record.
+      record_key:
+        type: str
+        description: Stable string key of the inserted record; required in the event payload schema.
+      fields:
+        type: list
+        items: str
+        description: Exact writable result fields declared in the collection, output model and closed receiver input.
+
   ModuleReactionTarget:
     type: model
     fields:
@@ -2651,6 +2672,13 @@ models:
         - str
         - 'null'
         description: Capability id to invoke when kind=capability.
+      result_write:
+        type: union
+        variants:
+        - ModuleReactionResultWrite
+        - 'null'
+        default: null
+        description: Copy the exact event-specific result write from the pinned workflow integration contract only on the owning capability target.
       notification_id:
         type: union
         variants:

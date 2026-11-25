@@ -130,6 +130,7 @@ agents:
       2. **Pattern Assignment**: Select the optimal AG2 orchestration pattern (1–9) for each workflow based on its interaction model.
       3. **Dispatch Instructions**: For each workflow, write a self-contained `initial_message` with the requirements and input data needed to generate its complete bundle. Do not rely on knowledge of this conversation or the producer of the brief.
       4. **Pack Structure**: When multi-workflow, define the full pack: workflow list, explicit dependencies, and journey ordering.
+      5. When the user requests an automatic write to the private record being created, declare one result_write_plans entry per triggering insert. Name the local structured-result agent, exact event, owning module, source action, private collection, stable record key, internal result action, and result fields. Respect the existing module and data contracts. This binding is shown in workflow plan review.
   - id: pack_partition_concept
     heading: '[PACK PARTITIONING]'
     content: |-
@@ -518,6 +519,7 @@ agents:
         one-line docstring or comment; never start a triple-quoted string that is
         not closed in the same file. Do not emit explanatory prose inside code.
       - Reuse declared module capabilities and public runtime APIs. Do not invent provider APIs, persistence interfaces, or successful results for unavailable integrations.
+      - For an approved automatic update of the triggering private record, use the supplied result_write_plans in this task. Declare every exact BackendOnly event trigger. Bind the named agent in structured_outputs.yaml to a model with exactly the approved required result fields. Factory materializes the automatic result tool and Python adapter. Omit those owned files and bindings from your output. The agent receives the triggering content and returns the result. The host selects the record and authorizes the write.
       - Missing external configuration must produce an explicit actionable error. Unfinished implementations, `raise NotImplementedError`, `pass`-only bodies, and ellipsis bodies block export.
       - `tools.yaml` entries must use the runtime schema:
         ```yaml

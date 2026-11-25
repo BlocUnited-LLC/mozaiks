@@ -1330,6 +1330,11 @@ models:
   WorkflowInPack:
     type: model
     fields:
+      result_write_plans:
+        type: list
+        items: WorkflowResultWritePlan
+        default: []
+        description: For automatic enrichment, one reviewed result action per triggering private record insert. Otherwise use [].
       name:
         type: str
         description: Workflow name in PascalCase (e.g., 'ITSupportBot', 'KnowledgeBase')
@@ -2381,6 +2386,43 @@ models:
         type: list
         items: str
         description: Nonempty unique context names already defined and exposed to this agent, with effective model_visible enabled.
+
+  ModuleReactionResultWrite:
+    type: model
+    description: One host-scoped result action for the private record inserted by a declared source action.
+    fields:
+      source_action:
+        type: str
+        description: Action on this module that inserts the record and emits the triggering event.
+      action:
+        type: str
+        description: Internal action on the same module that commits the validated result.
+      collection:
+        type: str
+        description: Declared per-user collection that owns the triggering record.
+      record_key:
+        type: str
+        description: Stable string key of the inserted record; required in the event payload schema.
+      fields:
+        type: list
+        items: str
+        description: Exact writable result fields declared in the collection, output model and closed receiver input.
+
+  WorkflowResultWritePlan:
+    type: model
+    fields:
+      agent:
+        type: str
+        description: Local structured-output agent whose validated result fields are committed automatically.
+      event_type:
+        type: str
+        description: Exact event declared in this BackendOnly workflow's orchestrator triggers.
+      module_id:
+        type: str
+        description: Owning module that inserts the source record and implements the result action.
+      result_write:
+        type: ModuleReactionResultWrite
+        description: The approved event-to-result write binding passed to AppGenerator.
 
   WorkflowBundleBuilderOutput:
     type: model

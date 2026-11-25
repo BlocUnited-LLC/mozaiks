@@ -621,7 +621,7 @@ agents:
         - Do not declare helper files for arbitrary service splitting, persistence, authorization, typed shapes, or generic business logic that belongs in the canonical module layers; require implementation tasks to emit only helper files declared in the approved build plan.
       12g. **materialization authority rule**:
         - Every build task must own real application files. Do not plan an `agent_backend_integration` build task: this retired type has no AppGenerator-owned materialization output.
-        - A workflow calling module actions via `backend_request()` does not require a separate AppGenerator integration task.
+        - For an approved automatic result on the triggering private record, the generated workflow's integration contract names the exact event, module, source action, result action, collection, record key, and result fields. Build those contracts into the normal module/data/service tasks. The source action emits the inserted record's stable key, and the internal receiver delegates to the host-scoped result commit.
       13. Keep `generation_order` concrete and usable by downstream agents. Prefer high-level phases like:
          - backend-foundation
          - data-models

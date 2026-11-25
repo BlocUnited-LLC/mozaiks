@@ -459,6 +459,7 @@ def test_studio_trigger_endpoint_accepts_refinement_trigger_payload(monkeypatch,
             "change_intent": {
                 "change_class": "feature",
                 "branding_intent": None,
+                "requires_workflow_revision": False,
                 "source": "llm",
                 "signals": ["new_capability", "app_extension"],
                 "rationale": "Adding an export action extends the existing app bundle.",
@@ -1612,8 +1613,12 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
     assert snapshot["lifecycle_state"] == "active"
 
 
-@pytest.mark.parametrize("change_class", ["design", "feature", "core"])
-def test_selected_file_scope_rejects_broader_classification_when_surface_refinement_is_unavailable(monkeypatch, _owned_build_target, change_class):
+@pytest.mark.parametrize(("change_class", "requires_workflow_revision"), [
+    ("design", False), ("feature", False), ("core", False), ("feature", True),
+])
+def test_selected_files_block_broader_work_when_no_app_only_surface_is_eligible(
+    monkeypatch, _owned_build_target, change_class, requires_workflow_revision,
+):
     from mozaiksai.core.auth import reset_auth_adapter
     from mozaiksai.hosts import studio
 
@@ -1626,10 +1631,11 @@ def test_selected_file_scope_rejects_broader_classification_when_surface_refinem
         llm_profiles={"codegen": {"llm_config": {"model": "test-model"}}},
         classifier={"enabled": True, "llm_profile": "codegen"},
         coding={"enabled": True, "llm_profile": "codegen"},
-        contract_surface={"enabled": False},
+        contract_surface={"enabled": requires_workflow_revision, "llm_profile": "codegen"},
     ))
     classifier = AsyncMock(side_effect=_async_classifier(
         change_class=change_class, rationale="Requires broader contracts", confidence=0.95, signals=[],
+        requires_workflow_revision=requires_workflow_revision,
     ))
     monkeypatch.setattr(harness._refinement_resolver, "_classifier", SimpleNamespace(classify=classifier))
     planner = AsyncMock(side_effect=AssertionError("Must not plan beyond the selected file"))
@@ -2675,13 +2681,16 @@ async def test_studio_index_failure_is_persisted_without_logging_failure(monkeyp
     assert failed.completed_at is not None
 
 
-def _async_classifier(*, change_class: str, rationale: str, confidence: float, signals: list[str]):
+def _async_classifier(
+    *, change_class: str, rationale: str, confidence: float, signals: list[str], requires_workflow_revision: bool = False,
+):
     async def _run(**kwargs):  # noqa: ANN003
         return SimpleNamespace(
             change_class=change_class,
             rationale=rationale,
             confidence=confidence,
             signals=signals,
+            requires_workflow_revision=requires_workflow_revision,
         )
 
     return _run

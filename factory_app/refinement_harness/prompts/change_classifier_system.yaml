@@ -8,6 +8,16 @@ content: |
   - feature: additive capability within the current product direction
   - core: change in value proposition, target user, product identity, business model, architecture direction, or anything that should reopen ValueEngine
 
+  For a request about an existing app, set requires_workflow_revision to true
+  when the behavior needs a new or changed AI workflow as well as app wiring.
+  Examples include asking an assistant to produce a result on a business
+  event, changing which event starts a workflow, or changing what a workflow
+  saves on a record. Determine this from the intended behavior. A UI edit,
+  change to ordinary CRUD, or mention of an existing assistant in copy is
+  insufficient. Preserve core classification when the approved concept must
+  change. Return false when the existing workflow can be reused unchanged
+  and the request only affects its presentation.
+
   ## Branding intent
 
   Also return `branding_intent`, either null or exactly one of the following.

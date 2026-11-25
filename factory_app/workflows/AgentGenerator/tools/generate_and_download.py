@@ -33,6 +33,8 @@ from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
 
 from .export_agent_workflow import export_agent_workflow_to_github
 from .workflow_quality_gate import (
+    expected_workflows_from_context,
+    materialize_bundle_entries,
     prepare_workflow_bundle_repair,
     run_workflow_bundle_quality_gate,
 )
@@ -452,12 +454,7 @@ async def generate_and_download(
             "workflow_bundle_repair": repair_result,
             "validation_errors": quality_gate.get("errors") or [],
         }
-    from .outcome_materialization import materialize_workflow_outcomes
-    from .statusbar_materialization import materialize_workflow_statusbar
-
-    bundle_entries = [
-        materialize_workflow_statusbar(materialize_workflow_outcomes(entry)) for entry in bundle_entries
-    ]
+    bundle_entries = materialize_bundle_entries(bundle_entries, expected_workflows_from_context(context_variables))
     if context_variables is not None and hasattr(context_variables, "set"):
         by_name = {entry["workflow_name"]: entry for entry in bundle_entries}
         context_variables.set("workflow_bundle_results", {

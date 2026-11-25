@@ -30,6 +30,7 @@ class ChangeClassifierResult(BaseModel):
 
     change_class: ChangeClassLiteral
     branding_intent: BrandingIntent | None = None
+    requires_workflow_revision: bool = False
     rationale: str = Field(min_length=1)
     confidence: float = Field(ge=0.0, le=1.0)
     signals: list[str]

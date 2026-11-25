@@ -40,6 +40,23 @@ enforces plan grants (#770). AgentGenerator rejects a saved contract that still
 selects a workflow pricing feature and asks for SubscriptionContractDesigner to
 rerun. Named event triggers carry an explicit capability ID regardless of pricing.
 
+### Automatic results on a triggering private record
+
+An event workflow that saves a result on a newly created private record declares
+`result_write_plans` in its `WorkflowInPack` specification. Workflow plan review
+shows the source module action, event, collection, record key, receiving action,
+local agent, and allowed output fields. The review hash covers those values.
+The builder gives the specified agent a flat structured-output model with exactly
+the required result fields. Factory adds its workflow-local automatic tool and
+pins the result plan in the workflow bundle's integration metadata.
+
+AppGenerator uses that same plan to compile the matching capability reaction
+and the internal module action's handler and service. Assembly checks both
+against the declared event, actions, and private data collection. During
+execution the host supplies the triggering record, checks the result against
+the receiver input schema, and dispatches the internal action. The generated
+service calls `ctx.commit_workflow_result(values)` with the validated fields.
+
 ### Apps Without AI Workflows
 
 An explicit `workflows: []`, `is_multi_workflow: false`, and non-empty

@@ -20,7 +20,7 @@ archetypes:
       BackendOnly autonomous review workflow. Triggered by a domain event when a
       record is submitted for review. Evaluates the record using LLM reasoning,
       produces a structured decision (approved/rejected/revision_requested), and
-      calls record_review_result on the owning module to persist the outcome.
+      returns the approved review fields for the owning module.
     select_when:
       - "The app has an ai_review_pack capability — autonomous evaluation without a human reviewer per item."
       - "Records are submitted for review and need a structured decision written back to the module."
@@ -50,13 +50,13 @@ archetypes:
           structured_outputs_required: true
       - ResultAgent:
           role: >
-            Calls record_review_result on the owning module with the supplied structured review
-            decision and feedback. Confirms the write succeeded. Emits NEXT to close.
+            Returns the approved review fields as structured output. An insert-bound
+            result plan commits these fields on the private triggering record.
           max_consecutive_auto_reply: 4
-          structured_outputs_required: false
+          structured_outputs_required: true
     hard_constraints:
       - "workflow_startup_mode: BackendOnly — no user chat session."
-      - "ResultAgent MUST call record_review_result — the module owns the persistence."
+      - "For automatic persistence on record creation, use the reviewed result_write plan. Otherwise present the review via the declared delivery surface."
       - "Never write review state directly to the database — always via module action."
       - "Decision must be one of: approved, rejected, revision_requested."
 
@@ -64,7 +64,7 @@ archetypes:
     summary: >
       BackendOnly autonomous analysis workflow. Triggered when a record is created.
       Enriches the record with AI-derived analysis (sentiment, classification, scoring,
-      extraction) and writes the result back to the owning module via store_analysis_result.
+      extraction) and returns the approved analysis fields for that record.
     select_when:
       - "The app has an ai_analysis_pack capability — background enrichment on record creation."
       - "Records need AI-derived fields populated automatically after creation."
@@ -93,20 +93,20 @@ archetypes:
           structured_outputs_required: true
       - ResultWriterAgent:
           role: >
-            Calls store_analysis_result on the owning module with the supplied typed analysis_result object.
-            Confirms the write succeeded.
+            Returns the approved analysis fields as structured output for the
+            result_write plan bound to the newly inserted private record.
           max_consecutive_auto_reply: 3
-          structured_outputs_required: false
+          structured_outputs_required: true
     hard_constraints:
       - "workflow_startup_mode: BackendOnly — triggered by domain.{module_id}.created event."
-      - "ResultWriterAgent MUST call store_analysis_result — the module owns the persistence."
+      - "Persist only the reviewed fields through the owning module's internal result action."
       - "Never write analysis fields directly — always via the module action contract."
 
   ai_extraction:
     summary: >
       BackendOnly batch extraction workflow. Triggered when a batch of documents or
       records is submitted for processing. Fans out parallel extraction workers across
-      the batch items and writes results back to the owning module.
+      the batch items and returns the extraction results.
     select_when:
       - "The app has an ai_extraction_pack capability — parallel processing of document batches."
       - "Multiple records or files need to be processed in parallel with results persisted."
@@ -137,14 +137,14 @@ archetypes:
           structured_outputs_required: true
       - SynthesisAgent:
           role: >
-            Collects all worker results. Calls store_extraction_results on the owning
-            module with the batch_id and complete results array.
+            Collects worker results into the declared structured output. A reviewed
+            result_write may store the aggregate on one newly inserted private batch record.
           max_consecutive_auto_reply: 4
-          structured_outputs_required: false
+          structured_outputs_required: true
     hard_constraints:
       - "workflow_startup_mode: BackendOnly — triggered by domain.{module_id}.batch_submitted event."
       - "task_batches.yaml is required for parallel ExtractionWorkerAgent dispatch."
-      - "SynthesisAgent MUST call store_extraction_results — the module owns the persistence."
+      - "A result write addresses only the originating batch record. Individual batch items require separately authorized operations."
       - "Never write extraction results directly — always via the module action contract."
 
   proposal_only:

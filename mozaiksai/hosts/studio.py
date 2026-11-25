@@ -4358,6 +4358,7 @@ async def trigger_workflow(
         allow_surface = (
             not workflow_continuation
             and not branding_workflow
+            and not refinement_decision.change_intent.requires_workflow_revision
             and orchestration_control.contract_surface_enabled()
             and refinement_decision.change_intent.change_class.value in {"design", "feature"}
             and refinement_request.build_family == "app_bundle"

@@ -649,6 +649,17 @@ The Refinement Engine does not declare `affected_workflows` or
 `affected_declarative_families`. Those are owned by the sequence in
 `extension_registry.json`.
 
+For an existing app, the change classifier sets `requires_workflow_revision`
+when the request needs a new or changed workflow and corresponding app wiring.
+For example, suggesting a title when someone creates a note needs both a
+workflow and a subscription to the create event. The Factory app-bundle policy
+selects its declared `workflow_revision_route`, which starts at DesignDocs
+so an app that previously had no workflow can review the new workflow surface.
+AgentGenerator then works from that design and AppGenerator wires its events
+and actions through the existing design revision sequence. Studio skips
+app-only surface regeneration for that route.
+A change to the approved product concept still starts at ValueEngine.
+
 ### Staleness-aware classification
 
 The classifier reads `get_stale_artifact_families` before finalising the change

@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Annotated, Any
 
-from factory_app.workflows._shared.workflow_integration import validate_pricing_workflow_features
+from factory_app.workflows._shared.workflow_integration import (
+    validate_pricing_workflow_features,
+    workflow_result_write_plans,
+)
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
+
+
+def selection_fingerprint(selection: dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(selection, sort_keys=True).encode()).hexdigest()
 
 
 def validate_selection(raw_selection: Any, context_variables: Any) -> dict[str, Any]:
@@ -21,6 +30,7 @@ def validate_selection(raw_selection: Any, context_variables: Any) -> dict[str, 
     if len(set(names)) != len(names):
         raise ValueError("Workflow names must be unique")
     for item in workflows:
+        workflow_result_write_plans(item)
         if item["initial_agent"] != "WorkflowBundleBuilderAgent" or item["pattern_id"] not in range(1, 10):
             raise ValueError("Workflow dispatch must use the supported builder and pattern")
         if set(item.get("depends_on") or []) - (set(names) - {item["name"]}):
@@ -59,7 +69,14 @@ def pattern_selection(
     context_variables.set("PatternSelection", selection)
     for key in ("is_multi_workflow", "pack_name", "pack_partition_reason"):
         context_variables.set(key, selection[key])
-    context_variables.set("workflows_spec", selection["workflows"])
+    specs = []
+    for item in selection["workflows"]:
+        plans = item.get("result_write_plans")
+        if plans:
+            item = {**item, "initial_message": item["initial_message"] + "\n\n[WORKFLOW RESULT PLAN]\n"
+                    + json.dumps(plans, sort_keys=True)}
+        specs.append(item)
+    context_variables.set("workflows_spec", specs)
     context_variables.set("workflow_plan_review", None)
     return {"outcome": "selected", "workflow_count": len(selection["workflows"])}
 

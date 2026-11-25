@@ -8,11 +8,13 @@ from copy import deepcopy
 from typing import Any
 
 import yaml
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from mozaiksai.core.artifacts.models import BuildRecordStatus
 from mozaiksai.core.runtime.app.module_loader import (
     CANONICAL_EVENT_PREFIX_LABEL,
     CANONICAL_EVENT_PREFIXES,
+    ModuleReactionResultWrite,
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
@@ -30,6 +32,19 @@ class WorkflowEventBindingError(ValueError):
     def __init__(self, workflow_name: str, message: str) -> None:
         self.workflow_name = workflow_name
         super().__init__(message)
+
+
+class WorkflowResultWritePlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent: str = Field(min_length=1)
+    event_type: str = Field(min_length=1)
+    module_id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    result_write: ModuleReactionResultWrite
+
+
+def workflow_result_write_plans(entry: Mapping[str, Any]) -> list[WorkflowResultWritePlan]:
+    return TypeAdapter(list[WorkflowResultWritePlan]).validate_python(entry.get("result_write_plans", []))
 
 
 def _text(value: Any) -> str | None:
@@ -154,6 +169,13 @@ def _normalize_workflow_item(raw: Mapping[str, Any]) -> dict[str, Any] | None:
         "startup_mode": startup_mode,
         "trigger_events": trigger_events,
     }
+    plans = workflow_result_write_plans(raw)
+    if plans:
+        events = {event["event_type"] for event in trigger_events}
+        selected = {plan.event_type for plan in plans}
+        if (startup_mode != "BackendOnly" or len(selected) != len(plans) or selected != events):
+            raise WorkflowEventBindingError(workflow_name, "Automatic result writes require one plan for each declared BackendOnly event trigger")
+        workflow["result_write_plans"] = [plan.model_dump(mode="json") for plan in plans]
     design_surface_id = _text(raw.get("design_surface_id"))
     if design_surface_id:
         workflow["design_surface_id"] = design_surface_id
@@ -292,6 +314,8 @@ def extract_workflow_integration_metadata_from_bundle_entries(
             "startup_mode": startup_mode,
             "trigger_events": trigger_events,
         }
+        if entry.get("result_write_plans") is not None:
+            workflow["result_write_plans"] = entry["result_write_plans"]
         workflows.append(workflow)
 
     if bundle_entries and len(workflows) != len(bundle_entries):
