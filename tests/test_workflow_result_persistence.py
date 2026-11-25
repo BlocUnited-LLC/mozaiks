@@ -31,6 +31,20 @@ _SUBJECT = {"app_id": "app", "module_id": "tasks", "action_id": "create_task", "
             "collection": "tasks", "record_id": "task-1"}
 
 
+def test_private_projection_uses_the_serialized_expression_path():
+    from mozaiksai.core.runtime.persistence.mongo import _private_find_projection
+
+    class PathLabel(str):
+        def __eq__(self, other):
+            raise AssertionError("Projection handling must compare the stored spelling")
+
+        def startswith(self, *args):
+            raise AssertionError("Projection handling must read the stored spelling")
+
+    for path in ("$$ROOT", "$$ROOT._mz_workflow_result.origin"):
+        assert _private_find_projection({"copy": PathLabel(path)}) == _private_find_projection({"copy": path})
+
+
 def fake_collection(principal=_OWNER, *, acknowledged=True):
     raw = SimpleNamespace(
         name="tasks_physical", database=SimpleNamespace(name="test"),

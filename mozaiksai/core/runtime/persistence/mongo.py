@@ -370,9 +370,10 @@ class MongoPersistenceContext:
 def _public_root_expression(value: Any) -> Any:
     # ROOT always denotes the physical row, even inside a $let that rebinds CURRENT.
     if isinstance(value, str):
-        if value == "$$ROOT":
+        path = str.__str__(value)
+        if path == "$$ROOT":
             return {"$unsetField": {"field": _MARKER, "input": "$$ROOT"}}
-        if value == f"$$ROOT.{_MARKER}" or value.startswith(f"$$ROOT.{_MARKER}."):
+        if path == f"$$ROOT.{_MARKER}" or path.startswith(f"$$ROOT.{_MARKER}."):
             return "$$REMOVE"
     if isinstance(value, dict):
         return {key: item if key in {"$literal", "$const"} else _public_root_expression(item) for key, item in value.items()}
