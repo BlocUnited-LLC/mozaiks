@@ -32,6 +32,7 @@ from mozaiksai.core.runtime.persistence.distributed_lock import (
     chat_execution_lease,
     chat_lock_resource,
 )
+from mozaiksai.core.transport.input_authority import WORKFLOW_ACCESS_DENIED, input_refused
 from mozaiksai.core.transport.session_registry import session_registry
 
 if TYPE_CHECKING:
@@ -42,8 +43,6 @@ logger = logging.getLogger("simple_transport.workflow")
 # Failed runs whose reason this process keeps for refusing later input. Input
 # for an ended run follows its end closely, so the most recent ones suffice.
 _RUN_END_REASON_LIMIT = 256
-
-WORKFLOW_ACCESS_DENIED = "WORKFLOW_ACCESS_DENIED"
 
 
 def _persist_context_kwargs(
@@ -416,6 +415,14 @@ class WorkflowBridgeMixin:
                         )
                         if rejection is not None:
                             return rejection
+                    # Before recovery, rebinding or delivery changes anything. A chat with no
+                    # stored session yet has nothing to continue; its start asks the host itself.
+                    rejection = await self._reject_unauthorized_input(
+                        chat_id=chat_id, app_id=app_id, user_id=user_id,
+                        require_session=callable(get_live_run) and get_live_run(chat_id) is not None,
+                    )
+                    if rejection is not None:
+                        return rejection
                     # Another request may have opened or ended the channel
                     # while this request waited for the lease. Resolve its
                     # current state before persisting or delivering new input.
@@ -708,43 +715,19 @@ class WorkflowBridgeMixin:
         return {"status": "error", "chat_id": chat_id, "message": reason, "error_code": code}
 
     async def _reject_unauthorized_input(
-        self, *, chat_id: str, app_id: str, user_id: str | None,
+        self, *, chat_id: str, app_id: str, user_id: str | None, require_session: bool = True,
     ) -> dict[str, Any] | None:
-        """Refuse input to a running chat its sender may no longer run.
-
-        A start or resume asks the host before executing. Input to a run that is
-        still live starts no new execution, so ask here, for the workflow the chat
-        was created with rather than the one the request names.
-        """
-        from mozaiksai.core.data.persistence.persistence_manager import SERVER_OWNED_SESSION_FIELDS
-        from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
-
-        hooks = get_platform_hooks()
-        if not hooks.has_chat_session_fields:
+        if not await input_refused(
+            self._get_or_create_persistence_manager(), chat_id=chat_id, app_id=app_id, user_id=user_id,
+            require_session=require_session,
+        ):
             return None
-        sender = user_id or "anonymous"
-        try:
-            coll = await self._get_or_create_persistence_manager()._coll()
-            doc = await coll.find_one(
-                {"_id": chat_id, **build_app_scope_filter(app_id)},
-                {"workflow_name": 1, **{key: 1 for key in SERVER_OWNED_SESSION_FIELDS}},
-            )
-            if not isinstance(doc, dict):
-                raise PermissionError("Workflow session is not available")
-            await hooks.call_chat_session_fields(
-                app_id=app_id, user_id=sender, workflow_name=doc["workflow_name"], chat_id=chat_id,
-                phase="resume",
-                session_fields={key: doc[key] for key in SERVER_OWNED_SESSION_FIELDS if key in doc},
-            )
-        except Exception as exc:
-            logger.warning("WORKFLOW_INPUT_REFUSED chat=%s error=%s", chat_id, type(exc).__name__)
-            reason, code = "You can no longer continue this workflow.", WORKFLOW_ACCESS_DENIED
-            await self.send_error(error_message=reason, error_code=code, chat_id=chat_id)
-            return {
-                "status": "error", "chat_id": chat_id, "route": "access_denied", "input_accepted": False,
-                "error_code": code, "message": reason,
-            }
-        return None
+        reason = "You can no longer continue this workflow."
+        await self.send_error(error_message=reason, error_code=WORKFLOW_ACCESS_DENIED, chat_id=chat_id)
+        return {
+            "status": "error", "chat_id": chat_id, "route": "access_denied", "input_accepted": False,
+            "error_code": WORKFLOW_ACCESS_DENIED, "message": reason,
+        }
 
     async def _reject_terminal_session(self, *, chat_id: str, app_id: str) -> dict[str, Any] | None:
         rejection, _ = await self._resumable_chat_model(chat_id=chat_id, app_id=app_id)
@@ -947,8 +930,6 @@ class WorkflowBridgeMixin:
         )
 
         rejection = await self._reject_terminal_session(chat_id=chat_id, app_id=app_id)
-        if rejection is None:
-            rejection = await self._reject_unauthorized_input(chat_id=chat_id, app_id=app_id, user_id=user_id)
         if rejection is not None:
             return rejection
 

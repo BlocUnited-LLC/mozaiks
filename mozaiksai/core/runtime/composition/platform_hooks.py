@@ -420,10 +420,6 @@ class PlatformHookRegistry:
                 return False, "Chat prerequisite check failed"
         return True, None
 
-    @property
-    def has_chat_session_fields(self) -> bool:
-        return bool(self._chat_session_fields_hooks)
-
     async def call_chat_session_fields(
         self,
         app_id: str,
@@ -442,6 +438,8 @@ class PlatformHookRegistry:
         References are requests, not authority. Hooks see a detached snapshot;
         a later extension may inspect but cannot replace an earlier binding.
         Resume validates persisted facts and cannot install a different value.
+        It is asked again for every message and reply to a run, so a hook must
+        only check there: no single-use claim, charge or other state change.
         Route resolves an owned target without creating a build or chat.
         """
         from mozaiksai.core.session.build_binding import BuildTargetReference

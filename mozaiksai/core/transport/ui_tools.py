@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 from mozaiksai.core.auth import UserPrincipal, WebSocketUser
 from mozaiksai.core.auth.dependencies import is_shared_development_identity
 from mozaiksai.core.auth.websocket_auth import verify_user_owns_resource
+from mozaiksai.core.transport.input_authority import input_refused
 from mozaiksai.core.transport.ui_events import UIDisplayMode, UIUpdateData
 
 if TYPE_CHECKING:
@@ -617,6 +618,14 @@ class UIToolsMixin:
                 logger.warning("[UI_TOOL] Feedback receipt not persisted: %s", type(exc).__name__)
                 return False
             if not saved or self._tool_call_chat_id(event_id) != event_chat_id:
+                return False
+        else:
+            # A reply lets the waiting run go on; feedback does not.
+            refused = await input_refused(
+                self._get_or_create_persistence_manager(),
+                chat_id=event_chat_id, app_id=session["app_id"], user_id=session["user_id"],
+            )
+            if refused or self._tool_call_chat_id(event_id) != event_chat_id:
                 return False
         return await self.submit_tool_call_response(event_id, response_data)
 
