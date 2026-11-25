@@ -350,13 +350,22 @@ async def test_handle_user_input_from_api_clears_persisted_pending_input_before_
 
 
 @pytest.mark.asyncio
-async def test_handle_user_input_from_api_resumes_persisted_session_after_restart(monkeypatch) -> None:
+@pytest.mark.parametrize("model_change", [False, "warm", "cold"], ids=["restart", "change-model", "restart-after-change"])
+async def test_handle_user_input_from_api_resumes_persisted_session_after_restart(monkeypatch, model_change) -> None:
     persistence_manager = _FakePersistenceManager()
     persistence_manager.pending_input_request = None
     persistence_manager.resumable_run = True
     adapter = _FakeAdapter()
     transport = _DummyTransport(persistence_manager)
     live_run = _FakeLiveRun(result=_LiveRunResult(status=RunStatus.PAUSED))
+    if model_change:
+        from mozaiksai.core.data.persistence.persistence_manager import ChatModelPreference
+        persistence_manager.assert_chat_resumable = AsyncMock(return_value=ChatModelPreference(None, True))
+        persistence_manager.finish_chat_model_rebind = AsyncMock()
+    if model_change == "warm":
+        # Resetting to the workflow default still requires provider-specific agents.
+        previous = SimpleNamespace(workflow_model="openai:previous", can_rebind_model=AsyncMock(return_value=True))
+        transport.register_live_ag2_workflow_run("chat-1", previous)
 
     async def _restore_channel(request):  # noqa: ANN001
         adapter.resume_requests.append(request)
@@ -383,6 +392,9 @@ async def test_handle_user_input_from_api_resumes_persisted_session_after_restar
     assert result["route"] == "live_ag2_network"
     assert adapter.run_requests == []
     assert len(adapter.resume_requests) == 1
+    assert adapter.resume_requests[0].extra == ({"rebind_model": True} if model_change else {})
+    if model_change:
+        persistence_manager.finish_chat_model_rebind.assert_awaited_once_with("chat-1", "app-1", None)
     assert live_run.continued == [{
         "message": "Yes, the indexed readout matches the current app. NEXT",
         "context_updates": {"target_user": "founders"},
@@ -404,6 +416,64 @@ async def test_handle_user_input_from_api_resumes_persisted_session_after_restar
             "source": "http",
         }
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("durable,idle,rebuild_ok", [(False, True, True), (True, False, True), (True, True, False)])
+async def test_unsafe_model_switch_keeps_original_channel_and_does_not_run(monkeypatch, durable, idle, rebuild_ok):
+    persistence = _FakePersistenceManager()
+    persistence.resumable_run = durable
+    transport = _DummyTransport(persistence)
+    original = SimpleNamespace(workflow_model="openai:previous", can_rebind_model=AsyncMock(return_value=idle))
+    transport.register_live_ag2_workflow_run("chat-1", original)
+    adapter = _FakeAdapter()
+    adapter.resume = AsyncMock(return_value=SimpleNamespace(status=RunStatus.FAILED))
+    monkeypatch.setattr(_ag2_mod, "get_ag2_adapter", lambda: adapter)
+    monkeypatch.setattr(_bridge_mod, "get_workflow_lifecycle_hooks", lambda _name: {})
+
+    result = await transport.handle_user_input_from_api("chat-1", "user", "MyWorkflow", "Continue", "app")
+
+    assert result["error_code"] == "WORKFLOW_MODEL_UNAVAILABLE"
+    assert transport.get_live_ag2_workflow_run("chat-1") is original
+    assert not adapter.run_requests
+    assert adapter.resume.await_count == (0 if rebuild_ok else 1)
+    assert not transport.persisted_messages
+    assert not persistence.pending_clears
+    assert not persistence.failed
+
+
+@pytest.mark.asyncio
+async def test_removed_model_is_recoverable_before_user_input_is_admitted(monkeypatch):
+    from mozaiksai.core.data.persistence.persistence_manager import ChatModelPreference
+    from mozaiksai.core.workflow import llm_config
+
+    persistence = _FakePersistenceManager()
+    persistence.assert_chat_resumable = AsyncMock(return_value=ChatModelPreference("openai:removed", False))
+    transport = _DummyTransport(persistence)
+    monkeypatch.setattr(llm_config, "workflow_model_catalog", AsyncMock(return_value=(None, {})))
+    monkeypatch.setattr(_bridge_mod, "get_workflow_lifecycle_hooks", lambda _name: {})
+
+    result = await transport.handle_user_input_from_api("chat-1", "user", "MyWorkflow", "Continue", "app")
+
+    assert result["error_code"] == "WORKFLOW_MODEL_UNAVAILABLE"
+    assert not transport.persisted_messages
+    assert not persistence.failed
+
+
+@pytest.mark.asyncio
+async def test_background_model_rejection_leaves_journey_and_input_untouched(background_run, monkeypatch):
+    from mozaiksai.core.data.persistence.persistence_manager import ChatModelPreference
+    from mozaiksai.core.workflow import llm_config
+
+    background_run.persistence.assert_chat_resumable = AsyncMock(return_value=ChatModelPreference("removed:model", True))
+    monkeypatch.setattr(llm_config, "workflow_model_catalog", AsyncMock(return_value=(None, {})))
+    result = await background_run.run()
+
+    assert result["error_code"] == "WORKFLOW_MODEL_UNAVAILABLE"
+    background_run.dispatcher.emit.assert_not_awaited()
+    background_run.adapter.run.assert_not_awaited()
+    assert not background_run.persistence.run_user_messages
+    assert not background_run.persistence.failed
 
 
 @pytest.mark.asyncio

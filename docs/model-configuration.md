@@ -64,6 +64,31 @@ provider-specific and should be omitted for Google. For Anthropic, install
 explicit model. Provider/model capabilities must match the workflow's tools and
 structured-output requirements.
 
+### Choosing a model in a workflow chat
+
+Open **AI model** in the workflow composer to select a model for subsequent
+replies. Reopening the conversation restores the selection. Choose **Workflow
+default** to use the runtime default again. The full chat page, `WorkflowChat`,
+and the inline or floating `MozaiksEmbed` widget use the same control.
+
+Change models before the workflow starts or when it is waiting for your next
+message. If a tool interaction is open, finish it first. If the host removes a
+saved model, choose another available model or **Workflow default** and resend
+your message. If a provider is removed while saved agent work is unfinished, the
+host operator can restore that provider so the turn can finish. Switching models
+preserves the chat history and its artifacts.
+
+The options come from the runtime's configured providers. For an environment
+using OpenAI, for example, `LLM_PRIMARY_MODEL=gpt-4o-mini` and
+`LLM_FALLBACK_MODELS=gpt-4.1-mini` make two models available with the configured
+OpenAI credential. The primary model remains the default. A runtime that loads
+its provider list from MongoDB uses those entries instead.
+
+The choice applies to the agents answering in that workflow. Background jobs
+with their own model configuration continue to use it. Factory builds and
+refinements retain the model bound to their run. See the
+[Studio model settings](guides/configs/refinement.md#studio-ai-models).
+
 ## Refinement requests
 
 `app/config/refinement_policy.yaml` owns named `llm_profiles`. The shipped

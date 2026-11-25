@@ -18,6 +18,7 @@ import inspect
 import json
 import logging
 from collections.abc import Callable, Mapping
+from functools import partial
 from time import perf_counter
 from typing import Any, cast
 
@@ -518,6 +519,7 @@ async def _run_ag2_network_phase(
     knowledge_store: Any = None,
     context_authority_policy: Any = None,
     resume_existing_only: bool = False,
+    rebind_model: bool = False,
     resume_context_updates: Mapping[str, Any] | None = None,
     persisted_replay_context: Mapping[str, Any] | None = None,
     agent_output_handler: Callable | None = None,
@@ -542,6 +544,7 @@ async def _run_ag2_network_phase(
             knowledge_store=knowledge_store,
             context_authority_policy=context_authority_policy,
             resume_existing_only=resume_existing_only,
+            rebind_model=rebind_model,
             resume_context_updates=dict(resume_context_updates or {}),
             persisted_replay_context=dict(persisted_replay_context or {}),
             failure_message_key=failure_message_key,
@@ -660,6 +663,7 @@ async def run_workflow_orchestration(
     context_factory: Callable | None = None,
     knowledge_store: Any = None,
     resume_existing_only: bool = False,
+    rebind_model: bool = False,
     **kwargs: Any,
 ) -> dict[str, Any] | None:
     start_time = perf_counter()
@@ -675,7 +679,8 @@ async def run_workflow_orchestration(
 
     persistence_manager = AG2PersistenceManager()
     # Refusing re-entry is not another failed execution or lifecycle trigger.
-    await persistence_manager.assert_chat_resumable(chat_id, app_id)
+    preference = await persistence_manager.assert_chat_resumable(chat_id, app_id)
+    workflow_model = preference.selected if preference else None
 
     from mozaiksai.core.transport.simple_transport import SimpleTransport
 
@@ -858,9 +863,10 @@ async def run_workflow_orchestration(
             from mozaiksai.core.workflow.execution.lifecycle import get_lifecycle_manager
 
             lifecycle_manager = get_lifecycle_manager(workflow_name)
-            wf_logger.info("[%s] PRE_AGENT_LIFECYCLE_START", workflow_name_upper)
-            await lifecycle_manager.trigger_before_chat(context_variables=context)
-            wf_logger.info("[%s] PRE_AGENT_LIFECYCLE_DONE", workflow_name_upper)
+            if not (resume_existing_only and rebind_model):
+                wf_logger.info("[%s] PRE_AGENT_LIFECYCLE_START", workflow_name_upper)
+                await lifecycle_manager.trigger_before_chat(context_variables=context)
+                wf_logger.info("[%s] PRE_AGENT_LIFECYCLE_DONE", workflow_name_upper)
         except Exception as lifecycle_error:
             wf_logger.warning(
                 "[%s] PRE_AGENT_LIFECYCLE_FAILED: %s",
@@ -917,11 +923,11 @@ async def run_workflow_orchestration(
             )
 
         # 7) Create agents after deterministic preloads have populated context.
-        if agents_factory:
-            agents = await agents_factory(workflow_name, context, cache_seed)
-        else:
+        if agents_factory is None:
             from .agents import create_agents
-            agents = await create_agents(workflow_name, context_variables=context, cache_seed=cache_seed)
+
+            agents_factory = partial(create_agents, workflow_model=workflow_model) if workflow_model else create_agents
+        agents = await agents_factory(workflow_name, context, cache_seed)
 
         agents = agents or {}
         if not agents:
@@ -975,7 +981,7 @@ async def run_workflow_orchestration(
         )
 
         try:
-            if transport and hasattr(transport, "connections") and chat_id in transport.connections:
+            if not rebind_model and transport and hasattr(transport, "connections") and chat_id in transport.connections:
                 transport.connections[chat_id]["agents"] = agents
                 transport.connections[chat_id]["context"] = ctx_dict
         except Exception as _conn_err:
@@ -1021,7 +1027,7 @@ async def run_workflow_orchestration(
             wf_logger.debug("[%s] DerivedContextManager setup failed: %s", workflow_name_upper, dcm_err)
             derived_context_manager = None
 
-        if derived_context_manager and transport and hasattr(transport, "register_derived_context_manager"):
+        if not rebind_model and derived_context_manager and transport and hasattr(transport, "register_derived_context_manager"):
             try:
                 transport.register_derived_context_manager(chat_id, derived_context_manager)
             except Exception as _dcm_reg_err:
@@ -1148,12 +1154,27 @@ async def run_workflow_orchestration(
             knowledge_store=knowledge_store,
             context_authority_policy=context_authority_policy,
             resume_existing_only=resume_existing_only,
+            rebind_model=rebind_model,
             persisted_replay_context=(
                 {key: value for key, value in persisted_extra_ctx.items() if key not in SERVER_OWNED_SESSION_FIELDS}
-                if resume_existing_only else None
+                if resume_existing_only and not rebind_model else None
             ),
             failure_message_key=config.get("failure_message_key"),
         )
+
+        if rebind_model:
+            # Reattaching a paused channel is configuration only. Do not project its
+            # WAL again, announce another lifecycle outcome or advance the workflow.
+            replacement = runner_result.live_run
+            if runner_result.status is not RunStatus.PAUSED or replacement is None:
+                return {"failed": True, "error": "workflow_model_rebind_unavailable"}
+            replacement.workflow_model = workflow_model
+            if chat_id in getattr(transport, "connections", {}):
+                transport.connections[chat_id].update(agents=agents, context=ctx_dict)
+            transport.register_live_ag2_workflow_run(chat_id, replacement)
+            if derived_context_manager:
+                transport.register_derived_context_manager(chat_id, derived_context_manager)
+            return {"awaiting_user_input": True, "run_status": "paused"}
 
         structured_validation_failed = _structured_output_validation_failed(runner_result)
 
@@ -1195,6 +1216,7 @@ async def run_workflow_orchestration(
             live_run = getattr(runner_result, "live_run", None)
             if live_run is not None and hasattr(transport, "register_live_ag2_workflow_run"):
                 try:
+                    live_run.workflow_model = workflow_model
                     transport.register_live_ag2_workflow_run(chat_id, live_run)
                 except Exception as live_reg_err:
                     wf_logger.debug(
@@ -1296,6 +1318,8 @@ async def run_workflow_orchestration(
         raise
     except Exception as e:
         logger.error("[%s] Orchestration failed: %s", workflow_name_upper, e, exc_info=True)
+        if rebind_model:
+            return {"failed": True, "error": "workflow_model_rebind_unavailable"}
         await persistence_manager.mark_chat_failed(chat_id, app_id=app_id)
         if lifecycle_manager is not None:
             try:

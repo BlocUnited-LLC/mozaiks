@@ -96,6 +96,26 @@ PRICE_MAP: dict[str, list[float]] = {
 # A provider entry may include 'price': List[float] -> [prompt_per_1k, completion_per_1k]
 ProviderConfig = dict[str, Any]
 
+
+async def workflow_model_catalog() -> tuple[str | None, dict[str, ProviderConfig]]:
+    """Index the host's configured providers without dropping provider-specific settings.
+
+    Values are private to runtime execution. Only IDs and model labels may be
+    projected to the composer. The first occurrence retains runtime precedence
+    when multiple endpoints serve the same provider/model.
+    """
+    catalog: dict[str, ProviderConfig] = {}
+    default = None
+    for index, entry in enumerate(await _load_raw_config_list()):
+        provider = entry.get("api_type") or "openai"
+        if entry.get("api_key") or provider == "ollama":
+            model_id = f"{provider}:{entry['model']}"
+            catalog.setdefault(model_id, entry)
+            if index == 0:
+                default = model_id
+    return default, catalog
+
+
 async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
     """Load provider entries: first attempt Mongo -> fallback to env-defined list.
 

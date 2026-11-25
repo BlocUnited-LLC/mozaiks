@@ -550,6 +550,8 @@ async def create_agents(
     workflow_name: str,
     context_variables: Any | None = None,
     cache_seed: int | None = None,
+    *,
+    workflow_model: str | None = None,
 ) -> dict[str, Agent]:
     """Create AG2 Agent instances for a workflow."""
 
@@ -610,6 +612,15 @@ async def create_agents(
             if not key:
                 raise ValueError("The selected refinement provider has no configured API key")
             llm_overrides["config_list"] = [{**selected_config, "api_key": key}]
+
+    if workflow_model is not None and "config_list" not in llm_overrides:
+        from ..llm_config import workflow_model_catalog
+
+        _, catalog = await workflow_model_catalog()
+        provider = catalog.get(workflow_model)
+        if provider is None:
+            raise ValueError("The selected workflow model is no longer configured.")
+        llm_overrides["config_list"] = [provider]
 
     base_llm_config: dict[str, Any] = {}
     if local_agent_names:

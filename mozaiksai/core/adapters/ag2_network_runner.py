@@ -402,6 +402,7 @@ class AG2NetworkRunnerRequest:
     #     not Mozaiks-level authority.
     knowledge_store: KnowledgeStore | None = None
     resume_existing_only: bool = False
+    rebind_model: bool = False
     resume_context_updates: Mapping[str, Any] = field(default_factory=dict)
     persisted_replay_context: Mapping[str, Any] = field(default_factory=dict)
     # Declared by orchestrator.yaml: the context key whose text explains why
@@ -431,6 +432,35 @@ class AG2NetworkRunnerResult:
     # Set only after the live channel accepts this specific user message.
     # Run settlement can fail after admission, so status alone is not enough.
     input_accepted: bool | None = None
+
+
+async def _idle_human_turn(hub: Any, channel_id: str, human: str, agent_ids: Sequence[str]) -> bool:
+    if getattr(hub.adapter_state(channel_id), "expected_next_speaker", None) not in {"user", human}:
+        return False
+    for agent_id in agent_ids:
+        if agent_id != human and any(t.channel_id == channel_id for t in await hub.pending_turns_for(agent_id)):
+            return False
+    return True
+
+
+async def model_change_checkpoint(store: KnowledgeStore, workflow_name: str) -> str:
+    """Inspect the persisted channel without registering agents, replaying turns or starting timers."""
+    if not await store.exists("/"):
+        return "new"
+    hub = Hub(store, ttl_sweep_interval=0, expectation_sweep_interval=0)
+    hub.register_adapter(cast(ChannelAdapter, WorkflowHistoryAdapter()))
+    try:
+        await hub.hydrate()
+        channels = await hub.list_channels(state=ChannelState.ACTIVE)
+        if len(channels) == 1:
+            channel = channels[0]
+            if channel.labels.get("workflow_name") in {None, "", workflow_name} and await _idle_human_turn(
+                hub, channel.channel_id, channel.creator_id, [p.agent_id for p in channel.participants],
+            ):
+                return "idle"
+        return "busy"
+    finally:
+        await hub.close()
 
 
 class AG2NetworkRunner:
@@ -691,6 +721,8 @@ class AG2NetworkRunner:
                 )
 
             if existing_channel is not None:
+                if request.rebind_model and getattr(hub.adapter_state(channel_id), "expected_next_speaker", None) not in {"user", initiator.agent_id}:
+                    return await _snapshot_result(status=RunStatus.FAILED, error="ag2_model_rebind_requires_user_turn")
                 try:
                     resumed_pending_turns = await _resume_pending_agent_turns(
                         hub=hub,
@@ -699,7 +731,7 @@ class AG2NetworkRunner:
                         workflow_name=request.workflow_name,
                         chat_id=request.chat_id,
                         pending_turn_replay={
-                            name: getattr(agent, "_mozaiks_pending_turn_replay", "allow")
+                            name: ("block" if request.rebind_model else getattr(agent, "_mozaiks_pending_turn_replay", "allow"))
                             for name, agent in request.agents.items()
                         },
                     )
@@ -922,6 +954,8 @@ class AG2NetworkRunner:
 
     @staticmethod
     def _validate_request(request: AG2NetworkRunnerRequest, initial_agent_name: str) -> str | None:
+        if request.rebind_model and not request.resume_existing_only:
+            return "a model change requires an existing-channel resume"
         if request.persisted_replay_context and not request.resume_existing_only:
             return "persisted replay requires an existing-channel resume"
         if request.persisted_replay_context and request.context_authority_policy is None:
@@ -976,6 +1010,8 @@ class AG2NetworkRunner:
 class _AG2LiveWorkflowRun:
     """Process-local handle for an AG2 workflow channel paused on user input."""
 
+    workflow_model: str | None = None
+
     def __init__(
         self,
         *,
@@ -1011,6 +1047,13 @@ class _AG2LiveWorkflowRun:
         self._lock = asyncio.Lock()
         self._wal_cursor = 0
         self._context_authority_policy = context_authority_policy
+
+    async def can_rebind_model(self) -> bool:
+        """Only rebuild clients at a human turn with no unfinished agent work."""
+        async with self._lock:
+            return not self._closed and await _idle_human_turn(
+                self._hub, self.channel_id, self._initiator.agent_id, tuple(self._agent_name_by_id),
+            )
 
     async def continue_with_user_message(
         self,

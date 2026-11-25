@@ -161,6 +161,9 @@ const ModernChatInterface = ({
   transportType,
   workflowName,
   refinementModelPicker,
+  modelPicker = refinementModelPicker,
+  modelSaving = false,
+  waitingForConnection = false,
   workflowHasChildren = false,
   conversationMode = 'workflow',
   onConversationModeChange,
@@ -199,12 +202,16 @@ const ModernChatInterface = ({
   composerDisabled = false,
   composerLabel,
   composerValue,
+  rejectedDraft,
   onComposerChange,
   transcriptLabel,
 }) => {
   const [localMessage, setLocalMessage] = useState('');
   const message = composerValue ?? localMessage;
   const setMessage = onComposerChange || setLocalMessage;
+  useEffect(() => {
+    if (rejectedDraft) setLocalMessage(current => current || rejectedDraft.text);
+  }, [rejectedDraft]);
   const [hasUserInteracted, setHasUserInteracted] = useState(false);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const chatEndRef = useRef(null);
@@ -369,7 +376,7 @@ const ModernChatInterface = ({
 
   const onSubmitClick = (event) => {
     event.preventDefault();
-    if (composerDisabled) return;
+    if (composerDisabled || modelSaving) return;
     if (buttonText === 'NEXT') {
       const envDefaultAppId =
         (typeof process !== 'undefined' && process.env && (process.env.REACT_APP_DEFAULT_APP_ID || process.env.REACT_APP_DEFAULT_app_id))
@@ -380,7 +387,7 @@ const ModernChatInterface = ({
       return;
     }
 
-    if (hasPendingHarnessDecision) return;
+    if (hasPendingHarnessDecision || waitingForConnection) return;
     if (message.trim() === '') return;
 
     const newMessage = { "sender": "user", "content": message, "artifactContext": artifactContext || null };
@@ -949,7 +956,7 @@ const ModernChatInterface = ({
         )}
         <form
           onSubmit={onSubmitClick}
-          className={refinementModelPicker
+          className={modelPicker
             ? 'flex min-w-0 flex-col rounded-2xl border border-border bg-card focus-within:border-primary/60'
             : 'flex flex-row items-center gap-2 sm:gap-3'}
         >
@@ -978,7 +985,7 @@ const ModernChatInterface = ({
               aria-label={composerLabel}
               disabled={isComposerDisabled}
               rows={1}
-              className={refinementModelPicker
+              className={modelPicker
                 ? 'min-h-10 w-full resize-none bg-transparent px-3 pt-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none sm:px-4 sm:text-base'
                 : `w-full bg-white/10 border-2 rounded-lg sm:rounded-xl px-2.5 sm:px-3 py-1.5 sm:py-2 mt-0.5 text-[var(--color-text-primary)] text-slate-100 text-sm sm:text-base placeholder:text-[var(--color-text-secondary)] placeholder:text-slate-400 placeholder:text-xs sm:placeholder:text-sm focus:outline-none resize-none transition-all duration-300 transmission-typing-font min-h-[36px] sm:min-h-[40px] max-h-[120px] my-scroll1 backdrop-blur-sm ${
                 hasUserInteracted
@@ -990,12 +997,12 @@ const ModernChatInterface = ({
                 overflowY: message.split('\n').length > 2 || message.length > 100 ? 'auto' : 'hidden'
               }}
             />
-            {!refinementModelPicker && !hasUserInteracted && (
+            {!modelPicker && !hasUserInteracted && (
               <div className="absolute -top-1 -right-1 input-prompt-ping rounded-full subtle-ping" aria-hidden="true"></div>
             )}
           </div>
 
-          <div className={refinementModelPicker ? 'flex items-center gap-2 px-2 pb-2 pt-1 sm:px-3' : 'contents'}>
+          <div className={modelPicker ? 'flex items-center gap-2 px-2 pb-2 pt-1 sm:px-3' : 'contents'}>
             {onUploadFile && (
               <button
                 type="button"
@@ -1017,11 +1024,11 @@ const ModernChatInterface = ({
               </button>
             )}
 
-            {refinementModelPicker && <div className="ml-auto flex min-w-0 items-center">{refinementModelPicker}</div>}
+            {modelPicker && <div className="ml-auto flex min-w-0 items-center">{modelPicker}</div>}
             <button
               type="submit"
               aria-label={buttonText === 'NEXT' ? 'Continue' : 'Send message'}
-              disabled={!message.trim() || hasPendingHarnessDecision || composerDisabled}
+              disabled={!message.trim() || hasPendingHarnessDecision || composerDisabled || modelSaving || (waitingForConnection && buttonText !== 'NEXT')}
               className={`
                 px-2 py-1.5 rounded-md transition-all duration-300 min-w-[36px] sm:min-w-[40px] w-auto h-8 sm:h-9 oxanium font-bold text-[13px] flex items-center justify-center letter-spacing-wide border-2 flex-shrink-0
                 ${(!message.trim())

@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import Header from "../components/layout/Header";
 import Footer from "../components/layout/Footer";
 import ChatInterface from '../components/chat/ChatInterface';
+import { ModelSelect, useWorkflowModelPicker } from '../components/chat/WorkflowModelPicker';
 import { shouldReconnectAfterClose } from '../adapters/socketClose.js';
 import ArtifactPanel from '../components/chat/ArtifactPanel';
 import FluidChatLayout from '../components/chat/FluidChatLayout';
@@ -361,7 +362,7 @@ const ChatPage = () => {
 
   const defaultWorkflow = resolveWorkflow(urlWorkflowName) || '';
   const [currentWorkflowName, setCurrentWorkflowName] = useState(defaultWorkflow);
-  const [refinementModels, setRefinementModels] = useState([]);
+  const [refinementModels, setRefinementModels] = useState(null);
   const [refinementModel, setRefinementModel] = useState('');
   const [boundChatModels, setBoundChatModels] = useState(() => new Map());
   const refinementModelRef = useRef('');
@@ -370,19 +371,20 @@ const ChatPage = () => {
   useEffect(() => {
     if (!showRefinementModelPicker) return undefined;
     const controller = new AbortController();
+    setRefinementModels(null);
     authFetch('/api/studio/refinement/models', { signal: controller.signal })
       .then(response => response.ok ? response.json() : null)
       .then(policy => {
-        if (!policy || controller.signal.aborted) return;
-        const models = Array.isArray(policy.models) ? policy.models : [];
+        if (controller.signal.aborted) return;
+        const models = Array.isArray(policy?.models) ? policy.models : [];
         const selected = models.some(model => model.id === refinementModelRef.current)
           ? refinementModelRef.current
-          : models.some(model => model.id === policy.default) ? policy.default : models[0]?.id || '';
+          : models.some(model => model.id === policy?.default) ? policy.default : models[0]?.id || '';
         setRefinementModels(models);
         setRefinementModel(selected);
         refinementModelRef.current = selected;
       })
-      .catch(() => {});
+      .catch(() => { if (!controller.signal.aborted) setRefinementModels([]); });
     return () => controller.abort();
   }, [showRefinementModelPicker]);
 
@@ -391,19 +393,17 @@ const ChatPage = () => {
     : null;
   const activeRunModelLabel = activeRunModel === 'gemini' ? 'Gemini 3.8 Flash'
     : activeRunModel === 'openai' ? 'GPT-5 Nano' : null;
-  const refinementModelPicker = showRefinementModelPicker && refinementModels.length > 0 ? (
-    <select
-      aria-label="AI model"
-      className="h-8 max-w-full cursor-pointer rounded-full border border-transparent bg-card px-2.5 text-xs font-medium text-foreground hover:border-border focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-default disabled:text-muted-foreground"
+  const refinementModelPicker = showRefinementModelPicker && refinementModels?.length > 0 ? (
+    <ModelSelect
       value={refinementModel}
       disabled={loading || Boolean(pendingHarnessDecision)}
-      onChange={event => {
-        refinementModelRef.current = event.target.value;
-        setRefinementModel(event.target.value);
+      onChange={value => {
+        refinementModelRef.current = value;
+        setRefinementModel(value);
       }}
     >
       {refinementModels.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
-    </select>
+    </ModelSelect>
   ) : activeRunModelLabel ? (
     <span
       className="rounded-full px-2.5 py-1 text-xs font-medium text-muted-foreground"
@@ -1180,6 +1180,26 @@ const ChatPage = () => {
     'MozaiksAI'
   ).trim() || 'MozaiksAI';
   const currentUserId = user?.id || user?.user_id || user?.sub || getUserIdFromToken() || 'anonymous';
+  const submittedWorkflowMessage = useRef(null);
+  const [rejectedDraft, setRejectedDraft] = useState(null);
+  const composerScope = JSON.stringify([currentAppId, currentUserId, currentWorkflowName, currentChatId]);
+  const workflowSocket = wsRef.current?.socket;
+  const waitingForWorkflowSocket = conversationMode === 'workflow' && Boolean(currentChatId) && (!transportType || transportType === 'websocket')
+    && (connectionStatus !== 'connected' || wsRef.current?.chatId !== currentChatId || (workflowSocket && workflowSocket.readyState !== WebSocket.OPEN));
+  const recoveredWorkflowDraft = conversationMode === 'workflow' && rejectedDraft?.scope === composerScope
+    ? rejectedDraft : null;
+  const restoreRefusedDraft = useCallback(submitted => {
+    if (!submitted || submitted.rejected) return;
+    submitted.rejected = true;
+    setRejectedDraft({ scope: submitted.scope, text: submitted.message.content });
+    setMessagesWithLogging(previous => previous.filter(message => message.id !== submitted.message.id && !message.isThinking));
+  }, [setMessagesWithLogging]);
+  const workflowModel = useWorkflowModelPicker({
+    api, appId: currentAppId, userId: currentUserId, chatId: currentChatId,
+    workflow: conversationMode === 'workflow' && !refinementModelPicker && !(showRefinementModelPicker && refinementModels === null)
+      ? currentWorkflowName : null,
+    disabled: workflowCompleted || Boolean(pendingHarnessDecision),
+  });
   const failedWorkflowRetry = useFailedWorkflowRetry({
     appId: currentAppId, userId: currentUserId, chatId: currentChatId,
     workflowName: currentWorkflowName, surface: navContext?.surface, mode: conversationMode,
@@ -3910,6 +3930,12 @@ const ChatPage = () => {
         setPendingWorkflowReply(null);
         const errorMsg = data.message || data.data?.message || 'Unknown error';
         const errorCode = data.error_code || data.data?.error_code;
+        if (errorCode === 'WORKFLOW_MODEL_UNAVAILABLE') {
+          const submitted = submittedWorkflowMessage.current;
+          const rejectedChatId = data.chat_id || data.data?.chat_id || currentChatId;
+          if (submitted?.chatId === rejectedChatId) restoreRefusedDraft(submitted);
+          setLoading(false);
+        }
         // Create a stable ID based on error content to prevent duplicates
         const errorId = `${errorCode || 'error'}-${errorMsg.slice(0, 50)}`;
         
@@ -3945,7 +3971,7 @@ const ChatPage = () => {
       default:
         return;
     }
-  }, [adoptInlineRefinement, findRevisionArtifact, activeChatId, activeWorkflowName, appId, auth, config, user, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, urlWorkflowName, observeSessionMeta, hydrateServerArtifactForChat]);
+  }, [restoreRefusedDraft, adoptInlineRefinement, findRevisionArtifact, activeChatId, activeWorkflowName, appId, auth, config, user, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, urlWorkflowName, observeSessionMeta, hydrateServerArtifactForChat]);
   useEffect(() => {
     handleIncomingRef.current = handleIncoming;
   }, [handleIncoming]);
@@ -4678,6 +4704,7 @@ const ChatPage = () => {
         if (wsRef.current === connection) {
           wsRef.current = null;
           setWs(null);
+          setConnectionStatus('disconnected');
         }
       };
     };
@@ -5493,6 +5520,12 @@ const ChatPage = () => {
         navigate(location.pathname + (nextSearch ? `?${nextSearch}` : ''), { replace: true });
       }
       
+      const submitted = {
+        chatId: targetChatId, scope: JSON.stringify([currentAppId, currentUserId, targetWorkflowName, targetChatId]),
+        message: userMessage, rejected: false,
+      };
+      setRejectedDraft(null);
+      submittedWorkflowMessage.current = submitted;
       const success = await api.sendMessageToWorkflow(
         messageContent.content, 
         currentAppId, 
@@ -5501,6 +5534,7 @@ const ChatPage = () => {
         targetChatId,
         artifactContextPayload ? { artifact_context: artifactContextPayload } : null
       );
+      if (submitted.rejected) return;
       if (success && success.success !== false) {
         if (pendingWorkflowReply) {
           setPendingWorkflowReply(null);
@@ -5526,6 +5560,8 @@ const ChatPage = () => {
     } catch (error) {
       console.error('❌ [SEND] Failed to send message to workflow:', error);
       setLoading(false);
+      const submitted = submittedWorkflowMessage.current;
+      if (error?.deliveryState === 'refused' && submitted?.message.id === userMessage.id) restoreRefusedDraft(submitted);
       setMessagesWithLogging(prev => [
         ...prev.filter(message => !message.isThinking),
         {
@@ -6136,7 +6172,10 @@ const ChatPage = () => {
       chatStatus={chatStatus}
       transportType={transportType}
       workflowName={currentWorkflowName}
-      refinementModelPicker={refinementModelPicker}
+      modelPicker={refinementModelPicker || workflowModel.picker}
+      modelSaving={workflowModel.saving}
+      rejectedDraft={recoveredWorkflowDraft}
+      waitingForConnection={waitingForWorkflowSocket}
       structuredOutputs={getWorkflow(currentWorkflowName)?.structuredOutputs || {}}
       startupMode={workflowConfig?.getWorkflowConfig(currentWorkflowName)?.startup_mode}
       onRetry={retryConnection}
@@ -6375,7 +6414,10 @@ const ChatPage = () => {
         chatStatus={chatStatus}
         transportType={transportType}
         workflowName={currentWorkflowName}
-        refinementModelPicker={refinementModelPicker}
+        modelPicker={refinementModelPicker || workflowModel.picker}
+        modelSaving={workflowModel.saving}
+        rejectedDraft={recoveredWorkflowDraft}
+        waitingForConnection={waitingForWorkflowSocket}
         structuredOutputs={getWorkflow(currentWorkflowName)?.structuredOutputs || {}}
         startupMode={uiStartupMode}
         onRetry={retryConnection}

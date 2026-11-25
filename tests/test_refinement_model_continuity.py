@@ -78,7 +78,7 @@ async def test_factory_agents_use_persisted_binding_model_for_all_phases(monkeyp
     monkeypatch.setattr(llm_fallback, "resolve_configured_provider_key", lambda *_args, **_kwargs: "test-key")
     await factory.create_agents("FactoryWorkflow", context_variables={
         "run_build_binding": _binding(phase=phase, refinement_model="openai").model_dump(),
-    })
+    }, workflow_model="unlisted:must-not-override-frozen-build")
     assert len(_FakeAgent.created) == 1
     assert len(calls) == 2
     assert all(call["config_list"] == [{

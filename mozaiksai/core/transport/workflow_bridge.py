@@ -35,7 +35,7 @@ from mozaiksai.core.runtime.persistence.distributed_lock import (
 from mozaiksai.core.transport.session_registry import session_registry
 
 if TYPE_CHECKING:
-    pass
+    from mozaiksai.core.data.persistence.persistence_manager import ChatModelPreference
 
 logger = logging.getLogger("simple_transport.workflow")
 
@@ -415,21 +415,63 @@ class WorkflowBridgeMixin:
                     # Another request may have opened or ended the channel
                     # while this request waited for the lease. Resolve its
                     # current state before persisting or delivering new input.
-                    rejection = await self._reject_terminal_session(chat_id=chat_id, app_id=app_id)
+                    rejection, preference = await self._resumable_chat_model(chat_id=chat_id, app_id=app_id)
                     if rejection is not None:
                         return rejection
+                    workflow_model = preference.selected if preference else None
+                    if preference and preference.rebind_pending and is_resume_request:
+                        return await self._reject_workflow_model(chat_id, "Send a message to continue with your selected model.")
+                    if workflow_model is not None:
+                        from mozaiksai.core.workflow.llm_config import workflow_model_catalog
+
+                        _, catalog = await workflow_model_catalog()
+                        if workflow_model not in catalog:
+                            return await self._reject_workflow_model(
+                                chat_id, "The saved chat model is unavailable. Choose another model or Workflow default.",
+                            )
                     if (
                         not is_resume_request
                         and isinstance(message, str)
                         and message.strip()
                     ):
                         live_run = get_live_run(chat_id) if callable(get_live_run) else None
-                        if live_run is None:
-                            pm = self._get_or_create_persistence_manager()
+                        pm = self._get_or_create_persistence_manager()
+                        pending_rebind = preference is not None and preference.rebind_pending
+                        rebind_model = pending_rebind or (
+                            live_run is not None and getattr(live_run, "workflow_model", None) != workflow_model
+                        )
+                        if live_run is None or rebind_model:
                             has_resumable_run = getattr(pm, "chat_has_resumable_run", None)
-                            if callable(has_resumable_run) and await has_resumable_run(
+                            resumable = callable(has_resumable_run) and await has_resumable_run(
                                 chat_id, app_id, workflow_name,
-                            ):
+                            )
+                            if rebind_model:
+                                if not resumable or (live_run is not None and not await live_run.can_rebind_model()):
+                                    return await self._reject_workflow_model(
+                                        chat_id, "This workflow has unfinished work. Restore the previous model to continue.",
+                                    )
+                                from mozaiksai.core.adapters.ag2_orchestration import (
+                                    get_ag2_adapter,
+                                )
+                                from mozaiksai.core.ports.orchestration import (
+                                    ResumeRequest,
+                                    RunStatus,
+                                )
+
+                                # The registry retires the old handle only after replacement succeeds.
+                                rebound = await get_ag2_adapter().resume(ResumeRequest(
+                                    workflow_name=workflow_name, app_id=app_id, chat_id=chat_id,
+                                    user_id=user_id, extra={"rebind_model": True},
+                                ))
+                                replacement = get_live_run(chat_id)
+                                if rebound.status is not RunStatus.PAUSED or replacement is live_run or replacement is None:
+                                    return await self._reject_workflow_model(
+                                        chat_id, "The selected model could not resume this conversation. Choose another model.",
+                                    )
+                                live_run = replacement
+                                if pending_rebind:
+                                    await pm.finish_chat_model_rebind(chat_id, app_id, workflow_model)
+                            elif resumable:
                                 # Recovery restores AG2's persisted channel and
                                 # settles pending turns. The incoming text is a
                                 # separate delivery, never a history-only write.
@@ -656,19 +698,30 @@ class WorkflowBridgeMixin:
         )
         return reason
 
+    async def _reject_workflow_model(self, chat_id: str, reason: str) -> dict[str, Any]:
+        code = "WORKFLOW_MODEL_UNAVAILABLE"
+        await self.send_error(error_message=reason, error_code=code, chat_id=chat_id)
+        return {"status": "error", "chat_id": chat_id, "message": reason, "error_code": code}
+
     async def _reject_terminal_session(self, *, chat_id: str, app_id: str) -> dict[str, Any] | None:
+        rejection, _ = await self._resumable_chat_model(chat_id=chat_id, app_id=app_id)
+        return rejection
+
+    async def _resumable_chat_model(
+        self, *, chat_id: str, app_id: str,
+    ) -> tuple[dict[str, Any] | None, ChatModelPreference | None]:
         from mozaiksai.core.data.persistence.persistence_manager import ChatSessionTerminalError
 
         try:
-            await self._get_or_create_persistence_manager().assert_chat_resumable(chat_id, app_id)
+            selected = await self._get_or_create_persistence_manager().assert_chat_resumable(chat_id, app_id)
         except ChatSessionTerminalError as exc:
             reason = await self.send_session_ended_error(chat_id=chat_id)
             return {
                 "status": "error", "chat_id": chat_id, "route": "terminal_session",
                 "run_status": str(exc.status), "error_code": "WORKFLOW_SESSION_TERMINAL",
                 **({"reason": reason} if reason else {}),
-            }
-        return None
+            }, None
+        return None, selected
 
     async def _launch_workflow_run_locked(
         self,
@@ -1057,7 +1110,7 @@ class WorkflowBridgeMixin:
                         app_id=app_id,
                         initial_agent_name_override=initial_agent_name_override,
                     )
-                    if result.get("route") == "passive_reopen":
+                    if result.get("route") == "passive_reopen" or result.get("error_code") == "WORKFLOW_MODEL_UNAVAILABLE":
                         # Observation/refusal is not an execution outcome.
                         return result
                     run_status = str(result.get("run_status") or "").strip().lower()

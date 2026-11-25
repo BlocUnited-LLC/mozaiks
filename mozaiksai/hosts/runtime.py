@@ -301,7 +301,11 @@ async def principal_header_middleware(request: Request, call_next):
         return await call_next(request)
 
     path = request.url.path
-    app_match = re.search(r"/api/chats/([^/]+)/", path) or re.search(r"/ws/[^/]+/([^/]+)/", path)
+    app_match = (
+        re.fullmatch(r"/api/chats/model/([^/]+)/[^/]+/[^/]+/?", path)
+        or re.search(r"/api/chats/([^/]+)/", path)
+        or re.search(r"/ws/[^/]+/([^/]+)/", path)
+    )
     user_match = re.search(r"/ws/[^/]+/[^/]+/[^/]+/([^/]+)", path)
 
     path_app_id = app_match.group(1) if app_match else None
