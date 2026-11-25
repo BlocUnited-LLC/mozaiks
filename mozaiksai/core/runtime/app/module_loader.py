@@ -36,6 +36,13 @@ from jsonschema import Draft7Validator, SchemaError
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.runtime.persistence.collection_writes import (
+    CANONICAL_WRITE_OPERATIONS,
+    canonical_write_action_id,
+    canonical_write_fields,
+    canonical_write_input_schema,
+    record_id_field,
+)
 from mozaiksai.core.runtime.persistence.intent_loader import (
     DataContract,
     iter_data_contract_collections,
@@ -545,6 +552,33 @@ class ModuleReactionsManifest(ModuleContractModel):
         if len(reaction_ids) != len(set(reaction_ids)):
             raise ValueError("reactions.yaml reactions must have unique id values")
         return self
+
+
+def validate_collection_write_actions(definition: ModuleDefinition, data_contract: DataContract | None) -> None:
+    """Check installed canonical actions against any explicit collection write declaration."""
+    from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
+
+    actions = {action.id: action for action in definition.actions}
+    for owner, kind, collection in iter_data_contract_collections(data_contract, require_complete_ownership=False):
+        if owner != definition.name or kind != "module":
+            continue
+        operations = canonical_write_fields(collection)
+        if operations is None:
+            continue
+        fields = collection["fields"]
+        identity = record_id_field(collection, [field["name"] for field in fields])
+        for op in CANONICAL_WRITE_OPERATIONS:
+            action_id = canonical_write_action_id(collection["entity"], op)
+            action = actions.get(action_id)
+            if op not in operations:
+                if action is not None:
+                    raise ValueError(f"{owner}.{action_id} is disabled by lifecycle.module_writes")
+                continue
+            if action is None:
+                raise ValueError(f"{owner}.{action_id} is required by lifecycle.module_writes")
+            expected = canonical_write_input_schema(op, fields, operations[op], identity)
+            if import_closed_contract_schema(action.input_schema) != import_closed_contract_schema(expected):
+                raise ValueError(f"{owner}.{action_id} inputs must match the approved collection contract {expected}")
 
 
 def resolve_result_write_collection(
@@ -1592,6 +1626,10 @@ class ModuleLoader:
                     )
 
         self._validate_manifest_event_references(definition, manifests)
+        try:
+            validate_collection_write_actions(definition, self.data_contract)
+        except ValueError as exc:
+            raise ModuleLoadError(f"Invalid collection writes for {definition.name!r}: {exc}") from exc
         if manifests.reactions and any(r.target.result_write is not None for r in manifests.reactions.reactions):
             try:
                 validate_module_result_writes(definition, manifests.reactions, manifests.events, self.data_contract)

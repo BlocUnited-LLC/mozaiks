@@ -123,6 +123,9 @@ This project follows a practical pre-1.0 changelog format:
 - App builders can approve a background workflow to save one result on the
   private record that triggered it. The workflow plan shows the source event,
   receiving action and writable fields. Retrying the same result is idempotent.
+- App builders can choose which create, update and delete actions a collection
+  exposes and which fields each action accepts. The choice travels with the
+  app's reviewed data contract during generation and refinement.
 
 - Notification rules can explicitly select `audience.scope: app` for validated
   direct recipients across workspaces. Event ownership remains the default;

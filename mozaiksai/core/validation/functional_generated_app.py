@@ -240,6 +240,35 @@ def _module_action_registry(
     return actions
 
 
+def _validate_collection_writes(files: dict[str, str], diagnostics: list[FunctionalGeneratedAppDiagnostic]) -> None:
+    from mozaiksai.core.runtime.app.module_loader import (
+        ModuleDefinition,
+        validate_collection_write_actions,
+    )
+    from mozaiksai.core.runtime.persistence.collection_writes import canonical_write_fields
+    from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
+
+    path = "data/contract.json"
+    if path not in files:
+        return
+    try:
+        contract = json.loads(files[path])
+        if not isinstance(contract, dict):
+            return
+        owners = {owner for owner, _, collection in iter_data_contract_collections(contract, require_complete_ownership=False)
+                  if canonical_write_fields(collection) is not None}
+        for owner in sorted(owners):
+            path = f"modules/{owner}/module.yaml"
+            if path not in files:
+                raise ValueError(f"Collection writes require their owning module {owner!r}")
+            definition = ModuleDefinition.model_validate(yaml.safe_load(files[path]))
+            if definition.name != owner:
+                raise ValueError("module.id must match the collection owner")
+            validate_collection_write_actions(definition, contract)
+    except (ValueError, yaml.YAMLError) as exc:
+        diagnostics.append(_diag("INVALID_COLLECTION_WRITES", str(exc), path=path))
+
+
 def _validate_action_handlers(
     files: dict[str, str],
     actions: dict[str, dict[str, Any]],
@@ -688,6 +717,7 @@ def scan_functional_generated_app(
     safe_files = _safe_files(files)
     diagnostics: list[FunctionalGeneratedAppDiagnostic] = []
     actions = _module_action_registry(safe_files, diagnostics)
+    _validate_collection_writes(safe_files, diagnostics)
     _validate_result_writes(safe_files, diagnostics)
     _validate_action_handlers(safe_files, actions, diagnostics)
     _validate_routes(safe_files, diagnostics, inherited_components)

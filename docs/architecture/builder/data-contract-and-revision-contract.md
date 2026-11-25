@@ -311,9 +311,18 @@ only collection is the right one. Runtime metadata indexes the declared entity;
 repository code resolves that entry's collection `name` before calling
 `ctx.persistence.collection(module_id, collection_name)`.
 
+DesignDocs can restrict a module-owned collection with `lifecycle.module_writes`.
+Each entry enables one canonical operation and names the business fields that
+clients can supply. The list is part of the reviewed data contract. Factory
+projects the same declaration into the action inventory, request schemas and
+generated handlers. During refinement, the accepted app's action schemas are
+the baseline for deciding whether the proposed design widens a write.
+See the [collection lifecycle example](../app/data-contracts.md#surfaces).
+
 Design surfaces declare `custom_reads` beside `owned_mutations` for actions such
 as dashboard summaries. Code supplies canonical entity list/get reads and, for
-every collection whose `lifecycle.write_mode` is `module_action`, the canonical
+every collection whose `lifecycle.write_mode` is `module_action` and whose
+`lifecycle.module_writes` is absent or null, the canonical
 `create_<entity>`, `update_<entity>` and `delete_<entity>` writes. Their ids
 derive from the declared `entity`, so DesignDocs may list them in
 `owned_mutations` or omit them; custom mutations and custom reads remain declared
