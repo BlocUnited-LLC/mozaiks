@@ -28,6 +28,18 @@ listed above; selections pinned to previous pack identities require review.
 
 ## How the Factory uses a pack
 
+Four app-type recipes help the selection agent compare the approved requirements
+with available packs. A store with a cart and orders can use `commerce`. A
+community with member posts or friendships can use `social`. Direct and group
+conversations can use `messaging`. The SaaS billing recipe applies when the app
+explicitly chooses operator-enabled `mozaikspay` for paid subscriptions.
+
+Each recipe pairs a pack ID with the behavior it supplies. The agent can select
+multiple packs or none. The app owns its brand, navigation, and pages outside
+the selected pack's declared outputs. For example, a store can add shipment
+tracking to an order, and a community can add an appeals workflow for moderators.
+The recipes live in `factory_app/build_context/AppGenerator/domain_catalogs.yaml`.
+
 DesignDocs first asks `DesignPackSelectionAgent` for a list of pack IDs. That
 turn sees the app concept and a compact catalog. The deterministic selector
 checks the requested IDs, dependencies and source digests. An invalid choice

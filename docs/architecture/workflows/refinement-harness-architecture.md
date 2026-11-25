@@ -1093,6 +1093,13 @@ are supplied to generation as read-only context from the same saved snapshot.
 The `app_config` target uses the request's owner-resolved artifact app identity;
 `app.json` may omit `appId`, but a conflicting declared identity is rejected.
 
+When a saved reaction names a workflow capability, the dependency graph can
+show the module manifest that declares that capability. If the same snapshot
+also contains a unique orchestrator trigger for that event and capability,
+the graph links the reaction to its orchestrator. These file references give
+the coding worker related sources to inspect. Changing a binding across app
+and workflow artifacts requires their respective Factory owners.
+
 Missing, empty, unsafe, ambiguous, dynamic, unknown or out-of-scope targets fail
 before generation. Admission checks every surface, including manually constructed
 plans; one invalid surface rejects the whole plan. The worker also rejects generated

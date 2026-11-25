@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import zipfile
@@ -423,6 +424,61 @@ def _candidate_proposal(**updates):
         changed_files=[ProposedFileChange(path="brand/theme_config.json", content='{"accent":"coral"}')],
         **updates,
     )
+
+
+@pytest.mark.asyncio
+async def test_color_refinement_preserves_prior_logo_without_exposing_it_to_provider(tmp_path):
+    from mozaiksai.hosts.studio import _inline_refinement_baseline
+
+    theme_path = "brand/theme_config.json"
+    before = '{"accent":"blue","assets":{"logo":"logo-privanote.png"}}'
+    after = before.replace("blue", "coral")
+    request = _candidate_request(validation_strategy="docker").model_copy(update={
+        "files": {theme_path: before}, "baseline_files": {"app.json": '{"appId":"app_1"}', theme_path: before},
+    })
+    logo_path = "brand/assets/logo-privanote.png"
+    logo = b"\x89PNG\r\n\x1a\n" + b"\x00\xff" * 150_000
+    archive_path = tmp_path / "privanote.zip"
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path, content in {**request.baseline_files, logo_path: logo}.items():
+            archive.writestr(f"privanote/{path}", content)
+    parent = BuildRecord(
+        id=request.build_record_id, app_id="app_1", build_family="app_bundle", build_key="app_bundle",
+        version_number=2, lineage_root_id="initial", lifecycle_status="current",
+        files_manifest=[{
+            "path": canonical_bundle_archive_path("privanote"), "sha256": hashlib.sha256(archive_path.read_bytes()).hexdigest(),
+            "size_bytes": archive_path.stat().st_size, "content_type": "application/zip",
+        }],
+        commit_metadata={"metadata": {"bundle_name": "privanote", "artifact_path": str(archive_path)}},
+    )
+    text, assets = await _inline_refinement_baseline(parent)
+    assert text == request.baseline_files
+    assert assets == {logo_path: logo}
+    store = _FakeArtifactStore()
+    store.get_build_record = AsyncMock(return_value=parent)
+    proposal = _candidate_proposal().model_copy(update={"changed_files": [ProposedFileChange(path=theme_path, content=after)]})
+    provider = SimpleNamespace(execute=AsyncMock(return_value=proposal))
+    validate = AsyncMock(return_value=_candidate_evidence("docker"))
+    worker = ScopedRefinementCodingWorker(
+        provider=provider, candidate_validation_runner=validate, config_loader=_enabled_control_plane,
+        artifact_store=store, output_root=tmp_path,
+    )
+    result = await worker.execute(request.model_copy(update={"baseline_files": text}), preserved_assets=assets)
+
+    assert result.status == "validated", result.error
+    sent = provider.execute.await_args.args[0]
+    assert sent.files == {theme_path: before}
+    assert logo_path not in sent.baseline_files
+    assert base64.b64encode(logo).decode() not in sent.model_dump_json()
+    validated = validate.await_args.kwargs["files"]
+    assert validated == {**text, theme_path: after, logo_path: logo}
+    saved = store.calls[0]
+    assert saved["parent_build_record_id"] == parent.id
+    metadata = saved["commit_metadata"]["metadata"]
+    assert metadata["staged_file_sha256"][logo_path] == hashlib.sha256(logo).hexdigest()
+    with zipfile.ZipFile(metadata["artifact_path"]) as archive:
+        assert archive.read(f"{metadata['bundle_name']}/{logo_path}") == logo
+        assert archive.read(f"{metadata['bundle_name']}/{theme_path}") == after.encode()
 
 
 @pytest.mark.parametrize("op,content", [("create", "new file"), ("delete", None)])

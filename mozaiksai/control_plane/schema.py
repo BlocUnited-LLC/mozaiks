@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from mozaiksai.core.artifacts.models import BrandingIntent
+
 from .contracts import ControlPlaneToolDefinition
 
 ControlPlaneCheckpointMode = Literal["ag2_structured_agent", "deterministic_handler"]
@@ -102,6 +104,7 @@ class ControlPlaneArtifactRoutingManifest(BaseModel):
     build_family: str = Field(min_length=1)
     label: str | None = None
     routes: ControlPlaneArtifactChangeRoutesManifest
+    branding_routes: dict[BrandingIntent, ControlPlaneChangeRouteManifest] = Field(default_factory=dict)
 
     @field_validator("build_family")
     @classmethod

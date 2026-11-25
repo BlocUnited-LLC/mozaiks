@@ -234,6 +234,7 @@ async def create_routed_chat_session(
     build_registry_id: str | None = None,
     source_chat_id: str | None = None,
     persistence_manager: Any | None = None,
+    run_model: RefinementModel | None = None,
 ) -> str:
     persistence = persistence_manager if persistence_manager is not None else _PERSISTENCE_MANAGER
     chat_id = chat_id or str(uuid4())
@@ -254,6 +255,12 @@ async def create_routed_chat_session(
             build_registry_id=build_registry_id,
             source_chat_id=source_chat_id,
         )
+    if "workflow_run_model" in session_fields:
+        raise ValueError("Bind the workflow run model through the session creation argument")
+    if run_model is not None and (
+        session_fields.get("run_build_binding") is not None or context_variables.get("transport_purpose") == "ask_carrier"
+    ):
+        raise ValueError("This workflow session cannot select a run model")
     extra_fields: dict[str, Any] = {"trigger_meta": trigger_meta}
     extra_fields.update(context_variables)
     extra_fields.update({key: value for key, value in session_fields.items() if key not in SERVER_OWNED_SESSION_FIELDS})
@@ -267,6 +274,7 @@ async def create_routed_chat_session(
         workflow_name=workflow_id,
         user_id=user_id,
         extra_fields=extra_fields or None,
+        **({"run_model": run_model} if run_model is not None else {}),
     )
     server_fields = {key: value for key, value in session_fields.items() if key in SERVER_OWNED_SESSION_FIELDS}
     if server_fields:

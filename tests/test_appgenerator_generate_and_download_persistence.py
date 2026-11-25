@@ -146,11 +146,11 @@ def test_initial_app_bundle_is_parentless_with_upstream_artifacts(monkeypatch, t
     fake_artifact_store = _FakeArtifactStore()
     artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
     monkeypatch.setattr(artifacts_mod, "get_artifact_store", lambda: fake_artifact_store)
-    monkeypatch.setattr(
-        artifacts_mod,
-        "resolve_latest_artifact_version_refs",
-        AsyncMock(return_value={"workflow_bundle": "av_workflow_1"}),
-    )
+    async def latest(**kwargs):
+        current = {"workflow_bundle": "av_newer_workflow"}
+        return {kind: current[kind] for kind in kwargs["artifact_kinds"] if kind in current}
+
+    monkeypatch.setattr(artifacts_mod, "resolve_latest_artifact_version_refs", latest)
     zip_path = tmp_path / "GeneratedApp.zip"
     zip_path.write_bytes(b"fake bundle bytes")
     context = _Context({
@@ -158,6 +158,10 @@ def test_initial_app_bundle_is_parentless_with_upstream_artifacts(monkeypatch, t
         "app_id": "app_123",
         "artifact_version_id": "av_workflow_1",
         "revision_source_artifact_version_id": pinned_source,
+        "workflow_integration_metadata": {"source_artifact_version_id": "av_newer_workflow"},
+        "app_bundle_acceptance_result": {"workflow_integration": {
+            "passed": True, "metadata": {"source_artifact_version_id": "av_workflow_1"},
+        }},
     })
 
     asyncio.run(generate_and_download_module._register_app_bundle_artifact_version(
@@ -192,7 +196,6 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
         lambda **kwargs: asyncio.sleep(0, result={
             "concept": "av_concept_1",
             "design_docs": "av_design_docs_1",
-            "workflow_bundle": "av_workflow_bundle_1",
             "theme_capture": "av_theme_capture_1",
         }),
     )
@@ -240,7 +243,6 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     assert fake_artifact_store.calls[0]["canonical_inputs_version"] == {
         "concept": "av_concept_1",
         "design_docs": "av_design_docs_1",
-        "workflow_bundle": "av_workflow_bundle_1",
         "theme_capture": "av_theme_capture_1",
     }
     assert fake_artifact_store.calls[0]["lifecycle_status"].value == "draft"

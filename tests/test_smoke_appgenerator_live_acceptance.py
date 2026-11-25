@@ -262,6 +262,66 @@ async def test_appgenerator_acceptance_blocks_invented_workflow_route() -> None:
     assert context.get("bundle_repair_status") == "needs_revision"
 
 
+@pytest.mark.parametrize("source", [None, "av_older", "av_pinned"])
+def test_workflow_integration_gate_requires_the_pinned_source_even_with_no_workflows(source):
+    context = {"artifact_kind": "workflow_bundle", "artifact_version_id": "av_pinned"}
+    if source:
+        context["workflow_integration_metadata"] = {"workflows": [], "source_artifact_version_id": source}
+    result = app_validation.validate_workflow_integration_contract({}, context)
+    assert result["passed"] is (source == "av_pinned")
+    if source != "av_pinned":
+        assert result["failed_tests"][0]["test"] == "workflow_integration_source"
+
+
+@pytest.mark.parametrize("external", ["platform.identity.signed_in", "hosted.billing.activated", "mozaikspay.billing.checkout"])
+def test_generated_module_emit_cannot_verify_an_external_workflow_event(external):
+    workflow = default_workflow_integration()
+    workflow["trigger_events"][0]["event_type"] = external
+    files = build_appgenerator_acceptance_files(workflow)
+    result = app_validation.validate_workflow_integration_contract(
+        files, {"workflow_integration_metadata": {"workflows": [workflow]}},
+    )
+    assert result["passed"] is False
+    assert [item["test"] for item in result["failed_tests"]] == ["workflow_trigger_external_producer_unverified"]
+
+
+def test_generated_workflows_cannot_share_the_same_event_and_capability_pair():
+    workflow = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(workflow)
+    duplicate = {**workflow, "workflow_name": "Escalation"}
+    result = app_validation.validate_workflow_integration_contract(
+        files, {"workflow_integration_metadata": {"workflows": [workflow, duplicate]}},
+    )
+    assert result["passed"] is False
+    assert "workflow_trigger_duplicate_binding" in {item["test"] for item in result["failed_tests"]}
+
+
+@pytest.mark.parametrize(
+    ("target", "passes"),
+    [(DEFAULT_WORKFLOW_CAPABILITY_ID, False), ("support_tickets.list", True)],
+)
+def test_generated_event_requires_a_matching_trigger_for_workflow_reactions(target, passes):
+    workflow = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(workflow)
+    path = "modules/support_tickets/contracts/reactions.yaml"
+    reactions = yaml.safe_load(files[path])
+    reactions["reactions"].append({
+        "id": "on_ticket_created",
+        "event_type": "domain.support_ticket.created",
+        "target": {"kind": "capability", "capability_id": target},
+    })
+    files[path] = yaml.safe_dump(reactions)
+    result = app_validation.validate_workflow_integration_contract(
+        files, {"workflow_integration_metadata": {"workflows": [workflow]}},
+    )
+    assert result["passed"] is passes
+    if not passes:
+        failure, = result["failed_tests"]
+        assert failure["test"] == "workflow_trigger_ambiguous_workflow_reaction"
+        assert "domain.support_ticket.created" in failure["error"]
+        assert target in failure["error"]
+
+
 @pytest.mark.asyncio
 async def test_appgenerator_acceptance_requires_deployment_artifacts_when_requested() -> None:
     integration = default_workflow_integration()

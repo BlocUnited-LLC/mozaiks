@@ -287,7 +287,7 @@ class _DummyTransport(WorkflowBridgeMixin):
         if event.get("kind") == "run_complete" and chat_id:
             self.connections.setdefault(chat_id, {})["ui_run_complete_sent"] = True
 
-    async def submit_user_input(self, request_id: str, user_input: str) -> bool:
+    async def submit_user_input(self, request_id: str, user_input: str, *, chat_id: str | None = None) -> bool:
         self.submitted_inputs.append({"request_id": request_id, "user_input": user_input})
         return True
 

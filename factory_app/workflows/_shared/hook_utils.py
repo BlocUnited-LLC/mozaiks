@@ -15,6 +15,17 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _FACTORY_BUILD_CONTEXT_ROOT = _REPO_ROOT / "factory_app" / "build_context"
 
 
+def merge_config_mapping(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+    """Apply a generated config patch while preserving unmentioned nested settings."""
+    result = dict(base)
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            result[key] = merge_config_mapping(base[key], value)
+        else:
+            result[key] = value
+    return result
+
+
 def workflow_context_path(workflow_name: str, *relative_parts: str) -> Path:
     """Return a path inside a workflow's factory-owned build context."""
 
@@ -25,6 +36,18 @@ def workflow_context_path(workflow_name: str, *relative_parts: str) -> Path:
     if not parts:
         raise ValueError("at least one relative build-context path part is required")
     return _FACTORY_BUILD_CONTEXT_ROOT / workflow / Path(*parts)
+
+
+def load_catalog(path: Path) -> dict[str, Any]:
+    """Read a Factory-owned YAML catalog for advisory prompt context."""
+    import yaml
+
+    try:
+        catalog = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        logger.warning("Cannot load catalog %s: %s", path, exc)
+        return {}
+    return catalog if isinstance(catalog, dict) else {}
 
 
 def update_agent_section(agent: Any, header: str, body: str) -> None:
@@ -76,5 +99,5 @@ def update_agent_section(agent: Any, header: str, body: str) -> None:
         )
 
 
-__all__ = ["update_agent_section", "workflow_context_path"]
+__all__ = ["load_catalog", "update_agent_section", "workflow_context_path"]
 

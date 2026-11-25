@@ -210,7 +210,7 @@ class TestInjectDomainCatalogContext:
 
     def test_catalog_load_failure_does_not_raise(self):
         agent = _FakeAgent(name="AppPlanAgent")
-        with patch.object(self.mod, "_load_catalog", return_value=None):
+        with patch.object(self.mod, "load_catalog", return_value={}):
             # Should exit silently
             self.mod.inject_domain_catalog_context(agent, [])
         assert agent.system_message == ""

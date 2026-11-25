@@ -1115,6 +1115,8 @@ P2:
 ## Graph-bound user journeys
 
 An app can declare repeatable user journeys in `app/config/journeys.json`.
+Factory checks the optional catalog against the journey schema and matches its
+`app_id` to the saved bundle’s `app.json` `appId` during build validation.
 Regression runners and evaluators can share the declaration. The app owns
 setup, fixture data, browser sessions, and verification of the saved result.
 

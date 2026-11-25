@@ -136,6 +136,39 @@ async def launch(retry, **changes):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("intent", "workflow"), [
+    ("visual_redesign", "ThemeCapture"), ("new_logo", "BrandAssetGeneratorWorkflow"),
+])
+async def test_brand_workflow_retry_reopens_pinned_current_build_without_invalidating(retry, monkeypatch, intent, workflow):
+    from mozaiksai.core.artifacts import ArtifactLifecycleStatus, ChangeClassification
+
+    policy = yaml.safe_load((ROOT / "factory_app/refinement_harness/config/harness.yaml").read_text(encoding="utf-8"))
+    app_routes = next(artifact for artifact in policy["routing"]["artifacts"] if artifact["build_family"] == "app_bundle")
+    journey = app_routes["branding_routes"][intent]["workflow_sequence"]
+    retry.source["workflow_name"] = workflow
+    retry.source["trigger_meta"].update(workflow_sequence=journey, journey_id=journey, change_class="design")
+    retry.change.classification = retry.change.change_intent.change_class = ChangeClassification.DESIGN
+    retry.change.change_intent.branding_intent = intent
+    retry.change.impact_set.workflow_sequence = journey
+    retry.change.impact_set.affected_workflows = [workflow]
+    retry.change.router_decision.update(workflow_id=workflow, workflow_sequence=journey)
+    retry.baseline.lifecycle_status = ArtifactLifecycleStatus.CURRENT
+    before = retry.baseline.model_dump(mode="json")
+    theme = {"colors": {"primary": {"main": "#336699"}}}
+    monkeypatch.setattr(studio, "_saved_parent_theme", AsyncMock(return_value=theme))
+    invalidate = AsyncMock()
+    monkeypatch.setattr(studio, "_persist_trigger_invalidation", invalidate)
+
+    result = await launch(retry, workflow_id=workflow)
+    fresh = retry.pm._default._docs[result["chat_id"]]
+    assert result["journey_id"] == journey
+    assert fresh["artifact_version_id"] == retry.baseline.id
+    assert fresh["parent_theme_config"] == theme
+    assert retry.baseline.model_dump(mode="json") == before
+    invalidate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_refinement_retry_uses_saved_request_and_baseline_with_fresh_execution_state(retry):
     before = deepcopy(retry.pm._default._docs)
     result = await launch(retry)
