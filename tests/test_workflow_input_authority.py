@@ -10,6 +10,7 @@ import pytest
 from mozaiksai.core.auth import UserPrincipal
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.runtime.composition import platform_hooks
+from mozaiksai.core.transport.simple_transport import SimpleTransport
 from tests.test_ui_response_ownership import _Transport as _UIToolsTransport
 from tests.test_workflow_bridge import (
     _ag2_mod,
@@ -229,6 +230,46 @@ async def test_a_refused_reply_is_not_delivered(hooked, monkeypatch):
     hooked(lambda **_kwargs: {})
     assert await transport.submit_tool_call_response_for_user("evt-1", "continue", principal=_principal()) is True
     assert len(delivered) == 1
+
+
+@pytest.mark.asyncio
+async def test_refused_feedback_is_neither_stored_nor_delivered(hooked, monkeypatch):
+    hooked(_refuse([]))
+    transport = _reply_transport(_session())
+    transport._ui_tool_metadata["evt-1"].update(
+        workflow_primitive="outcome_feedback", workflow_name="OperatorOnly", feedback_agent_name="Reviewer",
+        outcome_id="outcome-1",
+    )
+    stored, delivered = [], []
+
+    async def store(receipt):
+        stored.append(receipt)
+        return True
+
+    async def deliver(*args):
+        delivered.append(args)
+        return True
+
+    transport._get_or_create_persistence_manager().save_workflow_feedback_receipt = store
+    monkeypatch.setattr(transport, "submit_tool_call_response", deliver)
+    reply = {"status": "submitted", "rating": 5}
+    assert await transport.submit_tool_call_response_for_user("evt-1", reply, principal=_principal()) is False
+    assert stored == delivered == []
+
+    hooked(lambda **_kwargs: {})
+    assert await transport.submit_tool_call_response_for_user("evt-1", reply, principal=_principal()) is True
+    assert len(stored) == len(delivered) == 1
+
+
+@pytest.mark.asyncio
+async def test_input_is_delivered_only_to_the_chat_that_was_checked():
+    transport = object.__new__(SimpleTransport)
+    answered = []
+    other = {"req-1": lambda text: answered.append(("other", text))}
+    transport._input_request_registries = {"other": other}
+    transport._recent_input_submit_chats = set()
+    assert await transport.submit_user_input("req-1", "", chat_id=CHAT) is False
+    assert answered == [] and "req-1" in other
 
 
 @pytest.mark.asyncio

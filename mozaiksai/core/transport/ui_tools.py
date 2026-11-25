@@ -588,7 +588,13 @@ class UIToolsMixin:
             return False
         if app_id is not None and app_id != session["app_id"]:
             return False
-        # The awaited lookup must not authorize an event rebound to another chat.
+        # Any reply, feedback included, lets the run waiting for it go on.
+        if await input_refused(
+            self._get_or_create_persistence_manager(),
+            chat_id=event_chat_id, app_id=session["app_id"], user_id=session["user_id"],
+        ):
+            return False
+        # The awaited lookups must not authorize an event rebound to another chat.
         if self._tool_call_chat_id(event_id) != event_chat_id:
             return False
         metadata = self._ui_tool_metadata.get(event_id) or {}
@@ -618,14 +624,6 @@ class UIToolsMixin:
                 logger.warning("[UI_TOOL] Feedback receipt not persisted: %s", type(exc).__name__)
                 return False
             if not saved or self._tool_call_chat_id(event_id) != event_chat_id:
-                return False
-        else:
-            # A reply lets the waiting run go on; feedback does not.
-            refused = await input_refused(
-                self._get_or_create_persistence_manager(),
-                chat_id=event_chat_id, app_id=session["app_id"], user_id=session["user_id"],
-            )
-            if refused or self._tool_call_chat_id(event_id) != event_chat_id:
                 return False
         return await self.submit_tool_call_response(event_id, response_data)
 
@@ -659,7 +657,7 @@ class UIToolsMixin:
         if self._has_pending_input_request(event_id):
             input_chat_id = self._tool_call_chat_id(event_id)
             logger.debug("[UI_TOOL] Routing response-required interaction through submit_user_input for %s", event_id)
-            submitted = await self.submit_user_input(event_id, input_request_text)
+            submitted = await self.submit_user_input(event_id, input_request_text, chat_id=input_chat_id)
             if submitted:
                 if input_chat_id:
                     self._ui_tool_metadata[event_id] = {"chat_id": input_chat_id}

@@ -370,7 +370,7 @@ class WorkflowBridgeMixin:
                         normalized_message = self._build_resume_signal(chat_id, request_id)
                         resume_signal = True
 
-                    success = await self.submit_user_input(request_id, str(normalized_message))
+                    success = await self.submit_user_input(request_id, str(normalized_message), chat_id=chat_id)
 
                     if success:
                         route = "existing_session_resume" if resume_signal else "existing_session"
