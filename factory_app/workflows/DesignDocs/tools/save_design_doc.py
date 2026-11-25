@@ -784,7 +784,7 @@ def _validate_design_collections(
         validate_collection_fields(collection, path)
         writes = canonical_write_fields(collection)
         if writes is not None:
-            disabled = {canonical_write_action_id(entity, op) for op in CANONICAL_WRITE_OPERATIONS if op not in writes}
+            disabled = {canonical_write_action_id(collection["entity"], op) for op in CANONICAL_WRITE_OPERATIONS if op not in writes}
             conflicts = disabled.intersection(surface.get("owned_mutations") or [])
             if conflicts:
                 raise ValueError(
