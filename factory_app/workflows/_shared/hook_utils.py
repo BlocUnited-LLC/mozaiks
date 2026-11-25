@@ -38,6 +38,18 @@ def workflow_context_path(workflow_name: str, *relative_parts: str) -> Path:
     return _FACTORY_BUILD_CONTEXT_ROOT / workflow / Path(*parts)
 
 
+def load_catalog(path: Path) -> dict[str, Any]:
+    """Read a Factory-owned YAML catalog for advisory prompt context."""
+    import yaml
+
+    try:
+        catalog = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        logger.warning("Cannot load catalog %s: %s", path, exc)
+        return {}
+    return catalog if isinstance(catalog, dict) else {}
+
+
 def update_agent_section(agent: Any, header: str, body: str) -> None:
     """Append or replace a named ``[HEADER]`` section in the agent system message.
 
@@ -87,5 +99,5 @@ def update_agent_section(agent: Any, header: str, body: str) -> None:
         )
 
 
-__all__ = ["update_agent_section", "workflow_context_path"]
+__all__ = ["load_catalog", "update_agent_section", "workflow_context_path"]
 

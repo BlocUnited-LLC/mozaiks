@@ -10,7 +10,11 @@ from typing import Any
 
 import yaml
 
-from factory_app.workflows._shared.hook_utils import update_agent_section
+from factory_app.workflows._shared.hook_utils import (
+    load_catalog,
+    update_agent_section,
+    workflow_context_path,
+)
 from factory_app.workflows._shared.pack_selection import available_pack_rows
 from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
@@ -48,7 +52,7 @@ def inject_pack_selection_context(agent: Any, messages: list[dict[str, Any]]) ->
     if context is None:
         return
     available = available_pack_rows(context)
-    catalog = [{
+    catalog: dict[str, dict[str, Any]] = {pack_id: {
         "pack_id": pack_id, "capability_source": row.get("capability_source"),
         "description": row.get("description") or "",
         "capabilities": [
@@ -59,20 +63,36 @@ def inject_pack_selection_context(agent: Any, messages: list[dict[str, Any]]) ->
             {key: integration[key] for key in ("service", "provider") if key in integration}
             for integration in row.get("required_integrations") or [] if isinstance(integration, Mapping)
         ],
-    } for pack_id, row in available.items()]
+    } for pack_id, row in available.items()}
+    domains = load_catalog(workflow_context_path("AppGenerator", "domain_catalogs.yaml")).get("domains", {})
+    if not isinstance(domains, dict):
+        domains = {}
+    for domain, data in domains.items():
+        recipe = data.get("pack_recipe") if isinstance(data, dict) else None
+        if not isinstance(recipe, dict):
+            continue
+        pack_id, condition = recipe.get("pack_id"), recipe.get("when")
+        if not isinstance(pack_id, str) or pack_id not in catalog:
+            continue
+        if not isinstance(condition, str) or not condition.strip():
+            continue
+        if recipe.get("requires_monetization") and context.get("monetization_enabled") is not True:
+            continue
+        catalog[pack_id].setdefault("app_recipes", {})[domain] = condition
     update_agent_section(
         agent, "[AVAILABLE PACK CATALOG]",
         "These verified offerings are available, not selected. Reason from the supplied approved "
         "concept_blueprint, concept_overview and monetization_enabled. Return DesignPackSelection "
         "with the exact reusable pack_ids this app needs; [] explicitly selects none. "
         "Include declared dependencies; repair any missing dependency named in selection feedback. "
-        "Use stock packs for matching behavior and leave missing app-owned pieces to the design. "
+        "Use app_recipes when their stated behavior matches the approved requirements. "
+        "A domain label alone does not select a pack. Leave missing app-owned pieces to the design. "
         "Capability-family hints are not pack IDs. "
         "Do not select managed billing for a free/non-monetized app or treat an available provider "
         "as owner intent. The tool records a candidate, not approval; an owner separately reviews "
         "the selected sources and permissions. The subsequent design stage receives their exact "
         "contracts and module actions. Unknown IDs, source changes and missing dependencies fail validation.\n"
-        + json.dumps(catalog, ensure_ascii=False, separators=(",", ":")),
+        + json.dumps(list(catalog.values()), ensure_ascii=False, separators=(",", ":")),
     )
 
 
