@@ -1,8 +1,11 @@
 # Use Studio
 
 Studio is the browser-based interface for building, reviewing, and managing your Mozaiks apps.
-Studio opens automatically when you run `python -m mozaiks quickstart` or
-`python -m mozaiks studio`.
+Run `python -m mozaiks quickstart` to create or reuse a workspace, start its
+services, and open Studio in your browser. To reopen Studio for an existing
+workspace, run `python -m mozaiks studio --open`. Run `python -m mozaiks studio`
+to print the workspace's app overview. Add `--dir <path>` to any of these
+commands if the workspace is outside your current directory.
 
 For the product-level page contracts, see the [Studio docs](../../studio/index.md).
 
