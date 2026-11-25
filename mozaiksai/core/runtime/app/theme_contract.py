@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+APP_THEME_PATH = "brand/theme_config.json"
+
 
 class PageTitleStyle(BaseModel):
     """Page titles select existing app font slots and finite typography tokens."""

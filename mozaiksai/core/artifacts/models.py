@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -35,6 +35,9 @@ class ChangeClassification(StrEnum):
     DESIGN = "design"
     FEATURE = "feature"
     CORE = "core"
+
+
+BrandingIntent = Literal["theme_color_patch", "visual_redesign", "new_logo"]
 
 
 class RefinementSessionStatus(StrEnum):
@@ -96,6 +99,7 @@ class ChangeIntentDoc(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     change_class: ChangeClassification
+    branding_intent: BrandingIntent | None = None
     source: str = "declared"
     signals: list[str] = Field(default_factory=list)
     rationale: str

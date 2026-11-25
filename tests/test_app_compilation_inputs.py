@@ -728,14 +728,18 @@ async def test_coding_worker_passes_bound_inputs_and_persists_replayable_child(s
 
 @pytest.mark.asyncio
 async def test_media_child_carries_exact_input_lineage(saved, monkeypatch):
-    from factory_app.workflows.AppMediaGenerator.tools import publish_app_media as publisher
+    from factory_app.workflows._shared import media_draft
+    from mozaiksai.core.session.build_binding import RunBuildBinding
 
     store, _, parent = saved
     approval = await resolve(saved)
-    monkeypatch.setattr(publisher, "get_artifact_store", lambda: store)
-    child, _ = await publisher._register_media_version(
+    monkeypatch.setattr(media_draft, "get_artifact_store", lambda: store)
+    child, _ = await media_draft.register_media_draft(
         parent=parent, files={"app.json": '{"appId":"target"}', "ui/assets/new.svg": "<svg/>"},
         overlay={}, chat_id="media-chat", user_id="owner", approved_compilation=approval,
+        workflow_name="AppMediaGenerator", binding=RunBuildBinding.model_validate({
+            key: parent.commit_metadata.metadata.get(key) for key in RunBuildBinding.model_fields
+        }),
         validation={
             "validation_status": "passed", "validation_strategy": "docker",
             "app_bundle_acceptance_result": {"status": "passed", "passed": True},

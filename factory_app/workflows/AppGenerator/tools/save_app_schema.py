@@ -20,6 +20,7 @@ from factory_app.workflows._shared.generated_ui_contract import (
     custom_route_bundle_page_files,
     dedupe,
 )
+from factory_app.workflows._shared.hook_utils import merge_config_mapping as _deep_merge_dicts
 from factory_app.workflows._shared.platform.build_target import require_build_binding
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     _assembled_data_contract,
@@ -192,19 +193,6 @@ def _require_dict(value: Any, field: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"AppSchemaOutput.{field} must be a dict, got {type(value).__name__}")
     return value
-
-
-def _deep_merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    merged: dict[str, Any] = dict(base)
-    for key, value in overlay.items():
-        if (
-            isinstance(value, dict)
-            and isinstance(base.get(key), dict)
-        ):
-            merged[key] = _deep_merge_dicts(base[key], value)
-        else:
-            merged[key] = value
-    return merged
 
 
 def resolve_app_theme_config(
