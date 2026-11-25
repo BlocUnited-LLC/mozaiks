@@ -26,14 +26,21 @@ import importlib
 import importlib.util
 import inspect
 import sys
+from functools import cached_property
 from pathlib import Path, PurePosixPath
 from types import ModuleType
 from typing import Annotated, Any, Literal, cast
 
 import yaml
+from jsonschema import Draft7Validator, SchemaError
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.runtime.persistence.intent_loader import (
+    DataContract,
+    iter_data_contract_collections,
+    load_data_contract,
+)
 from mozaiksai.core.taxonomy import SemanticCategory, validate_registered_identifier
 
 logger = get_workflow_logger("module_loader")
@@ -382,10 +389,34 @@ class ModuleEventsManifest(ModuleContractModel):
         return self
 
 
+ResultRecordField = Annotated[str, Field(strict=True, pattern=r"^[A-Za-z][A-Za-z0-9_]*$")]
+_RESULT_SCOPE_FIELDS = frozenset({"app_id", "tenant_id", "workspace_id", "user_id", "created_at", "updated_at"})
+
+
+class ModuleReactionResultWrite(ModuleContractModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source_action: str
+    action: str
+    collection: str
+    record_key: ResultRecordField
+    fields: tuple[ResultRecordField, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _validate_fields(self) -> ModuleReactionResultWrite:
+        if self.record_key in _RESULT_SCOPE_FIELDS:
+            raise ValueError("result_write.record_key must be an app record identifier")
+        if (len(set(self.fields)) != len(self.fields)
+                or set(self.fields) & (_RESULT_SCOPE_FIELDS | {self.record_key, "id"})):
+            raise ValueError("result_write.fields must be unique result fields, separate from identity and scope")
+        return self
+
+
 class ModuleReactionTarget(ModuleContractModel):
     kind: Literal["handler", "capability", "notification", "service_adapter"]
     handler_method: str | None = None
     capability_id: str | None = None
+    result_write: ModuleReactionResultWrite | None = None
     notification_id: str | None = None
     adapter: str | None = None
     adapter_method: str | None = None
@@ -397,6 +428,8 @@ class ModuleReactionTarget(ModuleContractModel):
 
     @model_validator(mode="after")
     def _validate_target_contract(self) -> ModuleReactionTarget:
+        if self.result_write is not None and self.kind != "capability":
+            raise ValueError("only a capability reaction can declare result_write")
         if self.kind == "handler":
             if not self.handler_method:
                 raise ValueError("handler reactions must declare target.handler_method")
@@ -512,6 +545,72 @@ class ModuleReactionsManifest(ModuleContractModel):
         if len(reaction_ids) != len(set(reaction_ids)):
             raise ValueError("reactions.yaml reactions must have unique id values")
         return self
+
+
+def resolve_result_write_collection(
+    module_id: str, result_write: ModuleReactionResultWrite, data_contract: DataContract | None,
+) -> dict[str, Any]:
+    """Resolve the declared private app collection and its protected fields."""
+    for owner, kind, collection in iter_data_contract_collections(data_contract):
+        if (owner, kind, collection["name"]) != (module_id, "module", result_write.collection):
+            continue
+        if collection["scope"] != "app" or collection["tenancy"] != "per_user":
+            raise ValueError("result_write.collection must be a per_user app collection")
+        selected = {result_write.record_key, *result_write.fields}
+        names = {field["name"] for field in collection["fields"] if isinstance(field, dict) and isinstance(field.get("name"), str)}
+        if collection["owner_field"] in selected or not selected <= names:
+            raise ValueError("result_write record_key and fields must be declared collection fields distinct from its owner")
+        return collection
+    raise ValueError(f"result_write.collection {result_write.collection!r} must be declared for module {module_id!r} in data/contract.json")
+
+
+def validate_module_result_writes(
+    definition: ModuleDefinition, reactions: ModuleReactionsManifest, events: ModuleEventsManifest | None,
+    data_contract: DataContract | None,
+) -> None:
+    """Close result-write references against the emitting module's published contracts."""
+    actions = {action.id: action for action in definition.actions}
+    declared_events = {event.type: event for event in events.events} if events else {}
+    source_actions: set[str] = set()
+    for reaction in reactions.reactions:
+        write = reaction.target.result_write
+        if write is None:
+            continue
+        if write.source_action in source_actions:
+            raise ValueError("only one result_write reaction may use each source_action")
+        source_actions.add(write.source_action)
+        if not any(c.kind == "workflow" and c.capability_id == reaction.target.capability_id for c in definition.capabilities):
+            raise ValueError("result_write requires a workflow capability declared by the owning module")
+        source = actions.get(write.source_action)
+        event = declared_events.get(reaction.event_type)
+        if (source is None or event is None or event.producer != definition.name or event.type not in source.emits):
+            raise ValueError("result_write.source_action must declare the reaction event in its emits")
+        event_schema = event.payload_schema
+        _check_result_schema(event_schema)
+        event_key = event_schema.get("properties", {}).get(write.record_key)
+        if (event_schema.get("type") != "object" or "$ref" in event_schema or not isinstance(event_key, dict)
+                or event_key.get("type") != "string" or "$ref" in event_key or event_key.get("nullable")
+                or write.record_key not in event_schema.get("required", [])):
+            raise ValueError("result_write.record_key must be a required string in the source event payload_schema")
+        action = actions.get(write.action)
+        if (action is None or action.api_surface != "internal" or action.permissions or action.emits
+                or action.entitlement_gate or action.ask_context_safe):
+            raise ValueError("result_write.action must be internal without permissions, emits, entitlement_gate, or ask_context_safe")
+        schema = action.input_schema
+        _check_result_schema(schema)
+        if (schema.get("type") != "object" or schema.get("nullable") or schema.get("additionalProperties") is not False
+                or "$ref" in schema or schema.get("patternProperties")
+                or set(schema.get("properties", {})) != set(write.fields)
+                or set(schema.get("required", ())) != set(write.fields)):
+            raise ValueError("result_write.action input_schema must require exactly its fields and forbid additional properties")
+        resolve_result_write_collection(definition.name, write, data_contract)
+
+
+def _check_result_schema(schema: dict[str, Any]) -> None:
+    try:
+        Draft7Validator.check_schema(schema)
+    except SchemaError as exc:
+        raise ValueError("result_write requires a valid JSON schema") from exc
 
 
 class ModuleNotificationAudience(ModuleContractModel):
@@ -1223,6 +1322,11 @@ class ModuleLoader:
             str(root / "modules") for root in self._module_roots
         ]
 
+    @cached_property
+    def data_contract(self) -> DataContract | None:
+        """Use one data contract for all modules and the app's persistence context."""
+        return load_data_contract(self._base)
+
     def discover_module_names(self) -> list[str]:
         """Discover active app modules and explicitly composed host defaults."""
         names: set[str] = set()
@@ -1473,6 +1577,11 @@ class ModuleLoader:
                     )
 
         self._validate_manifest_event_references(definition, manifests)
+        if manifests.reactions and any(r.target.result_write is not None for r in manifests.reactions.reactions):
+            try:
+                validate_module_result_writes(definition, manifests.reactions, manifests.events, self.data_contract)
+            except ValueError as exc:
+                raise ModuleLoadError(f"Invalid result_write for {definition.name!r}: {exc}") from exc
         return manifests
 
     def _validate_manifest_event_references(

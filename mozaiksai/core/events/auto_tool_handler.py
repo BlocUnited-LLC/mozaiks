@@ -698,7 +698,10 @@ class AutoToolEventHandler:
 
         context = kwargs.get("context_variables")
         base = context._base if isinstance(context, StructuredOutputOverlay) else context
-        scope = _workflow_tool_invocation(base) if isinstance(base, ContextVariablesBridge) else nullcontext()
+        scope = (
+            _workflow_tool_invocation(base, validated_output=context if isinstance(context, StructuredOutputOverlay) else None)
+            if isinstance(base, ContextVariablesBridge) else nullcontext()
+        )
         try:
             with scope:
                 result = binding.function(**kwargs)

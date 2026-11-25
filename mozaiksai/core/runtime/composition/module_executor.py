@@ -32,13 +32,19 @@ import os
 import re
 from collections import Counter
 from collections.abc import Awaitable, Callable
+from contextlib import nullcontext
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, cast
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.audit.audit_logger import AuditLogger, get_audit_logger
 from mozaiksai.core.ports.entitlement import EntitlementPort, NoOpEntitlementAdapter
-from mozaiksai.core.runtime.app.module_loader import SettingDef, validate_action_timeout
+from mozaiksai.core.runtime.app.module_loader import (
+    ModuleReaction,
+    SettingDef,
+    validate_action_timeout,
+)
 from mozaiksai.core.runtime.composition.bson_safe import (
     ModuleResultNormalizationError,
     json_safe_bson,
@@ -51,6 +57,7 @@ from mozaiksai.core.runtime.composition.module_authority import (
     ModuleEntitlementCheck,
     ModuleExecutionPolicyInput,
     ModulePermissionCheck,
+    workflow_user_authority,
 )
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
 from mozaiksai.core.runtime.composition.module_event_contract import (
@@ -66,6 +73,11 @@ from mozaiksai.core.runtime.composition.platform_hooks import (
 from mozaiksai.core.runtime.composition.schema_validation import (
     normalize_nullable_schema,
     validate_json_schema,
+)
+from mozaiksai.core.runtime.composition.workflow_result import (
+    WorkflowResultActionContext,
+    WorkflowResultGrant,
+    bind_result_event,
 )
 from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
     WORKFLOW_TRIGGER_TRACE_KEY,
@@ -289,6 +301,8 @@ class ModuleExecutor:
         self._action_timeouts: dict[str, dict[str, int | None]] = {}
         self._action_emits: dict[str, dict[str, list[str]]] = {}
         self._event_payload_schemas: dict[str, dict[str, dict[str, Any]]] = {}
+        self._result_reactions: dict[str, dict[str, tuple[ModuleReaction, str]]] = {}
+        self._result_record_keys: dict[str, dict[str, str]] = {}
         self._event_emitter = event_emitter
         self._data_contract = data_contract
         self._platform_modules = platform_modules
@@ -326,6 +340,17 @@ class ModuleExecutor:
             action_emits=loaded_module.action_emits_map,
             event_payload_schemas=loaded_module.event_payload_schemas_map,
         )
+        reactions = getattr(loaded_module.manifests, "reactions", None)
+        for reaction in reactions.reactions if reactions is not None else ():
+            declaration = reaction.target.result_write
+            if declaration is None:
+                continue
+            workflow = next(
+                cap.target for cap in loaded_module.definition.capabilities
+                if cap.kind == "workflow" and cap.capability_id == reaction.target.capability_id
+            )
+            self._result_reactions[loaded_module.name][reaction.id] = (reaction, workflow)
+            self._result_record_keys[loaded_module.name][declaration.source_action] = declaration.record_key
 
     def register(
         self,
@@ -378,6 +403,8 @@ class ModuleExecutor:
         if timeouts.keys() - (action_method_map or {}).keys():
             raise ValueError("Action timeouts must reference declared actions")
         self._modules[name] = handler
+        self._result_reactions[name] = {}
+        self._result_record_keys[name] = {}
         self._action_methods[name] = dict(action_method_map or {})
         self._settings[name] = list(settings or [])
         self._action_permissions[name] = dict(action_permissions or {})
@@ -689,7 +716,12 @@ class ModuleExecutor:
             context.dispatch_authority = dispatch_authority
             context.dispatch_provenance = dispatch_provenance
             context.dispatch_audit = dispatch_audit
-            if self._data_contract is not None or self._platform_modules is not None:
+            if type(context) is WorkflowResultActionContext:
+                # This internal receiver may only stage the one bound result. It
+                # must never inherit the app's ordinary persistence or emitter.
+                if request.persistence_principal is not None or context.persistence is not None:
+                    raise PermissionError("Unexpected result action authority")
+            elif self._data_contract is not None or self._platform_modules is not None:
                 # A loaded contract owns persistence on every execution path;
                 # custom contexts cannot replace its request-bound policy.
                 context.persistence = self._build_persistence_context(request)
@@ -698,7 +730,12 @@ class ModuleExecutor:
         timeout = declared_timeout if declared_timeout is not None else _action_timeout()
         try:
             try:
-                with bind_persistence_principal(str(request.app_id or "").strip(), request.persistence_principal):
+                record_key = self._result_record_keys.get(request.module, {}).get(request.action)
+                capture = (
+                    {"result_record_key": record_key, "module_id": request.module, "action_id": request.action}
+                    if record_key is not None else {}
+                )
+                with bind_persistence_principal(str(request.app_id or "").strip(), request.persistence_principal, **capture):
                     if inspect.iscoroutinefunction(action_fn):
                         coro = action_fn(context, **request.params)
                         result = (
@@ -848,7 +885,7 @@ class ModuleExecutor:
                 logger.warning(
                     "MODULE_OUTPUT_INVALID: module=%s action=%s error=%s",
                     request.module, request.action, output_diagnostic.message)
-                if output_diagnostic.category == "schema_invalid":
+                if output_diagnostic.category == "schema_invalid" or isinstance(context, WorkflowResultActionContext):
                     await self._finalize_dispatch_audit(
                         replace(dispatch_audit, outcome="failed", reason="INVALID_OUTPUT_SCHEMA"),
                         error="INVALID_OUTPUT_SCHEMA",
@@ -1097,16 +1134,72 @@ class ModuleExecutor:
                 trigger_trace=trigger_trace if isinstance(trigger_trace, dict) else None,
             )
 
-            result = self._event_emitter(event_type_text, envelope)  # type: ignore[misc]
-            if inspect.isawaitable(result):
-                result = await result
+            emission = (
+                bind_result_event(request.app_id, request.module, request.action, event_type_text, event_id)
+                if request.action in self._result_record_keys.get(request.module, {}) else nullcontext()
+            )
+            with emission:
+                result = self._event_emitter(event_type_text, envelope)  # type: ignore[misc]
+                if inspect.isawaitable(result):
+                    result = await result
             return cast("EventDispatchOutcome | ModuleEventRejection | None", result)
 
         return emit_module_event
 
+    async def apply_workflow_result(
+        self, *, grant: WorkflowResultGrant, run_identity: tuple[str, str, str, str],
+        values: dict[str, Any], verify_invocation: Callable[[], None],
+    ) -> dict[str, str]:
+        """Execute the declared receiver without granting it an owner's general persistence."""
+        from mozaiksai.core.runtime.persistence.workflow_result import commit_workflow_result
+
+        workflow, app_id, chat_id, user_id = run_identity
+        subject = grant.subject
+        binding = grant.declaration
+        roster = self._result_reactions.get(grant.module_id, {})
+        entry = roster.get(grant.reaction_id)
+        if entry is None:
+            raise PermissionError("Workflow result reaction is no longer registered")
+        reaction, current_workflow = entry
+        if (grant.workflow != workflow or grant.chat_id != chat_id or subject.app_id != app_id or subject.user_id != user_id
+                or grant.module_id != subject.module_id or subject.source_action != binding.source_action
+                or current_workflow != workflow or reaction.event_type != grant.event_type
+                or reaction.target.capability_id != grant.capability_id or reaction.target.result_write != binding):
+            raise PermissionError("Workflow result no longer matches the approved reaction")
+        if not isinstance(values, dict) or set(values) != set(binding.fields):
+            raise ValueError("Workflow result must supply exactly the approved fields")
+        original = deepcopy(values)
+        request = ModuleRequest(
+            module=grant.module_id, action=binding.action, app_id=app_id, user_id=user_id,
+            tenant_id=subject.tenant_id, workspace_id=subject.workspace_id, params=deepcopy(original),
+            authority=workflow_user_authority(actor_id=user_id, permissions=(), workflow_name=workflow),
+            provenance=ModuleDispatchProvenance(
+                surface="workflow_result", workflow_name=workflow, workflow_run_id=chat_id,
+                event_type=grant.event_type, event_id=grant.event_id, event_producer=grant.module_id,
+            ),
+        )
+        context = WorkflowResultActionContext(grant, original)
+        result = await self.execute(request, context=context)
+        if not result.success or not context.approved:
+            raise PermissionError("The result action did not approve the structured result")
+        principal = PersistencePrincipal(user_id=user_id, tenant_id=subject.tenant_id, workspace_id=subject.workspace_id)
+        storage = self._build_persistence_context(request, principal=principal)
+        if storage is None:
+            raise PermissionError("Workflow result storage is unavailable")
+        if self._result_reactions.get(grant.module_id) is not roster:
+            raise PermissionError("Workflow result reaction changed during dispatch")
+        verify_invocation()
+        status = await commit_workflow_result(
+            persistence=storage, subject=subject, module_id=grant.module_id, action_id=binding.action,
+            collection=binding.collection, invocation_id=grant.invocation_id,
+            allowed_fields=tuple(binding.fields), values=original,
+        )
+        return {"status": status}
+
     def _build_persistence_context(
         self,
         request: ModuleRequest,
+        *, principal: PersistencePrincipal | None = None,
     ) -> MongoPersistenceContext | None:
         app_id = str(request.app_id or "").strip()
         if not app_id:
@@ -1124,6 +1217,6 @@ class ModuleExecutor:
             database_name=self._persistence_database,
             client=self._persistence_client,
             data_contract=self._data_contract,
-            principal=lambda: current_persistence_principal(app_id),
+            principal=principal if principal is not None else lambda: current_persistence_principal(app_id),
             **module_binding,
         )

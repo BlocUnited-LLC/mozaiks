@@ -5,7 +5,7 @@ import inspect
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from pydantic import TypeAdapter
@@ -31,6 +31,9 @@ from .build_binding import BuildIdentity, RefinementModel, RunBuildBinding
 from .build_context import revalidate_build_context
 from .model import RoutingDecision, TriggerInput
 from .trigger_routing import TriggerRoutingContribution
+
+if TYPE_CHECKING:
+    from mozaiksai.core.runtime.composition.workflow_result import WorkflowResultGrant
 
 logger = get_core_logger("session_launcher")
 _PERSISTENCE_MANAGER = AG2PersistenceManager()
@@ -235,6 +238,7 @@ async def create_routed_chat_session(
     source_chat_id: str | None = None,
     persistence_manager: Any | None = None,
     run_model: RefinementModel | None = None,
+    workflow_result_grant: WorkflowResultGrant | None = None,
 ) -> str:
     persistence = persistence_manager if persistence_manager is not None else _PERSISTENCE_MANAGER
     chat_id = chat_id or str(uuid4())
@@ -275,6 +279,7 @@ async def create_routed_chat_session(
         user_id=user_id,
         extra_fields=extra_fields or None,
         **({"run_model": run_model} if run_model is not None else {}),
+        **({"workflow_result_grant": workflow_result_grant} if workflow_result_grant is not None else {}),
     )
     server_fields = {key: value for key, value in session_fields.items() if key in SERVER_OWNED_SESSION_FIELDS}
     if server_fields:

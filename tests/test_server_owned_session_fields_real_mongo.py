@@ -37,6 +37,8 @@ _INJECTED = {
     "workflow_run_id": "wfrun_attacker",
     "run_build_binding": {"build_id": "stolen", "forged": True},
     "build_terminal_receipt": {"kind": "success", "forged": True},
+    "workflow_result_grant": {"untrusted": True},
+    "workflow_result_grant.subject": {"untrusted": True},
 }
 
 
@@ -459,4 +461,26 @@ def test_reserved_key_set_is_exactly_the_server_authority_fields() -> None:
         "build_terminal_receipt",
         "run_build_binding",
         "workflow_run_id",
+        "workflow_run_model",
+        "workflow_result_grant",
     }
+
+
+@pytest.mark.asyncio
+async def test_manual_review_and_handoff_metadata_do_not_authorize_a_result() -> None:
+    client = AsyncIOMotorClient(_MONGO_URI)
+    database_name = f"mozaiks_boundary_test_{uuid4().hex}"
+    try:
+        pm = _pm(client, database_name)
+        for source in ("manual", "transition", "module_event"):
+            chat_id = f"{source}_{uuid4().hex}"
+            await pm.create_chat_session(
+                chat_id, app_id=_APP_ID, user_id="user-1", workflow_name=_WORKFLOW,
+                extra_fields={"trigger_meta": {"trigger_source": source, "workflow_result_grant": {"untrusted": True}},
+                              "source_event": {"id": "evt-1", "type": "domain.tasks.created"}},
+            )
+            with pytest.raises(PermissionError, match="No workflow result"):
+                await pm.read_workflow_result_grant(app_id=_APP_ID, chat_id=chat_id, user_id="user-1", workflow=_WORKFLOW)
+    finally:
+        await client.drop_database(database_name)
+        client.close()

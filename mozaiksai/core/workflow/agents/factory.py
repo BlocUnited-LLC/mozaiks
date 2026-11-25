@@ -45,6 +45,7 @@ from ..context.context_utils import (
 )
 from ..context.frozen import detach, freeze
 from ..context.schema import load_context_variables_config
+from ..context.structured_output_overlay import StructuredOutputOverlay
 from ..outputs.structured import (
     get_provider_response_model,
     get_structured_outputs_for_workflow,
@@ -167,6 +168,7 @@ class _WorkflowToolInvocation:
     user_id: str | None
     writer_id: ContextWriterId = DETERMINISTIC_TOOL_WRITER
     active: bool = True
+    validated_output: StructuredOutputOverlay | None = None
 
 
 _WORKFLOW_TOOL_INVOCATION: ContextVar[_WorkflowToolInvocation | None] = ContextVar(
@@ -191,15 +193,25 @@ def active_workflow_tool_run() -> tuple[str, str, str, str]:
     return (*invocation.run_identity, invocation.user_id)
 
 
+def active_workflow_result_input() -> dict[str, Any]:
+    """The current automatic tool's validated output, detached from writable workflow state."""
+    active_workflow_tool_run()
+    invocation = _WORKFLOW_TOOL_INVOCATION.get()
+    if invocation is None or invocation.validated_output is None:
+        raise PermissionError("Workflow results require validated automatic tool output")
+    return invocation.validated_output.get("structured_output")
+
+
 @contextmanager
 def _workflow_tool_invocation(
     bridge: ContextVariablesBridge, *, writer_id: ContextWriterId = DETERMINISTIC_TOOL_WRITER,
+    validated_output: StructuredOutputOverlay | None = None,
 ):
     actor = bridge.get("user_id")
     invocation = _WorkflowToolInvocation(
         bridge, bridge._authority_policy, bridge._run_identity,
         actor if isinstance(actor, str) and actor.strip() else None,
-        writer_id=writer_id,
+        writer_id=writer_id, validated_output=validated_output,
     )
     token = _WORKFLOW_TOOL_INVOCATION.set(invocation)
     try:

@@ -166,6 +166,40 @@ def _load_yaml(path: str, content: str, diagnostics: list[FunctionalGeneratedApp
         return None
 
 
+def _validate_result_writes(files: dict[str, str], diagnostics: list[FunctionalGeneratedAppDiagnostic]) -> None:
+    from mozaiksai.core.runtime.app.module_loader import (
+        ModuleDefinition,
+        ModuleEventsManifest,
+        ModuleReactionsManifest,
+        validate_module_result_writes,
+    )
+
+    for path, content in files.items():
+        parts = PurePosixPath(path).parts
+        if len(parts) != 4 or parts[0] != "modules" or parts[2:] != ("contracts", "reactions.yaml"):
+            continue
+        raw = _load_yaml(path, content, diagnostics)
+        rows = raw.get("reactions") if isinstance(raw, dict) else None
+        if not isinstance(rows, list) or not any(
+            isinstance(r, dict) and isinstance(r.get("target"), dict) and r["target"].get("result_write") is not None
+            for r in rows
+        ):
+            continue
+        module_dir = f"modules/{parts[1]}"
+        try:
+            definition = ModuleDefinition.model_validate(yaml.safe_load(files.get(f"{module_dir}/module.yaml", "")))
+            if definition.name != parts[1]:
+                raise ValueError("module.id must match its folder")
+            events = ModuleEventsManifest.model_validate(yaml.safe_load(files.get(f"{module_dir}/contracts/events.yaml", "")))
+            reactions = ModuleReactionsManifest.model_validate(raw)
+            contract = json.loads(files.get("data/contract.json", "null"))
+            if not isinstance(contract, dict):
+                raise ValueError("result_write requires data/contract.json")
+            validate_module_result_writes(definition, reactions, events, contract)
+        except (ValueError, yaml.YAMLError) as exc:
+            diagnostics.append(_diag("INVALID_RESULT_WRITE", str(exc), path=path))
+
+
 def _module_action_registry(
     files: dict[str, str],
     diagnostics: list[FunctionalGeneratedAppDiagnostic],
@@ -654,6 +688,7 @@ def scan_functional_generated_app(
     safe_files = _safe_files(files)
     diagnostics: list[FunctionalGeneratedAppDiagnostic] = []
     actions = _module_action_registry(safe_files, diagnostics)
+    _validate_result_writes(safe_files, diagnostics)
     _validate_action_handlers(safe_files, actions, diagnostics)
     _validate_routes(safe_files, diagnostics, inherited_components)
     refs = _collect_module_refs(safe_files, diagnostics)

@@ -563,6 +563,41 @@ Service adapters must not own durable module facts, public user actions,
 permissions, subscription state, wallet state, or hosted-product entitlement
 policy. Keep those in modules or the hosted product that owns them.
 
+#### Write a workflow result to the triggering record
+
+A module can authorize a workflow capability to fill specific fields on the private
+record created by its source action. Declare the binding on that action's event reaction.
+
+```yaml
+schema_version: mozaiks.reactions.v1
+reactions:
+  - id: summarize_created_note
+    event_type: domain.notes.created
+    target:
+      kind: capability
+      capability_id: notes.summarize
+      result_write:
+        source_action: create_note
+        action: save_summary
+        collection: notes
+        record_key: note_id
+        fields: [summary]
+```
+
+Here `notes` declares the workflow capability and the `create_note` action lists
+`domain.notes.created` in `emits`. Its event schema requires a string `note_id`.
+The runtime compares that value with the record the source action actually inserted.
+Each source action can authorize one result-writing reaction. Its other event
+subscribers may still start workflows or react without writing a result.
+
+In `data/contract.json`, the module owns the named collection with `scope: app`
+and `tenancy: per_user`. It declares the record key, owner field, and result
+fields separately. The result action uses `api_surface: internal`, empty
+permissions and emits, and no entitlement gate. Its input JSON schema is an
+object that requires exactly the listed result fields and sets
+`additionalProperties: false`. In this example the workflow supplies only
+`summary`. The host binds the record and owner independently of workflow output.
+
 ### `contracts/notifications.yaml`
 
 Declare notification rules. Each entry maps an event to a set of recipients,

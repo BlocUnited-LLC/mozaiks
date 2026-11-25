@@ -26,7 +26,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from pydantic import TypeAdapter
@@ -41,6 +41,9 @@ from mozaiksai.core.workflow.outputs.runtime_validation import normalize_json_ca
 
 from ..models import WorkflowStatus, WorkflowUIState
 from .namespaces import SYSTEM_DATABASE, RuntimeCollections
+
+if TYPE_CHECKING:
+    from mozaiksai.core.runtime.composition.workflow_result import WorkflowResultGrant
 
 # Lazy import to avoid circular dependency - see _format_message_for_storage
 
@@ -149,6 +152,7 @@ SERVER_OWNED_SESSION_FIELDS = frozenset({
     "run_build_binding",
     "workflow_run_id",
     "workflow_run_model",
+    "workflow_result_grant",
 })
 
 
@@ -496,10 +500,21 @@ class AG2PersistenceManager:
         *,
         extra_fields: dict[str, Any] | None = None,
         run_model: RefinementModel | None = None,
+        workflow_result_grant: WorkflowResultGrant | None = None,
     ) -> None:
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
+        grant_document = None
+        if workflow_result_grant is not None:
+            from mozaiksai.core.runtime.composition.workflow_result import WorkflowResultGrant
+
+            if (not isinstance(workflow_result_grant, WorkflowResultGrant)
+                    or workflow_result_grant.workflow != workflow_name or workflow_result_grant.chat_id != chat_id
+                    or workflow_result_grant.subject.app_id != resolved_app_id
+                    or workflow_result_grant.subject.user_id != user_id):
+                raise ValueError("Workflow result authority must match the new session")
+            grant_document = workflow_result_grant.model_dump(mode="json")
         if run_model is not None:
             if not user_id or not workflow_name:
                 raise ValueError("user_id and workflow_name are required when binding a run model")
@@ -512,7 +527,7 @@ class AG2PersistenceManager:
         # mutation, never a silent success.
         if isinstance(extra_fields, dict) and extra_fields:
             injected_server_owned = sorted(
-                k for k in extra_fields if k in SERVER_OWNED_SESSION_FIELDS
+                k for k in extra_fields if isinstance(k, str) and k.split(".", 1)[0] in SERVER_OWNED_SESSION_FIELDS
             )
             if injected_server_owned:
                 logger.warning(
@@ -532,6 +547,8 @@ class AG2PersistenceManager:
             # Scope the duplicate check to this app to maintain tenant isolation.
             existing = await coll.find_one({"_id": chat_id, **build_app_scope_filter(resolved_app_id)})
             if existing:
+                if grant_document is not None and existing.get("workflow_result_grant") != grant_document:
+                    raise ValueError("Cannot attach result authority to an existing session")
                 if run_model is not None and (
                     existing.get("workflow_run_model") != run_model
                     or existing.get("user_id") != user_id
@@ -558,6 +575,8 @@ class AG2PersistenceManager:
                 # Publish the model and session together so a simultaneous list
                 # or websocket request can never observe an unbound run.
                 session_doc["workflow_run_model"] = run_model
+            if grant_document is not None:
+                session_doc["workflow_result_grant"] = grant_document
 
             if isinstance(extra_fields, dict) and extra_fields:
                 # Prevent callers from overwriting canonical identifiers/state.
@@ -607,6 +626,21 @@ class AG2PersistenceManager:
         except Exception as e:  # pragma: no cover
             logger.error("Failed to create chat session %s: %s", chat_id, e, exc_info=True)
             raise
+
+    async def read_workflow_result_grant(
+        self, *, app_id: str, chat_id: str, workflow: str, user_id: str,
+    ) -> WorkflowResultGrant:
+        """Read an immutable event result binding, never a chat context or trigger hint."""
+        from mozaiksai.core.runtime.composition.workflow_result import WorkflowResultGrant
+
+        coll = await self._coll()
+        doc = await coll.find_one(
+            {"_id": chat_id, "user_id": user_id, "workflow_name": workflow, **build_app_scope_filter(app_id)},
+            {"workflow_result_grant": 1},
+        )
+        if not doc or not isinstance(doc.get("workflow_result_grant"), dict):
+            raise PermissionError("No workflow result was authorized for this session")
+        return WorkflowResultGrant.model_validate(doc["workflow_result_grant"])
 
     async def fetch_chat_session_extra_context(
         self,
@@ -661,6 +695,7 @@ class AG2PersistenceManager:
             "workflow_model",
             "workflow_model_rebind_pending",
             "workflow_run_model",
+            "workflow_result_grant",
             "workflow_name",
             "user_id",
             "status",
@@ -791,7 +826,7 @@ class AG2PersistenceManager:
                 continue
             if key.split(".", 1)[0] in {"workflow_model", "workflow_model_rebind_pending"}:
                 continue
-            if key in SERVER_OWNED_SESSION_FIELDS:
+            if key.split(".", 1)[0] in SERVER_OWNED_SESSION_FIELDS:
                 # Server-owned lifecycle authority fields are never writable
                 # through generic context persistence: a model/tool-authored
                 # context update must not install or replace them. The
@@ -890,6 +925,8 @@ class AG2PersistenceManager:
                 value = RunBuildBinding.model_validate(value).model_dump()
             if key == "workflow_run_model":
                 raise ValueError("A workflow run model can only be bound when its session is created")
+            if key == "workflow_result_grant":
+                raise ValueError("A workflow result grant can only be bound when its session is created")
             updates[key] = deepcopy(value)
         if not updates:
             return
