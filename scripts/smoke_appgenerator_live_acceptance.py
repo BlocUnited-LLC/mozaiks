@@ -276,10 +276,16 @@ sections:
   - id: ticket-create
     primitive: Form
     config:
+      submit_label: Create Ticket
       fields:
         - name: customer_name
           label: Customer
           type: text
+          required: true
+        - name: issue
+          label: Issue
+          type: text
+          required: true
       submit_action:
         label: Create Ticket
         action_type: submit
@@ -287,9 +293,10 @@ sections:
   - id: batch-triage
     primitive: Form
     config:
+      submit_label: Request Triage
       fields:
-        - name: batch_id
-          label: Batch
+        - name: priority
+          label: Priority
           type: text
       submit_action:
         label: Request Triage

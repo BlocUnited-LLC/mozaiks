@@ -82,6 +82,7 @@ def baseline(monkeypatch):
     )
     store = SimpleNamespace(get_build_record=AsyncMock(return_value=artifact))
     monkeypatch.setattr(revision, "get_artifact_store", lambda: store)
+    monkeypatch.setattr("mozaiksai.core.artifacts.get_artifact_store", lambda: store)
     monkeypatch.setattr(content_store, "get_artifact_content_store", lambda: content)
     context = {
         "app_id": "factory-host", "user_id": "owner", "build_mode": "revision",
@@ -1116,7 +1117,8 @@ async def test_revision_rejects_source_changes_after_acceptance_before_zip(
 
 
 @pytest.mark.asyncio
-async def test_revision_acceptance_binds_source_hashes_and_tombstones(baseline, monkeypatch):
+@pytest.mark.parametrize("with_workflow", [False, True])
+async def test_revision_acceptance_binds_source_hashes_and_tombstones(baseline, monkeypatch, with_workflow):
     from scripts.smoke_appgenerator_live_acceptance import (
         build_appgenerator_acceptance_files,
         default_workflow_integration,
@@ -1124,6 +1126,16 @@ async def test_revision_acceptance_binds_source_hashes_and_tombstones(baseline, 
     from tests.test_app_validation_strategy import _accept_support_tasks, _Context
 
     integration = default_workflow_integration()
+    workflow = BuildRecord(
+        id="reviewed-workflows", app_id="customer-app", build_family="workflow_bundle",
+        build_key="workflow_bundle", lineage_root_id="reviewed-workflows", version_number=1,
+        commit_metadata={"metadata": {"workflow_integration_metadata": {"workflows": [integration]}}},
+    )
+    records = {baseline.artifact.id: baseline.artifact}
+    if with_workflow:
+        baseline.artifact.canonical_inputs_version["workflow_bundle"] = workflow.id
+        records[workflow.id] = workflow
+    baseline.store.get_build_record.side_effect = lambda *, app_id, build_record_id: records.get(build_record_id)
     files = build_appgenerator_acceptance_files(integration)
     manifest = json.loads(files["app.json"])
     manifest["appId"] = "customer-app"
@@ -1146,6 +1158,13 @@ async def test_revision_acceptance_binds_source_hashes_and_tombstones(baseline, 
     accepted = await app_validation.run_app_bundle_acceptance_gate(files=files, context_variables=context)
 
     assert accepted["passed"] is True, accepted
+    assert context.get("workflow_integration_source_app") == {
+        "build_record_id": "artifact_1", "workflow_bundle_id": workflow.id if with_workflow else None,
+    }
+    if with_workflow:
+        assert accepted["workflow_integration"]["metadata"]["source_artifact_version_id"] == workflow.id
+    else:
+        assert accepted["workflow_integration"]["workflow_count"] == 0
     assert context.get("revision_asset_evidence") == {
         "source_artifact_version_id": "artifact_1",
         "opaque_assets": [{
@@ -1159,7 +1178,7 @@ async def test_revision_acceptance_binds_source_hashes_and_tombstones(baseline, 
     reentered = await app_validation.run_app_bundle_acceptance_gate(files=files, context_variables=context)
     assert reentered["passed"] is True, reentered
     assert export_app_code.resolve_export_gate(context)["allow_export"] is True
-    assert all(call.kwargs["build_record_id"] == "artifact_1" for call in baseline.store.get_build_record.await_args_list)
+    assert {call.kwargs["build_record_id"] for call in baseline.store.get_build_record.await_args_list} == set(records)
 
     context.set("deleted_files", ["modules/support_tickets/backend/handler.py"])
     assert export_app_code.resolve_export_gate(context)["allow_export"] is False
@@ -1172,6 +1191,13 @@ async def test_revision_acceptance_binds_source_hashes_and_tombstones(baseline, 
     denied = await app_validation.run_app_bundle_acceptance_gate(files=files, context_variables=context)
     assert denied["passed"] is False
     assert any("revision_binary_deletion_unowned" in error for error in denied["bundle_scan"]["errors"])
+
+    if with_workflow:
+        context.set("deleted_files", [])
+        del records[workflow.id]
+        unreadable = await app_validation.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+        assert unreadable["passed"] is False
+        assert unreadable["workflow_integration"]["failed_tests"][0]["test"] == "workflow_integration_source"
 
 
 @pytest.mark.asyncio
