@@ -31,7 +31,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from factory_app.workflows._shared.hook_utils import update_agent_section, workflow_context_path
+from factory_app.workflows._shared.hook_utils import (
+    load_catalog,
+    update_agent_section,
+    workflow_context_path,
+)
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import _MODULE_CONTRACT_OUTPUT_PATHS
 from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
@@ -41,8 +45,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-_CATALOG_PATH = workflow_context_path("AppGenerator", "domain_catalogs.yaml")
 
 _DOMAIN_CONTEXT_HEADER = "[DOMAIN CATALOG CONTEXT]"
 _MANIFEST_GUARD_HEADER = "[MODULE FILE MANIFEST GUARD]"
@@ -67,17 +69,6 @@ _MAX_MODULES_PER_DOMAIN = 5
 # ---------------------------------------------------------------------------
 # Shared utilities
 # ---------------------------------------------------------------------------
-
-def _load_catalog() -> dict[str, Any] | None:
-    """Load domain_catalogs.yaml. Returns None on any failure."""
-    try:
-        import yaml  # type: ignore
-        with open(_CATALOG_PATH, encoding="utf-8") as fh:
-            return yaml.safe_load(fh)  # type: ignore[no-any-return]
-    except Exception as exc:
-        logger.warning("domain_catalogs.yaml could not be loaded: %s", exc)
-        return None
-
 
 def _collect_concept_text(context_variables: Any, messages: list[dict[str, Any]]) -> str:
     """Collect all available concept signal text for domain scoring."""
@@ -144,7 +135,7 @@ def _select_top_domains(
         if isinstance(data, dict)
     ]
     scored.sort(key=lambda t: t[2], reverse=True)
-    return [(key, data) for key, data, _ in scored[:_TOP_N_DOMAINS]]
+    return [(key, data) for key, data, score in scored[:_TOP_N_DOMAINS] if score > 0]
 
 
 # ---------------------------------------------------------------------------
@@ -176,8 +167,7 @@ def _format_domain_excerpt(domain_key: str, domain_data: dict[str, Any]) -> str:
     if common_app_types:
         lines.append(f"  common_app_types: {', '.join(common_app_types[:4])}")
     if capability_packs:
-        lines.append(f"  recommended_capability_packs: {', '.join(capability_packs)}")
-        lines.append("    (These are framework or managed capabilities — select them; do not regenerate their internals.)")
+        lines.append(f"  capability hints: {', '.join(capability_packs)}")
     for i, (mod_key, mod_data) in enumerate(modules.items()):
         if i >= _MAX_MODULES_PER_DOMAIN:
             remaining = len(modules) - _MAX_MODULES_PER_DOMAIN
@@ -216,6 +206,7 @@ def _build_app_plan_body(
         "\n".join([
             "Rules (catalog is advisory — not a mandatory module list):",
             "  - Use these domains as a starting point; adapt to what this specific app needs.",
+            "  - Use the owner-reviewed pack selection for reusable files. A new pack or provider needs DesignDocs review.",
             "  - Treat recommended_module_type as a planning prior, not runtime truth.",
             "  - Use the injected [FILE CONTRACTS CONTEXT] for task ownership and allowed file families.",
             "  - Use the injected [MODULE ARCHETYPES CONTEXT] for backend archetype conventions only; do not emit module.type.",
@@ -309,7 +300,7 @@ def inject_domain_catalog_context(agent: Any, messages: list[dict[str, Any]]) ->
         return
 
     try:
-        catalog = _load_catalog()
+        catalog = load_catalog(workflow_context_path("AppGenerator", "domain_catalogs.yaml"))
         if not catalog:
             return
 
