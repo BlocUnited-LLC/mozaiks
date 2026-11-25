@@ -17,9 +17,17 @@ test keeps the two lists equal.
 | Workspace Dashboard | My Apps `/apps`, Performance `/performance`, Token Usage `/usage`, Integrations `/integrations`, Support `/support`, AI models `/settings/ai-models` | Manage the portfolio: app records, cross-app performance and usage, shared provider setup, support activity, and the AI models builds may use. |
 | App Dashboard | Overview, Revenue, Users, Project, Integrations, Launch, Billing, Token Usage, Health and Support, each under `/apps/:appId/...` | Manage one app. |
 
-Token Usage, Integrations, Support, and AI models are for workspace
-administrators. AI models also needs sign-in to be on: the setting is stored per
-signed-in workspace, so with sign-in off the page says it cannot be changed.
+In the workspace menu, **My Apps** lists the apps you own. **Performance** shows
+revenue and user metrics across those apps. Under **Manage an app**, pick a tool
+such as **Integrations**, then pick an app. Studio opens that app's Integrations
+page. You can also open the app first and choose Integrations from its menu.
+
+Studio builds these shortcuts from the selected-app pages available to you.
+A host that adds, hides, or renames a page gets the corresponding menu change
+in both places. Each app page uses its existing authorization checks.
+
+Workspace administrators also see the workspace-wide Token Usage, Integrations,
+Support, and AI models pages. AI model settings require a signed-in workspace.
 
 One detail route is linked from other pages and is not in a menu:
 
