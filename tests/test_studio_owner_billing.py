@@ -12,6 +12,20 @@ from tests import test_studio_app_ownership
 dashboard_portal = test_studio_app_ownership.dashboard_portal
 
 
+def test_unbuilt_stock_app_uses_its_registered_dashboard_id(dashboard_portal, monkeypatch):
+    from mozaiksai.hosts import studio
+
+    monkeypatch.setattr(studio.app.state, "list_studio_app_bindings", None)
+    monkeypatch.setattr(studio.app.state, "resolve_studio_dashboard_app_id", None, raising=False)
+    dashboard_portal.record["app_id"] = "notes.local"
+    url = "/api/studio/apps/notes.local/billing"
+    response = dashboard_portal.client.get(url)
+    assert response.status_code == 200
+    assert response.json()["status"] == "no_build"
+    dashboard_portal.state["user"] = "bob"
+    assert dashboard_portal.client.get(url).status_code == 404
+
+
 @pytest.fixture
 def saved_billing_build(dashboard_portal, monkeypatch, tmp_path):
     from mozaiksai.hosts import studio

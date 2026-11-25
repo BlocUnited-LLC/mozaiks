@@ -1353,7 +1353,7 @@ async def get_studio_analytics_metric_detail(
 
 @app.get("/api/studio/apps/{dashboard_app_id}/billing")
 async def get_dashboard_app_billing(
-    dashboard_app_id: BuildIdentity, principal: UserPrincipal = Depends(require_studio_user),
+    dashboard_app_id: str, principal: UserPrincipal = Depends(require_studio_user),
 ) -> dict[str, Any]:
     record = await _get_owned_dashboard_app_record(principal, dashboard_app_id)
     version = await _current_dashboard_app_bundle(record)
