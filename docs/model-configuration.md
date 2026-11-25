@@ -78,6 +78,15 @@ your message. If a provider is removed while saved agent work is unfinished, the
 host operator can restore that provider so the turn can finish. Switching models
 preserves the chat history and its artifacts.
 
+A workflow embedded with `WorkflowChat` can opt into `chooseRunModel`. In
+this mode, the composer displays the workspace's allowed and configured Studio
+models before starting the conversation. Gemini is the built-in default when
+available. The authenticated start request carries the chosen model ID, and
+the runtime binds it to the new workflow run before any agents execute.
+Refreshing or reconnecting displays that model in the composer. Starting a
+new conversation allows a new selection. Restore the configured provider if
+it becomes unavailable during an active run.
+
 The options come from the runtime's configured providers. For an environment
 using OpenAI, for example, `LLM_PRIMARY_MODEL=gpt-4o-mini` and
 `LLM_FALLBACK_MODELS=gpt-4.1-mini` make two models available with the configured

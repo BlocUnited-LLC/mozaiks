@@ -556,6 +556,8 @@ def _validate_route_sequences(*, manifest: ControlPlaneManifest, pack_path: Path
         for change_class in ("patch", "design", "feature", "core"):
             route = getattr(artifact.routes, change_class)
             route_refs.append((artifact.build_family, change_class, route.workflow_sequence))
+        for intent, route in artifact.branding_routes.items():
+            route_refs.append((artifact.build_family, f"branding_routes.{intent}", route.workflow_sequence))
 
     if not route_refs:
         return

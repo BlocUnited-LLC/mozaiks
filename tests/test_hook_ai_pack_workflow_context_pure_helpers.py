@@ -26,13 +26,11 @@ Covers:
     - ai_analysis_pack → non-empty string containing "ai_analysis_pack"
     - ai_extraction_pack → non-empty string containing "ai_extraction_pack"
     - unknown pack → empty string
-    - review pack includes "HARD CONSTRAINTS"
-    - review pack includes "reactions.yaml"
-    - analysis pack mentions BackendOnly
+    - pack advice covers the selected module's actions and data
     - extraction pack mentions "task_batches"
 
   _build_body:
-    - always includes capability_id naming convention header
+    - event and capability bindings belong to the generated workflow catalog
     - detected pack instructions included in output
     - unknown pack produces no separator block
     - multiple packs → all instruction blocks included
@@ -192,29 +190,25 @@ class TestPackInstructions:
     def test_empty_string_pack_returns_empty(self):
         assert _pack_instructions("") == ""
 
-    def test_review_pack_includes_hard_constraints(self):
+    def test_review_pack_preserves_module_action_advice(self):
         result = _pack_instructions("ai_review_pack")
-        assert "HARD CONSTRAINTS" in result
+        assert "record_review_result" in result
 
-    def test_review_pack_includes_reactions_yaml(self):
+    def test_review_pack_keeps_module_submission_control(self):
         result = _pack_instructions("ai_review_pack")
-        assert "reactions.yaml" in result
+        assert "submission control" in result
 
     def test_review_pack_mentions_ai_review_pack(self):
         result = _pack_instructions("ai_review_pack")
         assert "ai_review_pack" in result
 
-    def test_analysis_pack_mentions_backend_only(self):
+    def test_analysis_pack_preserves_result_storage(self):
         result = _pack_instructions("ai_analysis_pack")
-        assert "BackendOnly" in result
+        assert "store_analysis_result" in result
 
     def test_extraction_pack_mentions_task_batches(self):
         result = _pack_instructions("ai_extraction_pack")
         assert "task_batches" in result
-
-    def test_review_pack_mentions_workflow_surface_constraint(self):
-        result = _pack_instructions("ai_review_pack")
-        assert "surface_kind" in result
 
     def test_extraction_pack_mentions_batch(self):
         result = _pack_instructions("ai_extraction_pack")
@@ -226,9 +220,10 @@ class TestPackInstructions:
 # ---------------------------------------------------------------------------
 
 class TestBuildBody:
-    def test_always_includes_capability_id_naming(self):
+    def test_only_the_workflow_bundle_supplies_bindings(self):
         result = _build_body(["ai_review_pack"])
-        assert "capability_id" in result or "naming" in result.lower()
+        assert "[WORKFLOW INTEGRATION CONTRACT]" in result
+        assert "{module_id}-review-workflow" not in result
 
     def test_review_pack_block_included(self):
         result = _build_body(["ai_review_pack"])

@@ -1933,6 +1933,51 @@ test('app Studio root redirects to manifest default portal', async ({ page }) =>
   await expect(page.locator('main').getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
 });
 
+test('app Launch keeps Studio navigation and downloads only the displayed build', async ({ page, isMobile }) => {
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', route =>
+    route.fulfill({ json: buildOnboardingStatusPayload({ dismissed: true }) }));
+  const launch = `/api/studio/apps/${APP_ID}/launch`;
+  let status = 'validation_required';
+  await page.route('**' + launch, route => route.fulfill({
+    json: { status, artifact_version_id: 'av_1', filename: 'workbench-av_1.zip' },
+  }));
+  await page.route('**' + launch + '/av_1/download', route => route.fulfill({
+    contentType: 'application/zip', body: Buffer.from('test bundle'),
+  }));
+  await page.goto(`/apps/${APP_ID}/launch`);
+  await expect(page.getByText('Build validation required', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download app bundle' })).toHaveCount(0);
+  if (isMobile) {
+    await page.getByRole('button', { name: 'Open Studio navigation' }).click();
+  }
+  await expect(page.getByRole('navigation').getByRole('link', { name: 'Launch', exact: true }).filter({ visible: true })).toHaveAttribute('aria-current', 'page');
+  status = 'ready';
+  await page.reload();
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download app bundle' }).click();
+  expect((await download).suggestedFilename()).toBe('workbench-av_1.zip');
+  await expectNoHorizontalOverflow(page);
+});
+
+test("app Billing shows the selected app's plans and links to its integrations", async ({ page, isMobile }) => {
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', route =>
+    route.fulfill({ json: buildOnboardingStatusPayload({ dismissed: true }) }));
+  await page.route(`**/api/studio/apps/${APP_ID}/billing`, route => route.fulfill({ json: {
+    status: 'configured', dashboard_app_id: APP_ID, app_name: 'Campaign Revision Workbench', artifact_version_id: 'av_1',
+    products: [{ label: 'Workbench plans', product_id: 'workbench', default_plan_id: 'starter',
+      plans: [{ plan_id: 'starter', label: 'Starter', price: { amount_cents: 1200, currency: 'USD', interval: 'month' } }] }],
+  } }));
+  await page.goto(`/apps/${APP_ID}/billing`);
+  await expect(page.getByRole('heading', { name: 'Billing', exact: true })).toBeVisible();
+  const plan = page.getByRole('listitem').filter({ hasText: 'Starter' });
+  await expect(plan).toContainText('Default');
+  await expect(plan).toContainText('$12.00 / month');
+  await expect(page.getByRole('link', { name: 'Manage integrations' })).toHaveAttribute('href', `/apps/${APP_ID}/integrations`);
+  await expectNoHorizontalOverflow(page);
+  if (isMobile) await page.getByRole('button', { name: 'Open Studio navigation' }).click();
+  await expect(page.getByRole('navigation').getByRole('link', { name: 'Billing', exact: true }).filter({ visible: true })).toHaveAttribute('aria-current', 'page');
+});
+
 test('app overview route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.goto(`/apps/${APP_ID}/overview`);
   const main = page.locator('main');
@@ -2371,6 +2416,28 @@ test('app usage route stays responsive across desktop and mobile widths', async 
   } else {
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
   }
+});
+
+test('app usage keeps selected-app navigation while loading and after a failed read', async ({ page, isMobile }) => {
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', route =>
+    route.fulfill({ json: buildOnboardingStatusPayload({ dismissed: true }) }));
+  let releaseOverview;
+  const pending = new Promise(resolve => { releaseOverview = resolve; });
+  await page.route('**/api/studio/overview?**', async route => {
+    await pending;
+    await route.fulfill({ status: 503, json: {} });
+  });
+  await page.goto(`/apps/${APP_ID}/usage`);
+  const nav = page.getByRole('navigation', { name: 'App Studio navigation' });
+  const active = nav.getByRole('link', { name: 'Token Usage', exact: true }).filter({ visible: true });
+  await expect(page.getByText('Loading app usage...', { exact: true })).toBeVisible();
+  if (isMobile) await page.getByRole('button', { name: 'Open Studio navigation' }).click();
+  await expect(active).toHaveAttribute('aria-current', 'page');
+  releaseOverview();
+  await expect(page.getByRole('alert')).toContainText('Token Usage Unavailable');
+  await expect(active).toHaveAttribute('aria-current', 'page');
+  await nav.getByRole('link', { name: 'Launch', exact: true }).filter({ visible: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/apps/${APP_ID}/launch$`));
 });
 
 test('workspace performance route stays responsive across desktop and mobile widths', async ({ page }) => {

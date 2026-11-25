@@ -41,27 +41,15 @@ domains:
     - DTC brand
     - multi-vendor shop
     - subscription box
+    pack_recipe:
+      pack_id: commerce
+      when: Shoppers buy products through a catalog, cart, checkout, and orders.
     modules:
-      products:
-        description: "Product catalog \u2014 listings, variants, pricing, availability."
-        recommended_module_type: standard
-      inventory:
-        description: Stock levels, reservations, and low-stock alerts.
-        recommended_module_type: standard
-      cart:
-        description: "Shopping cart \u2014 add/remove items, apply coupons, persist session."
-        recommended_module_type: standard
-      checkout:
-        description: "Checkout flow \u2014 address collection, payment, order confirmation."
-        recommended_module_type: transactional
-      orders:
-        description: "Order lifecycle \u2014 creation, tracking, cancellation, refunds."
-        recommended_module_type: standard
       fulfillment:
-        description: Packing, shipping label generation, carrier integration.
+        description: Packing slips, carrier labels, and shipment tracking for an order.
         recommended_module_type: standard
       discounts:
-        description: Coupon codes, promotional rules, and automatic discounts.
+        description: Store-specific coupon eligibility and promotion rules.
         recommended_module_type: standard
       reviews:
         description: Product reviews and ratings.
@@ -99,30 +87,19 @@ domains:
     - developer platform
     - internal tool
     - vertical SaaS
-    capability_packs:
-      - mozaikspay
-      - commerce
+    pack_recipe:
+      pack_id: mozaikspay
+      when: The approved app explicitly chooses operator-enabled MozaiksPay billing for paid subscriptions.
+      requires_monetization: true
     modules:
-      plans:
-        description: Plan catalog, tiers, seats, and feature grants for the generated app's own users.
-        recommended_module_type: standard
-      subscriptions:
-        description: App-owned customer subscription lifecycle and plan assignment.
-        recommended_module_type: transactional
       usage_metering:
-        description: Product-specific usage counters such as seats, API calls, storage, or credits. Do not use this to recreate AI token metering; runtime token measurements come from /api/me/usage and /api/admin/usage.
+        description: App-specific usage counters such as API requests or storage consumed.
         recommended_module_type: standard
       api_keys:
         description: "API key lifecycle \u2014 generation, rotation, scoping, revocation."
         recommended_module_type: standard
-      onboarding:
-        description: "New user and org onboarding flows \u2014 checklist, progress, prompts."
-        recommended_module_type: standard
       feature_flags:
-        description: Plan-gated and experiment-based feature flag evaluation.
-        recommended_module_type: standard
-      teams:
-        description: Workspace team membership, invitations, and seat management.
+        description: Product experiments, rollout cohorts, and exposure tracking.
         recommended_module_type: standard
   fintech_payments:
     description: "Financial products \u2014 payments, wallets, transfers, compliance, ledger."
@@ -156,24 +133,18 @@ domains:
     - fan club
     - interest group
     - niche community
+    pack_recipe:
+      pack_id: social
+      when: Members share posts and reactions, read an activity feed, or manage friend requests.
     modules:
-      feed:
-        description: "Personalized activity feed \u2014 posts, reactions, ranking, pagination."
-        recommended_module_type: standard
-      posts:
-        description: "User-created content \u2014 text, media, polls."
-        recommended_module_type: standard
       follows:
-        description: "Follow/unfollow graph \u2014 follower counts, mutual detection."
-        recommended_module_type: standard
-      reactions:
-        description: Likes, emoji reactions, and aggregated reaction counts.
+        description: One-way subscriptions to members when the app needs them alongside friendships.
         recommended_module_type: standard
       groups:
-        description: "Topic-based groups or communities \u2014 membership, rules, moderation."
+        description: Topic-based groups with membership rules and community-specific roles.
         recommended_module_type: standard
       moderation:
-        description: "Content and user moderation \u2014 reports, queues, bans, appeals."
+        description: Community-specific reporting and appeals workflows.
         recommended_module_type: workflow
   messaging_communication:
     description: "Real-time and async messaging \u2014 DMs, threads, channels, announcements."
@@ -182,22 +153,16 @@ domains:
     - community chat
     - customer inbox
     - announcement platform
+    pack_recipe:
+      pack_id: messaging
+      when: People exchange direct or group messages in persistent conversation threads.
     modules:
-      threads:
-        description: "Threaded conversations \u2014 creation, participant management, read state."
-        recommended_module_type: messaging
-      messages:
-        description: Message send, delivery, read receipts, and deletion.
-        recommended_module_type: messaging
       channels:
-        description: "Named broadcast channels \u2014 creation, membership, topic management."
+        description: App-specific channel topics and audience rules linked to conversation threads.
         recommended_module_type: standard
       announcements:
-        description: Org-wide or audience-targeted broadcast announcements.
+        description: Editorial approval and scheduling for app announcements.
         recommended_module_type: messaging
-      presence:
-        description: Online status, last-seen, and typing indicators.
-        recommended_module_type: standard
   content_publishing:
     description: Content creation, editorial workflow, publishing, and distribution.
     common_app_types:

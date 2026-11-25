@@ -12,6 +12,7 @@ import json
 import os
 import stat
 import zipfile
+import zlib
 from asyncio import CancelledError, Lock, to_thread
 from collections import Counter
 from collections.abc import Iterable
@@ -22,6 +23,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal, NamedTuple, TypeVar
 from uuid import uuid4
 
+import yaml
 from anyio import CancelScope
 from fastapi import BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response
@@ -29,7 +31,11 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, TypeAdapter, Vali
 
 from factory_app.app.modules.app_registry.backend.schemas import GenesisImportClaim
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
-from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
+from factory_app.workflows._shared.artifact_bundle import (
+    APP_BUNDLE_MAX_FILE_BYTES,
+    APP_BUNDLE_MAX_TOTAL_BYTES,
+    read_artifact_bundle,
+)
 from factory_app.workflows._shared.platform.genesis_import import (
     GenesisImportError,
     accept_existing_app_genesis,
@@ -87,7 +93,11 @@ from mozaiksai.control_plane.app_intelligence_jobs import (
     public_app_intelligence_index_job,
     save_app_intelligence_index_job,
 )
-from mozaiksai.control_plane.contracts import RegistryRunState, build_acceptance_evidence
+from mozaiksai.control_plane.contracts import (
+    RegistryRunState,
+    build_acceptance_evidence,
+    safe_artifact_relpath,
+)
 from mozaiksai.control_plane.dry_run import RefinementDryRunPlan, RefinementExecutionPlan
 from mozaiksai.control_plane.implementations.coding_worker import (
     PACK_OWNERSHIP_UNRESOLVED_GUIDANCE,
@@ -106,6 +116,7 @@ from mozaiksai.core.app_context.refresh import ContextRefreshPlan, ContextRefres
 from mozaiksai.core.artifacts import (
     ArtifactLifecycleStatus,
     ArtifactValidationStatus,
+    BuildRecord,
     ChangeClassification,
     RefinementSessionStatus,
     get_artifact_store,
@@ -113,6 +124,10 @@ from mozaiksai.core.artifacts import (
 from mozaiksai.core.artifacts.content_store import (
     ContentNotFoundError,
     read_verified_artifact_bundle,
+)
+from mozaiksai.core.artifacts.models import (
+    CanonicalBundleEntryError,
+    resolve_canonical_bundle_entry,
 )
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.auth.anonymous_access import ANONYMOUS_PROVENANCE, STUDIO_PUBLIC_MESSAGE
@@ -131,7 +146,7 @@ from mozaiksai.core.runtime.app.metrics_loader import (
     load_metrics_config,
 )
 from mozaiksai.core.runtime.app.module_permissions import resolve_module_permissions
-from mozaiksai.core.runtime.app.paths import app_bundle_workspace_path
+from mozaiksai.core.runtime.app.paths import APP_BINARY_ASSET_SUFFIXES, app_bundle_workspace_path
 from mozaiksai.core.runtime.app.studio_summary import (
     build_app_overview_summary,
     build_apps_summary,
@@ -141,6 +156,8 @@ from mozaiksai.core.runtime.app.studio_summary import (
     load_build_state_from_db,
     save_build_state_to_db,
 )
+from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+from mozaiksai.core.runtime.app.theme_contract import APP_THEME_PATH
 from mozaiksai.core.runtime.composition.extensions import resolve_startup_service_profile
 from mozaiksai.core.sandbox.preview_sessions import preview_sessions_lifespan
 from mozaiksai.core.secrets.contract import is_secret_contract_path, validate_secret_contract_text
@@ -339,50 +356,76 @@ def _strip_app_bundle_root_prefix(paths: list[str]) -> dict[str, str]:
     return {path: stripped_path for path, stripped_path in zip(paths, stripped, strict=False)}
 
 
-def _decode_text_bundle_entries(zip_source: Path | bytes) -> tuple[dict[str, str], list[str]]:
+def _decode_text_bundle_entries(
+    zip_source: Path | bytes, *, preserved_assets: dict[str, bytes] | None = None,
+) -> tuple[dict[str, str], list[str]]:
     files: dict[str, str] = {}
     skipped: list[str] = []
-    total_bytes = 0
-    entries: list[tuple[str, bytes]] = []
+    total_text = 0
+    total_assets = 0
+    entries: list[tuple[str, str | bytes]] = []
+    seen: set[str] = set()
 
     with zipfile.ZipFile(io.BytesIO(zip_source) if isinstance(zip_source, bytes) else zip_source, "r") as archive:
         for info in archive.infolist():
-            safe_name = _normalize_bundle_entry_name(info.filename)
-            if safe_name is None:
+            safe_name = safe_artifact_relpath(info.filename)
+            if safe_name is None or safe_name != info.filename.rstrip("/"):
                 skipped.append(f"{info.filename}: unsafe_path")
-                continue
-            if info.is_dir():
                 continue
             if _zipinfo_is_symlink(info):
                 skipped.append(f"{safe_name}: symlink")
                 continue
-            if any(name == safe_name for name, _ in entries):
+            if info.is_dir():
+                continue
+            if safe_name.casefold() in seen:
                 skipped.append(f"{safe_name}: duplicate_path")
                 continue
+            seen.add(safe_name.casefold())
             if len(entries) >= _BUNDLE_MAX_TEXT_FILES:
                 skipped.append(f"{safe_name}: file_limit")
                 continue
-            if info.file_size > _BUNDLE_MAX_SINGLE_FILE_BYTES:
+            suffix = PurePosixPath(safe_name).suffix.lower()
+            opaque_asset = preserved_assets is not None and suffix in APP_BINARY_ASSET_SUFFIXES and suffix != ".svg"
+            if info.file_size > (APP_BUNDLE_MAX_FILE_BYTES if opaque_asset else _BUNDLE_MAX_SINGLE_FILE_BYTES):
                 skipped.append(f"{safe_name}: file_too_large")
                 continue
-            raw = archive.read(info.filename)
-            if total_bytes + len(raw) > _BUNDLE_MAX_TOTAL_BYTES:
+            if (total_text + total_assets + info.file_size > APP_BUNDLE_MAX_TOTAL_BYTES
+                    or (not opaque_asset and total_text + info.file_size > _BUNDLE_MAX_TOTAL_BYTES)):
                 skipped.append(f"{safe_name}: total_size_limit")
+                continue
+            raw = archive.read(info)
+            if opaque_asset:
+                entries.append((safe_name, raw))
+                total_assets += len(raw)
                 continue
             if b"\x00" in raw:
                 skipped.append(f"{safe_name}: binary")
                 continue
             try:
-                raw.decode("utf-8")
+                content = raw.decode("utf-8")
             except UnicodeDecodeError:
                 skipped.append(f"{safe_name}: non_utf8")
                 continue
-            total_bytes += len(raw)
-            entries.append((safe_name, raw))
+            total_text += len(raw)
+            entries.append((safe_name, content))
 
-    for relative_path, raw in _strip_shared_root_prefix(entries):
-        files[relative_path] = raw.decode("utf-8")
+    for relative_path, content in _strip_shared_root_prefix(entries):
+        if isinstance(content, str):
+            files[relative_path] = content
+        elif preserved_assets is not None:
+            preserved_assets[relative_path] = content
     return files, skipped
+
+
+async def _inline_refinement_baseline(version) -> tuple[dict[str, str], dict[str, bytes]]:  # noqa: ANN001
+    assets: dict[str, bytes] = {}
+    try:
+        files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(version), preserved_assets=assets)
+    except (zipfile.BadZipFile, zlib.error, EOFError, OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail="Inline refinement cannot read the verified bundle") from exc
+    if skipped:
+        raise HTTPException(status_code=409, detail="Inline refinement cannot preserve every file in this bundle")
+    return files, assets
 
 
 def _artifact_bundle_path_from_version(version) -> Path | None:  # noqa: ANN001
@@ -393,8 +436,10 @@ def _artifact_bundle_path_from_version(version) -> Path | None:  # noqa: ANN001
     return path if path.exists() else None
 
 
-async def _verified_app_bundle(version) -> bytes:  # noqa: ANN001
+async def _verified_app_bundle(version, *, max_bytes: int | None = None) -> bytes:  # noqa: ANN001
     try:
+        if max_bytes is not None:
+            return await read_verified_artifact_bundle(version, max_bytes=max_bytes)
         return await read_verified_artifact_bundle(version)
     except (ValueError, ContentNotFoundError, OSError) as exc:
         raise HTTPException(
@@ -422,6 +467,17 @@ def _version_metadata(version) -> dict[str, Any]:
         if isinstance(payload, dict):
             return dict(payload)
     return {}
+
+
+def _artifact_build_binding(version: BuildRecord, *, build_registry_id: str, target_app_id: str) -> RunBuildBinding:
+    metadata = _version_metadata(version)
+    try:
+        binding = RunBuildBinding.model_validate({key: metadata.get(key) for key in RunBuildBinding.model_fields})
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="Artifact has no verified build identity") from exc
+    if binding.build_registry_id != build_registry_id or binding.target_app_id != target_app_id:
+        raise HTTPException(status_code=409, detail="Artifact identity does not match its build target")
+    return binding
 
 
 def _refinement_metadata_from_version(version) -> dict[str, Any] | None:  # noqa: ANN001
@@ -1293,6 +1349,51 @@ async def get_studio_analytics_metric_detail(
     except Exception as exc:
         logger.exception("Analytics metric detail assembly failed")
         raise HTTPException(status_code=500, detail="Failed to build metric detail") from exc
+
+
+@app.get("/api/studio/apps/{dashboard_app_id}/billing")
+async def get_dashboard_app_billing(
+    dashboard_app_id: str, principal: UserPrincipal = Depends(require_studio_user),
+) -> dict[str, Any]:
+    record = await _get_owned_dashboard_app_record(principal, dashboard_app_id)
+    version = await _current_dashboard_app_bundle(record)
+    result = {"dashboard_app_id": dashboard_app_id, "app_name": record.get("name") or record["app_id"]}
+    if version is None:
+        return {**result, "status": "no_build"}
+    if version.validation_status != ArtifactValidationStatus.PASSED or version.app_validation_status != "passed":
+        return {**result, "status": "validation_required"}
+
+    try:
+        files, diagnostics = await read_artifact_bundle(version)
+    except (ValueError, OSError, ContentNotFoundError, zipfile.BadZipFile) as exc:
+        raise HTTPException(status_code=409, detail="The selected build archive could not be verified.") from exc
+    if any(item.get("blocking") for item in diagnostics):
+        raise HTTPException(status_code=409, detail="The selected build archive could not be verified.")
+    bundle_path = "config/subscriptions.yaml"
+    matches = [path for path in (bundle_path, app_bundle_workspace_path(bundle_path)) if path in files]
+    if not matches:
+        return {**result, "status": "no_catalog"}
+    if len(matches) != 1:
+        raise HTTPException(status_code=409, detail="The selected build contains conflicting subscription catalogs.")
+    try:
+        catalog = SubscriptionsConfig.model_validate(yaml.safe_load(files[matches[0]]))
+    except (ValidationError, yaml.YAMLError) as exc:
+        raise HTTPException(status_code=422, detail="The selected build's subscription catalog is invalid.") from exc
+
+    # V1 has one top-level plan list. V2 groups plans by product.
+    groups = catalog.products or [catalog]
+    return {
+        **result, "status": "configured", "artifact_version_id": version.id,
+        "products": [{
+            "product_id": getattr(group, "product_id", None),
+            "label": group.label,
+            "default_plan_id": group.default_plan_id,
+            "plans": [
+                plan.model_dump(include={"plan_id", "label", "description", "price"})
+                for plan in group.plans
+            ],
+        } for group in groups],
+    }
 
 
 @app.get("/api/studio/integrations")
@@ -2174,6 +2275,81 @@ async def _resolve_studio_artifact_scope(
     return record["app_id"], user_id
 
 
+async def _current_dashboard_app_bundle(record: dict[str, Any]) -> BuildRecord | None:
+    """Resolve only the selected registry's current generated app artifact."""
+    run = record.get("current_build_run") or {}
+    version_id = run.get("artifact_version_id")
+    if not version_id:
+        return None
+    target_app_id = record["app_id"]
+    version = await get_artifact_store().get_build_record(app_id=target_app_id, build_record_id=version_id)
+    if not version or version.id != version_id or version.app_id != target_app_id or version.build_family != "app_bundle":
+        raise HTTPException(status_code=409, detail="The current build has no generated app bundle.")
+    if _version_metadata(version).get("bundle_mode") == "brownfield_genesis_import":
+        raise HTTPException(status_code=409, detail="A source import needs a generated app build.")
+    if version.lifecycle_status not in {ArtifactLifecycleStatus.DRAFT, ArtifactLifecycleStatus.CURRENT}:
+        raise HTTPException(status_code=409, detail="The current build no longer has an active app bundle.")
+    registry_id = record.get("build_registry_id")
+    if not registry_id:
+        raise HTTPException(status_code=409, detail="The selected app has no registered build.")
+    binding = _artifact_build_binding(version, build_registry_id=registry_id, target_app_id=target_app_id)
+    if binding.build_id != run.get("build_id"):
+        raise HTTPException(status_code=409, detail="The app bundle does not match the current build.")
+    return version
+
+
+async def _app_bundle_download(version: BuildRecord, *, target_app_id: str, artifact_version_id: str) -> Response:
+    _enforce_artifact_validation_gate(version, action="exported")
+    return Response(
+        await _verified_app_bundle(version, max_bytes=APP_BUNDLE_MAX_TOTAL_BYTES), media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{target_app_id}-{artifact_version_id}.zip"'},
+    )
+
+
+def _check_launch_archive(version: BuildRecord) -> None:
+    try:
+        entry = resolve_canonical_bundle_entry(version)
+    except CanonicalBundleEntryError as exc:
+        raise HTTPException(status_code=409, detail="The build has no verified archive entry.") from exc
+    if entry.size_bytes is not None and entry.size_bytes > APP_BUNDLE_MAX_TOTAL_BYTES:
+        raise HTTPException(status_code=409, detail="The app archive exceeds the export size limit.")
+    metadata = _version_metadata(version)
+    if metadata.get("content_digest") and metadata.get("content_ref"):
+        raise HTTPException(status_code=409, detail="The app archive has conflicting content references.")
+    if not any(metadata.get(key) for key in ("content_digest", "content_ref", "artifact_path")):
+        raise HTTPException(status_code=409, detail="The app archive has no stored content.")
+
+
+@app.get("/api/studio/apps/{dashboard_app_id}/launch")
+async def get_dashboard_app_launch(
+    dashboard_app_id: str, principal: UserPrincipal = Depends(require_studio_user),
+) -> dict[str, Any]:
+    record = await _get_owned_dashboard_app_record(principal, dashboard_app_id)
+    version = await _current_dashboard_app_bundle(record)
+    if version is None:
+        return {"status": "no_build"}
+    try:
+        _enforce_artifact_validation_gate(version, action="exported")
+    except HTTPException:
+        return {"status": "validation_required"}
+    _check_launch_archive(version)
+    return {"status": "ready", "artifact_version_id": version.id, "filename": f"{version.app_id}-{version.id}.zip"}
+
+
+@app.get("/api/studio/apps/{dashboard_app_id}/launch/{artifact_version_id}/download")
+async def download_dashboard_app_bundle(
+    dashboard_app_id: str, artifact_version_id: str,
+    principal: UserPrincipal = Depends(require_studio_user),
+) -> Response:
+    validate_path_id(artifact_version_id, "artifact_version_id")
+    record = await _get_owned_dashboard_app_record(principal, dashboard_app_id)
+    version = await _current_dashboard_app_bundle(record)
+    if version is None or version.id != artifact_version_id:
+        raise HTTPException(status_code=409, detail="The selected build has changed. Refresh Launch before downloading.")
+    _check_launch_archive(version)
+    return await _app_bundle_download(version, target_app_id=version.app_id, artifact_version_id=artifact_version_id)
+
+
 @app.get("/api/studio/build/artifacts/{artifact_version_id}/download")
 async def download_build_artifact(
     artifact_version_id: str,
@@ -2204,20 +2380,9 @@ async def download_build_artifact(
             source_bytes, media_type="application/zip",
             headers={"Content-Disposition": f'attachment; filename="{target_app_id}-{artifact_version_id}.zip"'},
         )
-    try:
-        binding = RunBuildBinding.model_validate({
-            key: _version_metadata(version).get(key) for key in RunBuildBinding.model_fields
-        })
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail="Artifact has no verified build identity") from exc
-    if binding.build_registry_id != build_registry_id or binding.target_app_id != target_app_id:
-        raise HTTPException(status_code=409, detail="Artifact identity does not match its build target")
+    _artifact_build_binding(version, build_registry_id=build_registry_id, target_app_id=target_app_id)
     if version.build_family == "app_bundle":
-        _enforce_artifact_validation_gate(version, action="exported")
-        return Response(
-            await _verified_app_bundle(version), media_type="application/zip",
-            headers={"Content-Disposition": f'attachment; filename="{target_app_id}-{artifact_version_id}.zip"'},
-        )
+        return await _app_bundle_download(version, target_app_id=target_app_id, artifact_version_id=artifact_version_id)
     zip_path = _artifact_bundle_path_from_version(version)
     if zip_path is None or not zip_path.is_file():
         raise HTTPException(status_code=404, detail="Artifact archive is unavailable")
@@ -2439,6 +2604,20 @@ def _app_bundle_entries(zip_source: bytes, paths: set[str]) -> dict[str, bytes]:
             )
         entries = {path: archive.read(infos[0]) for path, infos in found.items()}
     return entries
+
+
+async def _saved_parent_theme(version) -> dict[str, Any]:  # noqa: ANN001
+    """Get visual context from the same verified app archive the owner selected."""
+    entries = _app_bundle_entries(await _verified_app_bundle(version), {APP_THEME_PATH})
+    if APP_THEME_PATH not in entries:
+        return {}
+    try:
+        theme = json.loads(entries[APP_THEME_PATH])
+    except (ValueError, UnicodeError) as exc:
+        raise HTTPException(status_code=409, detail="The saved build's theme contains invalid JSON.") from exc
+    if not isinstance(theme, dict):
+        raise HTTPException(status_code=409, detail="The saved build's theme must be a JSON object.")
+    return theme
 
 
 def _recorded_workspace_pack_paths(provenance_entry: bytes | None) -> set[str]:
@@ -2854,6 +3033,21 @@ async def accept_build_artifact_version(
             )
         await _require_current_app_owned_pack_code(version, app_id=app_id, artifact_store=artifact_store)
         await _require_current_build_in_lineage(version, app_id=app_id, artifact_store=artifact_store)
+        metadata = _version_metadata(current_version)
+        if metadata.get("requires_current_review_assignment") is True:
+            registry = (await _get_app_registry_service().get_app_record(
+                build_registry_id=build_registry_id, owner_user_id=owner_user_id,
+            )).get("app") or {}
+            run = registry.get("current_build_run") or {}
+            if (
+                registry.get("app_id") != app_id or registry.get("lifecycle_state") != "review"
+                or current_version.commit_metadata.author_user_id != owner_user_id
+                or metadata.get("build_registry_id") != build_registry_id
+                or run.get("build_id") != metadata.get("build_id")
+                or run.get("artifact_version_id") != current_version.id
+                or run.get("active_chat_id") != current_version.source_chat_id
+            ):
+                raise HTTPException(status_code=409, detail="Selected artifact is not the current build under review")
         if refinement_review_record is not None:
             try:
                 accepted_result = await accept_staged_refinement_build_record(
@@ -3376,6 +3570,8 @@ async def _failed_workflow_retry_contribution(
         "revision_origin_workflow": request.requested_workflow_id or body.workflow_id,
         "workflow_sequence": journey_id, "screen": request.source_surface,
     }
+    if change.change_intent.branding_intent in {"visual_redesign", "new_logo"}:
+        seed["parent_theme_config"] = await _saved_parent_theme(baseline)
     if extra.get("lifecycle_state"):
         seed["lifecycle_state"] = extra["lifecycle_state"]
     return TriggerRoutingContribution(
@@ -3536,16 +3732,24 @@ async def _inline_run_baseline_effect(
 
 def _unresolved_change(
     effect: _InlineRunEffect | None, *, baseline_build_record_id: str | None, invalidation_recorded: bool,
+    preserve_branding_source: bool = False,
 ) -> dict[str, Any] | None:
     """The trigger's explicit report of an inline run whose outcome is unresolved, or None."""
     if effect is None or effect.unresolved is None:
         return None
+    detail = _UNRESOLVED_CHANGE_DETAILS[effect.unresolved]
+    if preserve_branding_source:
+        detail = (
+            "The color draft did not complete validation. It cannot be accepted. The selected build is unchanged."
+            if effect.unresolved in {"validation_pending", "validation_skipped"} else
+            "The color draft could not be verified. Review the app's saved builds. The selected build is unchanged."
+        )
     return {
         "reason": effect.unresolved,
         "draft_build_record_id": effect.draft_build_record_id,
         "baseline_build_record_id": baseline_build_record_id,
         "baseline_invalidation_recorded": invalidation_recorded,
-        "detail": _UNRESOLVED_CHANGE_DETAILS[effect.unresolved],
+        "detail": detail,
     }
 
 
@@ -3919,6 +4123,8 @@ async def trigger_workflow(
     surface_result = None
     inline_binding = None
     baseline_files = None
+    baseline_assets: dict[str, bytes] = {}
+    branding_intent = None
     proposal_baseline_state = None
     persisted_change_request_id = str(trigger_payload.get("change_request_id") or "").strip() or None
     persisted_revision_id = str(trigger_payload.get("revision_id") or "").strip() or None
@@ -4102,9 +4308,7 @@ async def trigger_workflow(
         if explicit_paths:
             if not orchestration_control.coding_enabled():
                 raise HTTPException(status_code=409, detail="Selected-file refinement is unavailable. The file scope has not been widened.")
-            baseline_files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(source_version))
-            if skipped:
-                raise HTTPException(status_code=409, detail="Inline refinement cannot preserve every file in this bundle")
+            baseline_files, baseline_assets = await _inline_refinement_baseline(source_version)
             if any(path not in baseline_files for path in explicit_paths):
                 raise HTTPException(status_code=400, detail="Refinement file scope is not in the selected artifact")
             coding_payload = {**coding_payload, "files": {path: baseline_files[path] for path in explicit_paths}}
@@ -4144,30 +4348,39 @@ async def trigger_workflow(
         ):
             raise HTTPException(status_code=409, detail="The recommended workflow has changed. Submit the change again to review the new route.")
         harness_decision = orchestration_control.build_harness_decision(refinement_decision)
-        selected_surface_request = (
-            bool(explicit_paths)
-            and not workflow_continuation
+        branding_intent = refinement_decision.change_intent.branding_intent
+        branding_workflow = branding_intent in {"visual_redesign", "new_logo"}
+        if branding_intent == "theme_color_patch" and explicit_paths and explicit_paths != [APP_THEME_PATH]:
+            raise HTTPException(
+                status_code=409,
+                detail="The selected files do not match the app's color settings. Clear the file limit or refine the selected files.",
+            )
+        allow_surface = (
+            not workflow_continuation
+            and not branding_workflow
             and orchestration_control.contract_surface_enabled()
             and refinement_decision.change_intent.change_class.value in {"design", "feature"}
             and refinement_request.build_family == "app_bundle"
         )
+        selected_surface_request = bool(explicit_paths) and allow_surface
         if explicit_paths and refinement_decision.change_intent.change_class.value != "patch" and not selected_surface_request:
             raise HTTPException(
                 status_code=409,
                 detail="This change needs a broader plan than the selected files allow. Narrow the request, or clear the file limit and submit it for a broader review. No files were changed.",
             )
-        if (
-            not workflow_continuation
-            and orchestration_control.contract_surface_enabled()
-            and refinement_decision.change_intent.change_class.value in {"feature", "design"}
-            and refinement_request.build_family == "app_bundle"
-        ):
+        if branding_workflow:
+            saved_context_keys = {
+                "parent_theme_config", "parent_shell_config", "refinement_request",
+                "build_record_id", "refinement_request_meta", "build_mode",
+            }
+            if saved_context_keys.intersection(body.context_variables):
+                raise HTTPException(status_code=400, detail="The branding workflow uses the selected build and its saved refinement request.")
+            refinement_decision.context_seed["parent_theme_config"] = await _saved_parent_theme(source_version)
+        if allow_surface:
             inline_binding = None
             try:
                 if baseline_files is None:
-                    baseline_files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(source_version))
-                    if skipped:
-                        raise HTTPException(status_code=409, detail="Inline refinement cannot preserve every file in this bundle")
+                    baseline_files, baseline_assets = await _inline_refinement_baseline(source_version)
                 contract_surface_plan, harness_decision = (
                     await orchestration_control.prepare_contract_surface_request(
                         refinement_request=refinement_request,
@@ -4217,6 +4430,7 @@ async def trigger_workflow(
                         routing_decision=refinement_decision, workspace_files=baseline_files,
                         run_build_binding=inline_binding, allowed_paths=explicit_paths or None,
                         registry_run_state=registry_run_state,
+                        preserved_assets=baseline_assets,
                     )
                     await _complete_inline_refinement(binding=inline_binding, user_id=user_id, result=finalized)
                     surface_result = surface_result.model_copy(update={
@@ -4262,9 +4476,10 @@ async def trigger_workflow(
                         # Only an applying decision (auto_patch) returns a request.
                         _refuse_unverifiable_pack_patch(pack_owners, coding_request.files)
                         _refuse_template_pack_patch(template_pack_paths, coding_request.files)
-                        baseline_files, skipped = _decode_text_bundle_entries(await _verified_app_bundle(source_version))
-                        if skipped:
-                            raise HTTPException(status_code=409, detail="Inline refinement cannot preserve every file in this bundle")
+                        if baseline_files is None:
+                            baseline_files, baseline_assets = await _inline_refinement_baseline(source_version)
+                        if baseline_assets.keys() & coding_request.files.keys():
+                            raise HTTPException(status_code=409, detail="Binary assets cannot be edited by the coding worker")
                         registry_run_state = await _registry_run_state(
                             user_id=user_id, build_registry_id=build_registry_id, source_version=source_version,
                         )
@@ -4283,7 +4498,9 @@ async def trigger_workflow(
                             "run_build_binding": inline_binding, "baseline_files": baseline_files,
                             "registry_run_state": registry_run_state,
                         })
-                        coding_result = await orchestration_control.execute_coding_request(coding_request)
+                        coding_result = await orchestration_control.execute_coding_request(
+                            coding_request, **({"preserved_assets": baseline_assets} if baseline_assets else {}),
+                        )
                         await _complete_inline_refinement(
                             binding=inline_binding, user_id=user_id, result=coding_result,
                         )
@@ -4364,14 +4581,19 @@ async def trigger_workflow(
     # invalidated only by an operation that changed it or left its outcome
     # unresolved: an inline run whose stored, unrejected child passed
     # validation, is pending or was skipped, or whose child lookup failed
-    # (checked here, in the store), or a workflow run that launched (after its
-    # launch, below). A returned decision, a failed launch, or an inline run
-    # that stored nothing or only a child that failed validation leaves it as
-    # it was. An unresolved outcome is reported explicitly in the response.
+    # (checked here, in the store), or a workflow that starts rebuilding its
+    # inputs. Scoped branding changes stage a child for review and leave the selected
+    # app bundle in its original lifecycle until acceptance. A returned decision,
+    # a failed launch, or an inline run that stored nothing or only a child that
+    # failed validation leaves it as it was. An unresolved outcome is reported explicitly in the response.
     invalidation_pending = (
         persisted_change_request_id is not None
         and refinement_request is not None
         and refinement_decision is not None
+    )
+    preserve_branding_source = (
+        refinement_request is not None and refinement_request.build_family == "app_bundle"
+        and branding_intent in {"theme_color_patch", "visual_redesign", "new_logo"}
     )
     inline_effect = None
     invalidation_recorded = False
@@ -4385,7 +4607,7 @@ async def trigger_workflow(
             parent_build_record_id=refinement_request.build_record_id, binding=inline_binding,
             result=coding_result if coding_result is not None else surface_result,
         )
-        if inline_effect.changed:
+        if inline_effect.changed and not preserve_branding_source:
             invalidation_recorded = await _persist_trigger_invalidation(
                 orchestration_control, refinement_request=refinement_request, routing_decision=refinement_decision,
                 change_request_id=persisted_change_request_id, artifact_store=artifact_store,
@@ -4394,6 +4616,7 @@ async def trigger_workflow(
     unresolved_change = _unresolved_change(
         inline_effect, baseline_build_record_id=refinement_request.build_record_id if refinement_request else None,
         invalidation_recorded=invalidation_recorded,
+        preserve_branding_source=preserve_branding_source,
     )
 
     confirmed_action = action_id if refinement_request is not None else None
@@ -4715,7 +4938,7 @@ async def trigger_workflow(
             }
 
     workflow_launch = await launch_prepared_workflow(launch)
-    if invalidation_pending:
+    if invalidation_pending and not preserve_branding_source:
         # The launched run revises the selected build; a launch that failed
         # above raised before this and left the build as it was.
         await _persist_trigger_invalidation(
@@ -4751,14 +4974,7 @@ async def _resolve_preview_artifact(
         raise HTTPException(status_code=404, detail="Artifact not found")
     if version.build_family != "app_bundle":
         raise HTTPException(status_code=422, detail="Preview requires an app bundle")
-    try:
-        binding = RunBuildBinding.model_validate({
-            key: _version_metadata(version).get(key) for key in RunBuildBinding.model_fields
-        })
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail="Artifact has no verified build identity") from exc
-    if binding.build_registry_id != build_registry_id or binding.target_app_id != target_app_id:
-        raise HTTPException(status_code=409, detail="Artifact identity does not match its build target")
+    _artifact_build_binding(version, build_registry_id=build_registry_id, target_app_id=target_app_id)
     try:
         files, diagnostics = await read_artifact_bundle(version, include_binary=True)
     except (OSError, ValueError, zipfile.BadZipFile) as exc:

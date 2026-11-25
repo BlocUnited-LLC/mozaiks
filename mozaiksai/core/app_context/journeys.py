@@ -16,6 +16,8 @@ from pydantic import (
     model_validator,
 )
 
+from mozaiksai.core.runtime.app.paths import APP_JOURNEY_CATALOG_PATH
+
 from .health import ContextGraphHealthReport
 from .impact_analysis import analyze_impact, build_graph_snapshot_identity
 from .models import (
@@ -73,6 +75,15 @@ class AppJourneyCatalog(BaseModel):
     app_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)]
     journeys: tuple[AppJourney, ...] = Field(min_length=1, max_length=512)
 
+    @classmethod
+    def from_document(cls, content: str | bytes) -> AppJourneyCatalog:
+        """Apply the same size and schema checks to bundle and filesystem input."""
+        if len(content) > _MAX_CATALOG_BYTES or (
+            isinstance(content, str) and len(content.encode("utf-8")) > _MAX_CATALOG_BYTES
+        ):
+            raise ValueError("Journey catalog exceeds the 4 MiB limit")
+        return cls.model_validate_json(content)
+
     @model_validator(mode="after")
     def _unique_journeys(self) -> AppJourneyCatalog:
         if len({journey.journey_id for journey in self.journeys}) != len(self.journeys):
@@ -91,7 +102,7 @@ class AppJourneySelection(BaseModel):
 def load_app_journeys(app_root: Path) -> AppJourneyCatalog | None:
     """Read the optional config/journeys.json under the supplied app directory."""
     root = app_root.resolve()
-    path = (root / "config" / "journeys.json").resolve()
+    path = (root / APP_JOURNEY_CATALOG_PATH).resolve()
     if not path.is_relative_to(root):
         raise ValueError("Journey catalog must reside inside the app directory")
     try:
@@ -99,9 +110,7 @@ def load_app_journeys(app_root: Path) -> AppJourneyCatalog | None:
             content = stream.read(_MAX_CATALOG_BYTES + 1)
     except FileNotFoundError:
         return None
-    if len(content) > _MAX_CATALOG_BYTES:
-        raise ValueError("Journey catalog exceeds the 4 MiB limit")
-    return AppJourneyCatalog.model_validate_json(content)
+    return AppJourneyCatalog.from_document(content)
 
 
 def select_affected_journeys(

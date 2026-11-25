@@ -252,3 +252,28 @@ def test_inline_baseline_reports_unsafe_archive_entries(studio, tmp_path):
     files, skipped = module._decode_text_bundle_entries(archive)
     assert files == {"app.json": "{}"}
     assert skipped == ["../escape.txt: unsafe_path"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("defect", ["duplicate", "unsafe", "binary_source", "invalid_svg", "oversize", "unreadable"])
+async def test_binary_passthrough_refuses_unpreservable_bundle(studio, monkeypatch, tmp_path, defect):
+    module, _ = studio
+    archive = tmp_path / "baseline.zip"
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr("app/app.json", "{}")
+        output.writestr("app/brand/assets/logo.png", b"\x89PNG\x00")
+        if defect == "duplicate":
+            output.writestr("app/brand/assets/LOGO.png", b"\xff")
+        if defect == "unsafe":
+            output.writestr("/app/escape.png", b"\xff")
+        if defect == "binary_source":
+            output.writestr("app/invalid.py", b"\xff")
+        if defect == "invalid_svg":
+            output.writestr("app/brand/assets/invalid.svg", b"\x00")
+    if defect == "oversize":
+        monkeypatch.setattr(module, "APP_BUNDLE_MAX_FILE_BYTES", 3)
+    raw = b"broken archive" if defect == "unreadable" else archive.read_bytes()
+    monkeypatch.setattr(module, "_verified_app_bundle", AsyncMock(return_value=raw))
+    with pytest.raises(HTTPException) as caught:
+        await module._inline_refinement_baseline(object())
+    assert caught.value.status_code == 409

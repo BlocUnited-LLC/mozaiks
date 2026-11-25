@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 import yaml
 
 from mozaiksai.core.runtime.app.auth_contract import APP_AUTH_COMPONENTS
+from mozaiksai.core.runtime.app.paths import APP_JOURNEY_CATALOG_PATH
 from mozaiksai.core.workflow.generator_support.ui_registry_composition import SHELL_ROUTE_COMPONENTS
 
 
@@ -379,14 +380,14 @@ def _validate_journey_routes(
     pages: list[dict[str, Any]],
     diagnostics: list[FunctionalGeneratedAppDiagnostic],
 ) -> None:
-    path = "config/journeys.json"
+    path = APP_JOURNEY_CATALOG_PATH
     content = files.get(path)
     if content is None:
         return
     from mozaiksai.core.app_context.journeys import AppJourneyCatalog
 
     try:
-        catalog = AppJourneyCatalog.model_validate_json(content)
+        catalog = AppJourneyCatalog.from_document(content)
     except ValueError:
         diagnostics.append(_diag("INVALID_JOURNEY_CATALOG", "Invalid app journey declaration.", path=path))
         return

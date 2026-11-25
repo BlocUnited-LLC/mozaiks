@@ -49,6 +49,7 @@ def test_load_global_pack_graph_uses_canonical_file(monkeypatch) -> None:
         "AgentGenerator",
         "AppGenerator",
         "AppMediaGenerator",
+        "BrandAssetGeneratorWorkflow",
         "ExistingAppDiscovery",
         "SecurityReadiness",
         "AppReview",

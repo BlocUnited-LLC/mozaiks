@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
-from mozaiksai.core.artifacts.models import BuildRecord
+from mozaiksai.core.artifacts.models import BuildRecord, BuildRecordStatus
 from mozaiksai.core.artifacts.summary_artifacts import _summary_bytes
 from mozaiksai.core.validation import (
     GeneratedAppValidationRequest,
@@ -122,6 +122,87 @@ async def resolve(saved, **kwargs):
         "app_id": "target", "build_record_id": bundle.id, "owner_user_id": "owner", "build_registry_id": "registry",
         "artifact_store": store, **kwargs,
     })
+
+
+@pytest.fixture
+def workflow(saved):
+    from scripts.smoke_appgenerator_live_acceptance import default_workflow_integration
+
+    store, context, bundle = saved
+    record = BuildRecord(
+        id="workflow", app_id=bundle.app_id, build_family="workflow_bundle", build_key="support",
+        version_number=1, lineage_root_id="workflow", source_workflow="AgentGenerator",
+        commit_metadata={"author_user_id": "owner", "metadata": {
+            **context["run_build_binding"],
+            "workflow_integration_metadata": {"workflows": [default_workflow_integration()]},
+        }},
+    )
+    store.records[record.id] = record
+    bundle.canonical_inputs_version["workflow_bundle"] = record.id
+    return record
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_compiler_inputs", [True, False])
+async def test_explicit_candidate_checks_pinned_workflow_against_edited_files(saved, workflow, monkeypatch, has_compiler_inputs):
+    from factory_app.workflows.AppGenerator.tools import app_validation
+    from scripts.smoke_appgenerator_live_acceptance import build_appgenerator_acceptance_files
+    from tests._generated_acceptance_fixtures import stub_contained_generated_runtime
+
+    store, _, parent = saved
+    if not has_compiler_inputs:
+        del parent.commit_metadata.metadata["compilation_inputs"]
+    store.records["newer"] = workflow.model_copy(update={"id": "newer", "version_number": 2, "lifecycle_status": "current"})
+    approval = await resolve(saved)
+    context = approval.context_for(parent.app_id)
+    assert context["artifact_version_refs"] == {"workflow_bundle": workflow.id}
+    assert context["workflow_integration_metadata"]["source_artifact_version_id"] == workflow.id
+    files = build_appgenerator_acceptance_files(app_id=parent.app_id)
+    assert app_validation.validate_workflow_integration_contract(files, context)["passed"]
+    del files["modules/support_tickets/contracts/reactions.yaml"]
+    stub_contained_generated_runtime(monkeypatch, app_validation)
+    result = await validate_generated_app_candidate(
+        files=files, app_id=parent.app_id, approved_compilation=approval, validation_strategy="docker",
+        capability_packs=parent.commit_metadata.metadata["capability_packs"],
+    )
+    assert result["validation_status"] == "failed"
+    assert any(
+        item.get("gate") == "workflow_integration" and item["test"] == "workflow_trigger_reaction_declared"
+        for item in result["app_bundle_acceptance_result"]["failed_tests"]
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("damage", ["missing", "catalog", "source_id", "app", "owner", "registry", "family", "archived", "deleted"])
+async def test_workflow_approval_requires_owned_exact_catalog(saved, workflow, damage):
+    store, _, _ = saved
+    if damage == "missing":
+        del store.records[workflow.id]
+    elif damage == "catalog":
+        del workflow.commit_metadata.metadata["workflow_integration_metadata"]
+    elif damage == "source_id":
+        workflow.commit_metadata.metadata["workflow_integration_metadata"]["source_artifact_version_id"] = "other"
+    elif damage == "app":
+        workflow.app_id = "other"
+    elif damage == "owner":
+        workflow.commit_metadata.author_user_id = "other"
+    elif damage == "registry":
+        workflow.commit_metadata.metadata["build_registry_id"] = "other"
+    elif damage in {"archived", "deleted"}:
+        workflow.lifecycle_status = BuildRecordStatus(damage)
+    else:
+        workflow.build_family = "design_docs"
+    with pytest.raises(ValueError, match="workflow bundle"):
+        await resolve(saved)
+
+
+@pytest.mark.asyncio
+async def test_no_workflow_input_ignores_available_catalog(saved, workflow):
+    _, _, parent = saved
+    del parent.canonical_inputs_version["workflow_bundle"]
+    assert "workflow_integration_metadata" not in (await resolve(saved)).context_for(parent.app_id)
+    del parent.commit_metadata.metadata["compilation_inputs"]
+    assert await resolve(saved) is None
 
 
 @pytest.mark.asyncio
@@ -243,13 +324,13 @@ async def test_factory_save_pins_used_design_instead_of_later_current(saved, mon
     context["app_bundle_acceptance_status"] = "passed"
     artifacts = import_module("mozaiksai.core.artifacts")
     monkeypatch.setattr(artifacts, "resolve_latest_artifact_version_refs", AsyncMock(return_value={
-        "design_docs": "newer-unrelated-design", "subscription_contract": "not-used", "workflow_bundle": "workflow",
+        "design_docs": "newer-unrelated-design", "subscription_contract": "not-used",
     }))
     child = await download._register_app_bundle_artifact_version(
         app_id="target", user_id="owner", workflow_name="AppGenerator", chat_id="chat", bundle_name="bundle",
         zip_path=Path(parent.commit_metadata.metadata["artifact_path"]), context_variables=context, artifact_store=store,
     )
-    assert child.canonical_inputs_version == {"design_docs": "design", "workflow_bundle": "workflow"}
+    assert child.canonical_inputs_version == {"design_docs": "design"}
     assert child.commit_metadata.metadata["compilation_inputs"]["inputs"]["design_docs"]["record_id"] == "design"
 
 
@@ -690,11 +771,14 @@ async def test_public_facade_replays_saved_compiled_pack_and_rejects_unbound_or_
 
 
 @pytest.mark.asyncio
-async def test_coding_worker_passes_bound_inputs_and_persists_replayable_child(saved, tmp_path):
+@pytest.mark.parametrize("has_compiler_inputs", [True, False])
+async def test_coding_worker_passes_bound_inputs_and_persists_replayable_child(saved, workflow, tmp_path, has_compiler_inputs):
     from mozaiksai.control_plane.contracts import CodingWorkerPlan, CodingWorkerRequest
     from mozaiksai.control_plane.implementations.coding_worker import ScopedRefinementCodingWorker
 
     store, _, parent = saved
+    if not has_compiler_inputs:
+        del parent.commit_metadata.metadata["compilation_inputs"]
     evidence = {
         "validation_status": "passed", "validation_strategy": "docker",
         "app_bundle_acceptance_result": {"status": "passed", "passed": True},
@@ -723,19 +807,31 @@ async def test_coding_worker_passes_bound_inputs_and_persists_replayable_child(s
     child = store.records[result["build_record_id"]]
     assert child.canonical_inputs_version == parent.canonical_inputs_version
     child_approval = await resolve(saved, build_record_id=child.id)
-    assert child_approval.context_for("target")["run_build_binding"]["build_id"] == "genesis"
+    replay = child_approval.context_for("target")
+    assert replay["workflow_integration_metadata"]["source_artifact_version_id"] == workflow.id
+    if has_compiler_inputs:
+        assert replay["run_build_binding"]["build_id"] == "genesis"
+        child.canonical_inputs_version.pop("workflow_bundle")
+        with pytest.raises(ValueError, match="workflow input changed"):
+            await resolve(saved, build_record_id=child.id)
+    else:
+        assert "run_build_binding" not in replay
 
 
 @pytest.mark.asyncio
 async def test_media_child_carries_exact_input_lineage(saved, monkeypatch):
-    from factory_app.workflows.AppMediaGenerator.tools import publish_app_media as publisher
+    from factory_app.workflows._shared import media_draft
+    from mozaiksai.core.session.build_binding import RunBuildBinding
 
     store, _, parent = saved
     approval = await resolve(saved)
-    monkeypatch.setattr(publisher, "get_artifact_store", lambda: store)
-    child, _ = await publisher._register_media_version(
+    monkeypatch.setattr(media_draft, "get_artifact_store", lambda: store)
+    child, _ = await media_draft.register_media_draft(
         parent=parent, files={"app.json": '{"appId":"target"}', "ui/assets/new.svg": "<svg/>"},
         overlay={}, chat_id="media-chat", user_id="owner", approved_compilation=approval,
+        workflow_name="AppMediaGenerator", binding=RunBuildBinding.model_validate({
+            key: parent.commit_metadata.metadata.get(key) for key in RunBuildBinding.model_fields
+        }),
         validation={
             "validation_status": "passed", "validation_strategy": "docker",
             "app_bundle_acceptance_result": {"status": "passed", "passed": True},

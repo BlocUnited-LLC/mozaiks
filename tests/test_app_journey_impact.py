@@ -3,6 +3,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
+from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
 from mozaiksai.core.app_context import (
     AppContextGraph,
     AppContextGraphEdge,
@@ -28,6 +29,36 @@ def journey(name, *nodes):
 
 def catalog(*journeys):
     return AppJourneyCatalog(app_id="projects", journeys=journeys)
+
+
+def test_generated_bundle_accepts_the_app_owned_journey_catalog():
+    case = catalog(journey("publish-project")).model_dump_json()
+    manifest = {"app.json": json.dumps({"appId": "projects"})}
+    assert scan_generated_bundle({**manifest, "config/journeys.json": case}) == []
+    assert scan_generated_bundle(manifest) == []
+    assert scan_generated_bundle({**manifest, "config/journeys-other.json": case})
+
+
+def catalog_document(**overrides):
+    return json.dumps({**catalog(journey("publish")).model_dump(), **overrides})
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        pytest.param("{", "Invalid JSON", id="malformed-json"),
+        pytest.param(catalog_document(app_id="other"), "app_id must match", id="other-app"),
+        pytest.param(catalog_document(schema_version="unknown"), "schema_version", id="unknown-schema"),
+        pytest.param(
+            catalog_document(journeys=[{**journey("publish").model_dump(), "start_route": "//outside"}]),
+            "start_route", id="external-route",
+        ),
+        pytest.param(" " * (4 * 1024 * 1024 + 1), "4 MiB", id="file-limit"),
+    ],
+)
+def test_generated_bundle_rejects_invalid_journey_catalogs(payload, message):
+    errors = scan_generated_bundle({"app.json": '{"appId":"projects"}', "config/journeys.json": payload})
+    assert any(error.startswith("config/journeys.json:") and message in error for error in errors)
 
 
 def graph():
@@ -206,6 +237,10 @@ def test_functional_bundle_acceptance_checks_optional_journey_route():
         ),
     }
     assert not scan_functional_generated_app(files)
+    oversized = {**files, "config/journeys.json": " " * (4 * 1024 * 1024) + json.dumps(doc)}
+    assert [issue.code for issue in scan_functional_generated_app(oversized)] == [
+        "INVALID_JOURNEY_CATALOG"
+    ]
     files["ui/route_manifest.json"] = '{"pages": []}'
     assert [issue.code for issue in scan_functional_generated_app(files)] == [
         "MISSING_JOURNEY_ROUTE"
