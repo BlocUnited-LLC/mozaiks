@@ -115,6 +115,9 @@ Studio in your browser at `http://127.0.0.1:3000/apps`. While it runs,
 
 In-progress builds stay in **Apps** so you can always pick up where you left off.
 
+To see what each agent contributes, which files come from templates and where
+you review the result, read [How the Factory builds your app](getting-started/how-the-factory-builds-your-app.md).
+
 This first build is your app's **Genesis Build**; after that, every change you
 ask for is a **Refinement Run** against the app you already have. See
 [Genesis Builds and Refinement Runs](getting-started/genesis-builds-and-refinement-runs.md).

@@ -82,6 +82,9 @@ those product semantics into the generic Factory/Studio defaults.
 
 **Route:** `/apps/:appId/building`
 
+Each saved document corresponds to a stage in the build. See which workflow
+produces it and how the next agent uses it in [How the Factory builds your app](../getting-started/how-the-factory-builds-your-app.md).
+
 One page per app, in plain language and read-only:
 
 - **Status and one button.** "This app's build hasn't started." (Start build),

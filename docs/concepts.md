@@ -83,22 +83,12 @@ interactions into a user-facing surface.
 
 ## The Build Sequence
 
-A build is the full sequence of AI workflows that takes a plain-language
-description and produces a complete app bundle. It runs inside Studio:
-
-```
-ValueEngine → DesignDocs → AppGenerator → AgentGenerator
-```
-
-| Workflow | What it does |
-| --- | --- |
-| **ValueEngine** | Captures the concept, target users, and value proposition |
-| **DesignDocs** | Produces frontend, backend, and UX design intent |
-| **AppGenerator** | Generates the app bundle: modules, pages, config, data contract |
-| **AgentGenerator** | Generates AI workflow bundles when the app needs them |
-
-In-progress builds are saved automatically. You can pick up where you left off
-at any time from the **Apps** page.
+In a new Studio build, you describe the idea and visual direction before the
+Factory designs the pages, data and access rules. After the pricing decision,
+`AgentGenerator` prepares any AI workflows the app needs. `AppGenerator`
+then builds the app that uses them. Planned images, advisory security findings
+and draft review follow. Open the app’s **Project** page to continue a build or
+inspect its saved documents. [How the Factory builds your app](getting-started/how-the-factory-builds-your-app.md)
 
 The first complete run of this sequence is your app's **Genesis Build** — the
 build that establishes the app's first authoritative version. Every change

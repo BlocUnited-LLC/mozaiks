@@ -104,6 +104,7 @@ nav:
   - Getting Started:
       - getting-started.md
       - Genesis Builds & Refinement Runs: getting-started/genesis-builds-and-refinement-runs.md
+      - How the Factory Builds Your App: getting-started/how-the-factory-builds-your-app.md
   - Key Concepts: concepts.md
 
   - Guides:
