@@ -462,6 +462,9 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         if not normalized_id or normalized_id.lower() == "none":
             normalized_id = uuid.uuid4().hex
             logger.debug("Generated fallback input request id %s for chat %s", normalized_id, chat_id)
+        if any(normalized_id in held for other, held in self._input_request_registries.items() if other != chat_id):
+            # Answers are delivered by id: one id must not mean requests of two chats.
+            normalized_id = uuid.uuid4().hex
         if chat_id not in self._input_request_registries:
             self._input_request_registries[chat_id] = {}
         self._input_request_registries[chat_id][normalized_id] = respond_cb
