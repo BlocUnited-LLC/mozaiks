@@ -52,7 +52,7 @@ def inject_pack_selection_context(agent: Any, messages: list[dict[str, Any]]) ->
     if context is None:
         return
     available = available_pack_rows(context)
-    catalog = {pack_id: {
+    catalog: dict[str, dict[str, Any]] = {pack_id: {
         "pack_id": pack_id, "capability_source": row.get("capability_source"),
         "description": row.get("description") or "",
         "capabilities": [
