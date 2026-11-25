@@ -84,7 +84,10 @@ def _context(chat: str) -> ContextVariablesBridge:
                 "assignment_store": {"data_alias": "billing.subscriptions", "user_id_field": "user_id"},
             },
         }
-    # The current saved review includes the selected pack's canonical pages.
+    # This test's fresh review makes the captured customer-management pages private.
+    # Leave the archived WAL and the captured plan drafts intact.
+    for page in variables["experience_spec"]["pages"]:
+        page["requiresAuth"] = True
     contract = yaml.safe_load((ROOT / "factory_app/build_context/mozaikspay/contract.yaml").read_text(encoding="utf-8"))
     _materialize_facade_pages(variables["experience_spec"], variables["design_surface_map"],
                              pack_id="mozaikspay", contract=contract)

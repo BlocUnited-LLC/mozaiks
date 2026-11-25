@@ -98,6 +98,7 @@ from mozaiksai.core.workflow.generator_support.code_files import (
     data_contract_requires_auth,
 )
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_design_page_sign_in,
     validate_page_role_preservation,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
@@ -1739,6 +1740,7 @@ def _scan_reviewed_page_roles(files_map: dict[str, str], context: Any) -> list[s
                     expected is not None and entry.get("component") == expected["component"]
                     and entry.get("component") not in app_auth_components
                     and meta.get("requiresAuth") is False
+                    and entry.get("requiresAuth", False) is False
                     and not {"roles", "requiredRole", "requiresRole"} & entry.keys()
                     and not {"roles", "requiredRole"} & meta.keys()
                     and meta.get("requiresRole") is None and meta.get("routeAuth") is None
@@ -1749,8 +1751,11 @@ def _scan_reviewed_page_roles(files_map: dict[str, str], context: Any) -> list[s
         reviewed = validate_page_role_preservation(
             pages, context, custom_routes=routes, require_complete=True,
         )
-        if reviewed and any(reviewed.values()) and not _app_manifest_auth_required(files_map):
-            raise ValueError("Reviewed page roles require app.json.authRequired=true")
+        if reviewed and not _app_manifest_auth_required(files_map):
+            if any(reviewed.values()):
+                raise ValueError("Reviewed page roles require app.json.authRequired=true")
+            if any(resolve_design_page_sign_in(context).values()):
+                raise ValueError("Reviewed page sign-in requires app.json.authRequired=true")
     except (AttributeError, TypeError, ValueError, yaml.YAMLError) as exc:
         return [f"Reviewed page role restrictions: {exc}"]
     return []

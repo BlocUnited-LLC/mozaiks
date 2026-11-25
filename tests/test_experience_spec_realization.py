@@ -6,13 +6,17 @@ from pathlib import Path
 import pytest
 
 from factory_app.workflows.DesignDocs.tools.save_design_doc import _canonical_experience_spec
-from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
+from mozaiksai.core.workflow.outputs.runtime_validation import validate_agent_structured_output
+from mozaiksai.core.workflow.outputs.structured import (
+    get_provider_response_model,
+    load_workflow_structured_outputs,
+)
 from tests.test_factory_auto_tool_acceptance import factory_manager  # noqa: F401
 
 
 def _page(surface="custom_react_page"):
     return {
-        "name": "Focus", "route": "/focus", "ui_surface": surface,
+        "name": "Focus", "route": "/focus", "ui_surface": surface, "requiresAuth": True,
         "layout": "full-width", "intent": "Local countdown with pause, resume and reset.",
         "sections": [],
     }
@@ -24,6 +28,25 @@ def page_model(request):
     assert not manager.reload_workflow("DesignDocs").get("error")
     models, _ = load_workflow_structured_outputs("DesignDocs")
     return models["UIPage"]
+
+
+def test_page_sign_in_is_a_required_boolean_in_both_schemas(page_model):
+    for model in (page_model, get_provider_response_model(page_model)):
+        schema = model.model_json_schema()
+        assert "requiresAuth" in schema["required"]
+        assert schema["properties"]["requiresAuth"]["type"] == "boolean"
+    for gate in (True, False):
+        assert page_model.model_validate({**_page(), "requiresAuth": gate}).requiresAuth is gate
+
+
+@pytest.mark.parametrize("bad_gate", ["off", "false", "true", 0, 1, None])
+def test_agent_cannot_coerce_an_invalid_gate_to_a_public_page(page_model, bad_gate):
+    result = validate_agent_structured_output(
+        agent_name="Designer", reply={**_page(), "requiresAuth": bad_gate},
+        structured_registry={"Designer": page_model},
+    )
+    assert result is not None and not result.validation_passed
+    assert "requiresAuth" in result.error
 
 
 @pytest.mark.parametrize("surface", ["declarative_page", "custom_react_page"])

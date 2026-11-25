@@ -474,7 +474,7 @@ def _approved_page_inventory(context: Any) -> list[dict[str, Any]]:
 
 def _validate_page_realizations(plan: dict[str, Any], context: Any) -> None:
     """A plan implements the approved rendering contract; it cannot re-decide it."""
-    validate_page_role_preservation(plan.get("pages") or [], context)
+    validate_page_role_preservation(plan.get("pages") or [], context, planned=True, fill_missing=True)
     planned = {page.get("route"): page for page in plan.get("pages") or []}
     for approved in _approved_page_inventory(context):
         surface = approved.get("ui_surface")
@@ -1347,23 +1347,39 @@ def _restate_page_task_outputs(plan: dict[str, Any]) -> list[str]:
         paths = _normalized_owned_paths(task)
         manifest = (
             "Emit a non-null AppSchemaOutput.manifest to materialize app.json. Its page "
-            "inventory covers the full approved app_build_plan, not just this worker's pages."
+            "inventory covers the full approved app_build_plan. "
+            f"Use manifest auth_strategy={json.dumps(plan.get('auth_strategy'))}, roles={json.dumps(plan.get('roles'))}."
             if "app.json" in paths else
             "Set AppSchemaOutput.manifest to null. Preserve the existing app.json and provenance; "
             "do not emit replacements."
         )
+        owned_pages = [page for page in plan.get("pages") or [] if planned_page_path(page) in paths]
+        declarative = [page for page in owned_pages if page.get("ui_surface") != "custom_react_page"]
+        page_scope = (
+            "AppSchemaOutput.pages must contain only these approved name/route pairs: "
+            + json.dumps([[page["name"], page["route"]] for page in declarative]) + "."
+            if declarative else "Set AppSchemaOutput.pages to []."
+        )
+        custom_routes = [page["route"] for page in owned_pages if page.get("ui_surface") == "custom_react_page"]
+        custom_scope = (
+            "Use custom_route_bundle only for " + json.dumps(custom_routes) + "."
+            if custom_routes else "Set custom_route_bundle to null."
+        )
+        prefix = "Page output contract from final owned_paths: "
         note = (
-            "Page output contract from final owned_paths: " + json.dumps(paths) + ". "
-            "This contract supersedes earlier artifact inclusion/exclusion wording in this task's "
-            "initial_message and acceptance_criteria, including page-only or no-manifest wording. "
-            "It does not change approved product behavior, routes, roles, layout, or bindings. "
-            + manifest + " Emit only pages and optional output fields whose materialized paths "
+            prefix + json.dumps(paths) + ". This contract supersedes earlier artifact inclusion/exclusion wording. "
+            + " ".join((manifest, page_scope, custom_scope))
+            + " Emit only pages and optional output fields whose materialized paths "
             "are owned by this task; leave unowned fields null. Do not widen owned_paths."
         )
         message = str(task.get("initial_message") or "").rstrip()
         criteria = list(task.get("acceptance_criteria") or [])
         if message.endswith(note) and criteria and criteria[-1] == note:
             continue
+        # Re-review can change the owner or revisit a plan with an older note.
+        # Replace the note emitted into both fields, preserving all product prose.
+        if criteria and isinstance(criteria[-1], str) and criteria[-1].startswith(prefix) and message.endswith(criteria[-1]):
+            message = message.removesuffix(criteria.pop()).rstrip()
         task["initial_message"] = "\n\n".join(part for part in (message, note) if part)
         task["acceptance_criteria"] = [*criteria, note]
         repairs.append(f"{task.get('task_id')}: restated page output scope from final owned_paths")

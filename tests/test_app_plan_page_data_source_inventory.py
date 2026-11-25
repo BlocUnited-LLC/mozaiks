@@ -22,7 +22,10 @@ import yaml
 
 from factory_app.workflows._shared.pack_selection import pin_pack_choices
 from factory_app.workflows._shared.subscription_contract_context import selected_feature_gates
-from factory_app.workflows.AppGenerator.tools.app_plan_review import review_app_build_plan
+from factory_app.workflows.AppGenerator.tools.app_plan_review import (
+    _restate_page_task_outputs,
+    review_app_build_plan,
+)
 from factory_app.workflows.AppGenerator.tools.hook_file_contract_context import (
     _build_file_contracts_body,
 )
@@ -322,6 +325,26 @@ def test_review_requires_independent_worker_only_when_an_owned_page_has_approved
     assert queued["editor-page"]["owned_paths"] == ["ui/pages/editor.yaml"]
     assert "ui/pages/dashboard.yaml" in queued[owner["task_id"]]["owned_paths"]
     assert "tasks/update_task" in queued["editor-page"]["initial_message"]
+    instruction = queued["editor-page"]["acceptance_criteria"][-1]
+    assert '[["Editor", "/editor"]]' in instruction and "Set custom_route_bundle to null." in instruction
+    assert "Set AppSchemaOutput.manifest to null." in instruction
+
+
+def test_custom_page_worker_receives_only_its_approved_route_in_the_output_contract():
+    task = {"task_id": "detail", "task_type": "page_bundle", "initial_message": "Build the detail view.",
+            "owned_paths": ["ui/pages/custom/item_id.jsx", "ui/index.js", "ui/route_manifest.json"]}
+    plan = {"build_tasks": [task], "pages": [
+        {"name": "Browse", "route": "/items", "ui_surface": "declarative_page"},
+        {"name": "Detail", "route": "/items/:item_id", "ui_surface": "custom_react_page"},
+    ]}
+    assert _restate_page_task_outputs(plan)
+    note = task["acceptance_criteria"][-1]
+    assert "Set AppSchemaOutput.pages to []" in note
+    assert "Set AppSchemaOutput.manifest to null" in note
+    assert 'Use custom_route_bundle only for ["/items/:item_id"]' in note
+    assert '"Browse"' not in note
+    assert task["initial_message"].endswith(note)
+    assert _restate_page_task_outputs(plan) == []
 
 
 @pytest.mark.parametrize("source, expected_error", [

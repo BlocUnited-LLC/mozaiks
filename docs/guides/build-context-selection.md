@@ -57,9 +57,9 @@ collections for additional records they own. When packs supply all app data,
 the design leaves `data_contract.surfaces` and `shared_collections` empty and
 declares its presentation in the surface map and experience spec.
 Template files stay on disk for deterministic assembly. The owner reviews the
-pack identities alongside the proposed permissions and page roles. AppGenerator
-uses the selection recorded in the reviewed DesignDocs artifact.
-
-When the owner requests changes, the replacement returns for review even if it
-removes every pack, grant and page-role requirement. An initial design with
-empty selections, grants and page gates can still proceed directly.
+pack identities, action grants and access to each proposed page. Every new
+page declares `requiresAuth`. The review shows whether visitors can open its
+route anonymously, whether it requires sign-in and which verified roles it
+requires. This review also covers page-only apps with no packs or grants.
+AppGenerator uses the reviewed DesignDocs artifact. Requested changes return
+to the owner for a new review.

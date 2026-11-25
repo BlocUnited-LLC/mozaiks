@@ -100,10 +100,14 @@ Login never assigns a named role. Empty policies remain valid for concepts that 
 and ownership. The compiler consumes the reviewed policy; it does not infer
 missing authority from concept prose or silently add grants.
 
-The same owner review displays each page's route and required roles, and its
-digest binds the typed route-to-role map alongside the action policy. Page-only
-restrictions also require this review. Reviews from the earlier policy-only
-shape require a fresh DesignDocs review; they cannot authorize page gates.
+Each new `experience_spec.pages[]` row declares a boolean `requiresAuth`.
+The owner reviews each route's anonymous or signed-in access and its verified
+roles, including when the design has no action grants. A role-gated page
+requires sign-in. The receipt binds those sign-in decisions and roles together
+with the action policy. An older valid receipt covering roles alone retains its
+original digest and existing sign-in protection. Opening an older route to
+anonymous visitors requires a new reviewed design. Earlier policy-only receipts
+that never bound the page roles also require a fresh review.
 `AppBuildPage.roles` and declarative `AppPageSchema.roles` preserve that exact
 reviewed value. Null and an empty list both mean no page-role gate and retain
 their existing representation. A custom React route projects one reviewed role

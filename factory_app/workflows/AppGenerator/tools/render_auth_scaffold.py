@@ -17,7 +17,7 @@ from mozaiksai.core.runtime.app.auth_contract import (
 from mozaiksai.core.workflow.context.context_utils import context_to_dict
 from mozaiksai.core.workflow.generator_support.code_files import materialize_collection_auth
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
-    resolve_design_access_policy,
+    resolve_scaffold_access,
 )
 from mozaiksai.core.workflow.generator_support.module_role_grants import (
     PackAuthorization,
@@ -37,7 +37,7 @@ from .code_file_utils import (
 def materialize_auth_scaffold(
     files: dict[str, str], *, data_contract: Any = None,
     design_surface_map: Any = None, access_policy: Any = None, auth_mode: str | None = None,
-    pack_authorization: PackAuthorization | None = None,
+    pack_authorization: PackAuthorization | None = None, requires_sign_in: bool = False,
 ) -> dict[str, str]:
     """Render the canonical auth file delta for a constructed app bundle."""
     generated = dict(files)
@@ -52,10 +52,7 @@ def materialize_auth_scaffold(
         access_policy, data_contract=data_contract, design_surface_map=design_surface_map,
         pack_authorization=pack_authorization,
     ) if access_policy is not None else None
-    if policy and policy["roles"]:
-        manifest["authRequired"] = True
-        generated["app.json"] = json.dumps(manifest, indent=2) + "\n"
-    if auth_mode is not None:
+    if requires_sign_in or (policy and policy["roles"]) or auth_mode is not None:
         manifest["authRequired"] = True
         generated["app.json"] = json.dumps(manifest, indent=2) + "\n"
     rendered: dict[str, str] = {}
@@ -129,11 +126,12 @@ async def save_auth_scaffold(
     the repair with the pre-repair root.
     """
     context = context_to_dict(context_variables)
+    policy, requires_sign_in = resolve_scaffold_access(context)
     rendered = materialize_auth_scaffold(
         admitted_app_file_map(context_variables, revision_baseline=revision_baseline),
         data_contract=context.get("data_contract"),
         design_surface_map=context.get("design_surface_map"),
-        access_policy=resolve_design_access_policy(context),
+        access_policy=policy, requires_sign_in=requires_sign_in,
         auth_mode=(context.get("app_build_plan") or {}).get("auth_mode"),
         pack_authorization=verified_pack_authorization(context),
     )

@@ -58,6 +58,10 @@ def _save() -> tuple[ContextVariablesBridge, dict]:
         "surface_map": deepcopy(entry["surface_map"]), "data_contract": deepcopy(entry["data_contract"]),
         "experience_spec": deepcopy(entry["experience_spec"]),
     }
+    # This new test proposal requests sign-in on every page; the original
+    # packet has no such decision and the corpus tests its rejection.
+    for page in bundle["experience_spec"]["pages"]:
+        page["requiresAuth"] = True
     submitted = deepcopy(bundle)
     result = inventory._save(context, bundle)
     assert bundle == submitted, "the model's structured output is never edited in place"
@@ -168,4 +172,4 @@ def test_the_app_pages_are_saved_as_the_model_wrote_them(persistence, name):
     assert result["outcome"] == "saved", result
     saved = {page["name"]: page for page in detach(context.get("experience_spec"))["pages"]}
     written = {page["name"]: page for page in _entry()["experience_spec"]["pages"]}
-    assert saved[name] == written[name]
+    assert saved[name] == {**written[name], "requiresAuth": True}

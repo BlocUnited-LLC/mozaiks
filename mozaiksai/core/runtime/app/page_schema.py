@@ -987,6 +987,11 @@ def _validate_href(value: str, action_type: str) -> None:
         _validate_api_endpoint(value)
         return
     if ".." in value or not _SAFE_ROUTE_RE.fullmatch(value):
+        if action_type == "navigate" and "?" in value:
+            raise PydanticCustomError(
+                "page_href", "navigate href must use an app route path. Move record identifiers into approved path "
+                "parameters, such as {selected_row.id}. For editing on the current page, use its form or open its modal.",
+            )
         raise PydanticCustomError("page_href", "href must be a safe absolute route or API path; use null when the action does not use href")
 
 

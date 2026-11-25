@@ -7,6 +7,7 @@ import pytest
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
 from tests.factory_context import factory_context
 from tests.import_utils import import_module_directly
+from tests.test_designdocs_monetization_inventory import approve_page_access
 
 design_docs_module = import_module_directly(
     "factory_app.workflows.DesignDocs.tools.save_design_doc"
@@ -87,7 +88,7 @@ def _bundle():
             "pages": [
                 {
                     "name": "Users",
-                    "ui_surface": "declarative_page", "route": "/users",
+                    "ui_surface": "declarative_page", "route": "/users", "requiresAuth": True,
                     "layout": "full-width",
                     "intent": "Manage users",
                     "sections": [
@@ -158,6 +159,7 @@ def _bundle():
 
 
 def test_save_design_docs_bundle_persists_surface_map_and_data_contract(monkeypatch) -> None:
+    monkeypatch.setattr(design_docs_module, "use_ui_tool", approve_page_access)
     monkeypatch.setattr(design_docs_module, "AG2PersistenceManager", _FakePersistenceManager)
     summary_artifact = {}
 
@@ -211,6 +213,7 @@ def test_save_design_docs_bundle_persists_surface_map_and_data_contract(monkeypa
 
 
 def test_save_design_docs_bundle_propagates_summary_persistence_failure(monkeypatch) -> None:
+    monkeypatch.setattr(design_docs_module, "use_ui_tool", approve_page_access)
     monkeypatch.setattr(design_docs_module, "AG2PersistenceManager", _FakePersistenceManager)
 
     async def _fail_summary(**_kwargs):
@@ -221,6 +224,7 @@ def test_save_design_docs_bundle_propagates_summary_persistence_failure(monkeypa
         {
             "app_id": "app_failure",
             "chat_id": "chat_failure",
+            "user_id": "owner",
             "build_id": "build_failure",
             "structured_output": _bundle(),
         }
