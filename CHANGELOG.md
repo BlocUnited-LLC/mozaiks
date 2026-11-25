@@ -104,6 +104,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- A workflow can use `reply_tool` to send a verified receipt or calculation
+  directly into chat. The reply stays in the conversation history, accepts
+  follow-up questions, and requires no model call to present the result.
 - In Studio app review, you can ask for a color change, a visual redesign, or
   a new logo without naming any files. Studio edits the selected build's theme,
   opens ThemeCapture, or starts the logo designer according to your request.

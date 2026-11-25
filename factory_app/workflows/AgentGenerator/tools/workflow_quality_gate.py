@@ -197,6 +197,7 @@ def _read_agent_names(agents_payload: Any) -> list[str]:
 
 def _validate_bundle_implementations(
     files: dict[str, str], tools: dict[str, Any], ui_config: dict[str, Any] | None = None,
+    reply_tools: set[tuple[str, str]] | None = None,
 ) -> list[str]:
     from mozaiksai.core.validation.functional_generated_app import scan_placeholder_implementations
 
@@ -258,6 +259,11 @@ def _validate_bundle_implementations(
         if function is None:
             errors.append(f"{filename} does not define declared tool function {function_name!r}")
             continue
+        if reply_tools and (filename, function_name) in reply_tools:
+            args = function.args
+            parameters = [arg.arg for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs)]
+            if parameters not in ([], ["context_variables"]) or args.vararg or args.kwarg:
+                errors.append(f"{filename}: reply_tool {function_name} can only take runtime context_variables")
         if (binding.get("ui") or {}).get("workflow_primitive") == "outcome_feedback":
             errors.extend(_validate_feedback_implementation(filename, module, function, binding))
         body = [node for node in function.body if not (
@@ -501,8 +507,11 @@ def validate_workflow_bundle_structure(
         except ValueError as exc:
             report["errors"].append(str(exc))
 
+        reply_agents = {name for name, agent in parsed_payloads["agents.yaml"]["agents"].items() if agent.get("reply_tool")}
+        reply_tools = {(tool["file"], tool["function"]) for tool in parsed_payloads["tools.yaml"]["tools"]
+                       if reply_agents.intersection([tool["agent"]] if isinstance(tool["agent"], str) else tool["agent"])}
         report["errors"].extend(_validate_bundle_implementations(
-            files, parsed_payloads["tools.yaml"], parsed_payloads.get("ui_config.yaml"),
+            files, parsed_payloads["tools.yaml"], parsed_payloads.get("ui_config.yaml"), reply_tools,
         ))
 
         orchestrator = payloads.get("orchestrator.yaml")

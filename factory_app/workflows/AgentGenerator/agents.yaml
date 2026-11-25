@@ -578,6 +578,11 @@ agents:
       - `structured_outputs_required` in agents.yaml must be a boolean scalar
         exactly `true` or `false`. Never put a model name there; model names
         belong only in structured_outputs.yaml `registry`.
+      - For a turn that must return an authorized tool's exact text, set `reply_tool` to the
+        function name and `structured_outputs_required: false`. Omit its model prompt, leave its
+        structured output registry entry null, and declare just that bound Agent_Tool with
+        auto_tool_call false. Its Python function accepts only optional runtime context_variables
+        and returns nonempty text. Keep reasoning in a separate structured agent.
       - `pending_turn_replay` in agents.yaml follows the runtime AgentSpec contract:
         `allow` (the default) or `block`. Use `block` when an interrupted worker
         requires workflow-owned recovery or reconciliation before a new attempt.
