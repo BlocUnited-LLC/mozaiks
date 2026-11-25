@@ -22,7 +22,7 @@ from mozaiksai.core.artifacts.models import (
 from mozaiksai.core.artifacts.store import get_artifact_store
 
 
-def _first_generation(context_variables: Any) -> bool:
+def revision_is_first_generation(context_variables: Any) -> bool:
     """Only the baseline owner can establish this exception for a design revision."""
     binding = context_variables.get("run_build_binding")
     return bool(
@@ -40,7 +40,7 @@ def revision_baseline_required(context_variables: Any) -> bool:
         context_variables is not None
         and context_variables.get("build_mode") == "revision"
         and context_variables.get("workflow_sequence") not in {"conceptual_replan", "full_rebuild"}
-        and not _first_generation(context_variables)
+        and not revision_is_first_generation(context_variables)
     )
 
 
@@ -57,7 +57,7 @@ def revision_source_artifact_id(context_variables: Any) -> str | None:
     """Keep the selected source stable after artifact_version_id becomes the result."""
     if context_variables.get("build_mode") != "revision":
         return None
-    if _first_generation(context_variables):
+    if revision_is_first_generation(context_variables):
         return None
     source = context_variables.get("revision_source_artifact_version_id")
     if not source and context_variables.get("workflow_sequence") in {"conceptual_replan", "full_rebuild"}:
