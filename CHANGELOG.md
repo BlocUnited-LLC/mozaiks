@@ -928,6 +928,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- AI usage larger than the remaining token balance is charged in full. It was
+  refused and left the balance unchanged, so a small balance admitted calls
+  without limit. The balance now reads zero, further calls are denied, and later
+  credits repay the difference. Wallets declared with `allow_negative_balance`
+  still admit calls after their balance is spent.
 - Generated app container images now serve as an unprivileged `mozaiks` user
   (uid 10001) that owns `/app`, instead of as root, and write their logs under
   `/app/logs`. The generated `docker-compose.yml` also drops the obsolete

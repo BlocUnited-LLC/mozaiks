@@ -1234,8 +1234,16 @@ class TokenWalletLedger:
         payload: dict[str, Any],
         *,
         wallet: TokenWalletDef,
-        allow_negative_balance: bool | None = None,
     ) -> TokenWalletEntryResult | None:
+        """Charge usage that has already happened, in full.
+
+        The model call is over, so refusing the charge would not undo it: it
+        would leave a small balance in place to admit the next call for free.
+        A call larger than the balance therefore takes it below zero, which
+        reads as zero and makes the guard deny further calls until later
+        credits repay the difference. ``wallet.allow_negative_balance`` is the
+        guard's admission policy; it does not decide whether usage is charged.
+        """
         amount = _positive_int(payload.get("total_tokens"))
         if amount <= 0:
             return None
@@ -1266,11 +1274,7 @@ class TokenWalletLedger:
                 "completion_tokens": _positive_int(payload.get("completion_tokens")),
                 "total_tokens": amount,
             },
-            allow_negative_balance=(
-                wallet.allow_negative_balance
-                if allow_negative_balance is None
-                else bool(allow_negative_balance)
-            ),
+            allow_negative_balance=True,
             usage_event_id=event_id,
         )
 

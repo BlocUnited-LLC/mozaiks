@@ -185,8 +185,17 @@ Wallet entries are idempotent by key and persisted under:
 - `RuntimeTokenWalletBalances` — projected balance per app/wallet/scope
 
 Balances are scoped by `app_id`, `wallet_id`, and either user, tenant, or app
-scope. Debits reject by default when the balance is insufficient; wallets can
-explicitly allow negative balances for overage-style products.
+scope. A requested debit is rejected when the balance is insufficient. Usage
+is different: the model call has already run, so its debit is always recorded in
+full. A call larger than the balance takes the balance below zero. It is reported
+as zero, further calls are denied, and later credits repay the difference first.
+A wallet with `allow_negative_balance: true` keeps admitting calls after its
+balance is spent, for overage-style products.
+
+The pre-call check compares the current balance with a required amount, 1 token
+unless `MOZAIKS_TOKEN_PREFLIGHT_REQUIRED_TOKENS` or a workflow preflight value
+raises it. It is not a reservation: calls already running when the balance runs
+out still complete and are charged.
 
 Workspace context participates in active-plan resolution and usage event
 metadata. It does not create a separate wallet balance scope: token balances

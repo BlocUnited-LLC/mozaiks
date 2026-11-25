@@ -10,6 +10,7 @@ from pymongo.errors import DuplicateKeyError
 from mozaiksai.core.data.persistence.namespaces import RuntimeCollections
 from mozaiksai.core.runtime.app.entitlements import ProductPlanSelection
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+from mozaiksai.core.tokens.guard import TokenUsageGuard
 from mozaiksai.core.tokens.plan_resolution import resolve_v2_wallet_plans
 from mozaiksai.core.tokens.wallet import TokenWalletLedger
 
@@ -667,6 +668,65 @@ async def test_usage_debit_uses_event_id_for_idempotency() -> None:
     balance = await ledger.query_balance(app_id="app_1", user_id="user_1")
     assert balance["balance"] == 75
     assert balance["total_spent"] == 25
+
+
+def _usage(event_id: str, total_tokens: int) -> dict[str, Any]:
+    return {"event_id": event_id, "app_id": "app_1", "user_id": "user_1", "total_tokens": total_tokens}
+
+
+@pytest.mark.asyncio
+async def test_usage_larger_than_the_balance_stops_further_calls() -> None:
+    """A refused post-call charge would leave the balance to admit calls forever."""
+    ledger = _ledger()
+    config = _subscriptions_config()
+    wallet = config.token_wallets[0]
+    assert wallet.allow_negative_balance is False
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=500, idempotency_key="payment:1")
+    guard = TokenUsageGuard(
+        config=config.model_copy(update={"token_wallets": [wallet.model_copy(update={"auto_debit_usage": True})],
+                                         "plans": [], "default_plan_id": None}),
+        ledger=ledger,
+    )
+
+    async def admitted() -> bool:
+        return (await guard.check(app_id="app_1", user_id="user_1", required_tokens=1)).allowed
+
+    assert await admitted()
+    result = await ledger.record_usage_debit(_usage("call_1", 20_000), wallet=wallet)
+    assert result is not None and result.status == "applied"
+    assert result.entry["amount"] == 20_000
+    assert not await admitted()
+    balance = await ledger.query_balance(app_id="app_1", user_id="user_1")
+    assert balance["balance"] == 0
+    assert balance["total_spent"] == 20_000
+
+    # The same event is charged once, and a credit repays the difference before admitting calls.
+    await ledger.record_usage_debit(_usage("call_1", 20_000), wallet=wallet)
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=19_500, idempotency_key="payment:2")
+    assert not await admitted()
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=1, idempotency_key="payment:3")
+    assert await admitted()
+    assert (await ledger.query_balance(app_id="app_1", user_id="user_1"))["balance"] == 1
+
+
+@pytest.mark.asyncio
+async def test_calls_already_running_when_the_balance_runs_out_are_all_charged() -> None:
+    ledger = _ledger()
+    wallet = _subscriptions_config().token_wallets[0]
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=500, idempotency_key="payment:1")
+    for index in range(3):
+        result = await ledger.record_usage_debit(_usage(f"running_{index}", 400), wallet=wallet)
+        assert result is not None and result.status == "applied"
+    assert (await ledger.query_balance(app_id="app_1", user_id="user_1"))["total_spent"] == 1_200
+
+
+@pytest.mark.asyncio
+async def test_a_requested_debit_still_cannot_overdraw() -> None:
+    ledger = _ledger()
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=10, idempotency_key="payment:1")
+    result = await ledger.debit(app_id="app_1", user_id="user_1", amount=11, idempotency_key="spend:1")
+    assert result.status == "rejected"
+    assert result.balance["balance"] == 10
 
 
 @pytest.mark.asyncio
