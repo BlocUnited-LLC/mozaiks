@@ -795,7 +795,9 @@ class ScopedRefinementCodingWorker:
         config = self._load_config()
         return bool(config.enabled and config.coding_enabled())
 
-    async def execute(self, request: CodingWorkerRequest) -> CodingWorkerResult:
+    async def execute(
+        self, request: CodingWorkerRequest, *, preserved_assets: dict[str, bytes] | None = None,
+    ) -> CodingWorkerResult:
         eligible, blocked_reason = self._check_eligibility(request)
         if not eligible:
             return CodingWorkerResult(
@@ -847,7 +849,9 @@ class ScopedRefinementCodingWorker:
                 {"provider": proposal.provider_id, "status": proposal.status, "reason": selection.reason}
             )
 
-        return await self.finalize_proposal(request, proposal, provider_attempts=provider_attempts)
+        return await self.finalize_proposal(
+            request, proposal, provider_attempts=provider_attempts, preserved_assets=preserved_assets,
+        )
 
     async def finalize_proposal(
         self,
@@ -855,6 +859,7 @@ class ScopedRefinementCodingWorker:
         proposal: StagedPatchProposal,
         *,
         provider_attempts: list[dict[str, str]] | None = None,
+        preserved_assets: dict[str, bytes] | None = None,
     ) -> CodingWorkerResult:
         """Validate and persist scoped output without making another model call."""
         provider_attempts = list(provider_attempts or [])
@@ -914,6 +919,7 @@ class ScopedRefinementCodingWorker:
                 validation_result = await self._run_candidate_validation(
                     request=request,
                     merged_files=merged_files,
+                    preserved_assets=preserved_assets,
                     validation_strategy=resolved_strategy,
                     capability_packs=capability_packs,
                 )
@@ -976,6 +982,7 @@ class ScopedRefinementCodingWorker:
                         resolved_artifact_kind=resolved_artifact_kind,
                         applied_files=applied_files,
                         merged_files=merged_files,
+                        preserved_assets=preserved_assets,
                         plan=resolved_plan,
                         validation_result=validation_result or {},
                         provider_execution=provider_execution,
@@ -1541,6 +1548,7 @@ class ScopedRefinementCodingWorker:
         *,
         request: CodingWorkerRequest,
         merged_files: dict[str, str],
+        preserved_assets: dict[str, bytes] | None = None,
         validation_strategy: str,
         capability_packs: list[dict[str, Any]],
     ) -> dict[str, Any]:
@@ -1548,10 +1556,10 @@ class ScopedRefinementCodingWorker:
         # the complete candidate. Provider context and commands are not policy.
         self._output_root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="validation-", dir=self._output_root.resolve()) as root:
-            materialize_coding_workspace(merged_files, workspace_root=Path(root))
+            materialize_coding_workspace(merged_files, workspace_root=Path(root), read_only_files=preserved_assets)
             approved_compilation = await self._approved_compilation(request)
             result = await self._candidate_validation_runner(
-                files=dict(merged_files),
+                files={**merged_files, **(preserved_assets or {})},
                 app_id=request.artifact_app_id,
                 validation_strategy=validation_strategy,
                 capability_packs=deepcopy(capability_packs),
@@ -1592,6 +1600,7 @@ class ScopedRefinementCodingWorker:
         resolved_artifact_kind: str,
         applied_files: dict[str, str],
         merged_files: dict[str, str],
+        preserved_assets: dict[str, bytes] | None = None,
         plan: CodingWorkerPlan,
         validation_result: dict[str, Any],
         capability_packs: list[dict[str, Any]],
@@ -1608,7 +1617,9 @@ class ScopedRefinementCodingWorker:
         workspace_dir = bundle_root / "workspace"
 
         try:
-            staged_workspace = materialize_coding_workspace(merged_files, workspace_root=workspace_dir)
+            staged_workspace = materialize_coding_workspace(
+                merged_files, workspace_root=workspace_dir, read_only_files=preserved_assets,
+            )
         except OSError as exc:
             raise RuntimeError(
                 f"STAGING_WRITE_FAILED: could not write staging workspace at {workspace_dir} — {exc}"
@@ -1619,13 +1630,13 @@ class ScopedRefinementCodingWorker:
             raise RuntimeError(
                 f"STAGING_VERIFICATION_FAILED: workspace harvest found scope violations: {details}"
             )
-        written_paths = sorted(staged_workspace.editable_manifest)
+        verified_manifest = staged_workspace.editable_manifest | staged_workspace.read_only_manifest
 
         bundle_name = f"refinement_{bundle_token}"
         zip_path = bundle_root / f"{bundle_name}.zip"
         try:
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-                for rel_path in sorted(written_paths):
+                for rel_path in sorted(verified_manifest):
                     zipf.write(workspace_dir / rel_path, arcname=f"{bundle_name}/{rel_path}")
         except OSError as exc:
             raise RuntimeError(
@@ -1650,7 +1661,7 @@ class ScopedRefinementCodingWorker:
             "validation_evidence": validation_result["app_bundle_acceptance_result"].get("validation_evidence"),
             "app_validation_result": validation_result["app_validation_result"],
             "source_surface": request.source_surface,
-            "staged_file_sha256": dict(staged_workspace.editable_manifest),
+            "staged_file_sha256": verified_manifest,
             "coding_provider": provider_execution,
             "capability_packs": deepcopy(capability_packs),
             # Who chose the written scope stays with the record it authorized.

@@ -16,6 +16,27 @@ def _read_yaml(relative_path: str) -> dict:
     return yaml.safe_load((WORKSPACE / relative_path).read_text(encoding="utf-8")) or {}
 
 
+def test_app_redesign_preserves_assets_identity_and_unknown_tokens() -> None:
+    from factory_app.workflows.ThemeCapture.tools.stage_app_theme import apply_visual_tokens
+
+    original = {
+        "assets": {"logo": "owned-logo.png"}, "identity": {"name": "PrivaNote"},
+        "theme": {"branding": {"logo_url": "owned-logo.png"}, "density": "medium"},
+        "ui": {"custom_extension": {"padding": 4}}, "colors": {"accent": {"main": "#2DD4BF"}},
+    }
+    captured = {
+        "assets": {"logo": None}, "identity": {"name": "Unrelated"},
+        "theme": {"branding": {"logo_url": "new.png"}, "density": "compact"},
+        "ui": {"page": {}}, "colors": {"accent": {"main": "#D97706"}},
+    }
+    updated = apply_visual_tokens(original, captured)
+    assert updated["identity"] == original["identity"] and updated["assets"] == original["assets"]
+    assert updated["theme"] == {"branding": {"logo_url": "owned-logo.png"}, "density": "compact"}
+    assert updated["ui"] == {"custom_extension": {"padding": 4}, "page": {}}
+    assert updated["colors"]["accent"]["main"] == "#D97706"
+    assert original["colors"]["accent"]["main"] == "#2DD4BF"
+
+
 def _read_text(relative_path: str) -> str:
     return (WORKSPACE / relative_path).read_text(encoding="utf-8")
 

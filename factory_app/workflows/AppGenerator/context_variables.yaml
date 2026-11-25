@@ -779,9 +779,10 @@ definitions:
       default: null
   captured_theme_config:
     type: object
+    writer_ids: [lifecycle_tool]
     description: >
-      Most recent canonical theme_config captured by ThemeCapture for this app.
-      Highest-fidelity visual input for AppSchemaAgent when deriving theme_config_patch.
+      Visual input for AppSchemaAgent. A revision to a selected app bundle
+      takes its theme from the verified source archive before agents start.
     source:
       type: data_reference
       database_name: mozaiksai

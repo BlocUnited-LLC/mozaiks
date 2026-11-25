@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from factory_app.workflows._shared.platform.build_target import require_build_binding
+from factory_app.workflows.ThemeCapture.tools.stage_app_theme import stage_app_theme
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
 from mozaiksai.core.runtime.app.theme_contract import validate_page_title_theme
@@ -57,6 +58,10 @@ async def save_captured_theme(
         validate_page_title_theme(theme_config)
     except ValueError as exc:
         return {"success": False, "error": str(exc)}
+    bounded_revision = context_variables.get("workflow_sequence") == "app_theme_revision"
+    draft_id = None
+    if bounded_revision:
+        theme_config, draft_id = await stage_app_theme(context_variables, theme_config)
     identity = theme_config.get("identity") or {}
     colors = theme_config.get("colors") or {}
     fonts = theme_config.get("fonts") or {}
@@ -65,37 +70,38 @@ async def save_captured_theme(
     persistence_id = app_id
     now = datetime.now(UTC)
 
-    store = BuilderArtifactStore()
-    await store.save_theme_capture(
-        app_id=persistence_id,
-        chat_id=str(chat_id) if chat_id else None,
-        app_url=app_url,
-        identity=identity,
-        theme_config=theme_config,
-    )
-
-    try:
-        await persist_summary_artifact(
+    if not bounded_revision:
+        store = BuilderArtifactStore()
+        await store.save_theme_capture(
             app_id=persistence_id,
-            artifact_kind="theme_capture",
-            artifact_key="theme_capture",
-            summary_payload={
-                "app_id": persistence_id,
-                "chat_id": str(chat_id) if chat_id else None,
-                "app_url": app_url,
-                "identity": identity,
-                "theme_config": theme_config,
-                "updated_at": now.isoformat(),
-            },
-            source_workflow="ThemeCapture",
-            source_chat_id=str(chat_id) if chat_id else None,
-            author_user_id=str(user_id) if user_id else None,
-            revision_mode=str(build_mode or "").strip().lower() == "revision",
-            input_artifact_kinds=("concept",),
+            chat_id=str(chat_id) if chat_id else None,
+            app_url=app_url,
+            identity=identity,
+            theme_config=theme_config,
         )
-    except Exception as exc:
-        logger.warning("[ThemeCapture] Generic theme artifact persistence failed: %s", exc)
-        raise
+
+        try:
+            await persist_summary_artifact(
+                app_id=persistence_id,
+                artifact_kind="theme_capture",
+                artifact_key="theme_capture",
+                summary_payload={
+                    "app_id": persistence_id,
+                    "chat_id": str(chat_id) if chat_id else None,
+                    "app_url": app_url,
+                    "identity": identity,
+                    "theme_config": theme_config,
+                    "updated_at": now.isoformat(),
+                },
+                source_workflow="ThemeCapture",
+                source_chat_id=str(chat_id) if chat_id else None,
+                author_user_id=str(user_id) if user_id else None,
+                revision_mode=str(build_mode or "").strip().lower() == "revision",
+                input_artifact_kinds=("concept",),
+            )
+        except Exception as exc:
+            logger.warning("[ThemeCapture] Generic theme artifact persistence failed: %s", exc)
+            raise
 
     ui_payload = {
         "title": f"Theme: {identity.get('app_name', 'Captured Theme')}",
@@ -136,4 +142,5 @@ async def save_captured_theme(
         "message": agent_message,
         "app_id": persistence_id,
         "theme_config_keys": list(theme_config.keys()),
+        **({"draft_build_record_id": draft_id} if draft_id else {}),
     }

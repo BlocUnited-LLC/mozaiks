@@ -97,6 +97,10 @@ def test_sequences_use_persisted_design_and_theme_families() -> None:
     assert "theme_capture" in sequences["full_rebuild"]
     assert sequences["app_surface_revision"] == ["design_docs", "app_bundle"]
     assert sequences["theme_revision"] == ["theme_capture", "app_bundle"]
+    assert sequences["app_theme_revision"] == ["theme_capture", "app_bundle"]
+    brand_steps = {s["id"]: s["steps"] for s in registry["workflow_sequences"]}
+    assert brand_steps["app_theme_revision"] == [{"workflows": ["ThemeCapture"]}]
+    assert brand_steps["logo_revision"] == [{"workflows": ["BrandAssetGeneratorWorkflow"]}]
     assert sequences["theme_patch"] == ["theme_capture", "app_bundle"]
     for families in sequences.values():
         assert {"experience_spec", "build_plan", "brand", "theme_config"}.isdisjoint(families)

@@ -116,6 +116,7 @@ async def persist_summary_artifact(
     artifact_key: str | None = None,
     message: str | None = None,
     revision_mode: bool = False,
+    draft_only: bool = False,
     parent_version_id: str | None = None,
     canonical_inputs_version: Mapping[str, str] | None = None,
     input_artifact_kinds: Iterable[str] | None = None,
@@ -158,7 +159,7 @@ async def persist_summary_artifact(
     summary_bytes = _summary_bytes(summary_payload)
     lifecycle_status = (
         ArtifactLifecycleStatus.DRAFT
-        if revision_mode and resolved_parent_version_id
+        if draft_only or (revision_mode and resolved_parent_version_id)
         else ArtifactLifecycleStatus.CURRENT
     )
     summary_file_name = f"{resolved_artifact_key}.json"

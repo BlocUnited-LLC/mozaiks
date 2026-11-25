@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 from typing import Any, cast
 
@@ -17,6 +17,7 @@ from pydantic import (
 )
 
 from mozaiksai.control_plane.config import RefinementModel
+from mozaiksai.core.artifacts.models import BrandingIntent
 from mozaiksai.core.session.model import SessionLifecycle, TriggerInput
 from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
 from mozaiksai.core.usage.context import AuxiliaryUsageContext
@@ -362,6 +363,7 @@ class ChangeIntent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     change_class: ChangeClass
+    branding_intent: BrandingIntent | None = None
     source: str = "llm"
     signals: list[str] = Field(default_factory=list)
     rationale: str
@@ -411,8 +413,17 @@ class ArtifactRoutePolicy:
     design: ControlPlaneChangeRouteManifest
     feature: ControlPlaneChangeRouteManifest
     core: ControlPlaneChangeRouteManifest
+    branding_routes: dict[BrandingIntent, ControlPlaneChangeRouteManifest] = field(default_factory=dict)
 
-    def route_for(self, change_class: ChangeClass) -> ControlPlaneChangeRouteManifest:
+    def route_for(
+        self, change_class: ChangeClass, *, branding_intent: BrandingIntent | None = None,
+    ) -> ControlPlaneChangeRouteManifest:
+        if (
+            change_class in (ChangeClass.PATCH, ChangeClass.DESIGN)
+            and branding_intent is not None
+            and branding_intent in self.branding_routes
+        ):
+            return self.branding_routes[branding_intent]
         return getattr(self, change_class.value)  # type: ignore[no-any-return]
 
 class RefinementTriggerRouteResolver:
@@ -449,6 +460,7 @@ class RefinementTriggerRouteResolver:
             design=policy.routes.design,
             feature=policy.routes.feature,
             core=policy.routes.core,
+            branding_routes=policy.branding_routes,
         )
 
     def _families_for_route(self, route: ControlPlaneChangeRouteManifest, build_family: str) -> list[str]:
@@ -1496,7 +1508,14 @@ class RefinementTriggerRouteResolver:
         source = "llm"
         signals = [str(signal).strip() for signal in classification.signals if str(signal).strip()]
         policy = self._policy_for(request.build_family)
-        route = policy.route_for(change_class)
+        branding_intent = getattr(classification, "branding_intent", None)
+        if change_class not in (ChangeClass.PATCH, ChangeClass.DESIGN) or branding_intent not in policy.branding_routes:
+            branding_intent = None
+        elif branding_intent == "theme_color_patch":
+            change_class = ChangeClass.PATCH
+        else:
+            change_class = ChangeClass.DESIGN
+        route = policy.route_for(change_class, branding_intent=branding_intent)
         families = set(self._families_for_route(route, request.build_family))
         label = self._artifact_label(request.build_family, policy)
 
@@ -1535,6 +1554,7 @@ class RefinementTriggerRouteResolver:
 
         return ChangeIntent(
             change_class=change_class,
+            branding_intent=branding_intent,
             source=source,
             signals=signals,
             rationale=rationale,
@@ -1548,7 +1568,7 @@ class RefinementTriggerRouteResolver:
 
     async def _derive_impact_set(self, request: RefinementRequest, intent: ChangeIntent) -> ImpactSet:
         policy = self._policy_for(request.build_family)
-        route = policy.route_for(intent.change_class)
+        route = policy.route_for(intent.change_class, branding_intent=intent.branding_intent)
         families = self._families_for_route(route, request.build_family)
         label = self._artifact_label(request.build_family, policy)
         workflow_id = self._route_workflow_id(route)
@@ -1591,7 +1611,7 @@ class RefinementTriggerRouteResolver:
         impact_set: ImpactSet,
     ) -> RefinementRoutingDecision:
         policy = self._policy_for(request.build_family)
-        route = policy.route_for(change_intent.change_class)
+        route = policy.route_for(change_intent.change_class, branding_intent=change_intent.branding_intent)
         label = self._artifact_label(request.build_family, policy)
         workflow_id = self._route_workflow_id(route)
 

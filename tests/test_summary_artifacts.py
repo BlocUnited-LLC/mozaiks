@@ -215,7 +215,8 @@ async def test_resolve_latest_artifact_version_refs_returns_empty_on_first_run()
 
 
 @pytest.mark.asyncio
-async def test_persist_summary_artifact_first_run_has_no_parent() -> None:
+@pytest.mark.parametrize(("draft_only", "status"), [(False, "current"), (True, "draft")])
+async def test_persist_summary_artifact_first_run_has_no_parent(draft_only: bool, status: str) -> None:
     """On first run the parent lookup returns nothing; parent_build_record_id must be None."""
     store = _EmptyArtifactStore()
 
@@ -223,7 +224,9 @@ async def test_persist_summary_artifact_first_run_has_no_parent() -> None:
         app_id="app_1",
         artifact_kind="concept",
         summary_payload={"name": "My App"},
+        draft_only=draft_only,
         artifact_store=store,
     )
 
     assert store.create_calls[0]["parent_build_record_id"] is None
+    assert store.create_calls[0]["lifecycle_status"] == status

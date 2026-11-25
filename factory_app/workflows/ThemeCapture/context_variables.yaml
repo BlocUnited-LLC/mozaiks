@@ -445,6 +445,7 @@ agents:
 
   ThemeAnalysisAgent:
     variables:
+      - refinement_request
       - value_manifest
       - app_name
       - app_description
@@ -475,6 +476,7 @@ agents:
 
   ThemeConfigAssemblerAgent:
     variables:
+      - refinement_request
       - value_manifest
       - app_name
       - parent_theme_config

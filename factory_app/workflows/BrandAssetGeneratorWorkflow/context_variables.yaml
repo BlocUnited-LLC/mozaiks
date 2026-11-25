@@ -1,4 +1,24 @@
 definitions:
+  run_build_binding:
+    type: object
+    description: Server-owned build target for Studio refinements.
+    source: {type: runtime}
+  artifact_version_id:
+    type: string
+    description: Selected saved app bundle.
+    source: {type: state, default: null}
+  change_request_id:
+    type: string
+    description: Persisted refinement request bound to the source app bundle.
+    source: {type: state, default: null}
+  refinement_request:
+    type: string
+    description: Design request from app review chat.
+    source: {type: state, default: null}
+  parent_theme_config:
+    type: object
+    description: The selected bundle's theme supplies existing brand direction.
+    source: {type: state, default: null}
   app_id:
     type: str
     description: ID of the app whose brand assets are being generated.
@@ -22,7 +42,7 @@ definitions:
       type: state
       default: ""
 
-  generated_brand_assets:
+  generated_media_assets:
     type: list
     description: >
       List of asset records generated in this session. Each entry has
@@ -34,7 +54,7 @@ definitions:
   promoted_brand_assets:
     type: list
     description: >
-      Subset of generated_brand_assets that have been promoted to
+      Subset of generated_media_assets that have been promoted to
       asset_manifest.json.
     source:
       type: state
@@ -42,7 +62,18 @@ definitions:
 
   brand_assets_complete:
     type: bool
-    description: Set to true when the user confirms brand assets are finalized.
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    description: The selected asset was saved for this app.
     source:
       type: state
       default: false
+
+agents:
+  BrandDesignerAgent:
+    variables:
+      - refinement_request
+      - brand_brief
+      - parent_theme_config
+      - generated_media_assets
+      - promoted_brand_assets

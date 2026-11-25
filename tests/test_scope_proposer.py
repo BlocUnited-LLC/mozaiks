@@ -190,6 +190,21 @@ def _routing_decision() -> RefinementRoutingDecision:
 
 
 @pytest.mark.asyncio
+async def test_classified_color_edit_scopes_the_existing_theme_without_a_filename():
+    words = "Make the app accent coral everywhere."
+    request = _request().model_copy(update={"raw_user_request": words})
+    route = _routing_decision()
+    route.change_intent.branding_intent = "theme_color_patch"
+    runner = _FakeAgentRunner()
+    proposer = ArtifactScopeProposer(agent_runner=runner, pack_loader=_pack)
+    scope = await proposer.propose(refinement_request=request, routing_decision=route)
+    assert scope.selected_paths == ["brand/theme_config.json"]
+    assert scope.resolution == "scoped_files"
+    assert scope.confidence == route.change_intent.confidence
+    assert not runner.calls
+
+
+@pytest.mark.asyncio
 async def test_scope_proposer_selects_paths_and_materializes_files(tmp_path: Path) -> None:
     workspace_root = tmp_path / "scope_workspace" / "app" / "ui" / "pages"
     workspace_root.mkdir(parents=True, exist_ok=True)

@@ -5,3 +5,4 @@ human_in_the_loop: true
 workflow_startup_mode: AgentDriven
 orchestration_pattern: ag2_network
 initial_agent: BrandDesignerAgent
+initial_message: Use the supplied design request and the app's existing visual identity to create logo options for review.
