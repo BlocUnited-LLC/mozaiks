@@ -1467,6 +1467,22 @@ def validate_workflow_integration_contract(
     context_variables: Any | None,
 ) -> dict[str, Any]:
     metadata = workflow_integration_metadata_from_context(context_variables)
+    refs = _context_get(context_variables, "artifact_version_refs", {})
+    workflow_ref = refs.get("workflow_bundle") if isinstance(refs, Mapping) else None
+    if workflow_ref and (metadata or {}).get("source_artifact_version_id") != workflow_ref:
+        message = f"Workflow integration metadata must come from the pinned workflow bundle {workflow_ref!r}."
+        return {
+            "contract_version": "1.0",
+            "passed": False,
+            "checks": [_check_result(check_id="workflow_integration_source", passed=False, message=message)],
+            "failed_tests": [{
+                "test": "workflow_integration_source",
+                "path": "workflow_integration_metadata",
+                "error": message,
+                "fix_suggestion": "Hydrate the pinned workflow bundle before validating this app build.",
+            }],
+            "warnings": [],
+        }
     if not metadata:
         return {
             "contract_version": "1.0",
@@ -1490,7 +1506,7 @@ def validate_workflow_integration_contract(
     action_emits = wiring["action_emits"]
     capability_reactions = wiring["capability_reactions"]
     expected_workflow_pairs: set[tuple[str, str]] = set()
-    expected_capability_ids_by_event: dict[str, set[str]] = {}
+    expected_reactions: set[tuple[str, str]] = set()
     declared_workflow_capability_ids = {
         capability["capability_id"]
         for capability in workflow_capabilities
@@ -1510,7 +1526,14 @@ def validate_workflow_integration_contract(
                 continue
             event_type = str(trigger_event.get("event_type") or "").strip()
             if event_type:
-                expected_capability_ids_by_event.setdefault(event_type, set()).add(capability_id)
+                if (event_type, capability_id) in expected_reactions:
+                    failed_tests.append({
+                        "test": "workflow_trigger_duplicate_binding",
+                        "path": "workflow_integration_metadata",
+                        "error": f"Multiple triggers claim event {event_type!r} and capability {capability_id!r}.",
+                        "fix_suggestion": "Declare a unique event and capability pair for each workflow trigger.",
+                    })
+                expected_reactions.add((event_type, capability_id))
 
     for capability in workflow_capabilities:
         capability_id = str(capability.get("capability_id") or "").strip()
@@ -1630,29 +1653,22 @@ def validate_workflow_integration_contract(
                         ),
                     }
                 )
-            expected_capability_ids = expected_capability_ids_by_event.get(event_type) or {capability_id}
-            for routed_event, routed_capability_id in sorted(capability_reactions):
-                if routed_event != event_type:
-                    continue
-                if routed_capability_id not in declared_workflow_capability_ids:
-                    continue
-                if routed_capability_id in expected_capability_ids:
-                    continue
-                failed_tests.append(
-                    {
-                        "test": "workflow_trigger_ambiguous_workflow_reaction",
-                        "path": "modules/*/contracts/reactions.yaml",
-                        "error": (
-                            f"Workflow trigger event {event_type!r} is also routed to workflow "
-                            f"capability {routed_capability_id!r}, which is not part of the "
-                            "AgentGenerator metadata for that event."
-                        ),
-                        "fix_suggestion": (
-                            "Route AgentGenerator trigger events only to the workflow capability ids "
-                            "declared in workflow_integration_metadata."
-                        ),
-                    }
-                )
+
+    for event_type, capability_id in sorted(capability_reactions - expected_reactions):
+        if capability_id in declared_workflow_capability_ids:
+            failed_tests.append(
+                {
+                    "test": "workflow_trigger_ambiguous_workflow_reaction",
+                    "path": "modules/*/contracts/reactions.yaml",
+                    "error": (
+                        f"Event {event_type!r} routes to workflow capability {capability_id!r} "
+                        "without a matching trigger in the generated workflow bundle."
+                    ),
+                    "fix_suggestion": (
+                        "Use the event and capability pair declared in workflow_integration_metadata."
+                    ),
+                }
+            )
 
     passed = not failed_tests
     return {

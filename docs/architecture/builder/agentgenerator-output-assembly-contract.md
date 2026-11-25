@@ -261,7 +261,7 @@ During bundle assembly, `generate_and_download` derives
 `orchestrator.yaml`:
 
 - `workflow_name`
-- derived stable `capability_id`
+- stable `capability_id` shared by the workflow's event triggers, defaulting to its kebab-case workflow name when none is declared
 - `workflow_startup_mode`
 - event triggers from the `triggers[]` block
 
@@ -275,10 +275,17 @@ The normalized metadata is written back to context as:
 - `generated_workflow_trigger_events`
 
 AgentGenerator persists the same metadata on the `workflow_bundle` artifact.
-AppGenerator hydrates it from the latest current `workflow_bundle` artifact
-before agents run, then its deterministic acceptance gate blocks export unless
-the generated app wires the workflow through module capabilities, emitted
-events, and `contracts/reactions.yaml`.
+AppGenerator hydrates the metadata from the run's pinned `workflow_bundle`, or
+from the current bundle when the run has no pin. A run with a pin must supply
+metadata from that exact build to pass app acceptance.
+AppPlanAgent receives every workflow and assigns each named trigger to a
+module contract task. ConfigMiddlewareAgent declares the corresponding workflow
+capability in `module.yaml` and each assigned event-to-capability pair in
+`contracts/reactions.yaml`. When two workflows subscribe to the same event,
+the module declares both reactions. A workflow with no named event triggers has
+no generated event reaction. AgentGenerator sends duplicate event-and-capability
+pairs back to the workflow builder for repair. AppGenerator verifies the
+materialized bindings before export.
 
 Smoke coverage:
 

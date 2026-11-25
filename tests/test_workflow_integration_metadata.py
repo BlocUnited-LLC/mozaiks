@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+import yaml
 
 from factory_app.workflows._shared.workflow_integration import (
     apply_workflow_integration_context,
@@ -115,6 +119,37 @@ def test_apply_workflow_integration_context_sets_canonical_handoff_fields() -> N
     assert context["workflow_integration_metadata"]["primary_workflow"]["workflow_name"] == "TicketBatchTriageWorkflow"
 
 
+def test_export_rejects_conflicting_capability_ids_for_one_workflow() -> None:
+    orchestrator = {
+        "workflow_name": "Review",
+        "triggers": [
+            {"type": "event", "event": "domain.orders.submitted", "capability_id": "review"},
+            {"type": "event", "event": "domain.orders.escalated", "capability_id": "other-review"},
+        ],
+    }
+    with pytest.raises(ValueError, match="Review.*one workflow capability_id.*other-review.*review"):
+        extract_workflow_integration_metadata_from_bundle_entries([
+            {"workflow_name": "Review", "files": [{"filename": "orchestrator.yaml", "content": yaml.safe_dump(orchestrator)}]}
+        ])
+
+
+def test_exported_bindings_use_named_event_triggers_only() -> None:
+    orchestrator = {
+        "workflow_name": "Review",
+        "triggers": [
+            {"event": "domain.orders.submitted", "capability_id": "review-order"},
+            {"type": "event", "capability_id": "family-default"},
+            {"type": "chat", "event": "domain.orders.renamed", "capability_id": "chat-only"},
+        ],
+    }
+    metadata = extract_workflow_integration_metadata_from_bundle_entries([
+        {"workflow_name": "Review", "files": [{"filename": "orchestrator.yaml", "content": yaml.safe_dump(orchestrator)}]}
+    ])
+    workflow = metadata["workflows"][0]
+    assert workflow["capability_id"] == "review-order"
+    assert [event["event_type"] for event in workflow["trigger_events"]] == ["domain.orders.submitted"]
+
+
 def test_hydrate_workflow_integration_context_from_latest_artifact() -> None:
     artifact = SimpleNamespace(
         id="av_workflow_bundle_1",
@@ -145,3 +180,38 @@ def test_hydrate_workflow_integration_context_from_latest_artifact() -> None:
     assert context["workflow_bundle_artifact_version_id"] == "av_workflow_bundle_1"
     assert context["generated_workflow_capability_id"] == "ticket-batch-triage-workflow"
     assert store.list_calls[0]["build_family"] == "workflow_bundle"
+
+
+@pytest.mark.parametrize("pinned", [False, True], ids=["primary-export-projection", "pin-replaces-stale-catalog"])
+def test_resumed_worker_hydrates_the_complete_bundle(pinned: bool) -> None:
+    current = _metadata()
+    current["workflows"].append({"workflow_name": "NotifyOwners", "capability_id": "notify-owners"})
+    bundle = SimpleNamespace(id="bundle-v2", commit_metadata=SimpleNamespace(metadata={"summary_payload": current}))
+    store = _FakeArtifactStore(bundle)
+    store.get_build_record = AsyncMock(return_value=bundle)
+    context = factory_context({"generated_workflow_name": "Old", "generated_workflow_capability_id": "old"})
+    if pinned:
+        context["artifact_version_refs"] = {"workflow_bundle": "bundle-v2"}
+        context["workflow_integration_metadata"] = {**_metadata(), "source_artifact_version_id": "bundle-v1"}
+    result = asyncio.run(hydrate_workflow_integration_context_from_latest_artifact(context, artifact_store=store))
+    assert result["workflow_count"] == 2
+    assert context["workflow_bundle_artifact_version_id"] == "bundle-v2"
+    assert [w["capability_id"] for w in context["generated_workflow_integrations"]] == [
+        "ticket-batch-triage-workflow", "notify-owners",
+    ]
+    if pinned:
+        assert not store.list_calls
+        store.get_build_record.assert_awaited_once_with(app_id="generated-app", build_record_id="bundle-v2")
+
+
+def test_missing_pinned_workflow_bundle_never_substitutes_another_catalog() -> None:
+    other = SimpleNamespace(id="other", commit_metadata=SimpleNamespace(metadata={"summary_payload": _metadata()}))
+    store = _FakeArtifactStore(other)
+    store.get_build_record = AsyncMock(return_value=None)
+    context = factory_context({"artifact_version_refs": {"workflow_bundle": "missing"}})
+    apply_workflow_integration_context(context, {**_metadata(), "source_artifact_version_id": "old"})
+    with pytest.raises(ValueError, match="missing.*no integration metadata"):
+        asyncio.run(hydrate_workflow_integration_context_from_latest_artifact(context, artifact_store=store))
+    assert not store.list_calls
+    assert context["generated_workflow_integrations"] == []
+    assert context["workflow_bundle_artifact_version_id"] is None

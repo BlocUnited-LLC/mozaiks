@@ -18,6 +18,7 @@ from typing import Any
 import yaml
 
 from factory_app.workflows._shared.workflow_integration import (
+    WorkflowEventBindingError,
     extract_workflow_integration_metadata_from_bundle_entries,
     workflow_name_to_capability_id,
 )
@@ -886,6 +887,12 @@ def run_workflow_bundle_quality_gate(
             )
         except ValueError as exc:
             errors.append(str(exc))
+            if isinstance(exc, WorkflowEventBindingError):
+                structure["valid"] = False
+                structure["errors"].append(str(exc))
+                for report in structure["workflows"]:
+                    if report["workflow_name"] == exc.workflow_name:
+                        report["errors"].append(str(exc))
     warnings = list(semantic_drift.get("warnings") or [])
     result = {
         "status": "passed" if not errors else "failed",

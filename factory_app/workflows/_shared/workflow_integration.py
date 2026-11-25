@@ -19,6 +19,14 @@ CONTRACT_VERSION = "1.0"
 EVENT_PREFIXES = ("domain.", "platform.", "hosted.")
 
 
+class WorkflowEventBindingError(ValueError):
+    """A generated orchestrator's event bindings need repair before export."""
+
+    def __init__(self, workflow_name: str, message: str) -> None:
+        self.workflow_name = workflow_name
+        super().__init__(message)
+
+
 def _text(value: Any) -> str | None:
     if value is None:
         return None
@@ -237,6 +245,7 @@ def extract_workflow_integration_metadata_from_bundle_entries(
 ) -> dict[str, Any] | None:
     validate_pricing_workflow_features(context_variables)
     workflows: list[dict[str, Any]] = []
+    event_workflows: dict[tuple[str, str], str] = {}
     for entry in bundle_entries:
         if not isinstance(entry, Mapping):
             continue
@@ -245,21 +254,36 @@ def extract_workflow_integration_metadata_from_bundle_entries(
         if not workflow_name:
             continue
         startup_mode = _text(orchestrator.get("workflow_startup_mode"))
-        capability_id = workflow_name_to_capability_id(workflow_name)
+        triggers = orchestrator.get("triggers")
+        if not isinstance(triggers, list):
+            triggers = []
         trigger_events = [
             event
-            for event in (
-                _normalize_trigger_event(item, default_capability_id=capability_id)
-                for item in (orchestrator.get("triggers") if isinstance(orchestrator.get("triggers"), list) else [])  # type: ignore[union-attr]
-            )
-            if event is not None
+            for trigger in triggers
+            if isinstance(trigger, Mapping) and trigger.get("type") in (None, "event")
+            if (event := _normalize_trigger_event(trigger)) is not None
         ]
+        capability_ids = {event["capability_id"] for event in trigger_events if event["capability_id"]}
+        if len(capability_ids) > 1:
+            raise WorkflowEventBindingError(
+                workflow_name,
+                f"Event triggers for {workflow_name!r} must use one workflow capability_id. Found {sorted(capability_ids)}."
+            )
+        capability_id = next(iter(capability_ids), None) or workflow_name_to_capability_id(workflow_name)
+        for event in trigger_events:
+            binding = (event["event_type"], capability_id)
+            if binding in event_workflows:
+                raise WorkflowEventBindingError(
+                    workflow_name,
+                    f"Duplicate event binding {binding!r} in {event_workflows[binding]!r} and {workflow_name!r}."
+                )
+            event_workflows[binding] = workflow_name
         workflow = {
-                "workflow_name": workflow_name,
-                "capability_id": capability_id,
-                "startup_mode": startup_mode,
-                "trigger_events": trigger_events,
-            }
+            "workflow_name": workflow_name,
+            "capability_id": capability_id,
+            "startup_mode": startup_mode,
+            "trigger_events": trigger_events,
+        }
         workflows.append(workflow)
 
     if bundle_entries and len(workflows) != len(bundle_entries):
@@ -320,8 +344,7 @@ def apply_workflow_integration_context(
     _context_set(context_variables, "generated_workflow_capability_id", primary.get("capability_id"))
     _context_set(context_variables, "generated_workflow_startup_mode", primary.get("startup_mode"))
     _context_set(context_variables, "generated_workflow_trigger_events", primary.get("trigger_events") or [])
-    if normalized.get("source_artifact_version_id"):
-        _context_set(context_variables, "workflow_bundle_artifact_version_id", normalized["source_artifact_version_id"])
+    _context_set(context_variables, "workflow_bundle_artifact_version_id", normalized.get("source_artifact_version_id"))
     return normalized
 
 
@@ -356,10 +379,18 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
     *,
     artifact_store: Any | None = None,
 ) -> dict[str, Any]:
-    existing = workflow_integration_metadata_from_context(context_variables)
-    if existing:
+    refs = _context_get(context_variables, "artifact_version_refs", {})
+    workflow_ref = refs.get("workflow_bundle") if isinstance(refs, dict) else None
+    existing = normalize_workflow_integration_metadata(_context_get(context_variables, "workflow_integration_metadata"))
+    if existing and existing.get("source") != "context_variables" and (
+        not workflow_ref or existing.get("source_artifact_version_id") == workflow_ref
+    ):
         apply_workflow_integration_context(context_variables, existing)
         return {"status": "hydrated", "source": "context_variables", "workflow_count": len(existing["workflows"])}
+    if workflow_ref:
+        # Lifecycle failures are logged and execution can continue. Remove stale
+        # bindings before resolving a pin so subsequent workers cannot use them.
+        apply_workflow_integration_context(context_variables, {"workflows": []})
 
     from factory_app.workflows._shared.platform.build_target import require_build_binding
 
@@ -371,23 +402,15 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
 
             artifact_store = get_artifact_store()
         except Exception as exc:
+            if workflow_ref:
+                raise RuntimeError(f"Cannot load the pinned workflow_bundle {workflow_ref!r}.") from exc
             return {"status": "skipped", "reason": "artifact_store_unavailable", "error": str(exc)}
 
     candidates: list[Any] = []
-    refs = _context_get(context_variables, "artifact_version_refs", {})
-    workflow_ref = refs.get("workflow_bundle") if isinstance(refs, dict) else None
-    if workflow_ref and hasattr(artifact_store, "get_build_record"):
-        try:
-            artifact = await artifact_store.get_build_record(
-                app_id=app_id,
-                build_record_id=str(workflow_ref),
-            )
-            if artifact is not None:
-                candidates.append(artifact)
-        except Exception:
-            pass
-
-    if hasattr(artifact_store, "list_build_records"):
+    if workflow_ref:
+        artifact = await artifact_store.get_build_record(app_id=app_id, build_record_id=str(workflow_ref))
+        candidates.append(artifact)
+    elif hasattr(artifact_store, "list_build_records"):
         try:
             from mozaiksai.core.artifacts import ArtifactLifecycleStatus
 
@@ -404,7 +427,7 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
 
     for artifact in candidates:
         metadata = workflow_integration_metadata_from_artifact(artifact)
-        if not metadata:
+        if not metadata or (workflow_ref and metadata.get("source_artifact_version_id") != workflow_ref):
             continue
         apply_workflow_integration_context(context_variables, metadata)
         return {
@@ -414,6 +437,12 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
             "workflow_count": len(metadata["workflows"]),
         }
 
+    if workflow_ref:
+        raise ValueError(f"Workflow bundle {workflow_ref!r} has no integration metadata for this build.")
+    legacy = workflow_integration_metadata_from_context(context_variables)
+    if legacy:
+        apply_workflow_integration_context(context_variables, legacy)
+        return {"status": "hydrated", "source": "context_variables", "workflow_count": len(legacy["workflows"])}
     return {"status": "skipped", "reason": "workflow_integration_metadata_absent"}
 
 

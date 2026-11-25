@@ -174,6 +174,61 @@ def test_workflow_integration_contract_hook_renders_the_reaction_entries() -> No
     assert "(none declared" not in prompt, "the hook told ConfigMiddlewareAgent no reactions were needed"
 
 
+def test_workflow_bundle_reaches_both_appgenerator_prompts_with_exact_event_targets() -> None:
+    import yaml
+
+    from factory_app.workflows._shared.workflow_integration import (
+        extract_workflow_integration_metadata_from_bundle_entries,
+    )
+    from factory_app.workflows.AppGenerator.tools.hook_workflow_integration_contract import (
+        SECTION_HEADER,
+        inject_workflow_integration_contract,
+    )
+    from mozaiksai.core.runtime.app.module_loader import ModuleReaction
+
+    submitted = "domain.orders.submitted"
+    escalated = "domain.orders.escalated"
+    entries = []
+    for name, capability_id, events in [
+        ("ReviewOrder", "human-review", [submitted, escalated]),
+        ("NotifyOwner", "notify-owner", [escalated]),
+        ("ManualSearch", "manual-search", []),
+    ]:
+        contract = {
+            "workflow_name": name,
+            "workflow_startup_mode": "BackendOnly" if events else "UserDriven",
+            "triggers": [{"type": "event", "event": event, "capability_id": capability_id} for event in events],
+        }
+        entries.append({"workflow_name": name, "files": [{"filename": "orchestrator.yaml", "content": yaml.safe_dump(contract)}]})
+    metadata = extract_workflow_integration_metadata_from_bundle_entries(entries)
+    seed = {**_INTEGRATION, "workflow_integration_metadata": metadata}
+    plan = _run_hook(inject_workflow_integration_contract, "AppPlanAgent", seed)
+    binding_lines = [line.strip() for line in plan.splitlines() if "→" in line]
+    expected = [(submitted, "human-review"), (escalated, "human-review"), (escalated, "notify-owner")]
+    assert binding_lines == [f"- event_type: {event}  →  workflow capability: {capability}" for event, capability in expected]
+    assert "ManualSearch" in plan and "ProposalsReview" not in plan
+
+    agent = _Capture("ConfigMiddlewareAgent", _bridge(seed))
+    inject_workflow_integration_contract(agent, [])
+    prompt = agent.system_message
+    reactions = []
+    for block in prompt.split("\n\n"):
+        _, marker, entries_yaml = block.partition("\n  - id:")
+        if marker:
+            entries = yaml.safe_load(marker + entries_yaml)
+            reactions.extend(ModuleReaction.model_validate(entry) for entry in entries)
+    assert [(r.event_type, r.target.capability_id) for r in reactions] == expected
+    assert len({r.id for r in reactions}) == len(expected)
+    assert "module.yaml workflow target: ManualSearch\nWorkflow capability_id: manual-search" in prompt
+    assert "proposals-review-workflow" not in prompt
+    inject_workflow_integration_contract(agent, [])
+    assert agent.system_message == prompt
+    agent.context_variables = _bridge({**seed, "workflow_integration_metadata": {"workflows": []}})
+    inject_workflow_integration_contract(agent, [])
+    assert agent.system_message.count(SECTION_HEADER) == 1
+    assert submitted not in agent.system_message and escalated not in agent.system_message
+
+
 @pytest.mark.parametrize("make", [_bridge, _overlay], ids=["hook", "auto_tool"])
 def test_module_contract_gate_audits_the_live_code_files(make) -> None:  # noqa: ANN001
     """`code_files` arrived as a tuple, was treated as empty, and the gate passed every build."""

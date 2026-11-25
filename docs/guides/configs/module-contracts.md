@@ -37,6 +37,42 @@ contracts when the module needs that surface.
   as a hidden infrastructure provisioning layer.
 - Runtime extensions live at `app/modules/{module_id}/runtime_extensions.yaml`.
 
+## Starting workflows from events
+
+Each app chooses its own event names and workflow capability IDs. For example,
+an order-review action can emit `domain.orders.review_requested`. Its module
+declares the event in `contracts/events.yaml` and lists it in the action's
+`emits`. A subscribing module declares the following reaction.
+
+```yaml
+reactions:
+  - id: start_order_review
+    event_type: domain.orders.review_requested
+    target: {kind: capability, capability_id: orders.review}
+```
+
+The workflow named by the module's `kind: workflow` capability declares how
+it starts in `workflows/OrderReview/orchestrator.yaml`.
+
+```yaml
+triggers:
+  - type: event
+    event: domain.orders.review_requested
+    capability_id: orders.review
+```
+
+DesignDocs captures the intended event. AgentGenerator writes the workflow
+trigger. AppGenerator uses each generated workflow's event and capability to
+plan the emitting action and write the module contracts. Two workflows may
+subscribe to the same event through distinct capabilities. AppGenerator's
+acceptance gate checks each generated pair before export.
+
+At runtime the platform resolves the reaction with the event type and capability
+ID. A unique matching declaration can open a workflow session with the source
+event and payload in its declared context. A separate, explicitly unqualified
+event trigger can supply a default in hand-authored workflows. Equally specific
+matches leave the capability unresolved.
+
 ## Notification Target Scope
 
 Notification rules default to `audience.scope: event`, retaining their source
