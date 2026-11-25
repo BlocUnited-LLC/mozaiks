@@ -40,6 +40,13 @@ export default function useWorkflowSubmission(scope, removeRefusedMessage) {
     setSending(previous => previous === entry ? null : previous);
   }, []);
 
+  const bindCreatedChat = useCallback((entry, chatId, chatScope) => {
+    entry.chatId = chatId;
+    entry.scope = chatScope;
+    // A user can already be typing the next turn while the first chat is being created.
+    setDraft(previous => previous?.scope === entry.originScope ? { ...previous, scope: chatScope } : previous);
+  }, []);
+
   const restore = useCallback(entry => {
     if (!isCurrent(entry) || entry.rejected) return false;
     entry.rejected = true;
@@ -65,6 +72,6 @@ export default function useWorkflowSubmission(scope, removeRefusedMessage) {
     text: draft?.scope === scope ? draft.text : '',
     refused: refused?.scope === scope ? refused : null,
     sending: isCurrent(sending) && !sending.rejected,
-    changeDraft, remember, finish, restore, handleAdmission, isCurrent,
+    changeDraft, remember, bindCreatedChat, finish, restore, handleAdmission, isCurrent,
   };
 }

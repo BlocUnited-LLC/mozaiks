@@ -1211,7 +1211,7 @@ const ChatPage = () => {
       ? { ...row, awaitingWorkflowAdmission: false } : row));
   }, [setMessagesWithLogging]);
   const { text: composerDraft, changeDraft, refused: recoveredWorkflowDraft, sending: sendingWorkflowInput,
-    remember: rememberWorkflowSubmission, finish: finishWorkflowSubmission, restore: restoreRefusedDraft, handleAdmission,
+    remember: rememberWorkflowSubmission, bindCreatedChat, finish: finishWorkflowSubmission, restore: restoreRefusedDraft, handleAdmission,
     isCurrent: isCurrentSubmission } =
     useWorkflowSubmission(composerScope, removeRefusedMessage);
   const workflowSocket = wsRef.current?.socket;
@@ -5542,6 +5542,7 @@ const ChatPage = () => {
         if (!targetChatId) {
           throw new Error('Could not open a chat for this workflow');
         }
+        bindCreatedChat(submitted, targetChatId, JSON.stringify(['workflow', currentAppId, currentUserId, targetWorkflowName, targetChatId]));
         setCurrentChatId(targetChatId);
         setActiveChatId(targetChatId);
         setCurrentWorkflowName(targetWorkflowName);
@@ -5561,8 +5562,6 @@ const ChatPage = () => {
         navigate(location.pathname + (nextSearch ? `?${nextSearch}` : ''), { replace: true });
       }
       
-      submitted.scope = JSON.stringify(['workflow', currentAppId, currentUserId, targetWorkflowName, targetChatId]);
-      submitted.chatId = targetChatId;
       if (pendingWorkflowReply) setPendingWorkflowReply(null);
       setLoading(true);
       attemptedInput = true;

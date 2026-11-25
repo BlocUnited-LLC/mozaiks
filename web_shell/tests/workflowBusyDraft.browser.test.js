@@ -56,6 +56,9 @@ test('an early workflow message is recoverable in its own chat and resends only 
         const [isWorking, setLoading] = useState(false);
         const [pendingWorkflowReply, setPendingWorkflowReply] = useState(null);
         const [conversationMode,currentAppId,currentUserId,currentWorkflowName,currentChatId] = scope;
+        const setCurrentChatId = chatId => setScope(previous => [...previous.slice(0, 4), chatId]);
+        const setActiveChatId = noop, setCurrentWorkflowName = noop, setActiveWorkflowName = noop;
+        const setConversationMode = noop, navigate = noop;
         const [messages, setMessagesWithLogging] = useState([]);
         const messagesRef = useRef(messages); messagesRef.current = messages;
         const workflowMessagesCacheRef = useRef([]), workflowMessagesSharedRef = useRef([]);
@@ -236,6 +239,23 @@ test('an early workflow message is recoverable in its own chat and resends only 
   await page.evaluate(() => window.rejectStart(new Error('Failed previous room creation')));
   await expect(input).toHaveValue('');
   await expect(transcript.getByText('Pending creation', {exact:true})).toHaveCount(0);
+
+  await page.evaluate(unstarted => {
+    window.switchRoom(unstarted);
+    window.startChat = () => new Promise(resolve => { window.completeStart = resolve; });
+  }, unstarted);
+  await input.fill('First turn in a new study');
+  await send.click();
+  await page.waitForFunction(() => typeof window.completeStart === 'function');
+  await input.fill('A follow-up I am still writing');
+  await page.evaluate(() => window.completeStart({chat_id:'new-study'}));
+  await expect.poll(() => attempts.length).toBe(5);
+  await expect(input).toHaveValue('A follow-up I am still writing');
+  await receipt(attempts[4], false, 'new-study', 'CHAT_LOCK_BUSY');
+  await expect(input).toHaveValue('A follow-up I am still writing');
+  await page.getByText('View unsent message').click();
+  await expect(page.getByText('First turn in a new study', {exact:true})).toHaveCount(1);
+  await page.evaluate(() => window.switchRoom(['workflow','app','owner','Study','chat-b']));
   await page.evaluate(() => { window.useHttp = true; });
   const requests = [];
   await page.route('**/chat/app/chat-b/owner/input', route => { requests.push(route); });
