@@ -215,15 +215,15 @@ class ApprovedAppCompilation:
     """Opaque immutable validation input, issued only by the scoped resolver."""
 
     _context_json: bytes
-    _binding_json: str
+    _binding_json: str | None
     _record_id: str
     _app_id: str
 
-    def __init__(self, *, key: object, context: dict[str, Any], binding: _CompilationBinding, record: BuildRecord):
+    def __init__(self, *, key: object, context: dict[str, Any], binding: _CompilationBinding | None, record: BuildRecord):
         if key is not _RESOLVER_KEY:
             raise TypeError("ApprovedAppCompilation must be obtained through resolve_app_compilation_inputs")
         object.__setattr__(self, "_context_json", _summary_bytes(context))
-        object.__setattr__(self, "_binding_json", binding.model_dump_json())
+        object.__setattr__(self, "_binding_json", binding.model_dump_json() if binding else None)
         object.__setattr__(self, "_record_id", record.id)
         object.__setattr__(self, "_app_id", record.app_id)
 
@@ -232,7 +232,10 @@ class ApprovedAppCompilation:
             raise ValueError("Approved compilation belongs to a different app")
         return cast(dict[str, Any], json.loads(self._context_json))
 
-    def for_child(self, archive_sha256: str) -> dict[str, Any]:
+    def for_child(self, archive_sha256: str) -> dict[str, Any] | None:
+        if self._binding_json is None:
+            # Workflow-only refinements inherit their reference in canonical_inputs_version.
+            return None
         binding = _CompilationBinding.model_validate_json(self._binding_json)
         return binding.model_copy(update={
             "archive_sha256": archive_sha256, "parent_record_id": self._record_id,
@@ -250,6 +253,9 @@ async def resolve_app_compilation_inputs(
     Unverifiable reviewed sources are invalid compilation inputs.
     """
     from factory_app.workflows._shared.artifact_bundle import APP_BUNDLE_MAX_TOTAL_BYTES
+    from factory_app.workflows._shared.workflow_integration import (
+        workflow_integration_metadata_from_artifact,
+    )
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         ManagedCapabilityTemplateError,
     )
@@ -262,6 +268,7 @@ async def resolve_app_compilation_inputs(
     selected = record
     if selected.id != build_record_id:
         raise ValueError("Approved compilation returned a different build record")
+    workflow_ref = selected.canonical_inputs_version.get("workflow_bundle")
     first: _CompilationBinding | None = None
     seen: set[str] = set()
     while record is not None:
@@ -269,7 +276,7 @@ async def resolve_app_compilation_inputs(
             raise ValueError("Approved compilation lineage is cyclic or exceeds its bound")
         seen.add(record.id)
         raw = record.commit_metadata.metadata.get("compilation_inputs")
-        if raw is None and first is None:
+        if raw is None and first is None and workflow_ref is None:
             return None
         if isinstance(raw, dict) and raw.get("version") == 1:
             raise ValueError("Approved compilation version 1 lacks immutable task evidence; a new Factory build is required")
@@ -281,6 +288,11 @@ async def resolve_app_compilation_inputs(
             or binding.target_app_id != app_id or binding.build_registry_id != build_registry_id
         ):
             raise ValueError("Approved compilation bundle is outside the owned build")
+        if record.canonical_inputs_version.get("workflow_bundle") != workflow_ref:
+            raise ValueError("Approved compilation workflow input changed across refinement lineage")
+        if raw is None and first is None:
+            context = {"capability_packs": deepcopy(selected.commit_metadata.metadata.get("capability_packs") or [])}
+            break
         saved = _CompilationBinding.model_validate(raw)
         if (
             saved.archive_sha256 != resolve_canonical_bundle_entry(record).sha256
@@ -303,11 +315,27 @@ async def resolve_app_compilation_inputs(
                 )
             except (ManagedCapabilityTemplateError, BuildContextError) as exc:
                 raise ValueError("Approved compilation pack sources could not be verified. Renew DesignDocs review.") from exc
-            await read_verified_artifact_bundle(selected, max_bytes=APP_BUNDLE_MAX_TOTAL_BYTES)
-            return ApprovedAppCompilation(key=_RESOLVER_KEY, context=context, binding=first, record=selected)
+            break
         if saved.parent_record_id != record.parent_build_record_id:
             raise ValueError("Approved compilation parent differs from bundle lineage")
         record = await store.get_build_record(app_id=app_id, build_record_id=saved.parent_record_id)
         if record is not None and record.id != saved.parent_record_id:
             raise ValueError("Approved compilation returned a different parent record")
-    raise ValueError("Approved compilation bundle or parent is missing")
+    else:
+        raise ValueError("Approved compilation bundle or parent is missing")
+
+    if workflow_ref is not None:
+        workflow = await store.get_build_record(app_id=app_id, build_record_id=workflow_ref)
+        if (workflow is None or workflow.id != workflow_ref or workflow.app_id != app_id
+            or workflow.commit_metadata.author_user_id != owner_user_id):
+            raise ValueError(f"Approved workflow bundle {workflow_ref!r} is missing or out of scope")
+        workflow_binding = _record_binding(workflow)
+        if workflow_binding.target_app_id != app_id or workflow_binding.build_registry_id != build_registry_id:
+            raise ValueError(f"Approved workflow bundle {workflow_ref!r} is outside the owned build")
+        metadata = workflow_integration_metadata_from_artifact(workflow)
+        if metadata is None:
+            raise ValueError(f"Approved workflow bundle {workflow_ref!r} has no verifiable integration metadata")
+        context["artifact_version_refs"] = {"workflow_bundle": workflow_ref}
+        context["workflow_integration_metadata"] = metadata
+    await read_verified_artifact_bundle(selected, max_bytes=APP_BUNDLE_MAX_TOTAL_BYTES)
+    return ApprovedAppCompilation(key=_RESOLVER_KEY, context=context, binding=first, record=selected)

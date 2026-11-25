@@ -37,7 +37,7 @@ test('the AppReview composer lets the user select a model and preserves it acros
         window.setReconnecting = setReconnecting;
         ${picker}
         const workflowModel = useWorkflowModelPicker({appId:'app', userId:'owner', chatId:currentChatId,
-          workflow:conversationMode === 'workflow' && !refinementModelPicker && !(showRefinementModelPicker && refinementModels === null)
+          workflow:conversationMode === 'workflow' && !showRefinementModelPicker && !refinementModelPicker
             ? currentWorkflowName : null});
         window.changeWorkflow = setCurrentWorkflowName;
         window.showBuildModel = () => {
@@ -50,7 +50,7 @@ test('the AppReview composer lets the user select a model and preserves it acros
         return <ChatInterface messages={[]} onSendMessage={() => {window.sent = (window.sent || 0) + 1;}} loading={false}
           workflowName={currentWorkflowName} connectionStatus="connected"
           conversationMode={conversationMode} plainContainer={true} modelPicker={refinementModelPicker || workflowModel.picker}
-          modelSaving={workflowModel.saving} waitingForConnection={reconnecting} />;
+          modelSaving={workflowModel.saving || (showRefinementModelPicker && refinementModels === null)} waitingForConnection={reconnecting} />;
       }
       createRoot(document.getElementById('root')).render(<Fixture />);
     ` },
@@ -238,6 +238,27 @@ test('the AppReview composer lets the user select a model and preserves it acros
     await expect(runModel).toBeVisible();
     await page.evaluate(() => window.changeChat('other-chat'));
     await expect(runModel).toHaveCount(0);
+    const fallbackRequests = [];
+    page.on('request', request => {
+      if (request.url().includes('/api/chats/model/app/AppReview/')) fallbackRequests.push(request.url());
+    });
+    await page.route('**/api/studio/refinement/models', route => route.fulfill({status:503}));
+    await page.evaluate(() => window.changeWorkflow('AppReview'));
+    await expect(page.getByText('No models available.')).toBeVisible();
+    await expect(select).toHaveCount(0);
+    assert.equal(await page.evaluate(() => window.selectedModel()), '');
+    assert.equal(fallbackRequests.length, 0);
+    await page.unroute('**/api/studio/refinement/models');
+    await page.getByRole('button', {name:'Reload models'}).click();
+    await expect(select).toHaveValue('default');
+    await page.route('**/api/studio/refinement/models', route => route.fulfill({json:{default:null, models:[]}}));
+    await page.evaluate(() => window.changeWorkflow('Other'));
+    await expect(select).toHaveCount(1);
+    await page.evaluate(() => window.changeWorkflow('AppReview'));
+    await expect(page.getByText('No models available.')).toBeVisible();
+    await expect(select).toHaveCount(0);
+    assert.equal(await page.evaluate(() => window.selectedModel()), '');
+    assert.equal(fallbackRequests.length, 0);
     assert.deepEqual(errors, []);
   }
 });

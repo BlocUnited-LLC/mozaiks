@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from mozaiksai.core.runtime.app.layout_registry import build_app_layout_registry
+from mozaiksai.core.runtime.app.layout_registry import AppLayoutRegistry, build_app_layout_registry
 from mozaiksai.core.semantics.canonical import canonical_digest
 from mozaiksai.core.semantics.capabilities import advertised_semantic_compiler_capabilities
 from mozaiksai.core.semantics.compilation_plan import (
@@ -39,6 +39,7 @@ from mozaiksai.core.semantics.resolver import (
     ReferenceResolutionError,
     SemanticReferenceResolver,
 )
+from tests.service_package_marker_migration_helpers import registry_without_families
 from tests.test_semantic_payload_graph_v2 import _corpus_graph
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -94,7 +95,10 @@ _OTHER_SCOPE = ExecutionAccessScopeRef(tenant_id="tenant2")
 # The optional module smoke-fixture companion adds exactly one registry row
 # and one reports-module input gap. The row-isolation proof below recovers
 # the preceding hash and preserves all 61 unit bodies and earlier gaps.
-_GOLDEN_PLAN_DIGEST = "da71c10a82922bbf0fce2fd4d570ada3223f3aa398f9b9eda84a25190ee49305"
+_SMOKE_FIXTURE_PLAN_DIGEST = "da71c10a82922bbf0fce2fd4d570ada3223f3aa398f9b9eda84a25190ee49305"
+# Registering the optional app journey catalog adds one app_config input gap
+# to this corpus. The row-isolation proofs pin both sides of each migration.
+_GOLDEN_PLAN_DIGEST = "c9f5f661c2e389068461c94d198fd8dfde1667b5801093456e0f1e807555e89a"
 
 
 def _registry():
@@ -215,29 +219,53 @@ def test_service_package_markers_preserve_existing_units_and_gaps() -> None:
 
 
 def test_module_smoke_fixture_row_preserves_existing_units_and_gaps() -> None:
-    from mozaiksai.core.runtime.app.layout_registry import AppLayoutRegistry, _stable_digest
-
     path = "modules/{module_id}/contracts/fixtures.yaml"
-    current_registry = _registry()
-    previous_rows = tuple(
-        row for row in current_registry.families if row.path_template != path
+    previous = registry_without_families("config/journeys.json", path)
+    current = registry_without_families("config/journeys.json")
+    assert len(previous.families) == 132
+    assert len(current.families) == 133
+    _assert_isolated_input_gap(
+        previous, current,
+        previous_digest="fdc88e33746108a99f99db21707f69767e04b043180cf3d5487fe2223cb729be",
+        current_digest=_SMOKE_FIXTURE_PLAN_DIGEST,
+        path=path, family_kind="module_contract", subject="reports",
     )
-    assert len(previous_rows) == 132
-    assert len(current_registry.families) == 133
-    previous_registry = AppLayoutRegistry(
-        families=previous_rows,
-        registry_digest=_stable_digest({
-            "schema_version": current_registry.schema_version,
-            "families": [row.identity_payload for row in previous_rows],
-        }),
+
+
+def test_journey_catalog_row_preserves_existing_units_and_gaps() -> None:
+    path = "config/journeys.json"
+    previous = registry_without_families(path)
+    current = _registry()
+    assert len(previous.families) == 133
+    assert len(current.families) == 134
+    _assert_isolated_input_gap(
+        previous, current,
+        previous_digest=_SMOKE_FIXTURE_PLAN_DIGEST, current_digest=_GOLDEN_PLAN_DIGEST,
+        path=path, family_kind="app_config", subject=None,
     )
+
+
+def _assert_isolated_input_gap(
+    previous_registry: AppLayoutRegistry,
+    current_registry: AppLayoutRegistry,
+    *,
+    previous_digest: str,
+    current_digest: str,
+    path: str,
+    family_kind: str,
+    subject: str | None,
+) -> None:
+    prior_rows = tuple(row for row in current_registry.families if row.path_template != path)
+    assert prior_rows == previous_registry.families
     graph, payloads = _corpus_graph()
     previous = derive_compilation_plan(
         graph=graph, payloads=payloads, registry=previous_registry,
     )
-    current = _plan()
-    assert previous.plan_digest == "fdc88e33746108a99f99db21707f69767e04b043180cf3d5487fe2223cb729be"
-    assert current.plan_digest == _GOLDEN_PLAN_DIGEST
+    current = derive_compilation_plan(
+        graph=graph, payloads=payloads, registry=current_registry,
+    )
+    assert previous.plan_digest == previous_digest
+    assert current.plan_digest == current_digest
     assert len(previous.units) == len(current.units) == 61
     assert [unit.model_dump(mode="json") for unit in current.units] == [
         unit.model_dump(mode="json") for unit in previous.units
@@ -245,9 +273,9 @@ def test_module_smoke_fixture_row_preserves_existing_units_and_gaps() -> None:
     assert [gap for gap in current.gaps if gap.path_template != path] == list(previous.gaps)
     assert [gap.model_dump(mode="json") for gap in current.gaps if gap.path_template == path] == [{
         "code": "renderer_input_incomplete",
-        "family_kind": "module_contract",
+        "family_kind": family_kind,
         "path_template": path,
-        "subject": "reports",
+        "subject": subject,
         "adr_slice": 4,
     }]
     restored = current.canonical_payload(include_digest=False)

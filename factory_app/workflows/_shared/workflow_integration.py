@@ -9,6 +9,11 @@ from typing import Any
 
 import yaml
 
+from mozaiksai.core.artifacts.models import BuildRecordStatus
+from mozaiksai.core.runtime.app.module_loader import (
+    CANONICAL_EVENT_PREFIX_LABEL,
+    CANONICAL_EVENT_PREFIXES,
+)
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     MISSING_FEATURE_SELECTION_MESSAGE,
@@ -16,7 +21,15 @@ from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
 )
 
 CONTRACT_VERSION = "1.0"
-EVENT_PREFIXES = ("domain.", "platform.", "hosted.")
+_RETIRED_STATUSES = {BuildRecordStatus.ARCHIVED, BuildRecordStatus.DELETED}
+
+
+class WorkflowEventBindingError(ValueError):
+    """A generated orchestrator's event bindings need repair before export."""
+
+    def __init__(self, workflow_name: str, message: str) -> None:
+        self.workflow_name = workflow_name
+        super().__init__(message)
 
 
 def _text(value: Any) -> str | None:
@@ -69,20 +82,12 @@ def workflow_name_to_capability_id(workflow_name: str) -> str:
     return text or "generated-workflow"
 
 
-def _event_source(event_type: str) -> str:
-    if event_type.startswith("domain."):
-        return "domain"
-    if event_type.startswith("platform."):
-        return "platform"
-    if event_type.startswith("hosted."):
-        return "hosted"
-    return "unknown"
-
-
-def _trigger_event_type(trigger: Mapping[str, Any]) -> str | None:
+def workflow_trigger_event_type(trigger: Any) -> str | None:
+    if not isinstance(trigger, Mapping):
+        return None
     for key in ("event", "event_type", "type"):
         value = _text(trigger.get(key))
-        if value and value.startswith(EVENT_PREFIXES):
+        if value and value.startswith(CANONICAL_EVENT_PREFIXES):
             return value
     return None
 
@@ -90,22 +95,22 @@ def _trigger_event_type(trigger: Mapping[str, Any]) -> str | None:
 def _normalize_trigger_event(raw: Any, *, default_capability_id: str | None = None) -> dict[str, Any] | None:
     if isinstance(raw, str):
         event_type = _text(raw)
-        if not event_type or not event_type.startswith(EVENT_PREFIXES):
+        if not event_type or not event_type.startswith(CANONICAL_EVENT_PREFIXES):
             return None
         return {
             "event_type": event_type,
-            "source": _event_source(event_type),
+            "source": event_type.partition(".")[0],
             "capability_id": default_capability_id,
             "description": None,
         }
     if not isinstance(raw, Mapping):
         return None
-    event_type = _trigger_event_type(raw)
+    event_type = workflow_trigger_event_type(raw)
     if not event_type:
         return None
     return {
         "event_type": event_type,
-        "source": _text(raw.get("source")) or _event_source(event_type),
+        "source": _text(raw.get("source")) or event_type.partition(".")[0],
         "capability_id": _text(raw.get("capability_id")) or default_capability_id,
         "description": _text(raw.get("description")),
     }
@@ -237,6 +242,7 @@ def extract_workflow_integration_metadata_from_bundle_entries(
 ) -> dict[str, Any] | None:
     validate_pricing_workflow_features(context_variables)
     workflows: list[dict[str, Any]] = []
+    event_workflows: dict[tuple[str, str], str] = {}
     for entry in bundle_entries:
         if not isinstance(entry, Mapping):
             continue
@@ -245,21 +251,47 @@ def extract_workflow_integration_metadata_from_bundle_entries(
         if not workflow_name:
             continue
         startup_mode = _text(orchestrator.get("workflow_startup_mode"))
-        capability_id = workflow_name_to_capability_id(workflow_name)
-        trigger_events = [
-            event
-            for event in (
-                _normalize_trigger_event(item, default_capability_id=capability_id)
-                for item in (orchestrator.get("triggers") if isinstance(orchestrator.get("triggers"), list) else [])  # type: ignore[union-attr]
+        triggers = orchestrator.get("triggers")
+        if not isinstance(triggers, list):
+            triggers = []
+        trigger_events = []
+        for trigger in triggers:
+            if not isinstance(trigger, Mapping) or trigger.get("type") not in (None, "event"):
+                continue
+            event = _normalize_trigger_event(trigger)
+            if event is None:
+                if trigger.get("event"):
+                    raise WorkflowEventBindingError(
+                        workflow_name,
+                        f"Event {trigger['event']!r} in {workflow_name!r} must use {CANONICAL_EVENT_PREFIX_LABEL}.",
+                    )
+                continue
+            if not event["capability_id"]:
+                raise WorkflowEventBindingError(
+                    workflow_name, f"Event {event['event_type']!r} in {workflow_name!r} requires its own capability_id."
+                )
+            trigger_events.append(event)
+        capability_ids = {event["capability_id"] for event in trigger_events}
+        if len(capability_ids) > 1:
+            raise WorkflowEventBindingError(
+                workflow_name,
+                f"Event triggers for {workflow_name!r} must use one workflow capability_id. Found {sorted(capability_ids)}."
             )
-            if event is not None
-        ]
+        capability_id = next(iter(capability_ids), None) or workflow_name_to_capability_id(workflow_name)
+        for event in trigger_events:
+            binding = (event["event_type"], capability_id)
+            if binding in event_workflows:
+                raise WorkflowEventBindingError(
+                    workflow_name,
+                    f"Duplicate event binding {binding!r} in {event_workflows[binding]!r} and {workflow_name!r}."
+                )
+            event_workflows[binding] = workflow_name
         workflow = {
-                "workflow_name": workflow_name,
-                "capability_id": capability_id,
-                "startup_mode": startup_mode,
-                "trigger_events": trigger_events,
-            }
+            "workflow_name": workflow_name,
+            "capability_id": capability_id,
+            "startup_mode": startup_mode,
+            "trigger_events": trigger_events,
+        }
         workflows.append(workflow)
 
     if bundle_entries and len(workflows) != len(bundle_entries):
@@ -320,34 +352,93 @@ def apply_workflow_integration_context(
     _context_set(context_variables, "generated_workflow_capability_id", primary.get("capability_id"))
     _context_set(context_variables, "generated_workflow_startup_mode", primary.get("startup_mode"))
     _context_set(context_variables, "generated_workflow_trigger_events", primary.get("trigger_events") or [])
-    if normalized.get("source_artifact_version_id"):
-        _context_set(context_variables, "workflow_bundle_artifact_version_id", normalized["source_artifact_version_id"])
+    _context_set(context_variables, "workflow_bundle_artifact_version_id", normalized.get("source_artifact_version_id"))
     return normalized
 
 
+def _source_app_id(context_variables: Any) -> str | None:
+    if (
+        _context_get(context_variables, "artifact_kind") == "workflow_bundle"
+        or _context_get(context_variables, "upstream_workflow_bundle_artifact_version_id")
+    ):
+        return None
+    baseline = _text(_context_get(context_variables, "revision_source_artifact_version_id"))
+    if baseline:
+        return baseline
+    if _context_get(context_variables, "artifact_kind") == "app_bundle":
+        request = _context_get(context_variables, "refinement_request_meta", {})
+        if isinstance(request, Mapping) and request.get("build_family") == "app_bundle":
+            baseline = _text(request.get("build_record_id"))
+        return baseline or _text(_context_get(context_variables, "artifact_version_id"))
+    return None
+
+
+def workflow_integration_source_error(context_variables: Any) -> str | None:
+    baseline_id = _source_app_id(context_variables)
+    if baseline_id:
+        receipt = _context_get(context_variables, "workflow_integration_source_app")
+        if not isinstance(receipt, Mapping) or receipt.get("build_record_id") != baseline_id:
+            return f"Workflow inputs for source app bundle {baseline_id!r} have not been verified."
+    return None
+
+
+def workflow_integration_source_pin(context_variables: Any) -> str | None:
+    upstream = _text(_context_get(context_variables, "upstream_workflow_bundle_artifact_version_id"))
+    if upstream:
+        return upstream
+    request = _context_get(context_variables, "refinement_request_meta", {})
+    if isinstance(request, Mapping) and request.get("build_family") == "workflow_bundle":
+        source = _text(request.get("build_record_id"))
+        if source:
+            return source
+    if _context_get(context_variables, "artifact_kind") == "workflow_bundle":
+        source = _text(_context_get(context_variables, "artifact_version_id"))
+        if source:
+            return source
+    baseline_id = _source_app_id(context_variables)
+    receipt = _context_get(context_variables, "workflow_integration_source_app")
+    if baseline_id and isinstance(receipt, Mapping) and receipt.get("build_record_id") == baseline_id:
+        return _text(receipt.get("workflow_bundle_id"))
+    refs = _context_get(context_variables, "artifact_version_refs", {})
+    return _text(refs.get("workflow_bundle")) if isinstance(refs, Mapping) else None
+
+
+def _declared_workflow_catalog(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, Mapping) or not isinstance(raw.get("workflows"), list):
+        return None
+    for item in raw["workflows"]:
+        if not isinstance(item, Mapping) or not _text(item.get("workflow_name")) or not _text(item.get("capability_id")):
+            return None
+        events = item.get("trigger_events", item.get("input_events", []))
+        if not isinstance(events, list) or any(_normalize_trigger_event(event) is None for event in events):
+            return None
+    return normalize_workflow_integration_metadata(raw)
+
+
 def workflow_integration_metadata_from_artifact(artifact: Any) -> dict[str, Any] | None:
-    from mozaiksai.core.artifacts.summary_artifacts import extract_summary_payload
-
-    summary_payload = extract_summary_payload(artifact)
-    metadata = normalize_workflow_integration_metadata(summary_payload)
-    if metadata:
-        artifact_id = _text(getattr(artifact, "id", None) or getattr(artifact, "_id", None))
-        if artifact_id:
-            metadata["source_artifact_version_id"] = artifact_id
-        return metadata
-
-    commit_metadata = getattr(artifact, "commit_metadata", None)
-    raw_metadata = getattr(commit_metadata, "metadata", None)
-    if not isinstance(raw_metadata, Mapping) and isinstance(artifact, Mapping):
-        raw_commit = artifact.get("commit_metadata")
-        if isinstance(raw_commit, Mapping):
-            raw_metadata = raw_commit.get("metadata")
-
-    metadata = normalize_workflow_integration_metadata(raw_metadata)
-    if metadata:
-        artifact_id = _text(getattr(artifact, "id", None) or getattr(artifact, "_id", None))
-        if artifact_id:
-            metadata["source_artifact_version_id"] = artifact_id
+    if isinstance(artifact, Mapping):
+        family = artifact.get("build_family")
+        status = artifact.get("lifecycle_status")
+        artifact_id = _text(artifact.get("_id") or artifact.get("id"))
+        commit = artifact.get("commit_metadata")
+    else:
+        family = getattr(artifact, "build_family", None)
+        status = getattr(artifact, "lifecycle_status", None)
+        artifact_id = _text(getattr(artifact, "id", None))
+        commit = getattr(artifact, "commit_metadata", None)
+    if family != "workflow_bundle" or not artifact_id or status in _RETIRED_STATUSES:
+        return None
+    fields = commit.get("metadata") if isinstance(commit, Mapping) else getattr(commit, "metadata", None)
+    if not isinstance(fields, Mapping):
+        return None
+    envelope = fields if "workflow_integration_metadata" in fields else fields.get("summary_payload", fields)
+    if not isinstance(envelope, Mapping):
+        return None
+    catalog = envelope.get("workflow_integration_metadata", envelope)
+    metadata = _declared_workflow_catalog(catalog)
+    if not metadata or metadata.get("source_artifact_version_id") not in (None, artifact_id):
+        return None
+    metadata["source_artifact_version_id"] = artifact_id
     return metadata
 
 
@@ -356,10 +447,22 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
     *,
     artifact_store: Any | None = None,
 ) -> dict[str, Any]:
-    existing = workflow_integration_metadata_from_context(context_variables)
-    if existing:
+    workflow_ref = workflow_integration_source_pin(context_variables)
+    baseline_id = _source_app_id(context_variables)
+    if baseline_id:
+        _context_set(context_variables, "workflow_integration_source_app", None)
+    existing_catalog = _context_get(context_variables, "workflow_integration_metadata")
+    existing = _declared_workflow_catalog(existing_catalog)
+    if (
+        not workflow_ref and not baseline_id and existing and existing.get("source") == "workflow_bundle_files"
+        and not existing.get("source_artifact_version_id")
+    ):
         apply_workflow_integration_context(context_variables, existing)
         return {"status": "hydrated", "source": "context_variables", "workflow_count": len(existing["workflows"])}
+    if workflow_ref or baseline_id or (existing_catalog and (not existing or existing.get("source") != "context_variables")):
+        # Lifecycle hooks may log lookup failures and continue into workers.
+        apply_workflow_integration_context(context_variables, {"workflows": []})
+        _context_set(context_variables, "workflow_integration_metadata", None)
 
     from factory_app.workflows._shared.platform.build_target import require_build_binding
 
@@ -371,23 +474,30 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
 
             artifact_store = get_artifact_store()
         except Exception as exc:
+            if workflow_ref or baseline_id:
+                raise RuntimeError(f"Cannot load workflow integration for build {(workflow_ref or baseline_id)!r}.") from exc
             return {"status": "skipped", "reason": "artifact_store_unavailable", "error": str(exc)}
 
-    candidates: list[Any] = []
-    refs = _context_get(context_variables, "artifact_version_refs", {})
-    workflow_ref = refs.get("workflow_bundle") if isinstance(refs, dict) else None
-    if workflow_ref and hasattr(artifact_store, "get_build_record"):
-        try:
-            artifact = await artifact_store.get_build_record(
-                app_id=app_id,
-                build_record_id=str(workflow_ref),
-            )
-            if artifact is not None:
-                candidates.append(artifact)
-        except Exception:
-            pass
+    if baseline_id:
+        baseline = await artifact_store.get_build_record(app_id=app_id, build_record_id=baseline_id)
+        if (
+            baseline is None or baseline.id != baseline_id or baseline.app_id != app_id
+            or baseline.build_family != "app_bundle" or baseline.lifecycle_status in _RETIRED_STATUSES
+        ):
+            raise ValueError(f"Cannot resolve workflow inputs for app bundle {baseline_id!r}.")
+        input_id = _text(baseline.canonical_inputs_version.get("workflow_bundle"))
+        _context_set(context_variables, "workflow_integration_source_app", {
+            "build_record_id": baseline_id, "workflow_bundle_id": input_id,
+        })
+        workflow_ref = workflow_integration_source_pin(context_variables)
+        if not workflow_ref:
+            return {"status": "skipped", "reason": "workflow_integration_metadata_absent"}
 
-    if hasattr(artifact_store, "list_build_records"):
+    candidates: list[Any] = []
+    if workflow_ref:
+        artifact = await artifact_store.get_build_record(app_id=app_id, build_record_id=str(workflow_ref))
+        candidates.append(artifact)
+    elif hasattr(artifact_store, "list_build_records"):
         try:
             from mozaiksai.core.artifacts import ArtifactLifecycleStatus
 
@@ -396,15 +506,18 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
                     app_id=app_id,
                     build_family="workflow_bundle",
                     lifecycle_status=ArtifactLifecycleStatus.CURRENT,
-                    limit=5,
+                    limit=1,
                 )
             )
         except Exception as exc:
             return {"status": "skipped", "reason": "artifact_lookup_failed", "error": str(exc)}
 
     for artifact in candidates:
+        record_app = artifact.get("app_id") if isinstance(artifact, Mapping) else getattr(artifact, "app_id", None)
+        if record_app != app_id:
+            continue
         metadata = workflow_integration_metadata_from_artifact(artifact)
-        if not metadata:
+        if not metadata or (workflow_ref and metadata.get("source_artifact_version_id") != workflow_ref):
             continue
         apply_workflow_integration_context(context_variables, metadata)
         return {
@@ -414,6 +527,16 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
             "workflow_count": len(metadata["workflows"]),
         }
 
+    if workflow_ref:
+        raise ValueError(f"Workflow bundle {workflow_ref!r} has no integration metadata for this build.")
+    if candidates:
+        apply_workflow_integration_context(context_variables, {"workflows": []})
+        _context_set(context_variables, "workflow_integration_metadata", None)
+        return {"status": "skipped", "reason": "workflow_integration_metadata_absent"}
+    projected = workflow_integration_metadata_from_context(context_variables)
+    if projected:
+        apply_workflow_integration_context(context_variables, projected)
+        return {"status": "hydrated", "source": "context_variables", "workflow_count": len(projected["workflows"])}
     return {"status": "skipped", "reason": "workflow_integration_metadata_absent"}
 
 
@@ -425,6 +548,9 @@ __all__ = [
     "normalize_workflow_integration_metadata",
     "validate_pricing_workflow_features",
     "workflow_integration_metadata_from_artifact",
+    "workflow_integration_source_error",
+    "workflow_integration_source_pin",
     "workflow_integration_metadata_from_context",
     "workflow_name_to_capability_id",
+    "workflow_trigger_event_type",
 ]

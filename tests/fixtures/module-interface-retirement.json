@@ -135,7 +135,7 @@
     "ui/pages/documents.yaml": "schema_version: mozaiks.app_page.v1\nname: documents\nroute: /documents\ntitle: Documents\npage_type: wizard\nlayout: full-width\nsections:\n- id: summarize\n  primitive: Form\n  config:\n    fields:\n    - name: text\n      label: Document text\n      type: textarea\n      required: true\n    submit_action:\n      label: Summarize\n      action_type: submit\n      href: /api/modules/documents/summarize_document\n"
   },
   "workflow_files": {
-    "orchestrator.yaml": "workflow_name: DocumentAnalysis\nworkflow_startup_mode: BackendOnly\ntriggers:\n  - type: event\n    event: domain.documents.analysis_requested\n",
+    "orchestrator.yaml": "workflow_name: DocumentAnalysis\nworkflow_startup_mode: BackendOnly\ntriggers:\n  - type: event\n    event: domain.documents.analysis_requested\n    capability_id: document-analysis\n",
     "tools.yaml": "tools:\n  - name: backend_request\n    type: Agent_Tool\n    module: mozaiksai.core.workflow.app_backend_tools\n    function: backend_request\n",
     "agents.yaml": "agents:\n  - name: AnalysisAgent\n    system_message: >\n      Call backend_request with method POST and path\n      /api/modules/documents/summarize_document to summarize the input document.\n"
   }

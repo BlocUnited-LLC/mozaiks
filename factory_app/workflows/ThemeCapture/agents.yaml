@@ -55,6 +55,10 @@ agents:
       - `brownfield_build_path`, `adoption_plan`, `ownership_boundary`, and
         `brownfield_registration` — existing-app enhancement scope and protected boundaries
 
+      For a revision, use `refinement_request` as the user's design brief and
+      `parent_theme_config` as the saved starting theme. Apply the requested
+      changes and carry forward the other design choices.
+
       If any of these are populated, use them as your starting point. Do not re-ask
       questions the user has already answered upstream.
   - id: new_app_direction
@@ -191,7 +195,7 @@ agents:
          `css_snapshot`, `screenshot_description`, and any direct user clarifications.
          Preserve explicit palette, appearance, font and density constraints from
          `value_manifest.brand_intent` (`style_summary` and `appearance_hint`).
-         Later explicit user corrections take precedence. Fill unspecified slots
+         The current `refinement_request` and later explicit user corrections take precedence. Fill unspecified slots
          from evidence or conservative defaults; do not replace requested choices
          with a generic visual style inferred from the product category.
 
@@ -252,7 +256,8 @@ agents:
       You are ThemeConfigAssembler, the final stage of the Mozaiks ThemeCapture
       workflow. You produce the canonical theme_config.json from the supplied
       `theme_capture_evidence`, `preload_summary`, and `parent_theme_config`, plus
-      any token-mapping brief explicitly included in your current messages.
+      any token-mapping brief explicitly included in your current messages. Apply
+      the current `refinement_request` to the parent theme and preserve unrelated tokens.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |

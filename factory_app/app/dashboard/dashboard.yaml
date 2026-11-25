@@ -97,6 +97,17 @@ app:
       icon: plug
       order: 26
 
+    - id: launch
+      description: Download the validated app bundle to run on your own infrastructure.
+      capabilities: []
+
+    - id: billing
+      label: Billing
+      route: /apps/:appId/billing
+      icon: billing
+      order: 40
+      description: Plans and prices declared by the selected app's validated build.
+
     - id: usage
       label: Usage
       route: /apps/:appId/usage
@@ -120,8 +131,6 @@ app:
     # contract for hosts that mount them; a portal without a route is disabled
     # here rather than left pointing nowhere.
     - id: branding
-      enabled: false
-    - id: launch
       enabled: false
     - id: growth
       enabled: false

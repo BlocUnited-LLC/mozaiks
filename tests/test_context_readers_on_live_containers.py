@@ -174,6 +174,61 @@ def test_workflow_integration_contract_hook_renders_the_reaction_entries() -> No
     assert "(none declared" not in prompt, "the hook told ConfigMiddlewareAgent no reactions were needed"
 
 
+def test_workflow_bundle_reaches_both_appgenerator_prompts_with_exact_event_targets() -> None:
+    import yaml
+
+    from factory_app.workflows._shared.workflow_integration import (
+        extract_workflow_integration_metadata_from_bundle_entries,
+    )
+    from factory_app.workflows.AppGenerator.tools.hook_workflow_integration_contract import (
+        SECTION_HEADER,
+        inject_workflow_integration_contract,
+    )
+    from mozaiksai.core.runtime.app.module_loader import ModuleReaction
+
+    submitted = "domain.orders.submitted"
+    escalated = "domain.orders.escalated"
+    entries = []
+    for name, capability_id, events in [
+        ("ReviewOrder", "human-review", [submitted, escalated]),
+        ("NotifyOwner", "notify-owner", [escalated]),
+        ("ManualSearch", "manual-search", []),
+    ]:
+        contract = {
+            "workflow_name": name,
+            "workflow_startup_mode": "BackendOnly" if events else "UserDriven",
+            "triggers": [{"type": "event", "event": event, "capability_id": capability_id} for event in events],
+        }
+        entries.append({"workflow_name": name, "files": [{"filename": "orchestrator.yaml", "content": yaml.safe_dump(contract)}]})
+    metadata = extract_workflow_integration_metadata_from_bundle_entries(entries)
+    seed = {**_INTEGRATION, "workflow_integration_metadata": metadata}
+    plan = _run_hook(inject_workflow_integration_contract, "AppPlanAgent", seed)
+    binding_lines = [line.strip() for line in plan.splitlines() if "→" in line]
+    expected = [(submitted, "human-review"), (escalated, "human-review"), (escalated, "notify-owner")]
+    assert binding_lines == [f"- event_type: {event}  →  workflow capability: {capability}" for event, capability in expected]
+    assert "ManualSearch" in plan and "ProposalsReview" not in plan
+
+    agent = _Capture("ConfigMiddlewareAgent", _bridge(seed))
+    inject_workflow_integration_contract(agent, [])
+    prompt = agent.system_message
+    reactions = []
+    for block in prompt.split("\n\n"):
+        _, marker, entries_yaml = block.partition("\n  - id:")
+        if marker:
+            entries = yaml.safe_load(marker + entries_yaml)
+            reactions.extend(ModuleReaction.model_validate(entry) for entry in entries)
+    assert [(r.event_type, r.target.capability_id) for r in reactions] == expected
+    assert len({r.id for r in reactions}) == len(expected)
+    assert "module.yaml workflow target: ManualSearch\nWorkflow capability_id: manual-search" in prompt
+    assert "proposals-review-workflow" not in prompt
+    inject_workflow_integration_contract(agent, [])
+    assert agent.system_message == prompt
+    agent.context_variables = _bridge({**seed, "workflow_integration_metadata": {"workflows": []}})
+    inject_workflow_integration_contract(agent, [])
+    assert agent.system_message.count(SECTION_HEADER) == 1
+    assert submitted not in agent.system_message and escalated not in agent.system_message
+
+
 @pytest.mark.parametrize("make", [_bridge, _overlay], ids=["hook", "auto_tool"])
 def test_module_contract_gate_audits_the_live_code_files(make) -> None:  # noqa: ANN001
     """`code_files` arrived as a tuple, was treated as empty, and the gate passed every build."""
@@ -210,6 +265,68 @@ def test_ai_pack_workflow_hook_detects_packs_from_the_plan_and_the_concept() -> 
     assert "[AI PACK WORKFLOW CONTEXT]" in prompt
     assert "ai_review_pack detected" in prompt
     assert "ai_analysis_pack detected" in prompt
+
+
+@pytest.mark.parametrize("state", ["matching", "stale", "unverified-parent", "empty", "absent"])
+@pytest.mark.asyncio
+async def test_ai_pack_advice_preserves_only_the_bound_workflow_routes_in_planner_prompt(state) -> None:
+    from types import SimpleNamespace
+
+    import yaml
+
+    from mozaiksai.core.workflow.agents.factory import _compose_prompt_sections
+    from mozaiksai.core.workflow.context.schema import load_context_variables_config
+    from mozaiksai.core.workflow.execution.middleware import (
+        MozaiksPromptMiddleware,
+        _resolve_import,
+        load_prompt_middleware_entries,
+    )
+
+    root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+    path = root / "AppGenerator"
+    agent_name = "AppPlanAgent"
+    loaded = yaml.safe_load((path / "agents.yaml").read_text(encoding="utf-8"))
+    agent = next(agent for agent in loaded["agents"] if agent["name"] == agent_name)
+    definitions = yaml.safe_load((path / "context_variables.yaml").read_text(encoding="utf-8"))
+    view = load_context_variables_config(definitions).agents[agent_name]
+    hooks = []
+    for entry in load_prompt_middleware_entries("AppGenerator", base_path=str(root)):
+        if entry["agent"] in (agent_name, "all"):
+            hook, _ = _resolve_import("AppGenerator", entry.get("filename"), entry["function"], path)
+            assert hook is not None
+            hooks.append(hook)
+    names = [hook.__name__ for hook in hooks]
+    assert names.index("inject_workflow_integration_contract") < names.index("inject_ai_pack_workflow_context")
+
+    seed = {"concept_blueprint": {"capability_pack_hints": ["ai_review_pack", "ai_analysis_pack", "ai_extraction_pack"]}}
+    if state != "absent":
+        seed.update(artifact_kind="workflow_bundle", artifact_version_id="bundle-2")
+        seed["workflow_integration_metadata"] = {
+            "source_artifact_version_id": "bundle-1" if state == "stale" else "bundle-2",
+            "workflows": [] if state == "empty" else [{
+                "workflow_name": "ReviewSubmission", "capability_id": "editorial-handoff",
+                "startup_mode": "BackendOnly", "trigger_events": [{"event_type": "domain.notes.review_requested"}],
+            }],
+        }
+        if state == "unverified-parent":
+            seed.update(artifact_kind="app_bundle", artifact_version_id="selected-app-build")
+    runner = MozaiksPromptMiddleware(
+        None, None, middleware_functions=hooks, agent_name=agent_name,
+        base_system_message=_compose_prompt_sections(agent["prompt_sections"]),
+        context_bridge=_bridge(seed), context_variables=view.variables,
+    )
+    prompt = await runner._run_prompt_middleware(SimpleNamespace(variables={}, prompt=[]))
+    assert "record_review_result" in prompt and "store_analysis_result" in prompt and "store_extraction_results" in prompt
+    assert "With no supplied binding, leave those workflow targets empty" in prompt
+    for kind in ("review", "analysis", "extraction"):
+        assert f"{{module_id}}-{kind}-workflow" not in prompt
+    assert ("domain.notes.review_requested" in prompt) is (state == "matching")
+    assert ("editorial-handoff" in prompt) is (state == "matching")
+    assert "WORKFLOW_INTEGRATION_METADATA:" not in prompt
+    if state in ("stale", "unverified-parent"):
+        assert "pinned workflow bundle is unavailable" in prompt
+    if state == "empty":
+        assert "No generated workflows are bound to this build" in prompt
 
 
 def test_ai_pack_archetype_hook_detects_workflow_surfaces() -> None:

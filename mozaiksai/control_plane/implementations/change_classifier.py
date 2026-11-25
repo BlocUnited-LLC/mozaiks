@@ -18,6 +18,7 @@ from mozaiksai.core.adapters.ag2_agent_runner import (
     AG2StructuredAgentRunner,
     StructuredAgentFactory,
 )
+from mozaiksai.core.artifacts.models import BrandingIntent
 from mozaiksai.core.usage.context import AuxiliaryUsageContext, resolve_auxiliary_usage_context
 
 ChangeClassLiteral = Literal["patch", "design", "feature", "core"]
@@ -28,6 +29,7 @@ class ChangeClassifierResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     change_class: ChangeClassLiteral
+    branding_intent: BrandingIntent | None = None
     rationale: str = Field(min_length=1)
     confidence: float = Field(ge=0.0, le=1.0)
     signals: list[str]

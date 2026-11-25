@@ -597,10 +597,11 @@ async def create_agents(
 
     a2a_specs = load_a2a_agent_specs(workflow_config)
     local_agent_names = [n for n in agent_configs if n not in a2a_specs]
+    model_agent_names = [n for n in local_agent_names if not agent_configs[n].get("reply_tool")]
 
     llm_overrides = {"cache_seed": cache_seed} if cache_seed is not None else {}
     raw_binding = ctx_dict.get("run_build_binding")
-    if raw_binding is not None:
+    if model_agent_names and raw_binding is not None:
         from mozaiksai.core.session.build_binding import RunBuildBinding, refinement_model_config
 
         selected = RunBuildBinding.model_validate(raw_binding).refinement_model
@@ -613,17 +614,16 @@ async def create_agents(
                 raise ValueError("The selected refinement provider has no configured API key")
             llm_overrides["config_list"] = [{**selected_config, "api_key": key}]
 
-    if workflow_model is not None and "config_list" not in llm_overrides:
-        from ..llm_config import workflow_model_catalog
+    if model_agent_names and workflow_model is not None and "config_list" not in llm_overrides:
+        from ..llm_config import resolve_workflow_model
 
-        _, catalog = await workflow_model_catalog()
-        provider = catalog.get(workflow_model)
+        provider = await resolve_workflow_model(workflow_model)
         if provider is None:
             raise ValueError("The selected workflow model is no longer configured.")
         llm_overrides["config_list"] = [provider]
 
     base_llm_config: dict[str, Any] = {}
-    if local_agent_names:
+    if model_agent_names:
         try:
             from ..llm_config import get_llm_config as _get_base_llm_config
 
@@ -705,6 +705,17 @@ async def create_agents(
             except Exception as a2a_err:
                 logger.error("[AGENTS] A2A agent '%s' failed: %s", agent_name, a2a_err)
                 raise
+
+        if reply_tool := agent_config.get("reply_tool"):
+            from .reply_tool import create_reply_tool_agent
+
+            functions = [_wrap_tool_with_context(fn, context_bridge) for fn in agent_tool_functions.get(agent_name, [])]
+            agent = create_reply_tool_agent(agent_name, reply_tool, functions)
+            agent._mozaiks_agent_kind = "local"
+            agent._mozaiks_context_bridge = context_bridge
+            agent._mozaiks_pending_turn_replay = agent_config.get("pending_turn_replay", "allow")
+            agents[agent_name] = agent
+            continue
 
         # Per-agent LLM config → AG2 ModelConfig
         try:

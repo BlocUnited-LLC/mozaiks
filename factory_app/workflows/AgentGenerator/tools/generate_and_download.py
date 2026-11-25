@@ -282,13 +282,10 @@ async def _record_context_and_artifacts(
         if isinstance(primary_workflow, dict)
         else []
     )
-    if workflow_integration_metadata:
-        apply_workflow_integration_context(context_variables, workflow_integration_metadata)
-
     # The canonical BuildRecord is the required persistence boundary. Register
     # it before writing optional export/diagnostic projections so a required
     # failure cannot leave those secondary records looking authoritative.
-    await _register_workflow_bundle_artifact_version(
+    workflow_record = await _register_workflow_bundle_artifact_version(
         app_id=str(app_id),
         user_id=user_id,
         workflow_name="AgentGenerator",
@@ -298,6 +295,11 @@ async def _record_context_and_artifacts(
         context_variables=context_variables,
         workflow_integration_metadata=workflow_integration_metadata,
     )
+    if workflow_integration_metadata is not None:
+        workflow_integration_metadata = {
+            **workflow_integration_metadata, "source_artifact_version_id": workflow_record.id,
+        }
+        apply_workflow_integration_context(context_variables, workflow_integration_metadata)
 
     try:
         await record_workflow_export(

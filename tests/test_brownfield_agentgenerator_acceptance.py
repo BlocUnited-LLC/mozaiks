@@ -224,7 +224,9 @@ def _captured_agentgenerator_bundle() -> dict[str, Any]:
                     initial_message: Review local source text and summarize it.
                     initial_agent: ResearchPlannerAgent
                     triggers:
-                      - type: domain.research.submitted
+                      - type: event
+                        event: domain.research.submitted
+                        capability_id: research-review-workflow
                         description: Start review when research source is submitted.
                     """
                 ).lstrip(),
@@ -602,6 +604,7 @@ async def test_agentgenerator_bundle_handoff_materializes_app_and_workflow_runti
     context = ContextVariablesBridge(factory_context({}))
     apply_workflow_integration_context(context, metadata)
     assert context.get("generated_workflow_name") == "ResearchReviewWorkflow"
+    assert context.get("generated_workflow_trigger_events")[0]["event_type"] == "domain.research.submitted"
 
     workspace_files = {
         str(path.relative_to(active_workflows_root.parent).as_posix()): path.read_text(encoding="utf-8")

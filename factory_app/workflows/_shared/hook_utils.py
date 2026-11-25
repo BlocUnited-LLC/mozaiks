@@ -15,6 +15,17 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _FACTORY_BUILD_CONTEXT_ROOT = _REPO_ROOT / "factory_app" / "build_context"
 
 
+def merge_config_mapping(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+    """Apply a generated config patch while preserving unmentioned nested settings."""
+    result = dict(base)
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            result[key] = merge_config_mapping(base[key], value)
+        else:
+            result[key] = value
+    return result
+
+
 def workflow_context_path(workflow_name: str, *relative_parts: str) -> Path:
     """Return a path inside a workflow's factory-owned build context."""
 
