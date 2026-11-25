@@ -120,6 +120,10 @@ This project follows a practical pre-1.0 changelog format:
 - Factory refinement agents can receive advisory file and dependency evidence
   tied to the verified app build they are changing.
 
+- App builders can approve a background workflow to save one result on the
+  private record that triggered it. The workflow plan shows the source event,
+  receiving action and writable fields. Retrying the same result is idempotent.
+
 - Notification rules can explicitly select `audience.scope: app` for validated
   direct recipients across workspaces. Event ownership remains the default;
   broad audiences and malformed source ownership cannot use the new mode.

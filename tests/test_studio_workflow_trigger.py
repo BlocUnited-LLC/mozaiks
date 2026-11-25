@@ -1631,7 +1631,9 @@ def test_selected_files_block_broader_work_when_no_app_only_surface_is_eligible(
         llm_profiles={"codegen": {"llm_config": {"model": "test-model"}}},
         classifier={"enabled": True, "llm_profile": "codegen"},
         coding={"enabled": True, "llm_profile": "codegen"},
-        contract_surface={"enabled": requires_workflow_revision, "llm_profile": "codegen"},
+        contract_surface={
+            "enabled": requires_workflow_revision, "llm_profile": "codegen", "regeneration_llm_profile": "codegen",
+        },
     ))
     classifier = AsyncMock(side_effect=_async_classifier(
         change_class=change_class, rationale="Requires broader contracts", confidence=0.95, signals=[],
