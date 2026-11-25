@@ -14,7 +14,10 @@ from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import _selecte
 from factory_app.workflows.AppGenerator.tools.hook_managed_capabilities_context import (
     inject_managed_capabilities_context,
 )
-from factory_app.workflows.DesignDocs.tools import save_design_doc
+from factory_app.workflows.DesignDocs.tools import (
+    hook_selected_pack_design_context,
+    save_design_doc,
+)
 from mozaiksai.core import observability
 from mozaiksai.core.workflow import llm_config
 from mozaiksai.core.workflow.agents import factory
@@ -27,6 +30,19 @@ from tests.test_factory_pack_selection import _enable_managed
 
 persistence = inventory.persistence
 selector = handoff.selector
+
+
+@pytest.mark.parametrize("domains", [None, {"invalid": {"pack_recipe": {"pack_id": "social"}}}])
+def test_incomplete_recipe_cannot_hide_a_verified_offering(monkeypatch, domains):
+    hook = hook_selected_pack_design_context
+    monkeypatch.setattr(hook, "available_pack_rows", lambda _: {"social": {"capability_source": "generated_module"}})
+    monkeypatch.setattr(hook, "load_catalog", lambda _: {"domains": domains})
+    agent = SimpleNamespace(name="DesignPackSelectionAgent", context_variables={}, system_message="")
+    agent.update_system_message = lambda message: setattr(agent, "system_message", message)
+    hook.inject_pack_selection_context(agent, [])
+    rows = json.loads(agent.system_message.splitlines()[-1])
+    assert [row["pack_id"] for row in rows] == ["social"]
+    assert "app_recipes" not in rows[0]
 
 
 @pytest.mark.parametrize(("overview", "domain", "monetized", "managed", "expected"), [

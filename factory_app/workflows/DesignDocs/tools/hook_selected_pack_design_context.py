@@ -65,14 +65,20 @@ def inject_pack_selection_context(agent: Any, messages: list[dict[str, Any]]) ->
         ],
     } for pack_id, row in available.items()}
     domains = load_catalog(workflow_context_path("AppGenerator", "domain_catalogs.yaml")).get("domains", {})
+    if not isinstance(domains, dict):
+        domains = {}
     for domain, data in domains.items():
-        recipe = data.get("pack_recipe")
-        if not recipe or recipe["pack_id"] not in catalog:
+        recipe = data.get("pack_recipe") if isinstance(data, dict) else None
+        if not isinstance(recipe, dict):
+            continue
+        pack_id, condition = recipe.get("pack_id"), recipe.get("when")
+        if not isinstance(pack_id, str) or pack_id not in catalog:
+            continue
+        if not isinstance(condition, str) or not condition.strip():
             continue
         if recipe.get("requires_monetization") and context.get("monetization_enabled") is not True:
             continue
-        offering = catalog[recipe["pack_id"]]
-        offering.setdefault("app_recipes", {})[domain] = recipe["when"]
+        catalog[pack_id].setdefault("app_recipes", {})[domain] = condition
     update_agent_section(
         agent, "[AVAILABLE PACK CATALOG]",
         "These verified offerings are available, not selected. Reason from the supplied approved "
