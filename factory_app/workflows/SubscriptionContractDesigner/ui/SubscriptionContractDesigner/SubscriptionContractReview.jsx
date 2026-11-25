@@ -55,6 +55,13 @@ function PlanCard({ plan, includedFeatures }) {
         <p className="mb-3 text-sm text-muted-foreground">{plan.description}</p>
       )}
 
+      {plan?.price && (
+        <div className="mb-3 text-sm text-foreground">
+          <p>Recurring price: {plan.price.currency.toUpperCase()} {(plan.price.amount_cents / 100).toFixed(2)} / {plan.price.interval}</p>
+          {plan.price.display && <p>Customer-facing label: {plan.price.display}</p>}
+        </div>
+      )}
+
       <div className="grid gap-3 md:grid-cols-3">
         <div>
           <p className="mb-1 text-xs font-semibold text-muted-foreground">Included features</p>

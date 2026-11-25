@@ -140,6 +140,10 @@ context from `concept_overview`, `concept_blueprint`, `backend_design_document`,
 - `subscription_config_file`: provider-neutral plan design with
   `plans[].included_features` selected from the approved feature inventory;
   the save tool compiles the canonical `app/config/subscriptions.yaml` payload
+- `plans[].price`: optional recurring price when the owner or approved requirements
+  specify the amount, currency and interval. The owner reviews these terms and any
+  customer-facing display label before the workflow saves them. Free, negotiated
+  and unspecified prices stay unset.
 - `pricing_catalog`: optional display groups inside that same payload
 - `add_on_products`: optional provider-neutral non-token add-ons referenced by
   pricing groups inside that same payload
