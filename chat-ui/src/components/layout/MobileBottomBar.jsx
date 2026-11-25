@@ -192,6 +192,7 @@ const MobileBottomBar = ({ route = null, shellMode = null }) => {
             type="button"
             onClick={() => execute(item)}
             className={`shell-mobile-bottom-item${active ? " is-active" : ""}`}
+            aria-current={active ? "page" : undefined}
           >
             <span className="shell-mobile-bottom-glyph" aria-hidden="true">
               <ShellNavigationIcon

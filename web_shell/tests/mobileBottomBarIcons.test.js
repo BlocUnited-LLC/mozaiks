@@ -138,3 +138,26 @@ test('configured bottom bar items use a named id as the icon hint and otherwise 
   assert.equal(glyph(html, 'Docs'), 'D');
   assert.match(glyph(html, 'Reports'), /mask:url\(\/assets\/reports\.svg\)/);
 });
+
+// The opening tag of the bottom-bar button that carries this label.
+const buttonTag = (html, label) => {
+  const button = html.split('<button').find((chunk) => chunk.includes(`shell-mobile-bottom-label">${label}</span>`));
+  assert.ok(button, `no bottom-bar button labelled ${label} in ${html}`);
+  return button.split('>')[0];
+};
+
+test('only the bottom bar button for the current route is marked as the current page', () => {
+  // The mocked router is on /apps.
+  const html = renderBar({
+    headerPages: [
+      { id: 'apps', label: 'Apps', path: '/apps' },
+      { id: 'docs', label: 'Docs', path: '/docs' },
+    ],
+  });
+  assert.match(buttonTag(html, 'Apps'), /aria-current="page"/);
+  assert.doesNotMatch(buttonTag(html, 'Docs'), /aria-current/);
+  // The Assistant toggle opens a panel; it is not a page, so it keeps aria-expanded only.
+  assert.doesNotMatch(buttonTag(html, 'Assistant'), /aria-current/);
+  assert.match(buttonTag(html, 'Assistant'), /aria-expanded="false"/);
+  assert.equal(html.match(/aria-current=/g).length, 1);
+});
