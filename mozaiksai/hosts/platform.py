@@ -2490,11 +2490,19 @@ async def start_chat(
     context_variables = validate_context_for_workflow(workflow_name, requested_context)
     trigger_meta = data.get("trigger_meta") if isinstance(data.get("trigger_meta"), dict) else {}
 
-    # Studio's Factory build picker binds a model to a build session. Generic
-    # platform workflows keep their own provider configuration unchanged.
+    # Factory build sessions use their existing registry-bound model.
     studio_factory_start = (
         "studio" in getattr(getattr(getattr(request, "app", None), "state", None), "mozaiks_repo_host_bootstrap_hosts", set())
         and workflow_name in {"ValueEngine", "ExistingAppDiscovery"}
+    )
+    from mozaiksai.hosts.studio_model_policy import select_requested_run_model
+
+    run_model = await select_requested_run_model(
+        principal,
+        data.get("run_model"),
+        eligible=not studio_factory_start and not (
+            data.get("build_registry_id") or data.get("source_chat_id") or data.get("transport_purpose") == "ask_carrier"
+        ),
     )
     requested_model = None
     if studio_factory_start:
@@ -2529,9 +2537,11 @@ async def start_chat(
         if client_request_id:
             reused_doc = await coll.find_one(
                 {**base_query, "client_request_id": client_request_id},
-                {"chat_id": 1, "run_build_binding": 1},
+                {"chat_id": 1, "run_build_binding": 1, "workflow_run_model": 1},
             )
         if reused_doc:
+            if reused_doc.get("workflow_run_model") != run_model:
+                raise HTTPException(status_code=409, detail="This chat launch already uses a different model.")
             if studio_factory_start and requested_model is not None:
                 from mozaiksai.core.session.build_binding import RunBuildBinding
 
@@ -2625,6 +2635,7 @@ async def start_chat(
         build_registry_id=data.get("build_registry_id"),
         source_chat_id=data.get("source_chat_id"),
         session_fields=session_fields,
+        run_model=run_model,
     )
 
     try:
