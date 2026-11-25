@@ -162,9 +162,11 @@ def create_scaffold(
     factory_root = resolve_factory_app_root()
     if factory_root is not None and not build_context.exists():
         offering = Path("billing_offering/context.yaml")
-        destination = build_context / offering
-        destination.parent.mkdir(parents=True)
-        shutil.copyfile(factory_root / "build_context" / offering, destination)
+        source = factory_root / "build_context" / offering
+        if source.is_file():
+            destination = build_context / offering
+            destination.parent.mkdir(parents=True)
+            shutil.copyfile(source, destination)
     return target_dir
 
 
