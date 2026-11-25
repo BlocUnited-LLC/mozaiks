@@ -338,7 +338,10 @@ def test_module_pricing_contract_does_not_change_workflow_metadata(
         "startup_mode": "AgentDriven",
         "trigger_events": [],
     }]
-    assert registration.await_args.kwargs["workflow_integration_metadata"] == metadata
+    assert metadata == {
+        **registration.await_args.kwargs["workflow_integration_metadata"],
+        "source_artifact_version_id": "av_priced",
+    }
     assert context.get("generated_workflow_capability_id") == "priced-workflow"
 
     class AppPlanAgent:

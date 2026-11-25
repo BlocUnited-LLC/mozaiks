@@ -264,7 +264,7 @@ async def test_appgenerator_acceptance_blocks_invented_workflow_route() -> None:
 
 @pytest.mark.parametrize("source", [None, "av_older", "av_pinned"])
 def test_workflow_integration_gate_requires_the_pinned_source_even_with_no_workflows(source):
-    context = {"artifact_version_refs": {"workflow_bundle": "av_pinned"}}
+    context = {"artifact_kind": "workflow_bundle", "artifact_version_id": "av_pinned"}
     if source:
         context["workflow_integration_metadata"] = {"workflows": [], "source_artifact_version_id": source}
     result = app_validation.validate_workflow_integration_contract({}, context)

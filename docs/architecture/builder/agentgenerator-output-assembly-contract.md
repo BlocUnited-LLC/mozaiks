@@ -38,8 +38,7 @@ AgentGenerator first validates and reviews the workflow partition:
 Workflow features are excluded from generated pricing until workflow launch
 enforces plan grants (#770). AgentGenerator rejects a saved contract that still
 selects a workflow pricing feature and asks for SubscriptionContractDesigner to
-rerun. Unpriced workflows continue using the workflow name capability
-convention for event routing.
+rerun. Named event triggers carry an explicit capability ID regardless of pricing.
 
 ### Apps Without AI Workflows
 
@@ -275,9 +274,14 @@ The normalized metadata is written back to context as:
 - `generated_workflow_trigger_events`
 
 AgentGenerator persists the same metadata on the `workflow_bundle` artifact.
-AppGenerator hydrates the metadata from the run's pinned `workflow_bundle`, or
-from the current bundle when the run has no pin. A run with a pin must supply
-metadata from that exact build to pass app acceptance.
+AppGenerator first looks for AgentGenerator output from the same app, registry,
+and build run. A refinement can also select a specific workflow bundle or
+inherit the workflow input recorded by its source app. A source app with no
+workflow input keeps that choice. Only an unbound build can look up the app's
+current workflow bundle. A pinned run must supply metadata from that exact
+workflow bundle to pass app acceptance.
+The saved app records the workflow source verified at acceptance, including
+when another workflow bundle becomes current before the app is registered.
 AppPlanAgent receives every workflow and assigns each named trigger to a
 module contract task. ConfigMiddlewareAgent declares the corresponding workflow
 capability in `module.yaml` and each assigned event-to-capability pair in

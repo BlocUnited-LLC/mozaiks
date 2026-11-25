@@ -966,6 +966,35 @@ definitions:
     source:
       type: computed
       default: []
+  upstream_workflow_bundle_artifact_version_id:
+    type: string
+    authority_class: immutable_runtime_authority
+    authorization: true
+    model_visible: false
+    description: AgentGenerator workflow bundle written by this build run.
+    source:
+      type: data_reference
+      database_name: mozaiksai
+      collection: ArtifactVersions
+      query_template:
+        app_id: '{{run_build_binding.target_app_id}}'
+        build_family: workflow_bundle
+        source_workflow: AgentGenerator
+        commit_metadata.metadata.build_id: '{{run_build_binding.build_id}}'
+        commit_metadata.metadata.build_registry_id: '{{run_build_binding.build_registry_id}}'
+        lifecycle_status: {$in: [current, draft]}
+      sort: [{field: created_at, direction: desc}, {field: version_number, direction: desc}]
+      fields: [_id]
+      default: null
+  workflow_integration_source_app:
+    type: object
+    description: Verified source app build_record_id and its nullable workflow_bundle_id from canonical_inputs_version.
+    authority_class: closed_writer_quality_state
+    writer_ids: [lifecycle_tool]
+    persisted: true
+    source:
+      type: state
+      default: null
   workflow_bundle_artifact_version_id:
     type: string
     description: >
@@ -1890,7 +1919,6 @@ agents:
     - agent_api_url
     - available_agents
     - available_tools
-    - workflow_integration_metadata
     - workflow_bundle_artifact_version_id
     - app_build_plan
     - app_plan_ready
@@ -2034,7 +2062,6 @@ agents:
     - integration_needs
     - agent_api_url
     - agent_websocket_url
-    - workflow_integration_metadata
     - generated_files
     - bundle_repair_status
     - bundle_repair_target

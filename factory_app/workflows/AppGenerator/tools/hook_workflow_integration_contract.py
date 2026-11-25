@@ -8,6 +8,8 @@ from typing import Any
 from factory_app.workflows._shared.hook_utils import update_agent_section
 from factory_app.workflows._shared.workflow_integration import (
     workflow_integration_metadata_from_context,
+    workflow_integration_source_error,
+    workflow_integration_source_pin,
 )
 
 SECTION_HEADER = "[WORKFLOW INTEGRATION CONTRACT]"
@@ -15,10 +17,17 @@ SECTION_HEADER = "[WORKFLOW INTEGRATION CONTRACT]"
 
 def inject_workflow_integration_contract(agent, messages: list[dict[str, Any]]) -> None:
     """Render the event and launch contracts from every orchestrator in the bundle."""
-    metadata = workflow_integration_metadata_from_context(agent.context_variables)
+    context = agent.context_variables
+    metadata = workflow_integration_metadata_from_context(context)
+    pin = workflow_integration_source_pin(context)
+    if workflow_integration_source_error(context) or (pin and pin != (metadata or {}).get("source_artifact_version_id")):
+        update_agent_section(
+            agent, SECTION_HEADER, "The pinned workflow bundle is unavailable. Leave workflow targets empty until it is loaded."
+        )
+        return
     workflows = metadata["workflows"] if metadata else []
     if not workflows:
-        if SECTION_HEADER in agent.system_message:
+        if metadata is not None or SECTION_HEADER in agent.system_message:
             update_agent_section(agent, SECTION_HEADER, "No generated workflows are bound to this build.")
         return
 

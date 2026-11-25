@@ -216,7 +216,7 @@ agents:
         `/api/modules/billing_portal/*`.
       - `platform_user_email`: Email of the authenticated platform user. Use this as the initial `admins` entry in the bundle-root `app.json` (physical workspace path `app/app.json`; owned_paths use `app.json`) when the generated app needs admin bootstrap access. Non-null when running on the hosted mozaiks.ai platform; null in OSS/self-managed contexts.
       - `app_backend_url`: Base URL of the active Mozaiks app host for this app. When non-null, generated agents call this URL + the platform module action API to persist data and trigger domain events. Include this in the `module_contract` build task's initial_message so downstream module implementation agents have it.
-      - `workflow_integration_metadata.workflows` lists all generated workflows. Each item supplies its workflow_name, capability_id, startup_mode, and trigger_events. Use these exact bindings in the build plan.
+      - [WORKFLOW INTEGRATION CONTRACT] lists all generated workflows. Each item supplies its workflow_name, capability_id, startup_mode, and trigger_events. Use these exact bindings in the build plan.
 
       **Automated task mode**:
       - If `task_run_mode` is true, the task context is already scoped by the AppGenerator task batch executor.
@@ -606,7 +606,7 @@ agents:
         - `event_flows[].producer_pack_id` must match the capability pack/module that owns the committed state.
         - `event_flows[].producing_action` must name the module action that commits the state before publishing the event.
         - Workflow reactions must reference `workflow_capability_ids`; do not put raw workflow names in event flows or subscriptions.
-        - Match event_flows[].event_type to trigger_events[].event_type in workflow_integration_metadata.workflows.
+        - Match event_flows[].event_type to trigger_events[].event_type in [WORKFLOW INTEGRATION CONTRACT].
         - For a platform- or hosted-owned event, preserve the consuming workflow's reaction and identify the required host integration. A generated app module cannot stand in for an external publisher.
         - A workflow with no trigger_events has no event subscription.
         - Workflows may react to domain events and may call module capabilities, but workflows must not directly publish `domain.*` facts.
@@ -1640,7 +1640,7 @@ agents:
       - Settings and feature flags
       - Python stubs required to implement the contract
       - `app_backend_url`: null = schema-only; non-null = active backend
-      - `workflow_integration_metadata.workflows` contains the generated workflow_name, capability_id, startup_mode and trigger_events for each workflow in the bundle.
+      - [WORKFLOW INTEGRATION CONTRACT] contains the generated workflow_name, capability_id, startup_mode and trigger_events for each workflow in the bundle.
       - For every workflow capability assigned to this module, declare its exact capability_id with kind workflow and target workflow_name in module.yaml.
       - Each assigned event_type and capability_id pair gets one capability reaction in its owning module contract. Preserve multiple declared targets for a shared event.
       - Code derives module action gates from approved subscription plan features

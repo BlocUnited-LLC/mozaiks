@@ -267,6 +267,68 @@ def test_ai_pack_workflow_hook_detects_packs_from_the_plan_and_the_concept() -> 
     assert "ai_analysis_pack detected" in prompt
 
 
+@pytest.mark.parametrize("state", ["matching", "stale", "unverified-parent", "empty", "absent"])
+@pytest.mark.asyncio
+async def test_ai_pack_advice_preserves_only_the_bound_workflow_routes_in_planner_prompt(state) -> None:
+    from types import SimpleNamespace
+
+    import yaml
+
+    from mozaiksai.core.workflow.agents.factory import _compose_prompt_sections
+    from mozaiksai.core.workflow.context.schema import load_context_variables_config
+    from mozaiksai.core.workflow.execution.middleware import (
+        MozaiksPromptMiddleware,
+        _resolve_import,
+        load_prompt_middleware_entries,
+    )
+
+    root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+    path = root / "AppGenerator"
+    agent_name = "AppPlanAgent"
+    loaded = yaml.safe_load((path / "agents.yaml").read_text(encoding="utf-8"))
+    agent = next(agent for agent in loaded["agents"] if agent["name"] == agent_name)
+    definitions = yaml.safe_load((path / "context_variables.yaml").read_text(encoding="utf-8"))
+    view = load_context_variables_config(definitions).agents[agent_name]
+    hooks = []
+    for entry in load_prompt_middleware_entries("AppGenerator", base_path=str(root)):
+        if entry["agent"] in (agent_name, "all"):
+            hook, _ = _resolve_import("AppGenerator", entry.get("filename"), entry["function"], path)
+            assert hook is not None
+            hooks.append(hook)
+    names = [hook.__name__ for hook in hooks]
+    assert names.index("inject_workflow_integration_contract") < names.index("inject_ai_pack_workflow_context")
+
+    seed = {"concept_blueprint": {"capability_pack_hints": ["ai_review_pack", "ai_analysis_pack", "ai_extraction_pack"]}}
+    if state != "absent":
+        seed.update(artifact_kind="workflow_bundle", artifact_version_id="bundle-2")
+        seed["workflow_integration_metadata"] = {
+            "source_artifact_version_id": "bundle-1" if state == "stale" else "bundle-2",
+            "workflows": [] if state == "empty" else [{
+                "workflow_name": "ReviewSubmission", "capability_id": "editorial-handoff",
+                "startup_mode": "BackendOnly", "trigger_events": [{"event_type": "domain.notes.review_requested"}],
+            }],
+        }
+        if state == "unverified-parent":
+            seed.update(artifact_kind="app_bundle", artifact_version_id="selected-app-build")
+    runner = MozaiksPromptMiddleware(
+        None, None, middleware_functions=hooks, agent_name=agent_name,
+        base_system_message=_compose_prompt_sections(agent["prompt_sections"]),
+        context_bridge=_bridge(seed), context_variables=view.variables,
+    )
+    prompt = await runner._run_prompt_middleware(SimpleNamespace(variables={}, prompt=[]))
+    assert "record_review_result" in prompt and "store_analysis_result" in prompt and "store_extraction_results" in prompt
+    assert "With no supplied binding, leave those workflow targets empty" in prompt
+    for kind in ("review", "analysis", "extraction"):
+        assert f"{{module_id}}-{kind}-workflow" not in prompt
+    assert ("domain.notes.review_requested" in prompt) is (state == "matching")
+    assert ("editorial-handoff" in prompt) is (state == "matching")
+    assert "WORKFLOW_INTEGRATION_METADATA:" not in prompt
+    if state in ("stale", "unverified-parent"):
+        assert "pinned workflow bundle is unavailable" in prompt
+    if state == "empty":
+        assert "No generated workflows are bound to this build" in prompt
+
+
 def test_ai_pack_archetype_hook_detects_workflow_surfaces() -> None:
     from factory_app.workflows.AgentGenerator.tools.hook_ai_pack_archetype_context import (
         inject_ai_pack_archetype_context,

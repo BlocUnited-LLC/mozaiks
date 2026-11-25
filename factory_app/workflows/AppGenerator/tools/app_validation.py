@@ -32,7 +32,10 @@ import yaml
 from anyio import CancelScope
 
 from factory_app.workflows._shared.workflow_integration import (
+    hydrate_workflow_integration_context_from_latest_artifact,
     workflow_integration_metadata_from_context,
+    workflow_integration_source_error,
+    workflow_integration_source_pin,
 )
 from factory_app.workflows.AppGenerator.tools import app_runtime_smoke
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
@@ -1467,10 +1470,11 @@ def validate_workflow_integration_contract(
     context_variables: Any | None,
 ) -> dict[str, Any]:
     metadata = workflow_integration_metadata_from_context(context_variables)
-    refs = _context_get(context_variables, "artifact_version_refs", {})
-    workflow_ref = refs.get("workflow_bundle") if isinstance(refs, Mapping) else None
-    if workflow_ref and (metadata or {}).get("source_artifact_version_id") != workflow_ref:
+    workflow_ref = workflow_integration_source_pin(context_variables)
+    message = workflow_integration_source_error(context_variables)
+    if not message and workflow_ref and (metadata or {}).get("source_artifact_version_id") != workflow_ref:
         message = f"Workflow integration metadata must come from the pinned workflow bundle {workflow_ref!r}."
+    if message:
         return {
             "contract_version": "1.0",
             "passed": False,
@@ -2013,6 +2017,12 @@ async def run_app_bundle_acceptance_gate(
             _context_set(context_variables, "revision_asset_evidence", source_evidence)
         except (OSError, ValueError, zipfile.BadZipFile, ContentNotFoundError) as exc:
             required_bundle_errors.append(f"Revision source assets are unavailable: {exc}")
+        else:
+            # Export and revalidation can call the gate without the before-chat hooks.
+            try:
+                await hydrate_workflow_integration_context_from_latest_artifact(context_variables)
+            except (OSError, ValueError, RuntimeError) as exc:
+                required_bundle_errors.append(f"Revision workflow inputs are unavailable: {exc}")
     if not generated_files:
         required_bundle_errors.append("No generated files were available for app-bundle acceptance.")
     if "app.json" not in generated_files:

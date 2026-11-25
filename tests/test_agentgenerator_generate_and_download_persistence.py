@@ -210,6 +210,8 @@ def test_empty_workflow_partition_is_recorded_without_fake_endpoints(monkeypatch
     assert context.get("generated_workflow_name") is None
     assert context.get("artifact_version_id") == "av_workflow_bundle_1"
     extra = export_write.call_args.kwargs["extra_fields"]
+    assert context.get("workflow_integration_metadata")["source_artifact_version_id"] == "av_workflow_bundle_1"
+    assert extra["workflow_integration_metadata"]["source_artifact_version_id"] == "av_workflow_bundle_1"
     assert extra["agent_websocket_url"] is None
     assert extra["agent_api_url"] is None
 
