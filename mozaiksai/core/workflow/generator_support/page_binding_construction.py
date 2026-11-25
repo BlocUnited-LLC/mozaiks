@@ -49,6 +49,7 @@ from .module_action_inventory import (
     CANONICAL_WRITE_OPERATIONS,
     canonical_read_action_id,
     canonical_write_action_id,
+    canonical_write_operations,
     collection_has_canonical_writes,
     entity_identifier,
 )
@@ -63,10 +64,11 @@ _FORM_FIELD_TYPES = {"string": "text", "integer": "number", "number": "number", 
 
 def canonical_write_ids(collection: Mapping[str, Any]) -> dict[str, str]:
     """The canonical ``{operation}_{entity}`` write ids for a collection's entity."""
+    operations = canonical_write_operations(collection) if collection_has_canonical_writes(collection) else CANONICAL_WRITE_OPERATIONS
     try:
         return {
             operation: canonical_write_action_id(str(collection.get("entity") or ""), operation)
-            for operation in CANONICAL_WRITE_OPERATIONS
+            for operation in operations
         }
     except ValueError:
         return {}  # module closure already reported the entity name

@@ -10,6 +10,12 @@ from typing import Any, Literal, NamedTuple
 
 import yaml
 
+from mozaiksai.core.runtime.persistence.collection_writes import (
+    CANONICAL_WRITE_OPERATIONS,
+    canonical_write_action_id,
+    canonical_write_fields,
+    entity_identifier,
+)
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.session.build_context import (
     BuildContextError,
@@ -59,28 +65,18 @@ def canonical_read_action_id(collection_name: str, operation: str) -> str:
     return f"{operation}_{collection_name}"
 
 
-CANONICAL_WRITE_OPERATIONS = ("create", "update", "delete")
-
-
-def entity_identifier(entity: str) -> str:
-    """Project a declared entity name such as ``ProjectMilestone`` to ``project_milestone``."""
-    if not isinstance(entity, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", entity):
-        raise ValueError(f"Canonical writes require an identifier-safe entity name, got {entity!r}.")
-    snake = re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "_", entity).lower()
-    return re.sub(r"_+", "_", snake)
-
-
-def canonical_write_action_id(entity: str, operation: str) -> str:
-    """Name a canonical write using the declared entity, matching approved mutation ids."""
-    if operation not in CANONICAL_WRITE_OPERATIONS:
-        raise ValueError(f"Unsupported canonical write operation {operation!r}; choose create, update or delete.")
-    return f"{operation}_{entity_identifier(entity)}"
-
-
 def collection_has_canonical_writes(collection: Mapping[str, Any]) -> bool:
     """Only collections written by module actions receive code-owned writes."""
     lifecycle = collection.get("lifecycle")
     return isinstance(lifecycle, Mapping) and lifecycle.get("write_mode") == "module_action"
+
+
+def canonical_write_operations(collection: Mapping[str, Any]) -> tuple[str, ...]:
+    """The ordered operations the approved collection lifecycle gives its module."""
+    policy = canonical_write_fields(collection)
+    if not collection_has_canonical_writes(collection):
+        return ()
+    return tuple(op for op in CANONICAL_WRITE_OPERATIONS if policy is None or op in policy)
 
 
 CANONICAL_WRITE_EVENT_VERBS = {"create": "created", "update": "updated", "delete": "deleted"}
@@ -136,7 +132,7 @@ def canonical_write_event_aliases(data_contract: Any) -> dict[str, str]:
             continue
         entity = str(collection.get("entity") or "")
         try:
-            events = {operation: canonical_write_event_type(entity, operation) for operation in CANONICAL_WRITE_EVENT_VERBS}
+            events = {operation: canonical_write_event_type(entity, operation) for operation in canonical_write_operations(collection)}
         except ValueError:
             continue  # module closure reports the entity name
         for operation, event_type in events.items():
@@ -180,7 +176,15 @@ def canonical_write_actions_for_surface(surface: Mapping[str, Any], data_contrac
         canonical_write_action_id(collection["entity"], operation)
         for collection in _surface_collections(surface, data_contract)
         if collection_has_canonical_writes(collection)
-        for operation in CANONICAL_WRITE_OPERATIONS
+        for operation in canonical_write_operations(collection)
+    })
+
+
+def authored_module_actions(surface: Mapping[str, Any], data_contract: Any) -> list[str]:
+    """Combine the reviewed module actions with its collection's canonical actions."""
+    return sorted({
+        *(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or []),
+        *canonical_read_actions_for_surface(surface, data_contract), *canonical_write_actions_for_surface(surface, data_contract),
     })
 
 
@@ -199,11 +203,7 @@ def all_module_actions(context_variables: Any) -> dict[str, list[str]]:
     contract = context_variables.get("data_contract")
     facades = managed_facade_actions(context_variables)
     return {
-        surface["surface_id"]: facades[surface["surface_id"]] if surface["surface_id"] in facades else sorted(set(
-            [*(surface.get("owned_mutations") or []), *(surface.get("custom_reads") or []),
-             *canonical_read_actions_for_surface(surface, contract),
-             *canonical_write_actions_for_surface(surface, contract)]
-        ))
+        surface["surface_id"]: facades[surface["surface_id"]] if surface["surface_id"] in facades else authored_module_actions(surface, contract)
         for surface in surface_map.get("surfaces") or []
         if surface.get("surface_kind") == "module" and surface.get("owner") == "app"
     }

@@ -18,8 +18,17 @@ from typing import Any
 
 import yaml
 
-from mozaiksai.core.runtime.app.module_loader import CANONICAL_EVENT_PREFIXES
+from mozaiksai.core.runtime.app.module_loader import (
+    CANONICAL_EVENT_PREFIXES,
+    ModuleDefinition,
+    validate_collection_write_actions,
+)
 from mozaiksai.core.runtime.app.paths import APP_AUTH_CONFIG_PATH, normalize_app_path
+from mozaiksai.core.runtime.persistence.collection_writes import (
+    SCOPE_FIELDS,
+    canonical_write_fields,
+    canonical_write_input_schema,
+)
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
@@ -42,13 +51,16 @@ from mozaiksai.core.workflow.generator_support.data_contract_fields import (
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     CANONICAL_WRITE_EVENT_VERBS,
     CANONICAL_WRITE_OPERATIONS,
+    authored_module_actions,
     canonical_read_action_id,
     canonical_write_action_id,
     canonical_write_event_aliases,
     canonical_write_event_for,
     canonical_write_event_type,
+    canonical_write_operations,
     collection_has_canonical_writes,
     entity_identifier,
+    unapproved_module_actions_error,
 )
 from mozaiksai.core.workflow.generator_support.module_authored_code import (
     parse_rendered_python,
@@ -72,7 +84,6 @@ _FIELD_TYPES: dict[str, tuple[str | None, str]] = {
     "number": ("number", "float"), "date": ("string", "datetime"), "datetime": ("string", "datetime"),
     "object": (None, "dict[str, Any]"), "array": (None, "list[Any]"),
 }
-_RESERVED_SCOPE_FIELDS = frozenset({"app_id", "tenant_id", "workspace_id", "user_id"})
 _RESTRICTED_SURFACES = frozenset({"internal", "admin_internal"})
 _ANONYMOUS_SURFACES = frozenset({"public", "public_readonly"})
 _AUTHORED_ACCESS_KEYS = frozenset({"handler_method", "input_schema", "output_schema", "permissions", "api_surface"})
@@ -113,7 +124,7 @@ def collection_record_shape(module_id: str, collection: Mapping[str, Any]) -> di
         if is_managed_timestamp(field):
             timestamps[field_name] = field_name
             continue
-        if field_name in {"_id", id_field, owner_field} or field_name in _RESERVED_SCOPE_FIELDS:
+        if field_name in {"_id", id_field, owner_field} or field_name in SCOPE_FIELDS:
             continue
         has_default, default = parse_default(field, location)
         writable.append({
@@ -123,11 +134,13 @@ def collection_record_shape(module_id: str, collection: Mapping[str, Any]) -> di
             "enum": list(field["enum"]) if field.get("enum") else None,
             "nullable": bool(field.get("nullable")),
         })
+    policy = canonical_write_fields(collection)
     return {
         "name": name, "entity": entity, "identifier": identifier, "class_name": _pascal(identifier),
         "constant": identifier.upper(), "fields": fields, "field_names": names,
         "id_field": id_field, "search_by": collection.get("search_by"), "owner_field": owner_field,
         "timestamps": timestamps, "writable": writable,
+        "operations": canonical_write_operations(collection), "write_policy": policy,
         "request_fields": [field for field in writable if field["json_type"] is not None],
     }
 
@@ -156,39 +169,22 @@ def _record_schema(shape: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _request_property(field: dict[str, Any]) -> dict[str, Any]:
-    declaration: dict[str, Any] = {"type": field["json_type"]}
-    if field["enum"]:
-        declaration["enum"] = list(field["enum"])
-    return declaration
-
-
-def _request_schema(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
-    schema: dict[str, Any] = {"type": "object", "properties": properties, "additionalProperties": False}
-    if required:
-        schema["required"] = required
-    import_closed_contract_schema(schema)
-    return schema
-
-
 def _write_action(shape: dict[str, Any], operation: str) -> dict[str, Any]:
     action_id = canonical_write_action_id(shape["entity"], operation)
     entity, id_field = shape["entity"], shape["id_field"]
-    writable = {field["name"]: _request_property(field) for field in shape["request_fields"]}
+    allowed = [f["name"] for f in _operation_fields(shape, operation) if f["json_type"] is not None]
+    input_schema = canonical_write_input_schema(operation, shape["fields"], allowed if operation != "delete" else [], id_field)
     if operation == "create":
-        input_schema = _request_schema(writable, [field["name"] for field in shape["request_fields"] if field["required"]])
         description = (
             f"Create one {entity} record. The record id ({id_field}), ownership and declared timestamps are "
             "assigned by code; the runtime stamps the authenticated owner."
         )
     elif operation == "update":
-        input_schema = _request_schema({id_field: {"type": "string"}, **writable}, [id_field])
         description = (
             f"Update the declared fields of one {entity} record addressed by {id_field} within the "
             "requesting principal's declared data scope; omitted fields keep their stored values."
         )
     else:
-        input_schema = _request_schema({id_field: {"type": "string"}}, [id_field])
         description = (
             f"Delete one {entity} record addressed by {id_field} within the requesting principal's "
             "declared data scope."
@@ -203,6 +199,13 @@ def _write_action(shape: dict[str, Any], operation: str) -> dict[str, Any]:
         "input_schema": input_schema, "output_schema": output_schema, "permissions": [], "emits": [],
         "entitlement_gate": None, "ask_context_safe": False,
     }
+
+
+def _operation_fields(shape: dict[str, Any], operation: str) -> list[dict[str, Any]]:
+    policy = shape["write_policy"]
+    if policy is None:
+        return shape["writable"]
+    return [field for field in shape["writable"] if field["name"] in policy.get(operation, ())]
 
 
 def _write_collections(module_id: str, plan: dict[str, Any], contract: Any) -> list[dict[str, Any]]:
@@ -376,7 +379,7 @@ def _authored_role_write_contracts(
     existing = {action["id"]: action for action in actions if action.get("id")}
     narrowed = False
     write_ids = []
-    for operation in CANONICAL_WRITE_OPERATIONS:
+    for operation in shape["operations"]:
         expected = _write_action(shape, operation)
         action_id = expected["id"]
         write_ids.append(action_id)
@@ -421,7 +424,7 @@ def _uses_authored_writes(
     if collection["tenancy"] != "app_wide":
         return False
     if all(canonical_write_action_id(collection["entity"], operation) in role_permissions
-           for operation in CANONICAL_WRITE_OPERATIONS):
+           for operation in canonical_write_operations(collection)):
         return _authored_role_write_contracts(module_id, collection, actions)
     return bool(_protected_siblings(
         actions, read_ids, module_id=module_id, subscription_contract=subscription_contract,
@@ -517,13 +520,28 @@ def _close_manifest_writes(
     stripped: set[str] = set()
     for collection in collections:
         shape = collection_record_shape(module_id, collection)
-        write_ids = [canonical_write_action_id(shape["entity"], operation) for operation in CANONICAL_WRITE_OPERATIONS]
+        operations = shape["operations"]
+        disabled = [canonical_write_action_id(shape["entity"], op) for op in CANONICAL_WRITE_OPERATIONS if op not in operations]
+        if conflicts := sorted(set(existing).intersection(disabled)):
+            raise ValueError(
+                f"{module_id}: remove canonical actions {conflicts} from module.yaml and their generated handlers; "
+                f"the reviewed lifecycle.module_writes for collection {collection['name']!r} allows {list(operations)}"
+            )
+        write_ids = [canonical_write_action_id(shape["entity"], op) for op in operations]
         authored = _uses_authored_writes(
             module_id, collection, actions, read_ids,
             subscription_contract=subscription_contract, role_permissions=role_permissions,
         )
-        for operation, action_id in zip(CANONICAL_WRITE_OPERATIONS, write_ids, strict=True):
+        for operation, action_id in zip(operations, write_ids, strict=True):
             prior = existing.get(action_id)
+            if shape["write_policy"] is not None and prior is not None and isinstance(prior.get("input_schema"), dict):
+                request = _materialize_schema_contract(prior["input_schema"], closed_request=True, where=f"{module_id}/{action_id}")
+                allowed = _write_action(shape, operation)["input_schema"]["properties"]
+                if extra := sorted(set(request.get("properties", {})).difference(allowed)):
+                    raise ValueError(
+                        f"{module_id}/{action_id}: remove input fields {extra}; the reviewed "
+                        f"lifecycle.module_writes for {collection['name']!r} admits {sorted(allowed)}"
+                    )
             if prior is not None and prior.get("api_surface") in _ANONYMOUS_SURFACES:
                 _apply_prior_access(module_id, collection, prior, _write_action(shape, operation), granted)
             if action_id not in role_permissions:
@@ -556,7 +574,7 @@ def _close_manifest_writes(
                     "per_user or per_workspace tenancy so code constructs owner-scoped writes."
                 )
             continue  # Authored restricted app-wide writes are preserved as declared.
-        for operation, action_id in zip(CANONICAL_WRITE_OPERATIONS, write_ids, strict=True):
+        for operation, action_id in zip(operations, write_ids, strict=True):
             action = _write_action(shape, operation)
             prior = existing.get(action_id)
             if prior is None:
@@ -680,7 +698,7 @@ def close_module_events(
     """
     canonical: dict[str, tuple[dict[str, Any], str]] = {
         canonical_write_event_type(shape["entity"], operation): (shape, operation)
-        for shape in shapes for operation in CANONICAL_WRITE_OPERATIONS
+        for shape in shapes for operation in shape["operations"]
     }
     action_events = {
         canonical_write_action_id(shape["entity"], operation): event_type
@@ -1015,6 +1033,14 @@ def materialize_module_actions(
                     )
         if expanded != manifest:
             changed[path] = yaml.safe_dump(expanded, sort_keys=False, allow_unicode=True)
+        if any(canonical_write_fields(c) is not None for c in _write_collections(module_id, app_build_plan, data_contract)):
+            validate_collection_write_actions(ModuleDefinition.model_validate(expanded), data_contract)
+            surface = next((row for row in (detach(design_surface_map) or {}).get("surfaces", [])
+                            if row.get("surface_id") == module_id and row.get("owner") == "app"), None)
+            if surface is not None and path not in pack_owned_manifest_paths:
+                approved = {module_id: authored_module_actions(surface, data_contract)}
+                if issue := unapproved_module_actions_error(module_id, (a["id"] for a in expanded["actions"]), approved):
+                    raise ValueError(issue)
         for key, relative in companion_paths.items():
             document = closed.get(key)
             if not isinstance(document, dict) or (key != _EVENTS_KEY and key not in authored):
@@ -1055,19 +1081,37 @@ def _render_input_classes(shape: dict[str, Any]) -> str:
     create.append(f'    """Writable fields accepted by create_{shape["identifier"]}."""')
     update = [f"class {shape['class_name']}UpdateInput(TypedDict, total=False):"]
     update.append(f'    """Writable fields accepted by update_{shape["identifier"]}."""')
-    for field in shape["writable"]:
+    for field in _operation_fields(shape, "create"):
         create.append(f"    {field['name']}: {_annotation(field)}")
+    for field in _operation_fields(shape, "update"):
         update.append(f"    {field['name']}: {_annotation(field)}")
     if len(create) == 2:
         create.append("    pass")
+    if len(update) == 2:
         update.append("    pass")
     return "\n".join(create) + "\n\n\n" + "\n".join(update) + "\n"
 
 
 def _render_collection_schema(module_id: str, shape: dict[str, Any]) -> str:
     prefix, identifier = shape["constant"], shape["identifier"]
-    writable = tuple(field["name"] for field in shape["writable"])
-    required = tuple(field["name"] for field in shape["writable"] if field["required"])
+    create = tuple(field["name"] for field in _operation_fields(shape, "create"))
+    update = tuple(field["name"] for field in _operation_fields(shape, "update"))
+    writable = tuple(dict.fromkeys((*create, *update)))
+    required = tuple(field["name"] for field in _operation_fields(shape, "create") if field["required"])
+    create_fields = update_fields = hook_fields = f"{prefix}_WRITABLE_FIELDS"
+    operation_constants = create_hook_defaults = ""
+    if shape["write_policy"] is not None:
+        create_fields, update_fields = f"{prefix}_CREATE_FIELDS", f"{prefix}_UPDATE_FIELDS"
+        operation_constants = f"{create_fields} = {create!r}\n{update_fields} = {update!r}\n"
+        hook_fields = f"({create_fields} if operation == 'create' else {update_fields})"
+        create_hook_defaults = (
+            "    if operation == 'create':\n"
+            f"        prepared = {identifier}_create_values(values)\n"
+        )
+        if shape["owner_field"]:
+            create_hook_defaults += (f"        if {prefix}_OWNER_FIELD in values:\n"
+                                     f"            prepared[{prefix}_OWNER_FIELD] = values[{prefix}_OWNER_FIELD]\n")
+        create_hook_defaults += "        return prepared\n"
     defaults = {field["name"]: field["default"] for field in shape["writable"] if field["has_default"]}
     nullable = tuple(field["name"] for field in shape["writable"] if field["nullable"] and not field["has_default"])
     serializer = (
@@ -1093,13 +1137,14 @@ def _render_collection_schema(module_id: str, shape: dict[str, Any]) -> str:
         f"{prefix}_CREATED_AT_FIELD = {shape['timestamps'].get('created_at')!r}\n"
         f"{prefix}_UPDATED_AT_FIELD = {shape['timestamps'].get('updated_at')!r}\n"
         f"{prefix}_WRITABLE_FIELDS = {writable!r}\n"
+        f"{operation_constants}"
         f"{prefix}_REQUIRED_CREATE_FIELDS = {required!r}\n"
         f"{prefix}_DEFAULTS: dict[str, Any] = {defaults!r}\n"
         f"{prefix}_NULLABLE_FIELDS = {nullable!r}\n\n\n"
         f"{serializer}\n\n"
         f"def {identifier}_create_values(values: Mapping[str, Any]) -> dict[str, Any]:\n"
         f'    """Keep declared writable fields; apply defaults and store null for omitted nullable fields."""\n'
-        f"    prepared = {{field: values[field] for field in {prefix}_WRITABLE_FIELDS if field in values}}\n"
+        f"    prepared = {{field: values[field] for field in {create_fields} if field in values}}\n"
         f"    for field, default in {prefix}_DEFAULTS.items():\n"
         f"        prepared.setdefault(field, copy.deepcopy(default))\n"
         f"    for field in {prefix}_NULLABLE_FIELDS:\n"
@@ -1107,7 +1152,7 @@ def _render_collection_schema(module_id: str, shape: dict[str, Any]) -> str:
         f"    return prepared\n\n\n"
         f"def {identifier}_update_changes(values: Mapping[str, Any]) -> dict[str, Any]:\n"
         f'    """Keep only declared writable fields; ids, ownership and timestamps are never client-set."""\n'
-        f"    return {{field: values[field] for field in {prefix}_WRITABLE_FIELDS if field in values}}\n\n\n"
+        f"    return {{field: values[field] for field in {update_fields} if field in values}}\n\n\n"
         f"def {identifier}_hook_values(values: Mapping[str, Any], operation: str) -> dict[str, Any]:\n"
         f'    """Allowlist a write hook result; the id and managed timestamps stay code-owned.\n\n'
         f"    A create hook's owner value is left for the runtime to verify (a foreign owner is\n"
@@ -1115,15 +1160,16 @@ def _render_collection_schema(module_id: str, shape: dict[str, Any]) -> str:
         f'    """\n'
         + (
             # A create hook's owner value reaches the runtime, which rejects a foreign owner (403).
-            f"    allowed = {prefix}_WRITABLE_FIELDS + (({prefix}_OWNER_FIELD,) if operation == 'create' else ())\n"
-            if shape["owner_field"] else f"    allowed = {prefix}_WRITABLE_FIELDS\n"
+            f"    allowed = {hook_fields} + (({prefix}_OWNER_FIELD,) if operation == 'create' else ())\n"
+            if shape["owner_field"] else f"    allowed = {hook_fields}\n"
         )
         + f"    stripped = sorted(key for key in values if key not in allowed)\n"
         f"    if stripped:\n"
         f"        logging.getLogger(__name__).warning(\n"
         f"            'HOOK_OUTPUT_STRIPPED: entity={shape['entity']} operation=%s keys=%s are code-owned', operation, stripped,\n"
         f"        )\n"
-        f"    return {{field: values[field] for field in allowed if field in values}}\n"
+        f"{create_hook_defaults}"
+        "    return {field: values[field] for field in allowed if field in values}\n"
         + (f"\n\n{new_id}" if new_id else "")
     )
 
@@ -1297,7 +1343,7 @@ def _reject_stale_schema_imports(module_id: str, files: Mapping[str, str], rende
 # --------------------------------------------------------------------------- implementations
 
 
-def _hook_call(name: str, arguments: str, *, guard: str | None = None) -> str:
+def _hook_call(name: str, arguments: str, *, guard: str | None = None, explicit_inputs: bool = False) -> str:
     """Call an optional hook; a None result leaves the payload unchanged."""
     lines = [
         f"    hook = globals().get({name!r})\n",
@@ -1307,11 +1353,11 @@ def _hook_call(name: str, arguments: str, *, guard: str | None = None) -> str:
         lines.append(f"        await hook({arguments})\n")
     else:
         target, helper, operation = guard.split(":")
-        lines.extend([
-            f"        result = await hook({arguments})\n",
-            "        if result is not None:\n",
-            f"            {target} = schemas.{helper}(result, {operation!r})\n",
-        ])
+        lines.append(f"        result = await hook({arguments})\n")
+        if explicit_inputs:
+            lines.append(f"        {target} = schemas.{helper}({target} if result is None else result, {operation!r})\n")
+        else:
+            lines.extend(["        if result is not None:\n", f"            {target} = schemas.{helper}(result, {operation!r})\n"])
     return "".join(lines)
 
 
@@ -1357,7 +1403,8 @@ def _write_functions(
             "    if missing:\n"
             "        from mozaiksai.core.runtime import ModuleInputValidationError\n"
             "        raise ModuleInputValidationError(f'Missing required fields: {missing}')\n"
-            + _hook_call(f"before_{method}", "ctx, prepared", guard=f"prepared:{identifier}_hook_values:create")
+            + _hook_call(f"before_{method}", "ctx, prepared", guard=f"prepared:{identifier}_hook_values:create",
+                         explicit_inputs=shape["write_policy"] is not None)
             + f"    record = await repo.{method}(ctx, prepared)\n"
             + _hook_call(f"after_{method}", "ctx, record")
             + respond
@@ -1401,7 +1448,8 @@ def _write_functions(
             f"        raise ModuleInputValidationError('{id_field} is required')\n"
             f"    changes = schemas.{identifier}_update_changes(values)\n"
             f"    record = await repo.{load_method}(ctx, id)\n"
-            + _hook_call(f"before_{method}", "ctx, record, changes", guard=f"changes:{identifier}_hook_values:update")
+            + _hook_call(f"before_{method}", "ctx, record, changes", guard=f"changes:{identifier}_hook_values:update",
+                         explicit_inputs=shape["write_policy"] is not None)
             + f"    record = await repo.{method}(ctx, id, changes)\n"
             + _hook_call(f"after_{method}", "ctx, record, changes")
             + respond
@@ -1538,7 +1586,7 @@ def materialize_module_write_implementations(
             if shape["id_field"] == "_id":
                 functions[2]["_id_filter"] = _ID_FILTER
             functions[2][f"load_{shape['identifier']}"] = _load_function(module_id, shape)
-            for operation in CANONICAL_WRITE_OPERATIONS:
+            for operation in shape["operations"]:
                 method = canonical_write_action_id(shape["entity"], operation)
                 if method not in declared:
                     raise ValueError(f"{module_id}: construct {method!r} in module.yaml before its implementation")
@@ -1627,7 +1675,7 @@ def module_write_implementation_ownership(
             subscription_contract=subscription_contract, role_permissions=role_permissions,
         )
         result["authored" if authored else "code_owned"].extend(
-            canonical_write_action_id(collection["entity"], operation) for operation in CANONICAL_WRITE_OPERATIONS
+            canonical_write_action_id(collection["entity"], operation) for operation in canonical_write_operations(collection)
         )
     return result
 
