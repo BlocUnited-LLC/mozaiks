@@ -181,6 +181,11 @@ checks cannot produce a validated result. A saved draft identifies reviewable
 work, not a promoted application. Persistence failure cannot emit completion.
 
 Contract-surface regeneration uses that same worker finalizer and audit writer.
+After admitting an app-bundle plan, the worker asks the dependency-graph agent
+once about its affected paths using the Studio run binding. Each surface receives
+the same bounded relationships, source record ID and digest from the verified
+saved build when available. Earlier surface edits are reflected in the supplied
+file contents. Only the current surface's admitted paths can be written.
 Generation alone does not emit completion: `surface_result.status=success` is
 returned only after the finalizer validates and saves the draft; incomplete
 validation becomes `partial`, and failure becomes `failed`. Exceptions and

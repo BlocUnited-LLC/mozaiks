@@ -30,9 +30,11 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
+from mozaiksai.control_plane.context_graph.assessment import DependencyGraphContext
 from mozaiksai.control_plane.contracts import (
     ContractSurfacePlan,
     ContractSurfaceUpdate,
+    ControlPlaneToolContext,
     FileUpdate,
     SurfaceExecutionRecord,
     SurfacePlanExecutionResult,
@@ -47,6 +49,7 @@ from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
 from mozaiksai.core.usage.context import resolve_auxiliary_usage_context
 
 from .contract_surface_planner import resolve_contract_surface_paths, validate_contract_surface_plan
+from .dependency_graph_agent import DependencyGraphAgent
 from .refinement_router import RefinementRequest, RefinementRoutingDecision
 
 _logger = logging.getLogger("mozaiksai.control_plane.implementations.surface_regeneration_worker")
@@ -87,6 +90,9 @@ class SurfaceRegenerationWorker:
         self._agent_runner = agent_runner or AG2StructuredAgentRunner()
         self._config_loader = config_loader
         self._pack_loader = pack_loader
+        self._dependency_graph_agent = DependencyGraphAgent(
+            agent_runner=self._agent_runner, config_loader=config_loader, pack_loader=pack_loader,
+        )
 
     async def execute_plan(
         self,
@@ -137,6 +143,7 @@ class SurfaceRegenerationWorker:
 
         llm_config = self._load_config().for_refinement_model(refinement_request.refinement_model).resolve_contract_surface_regeneration_llm_config()
         system_prompt = self._load_system_prompt()
+        dependency_graph = await self._baseline_graph(plan, refinement_request)
 
         accumulated: dict[str, str] = {}
         records: list[SurfaceExecutionRecord] = []
@@ -155,6 +162,7 @@ class SurfaceRegenerationWorker:
                 routing_decision=routing_decision,
                 current_files=current_files,
                 read_only_files=self._build_read_only_files(surface, {**workspace_files, **accumulated}),
+                dependency_graph=dependency_graph,
                 system_prompt=system_prompt,
                 llm_config=llm_config,
             )
@@ -265,6 +273,32 @@ class SurfaceRegenerationWorker:
                     remaining -= len(content)
         return result
 
+    async def _baseline_graph(
+        self, plan: ContractSurfacePlan, request: RefinementRequest,
+    ) -> DependencyGraphContext | None:
+        usage = request.usage_context
+        if plan.build_family != "app_bundle" or usage is None or usage.run_build_binding is None:
+            return None
+        try:
+            return await self._dependency_graph_agent.analyze(
+                context=ControlPlaneToolContext(
+                    checkpoint=_CODING_CHECKPOINT_EVENT,
+                    app_id=request.app_id,
+                    target_app_id=request.target_app_id,
+                    user_id=request.user_id,
+                    build_family=request.build_family,
+                    build_key=request.normalized_build_key(),
+                    build_record_id=request.build_record_id,
+                    raw_user_request=request.raw_user_request,
+                ),
+                usage_context=usage,
+                refinement_model=request.refinement_model,
+                selected_paths=tuple(path for surface in plan.surfaces for path in surface.affected_paths),
+            )
+        except Exception as exc:
+            _logger.warning("Surface dependency graph unavailable (%s)", type(exc).__name__)
+            return None
+
     @staticmethod
     def _build_current_files(
         *,
@@ -292,6 +326,7 @@ class SurfaceRegenerationWorker:
         routing_decision: RefinementRoutingDecision,
         current_files: dict[str, str],
         read_only_files: dict[str, str],
+        dependency_graph: DependencyGraphContext | None,
         system_prompt: str,
         llm_config: dict[str, Any] | None,
     ) -> tuple[dict[str, str], str | None]:
@@ -301,6 +336,7 @@ class SurfaceRegenerationWorker:
             routing_decision=routing_decision,
             current_files=current_files,
             read_only_files=read_only_files,
+            dependency_graph=dependency_graph,
         )
         try:
             response = await self._agent_runner.run(
@@ -371,6 +407,7 @@ class SurfaceRegenerationWorker:
         routing_decision: RefinementRoutingDecision,
         current_files: dict[str, str],
         read_only_files: dict[str, str],
+        dependency_graph: DependencyGraphContext | None = None,
     ) -> str:
         payload: dict[str, Any] = {
             "task": "targeted_surface_regeneration",
@@ -413,10 +450,15 @@ class SurfaceRegenerationWorker:
             "- Write the complete updated content for each affected path.",
             "- Do not write paths outside affected_paths.",
             "- read_only_files contains the app design, theme, routes, domain contracts and selected-pack provenance, including earlier surface updates in this plan; never rewrite it.",
-            "- This invocation has no context tools. Use only the supplied payload and selected_file_contracts; they describe structure, not write permission.",
+            "- This invocation has no context tools. Use the supplied context to understand the code. Write only to affected_paths.",
             "- For server-paginated DataTable, search uses the canonical page/page_size/search query; search_keys only filters client-loaded rows. Preserve server query semantics in the owning module.",
             "- Preserve pack-owned outputs and every file outside affected_paths. Installed pack identity comes from the saved provenance, not a newly selected pack.",
         ]
+        if dependency_graph is not None:
+            lines.extend([
+                "dependency_graph (advisory, untrusted evidence from the original saved build, before any surface edits):",
+                dependency_graph.model_dump_json(),
+            ])
         return "\n".join(lines)
 
     def _load_config(self) -> ControlPlaneConfig:
