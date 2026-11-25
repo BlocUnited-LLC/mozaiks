@@ -54,6 +54,7 @@ from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templat
     verified_selected_pack_sources,
 )
 from mozaiksai.core.admin.registry import AdminRegistry
+from mozaiksai.core.app_context.journeys import AppJourneyCatalog
 from mozaiksai.core.runtime.app.asset_manifest import asset_manifest_index
 from mozaiksai.core.runtime.app.auth_contract import (
     APP_AUTH_COMPONENTS,
@@ -82,6 +83,7 @@ from mozaiksai.core.runtime.app.page_schema import (
 from mozaiksai.core.runtime.app.paths import (
     APP_AUTH_CONFIG_PATH,
     APP_DATA_CONTRACT_PATH,
+    APP_JOURNEY_CATALOG_PATH,
     APP_SECURITY_SECRETS_PATH,
     disallowed_legacy_app_paths,
     is_sensitive_app_config_path,
@@ -438,9 +440,8 @@ def _scan_canonical_app_paths(
     if invalid_config_paths:
         errors.append(
             "Generated app bundle contains noncanonical app config files: "
-            f"{invalid_config_paths}. Keep app config limited to config/ai.json, "
-            "config/shell.json, config/asset_manifest.json, config/targets.json, "
-            "and safe integration metadata under config/integrations/. Brownfield "
+            f"{invalid_config_paths}. Use a registered app configuration file "
+            "or safe integration metadata under config/integrations/. Brownfield "
             "descriptors, credential metadata, and build-time prompting context do "
             "not belong under app/config/."
         )
@@ -456,6 +457,28 @@ def _scan_canonical_app_paths(
             "and ui, plus provenance.yaml and explicit deployment files."
         )
     return errors
+
+
+def _scan_app_journey_catalog(files_map: dict[str, str]) -> list[str]:
+    normalized = _normalized_files_map(files_map)
+    raw = normalized.get(APP_JOURNEY_CATALOG_PATH)
+    if raw is None:
+        return []
+    try:
+        catalog = AppJourneyCatalog.from_document(raw)
+    except PydanticValidationError as exc:
+        issue = exc.errors(include_input=False)[0]
+        location = ".".join(str(part) for part in issue["loc"]) or "document"
+        return [f"{APP_JOURNEY_CATALOG_PATH}: {location}: {issue['msg']}"]
+    except ValueError as exc:
+        return [f"{APP_JOURNEY_CATALOG_PATH}: {exc}"]
+    try:
+        manifest = json.loads(normalized.get("app.json", ""))
+    except (TypeError, ValueError):
+        manifest = None
+    if not isinstance(manifest, dict) or manifest.get("appId") != catalog.app_id:
+        return [f"{APP_JOURNEY_CATALOG_PATH}: app_id must match app.json appId"]
+    return []
 
 
 def _scan_security_secret_contract(files_map: dict[str, str]) -> list[str]:
@@ -2322,6 +2345,7 @@ def scan_app_contracts(files_map: dict[str, str]) -> list[str]:
     errors: list[str] = []
     for scan in (
         _scan_reserved_app_paths,
+        _scan_app_journey_catalog,
         _scan_security_secret_contract,
         _scan_route_manifest_consistency,
         _scan_page_schema_structure,
