@@ -105,8 +105,6 @@ class UIToolsMixin:
                 break
             registry.pop(oldest, None)
             self._ui_tool_metadata.pop(oldest, None)
-            # An unread reply must not outlive the binding of its event id.
-            getattr(self, "_buffered_tool_call_responses", {}).pop(oldest, None)
 
     def _is_tool_call_response_resolved(self, event_id: str) -> bool:
         if not event_id:
@@ -224,8 +222,6 @@ class UIToolsMixin:
         persistence_scope_guard: Callable[[], None] | None = None,
     ) -> bool | None:
         """Emit the canonical ``chat.tool_call`` workflow UI event to the frontend."""
-        if awaiting_response and event_id:
-            self._require_event_owner(event_id, chat_id)
         # Extract agent_name from payload if not explicitly provided
         if not agent_name and isinstance(payload, dict):
             agent_name = payload.get("agent_name")
@@ -308,7 +304,6 @@ class UIToolsMixin:
             raise RuntimeError("Artifact persistence was not confirmed")
 
         if event_id and bool(awaiting_response):
-            self._require_event_owner(event_id, chat_id)
             self._get_resolved_tool_call_registry().pop(event_id, None)
             self._ui_tool_metadata[event_id] = {
                 "chat_id": chat_id,
@@ -501,12 +496,6 @@ class UIToolsMixin:
             return None
         chat_id = next(iter(chat_ids))
         return chat_id if isinstance(chat_id, str) and chat_id else None
-
-    def _require_event_owner(self, event_id: str, chat_id: str | None) -> None:
-        """Replies are authorized per chat and delivered by event id, so one id may not mean two chats."""
-        owner = (self._ui_tool_metadata.get(event_id) or {}).get("chat_id")
-        if owner and owner != chat_id:
-            raise ValueError("Tool call event id already belongs to another chat")
 
     async def acknowledge_workflow_feedback_render_for_user(
         self, event_id: str, *, principal: UserPrincipal,

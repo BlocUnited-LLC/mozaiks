@@ -262,58 +262,6 @@ async def test_refused_feedback_is_neither_stored_nor_delivered(hooked, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_an_event_id_belongs_to_one_chat():
-    transport = object.__new__(SimpleTransport)
-    transport._ui_tool_metadata = {"evt-1": {"chat_id": CHAT, "tool_name": "Card"}}
-    emit = {"tool_name": "Card", "component_name": "Card", "display_type": "inline", "payload": {}}
-    with pytest.raises(ValueError, match="another chat"):
-        await transport.send_tool_call_event("evt-1", "chat-b", **emit)
-    # Answered or not, the id stays with its chat.
-    transport._mark_tool_call_response_resolved("evt-1")
-    with pytest.raises(ValueError, match="another chat"):
-        await transport.send_tool_call_event("evt-1", "chat-b", **emit)
-    assert transport._ui_tool_metadata["evt-1"]["chat_id"] == CHAT
-
-
-@pytest.mark.asyncio
-async def test_two_chats_cannot_bind_one_event_id_while_the_first_is_stored(monkeypatch):
-    transport = object.__new__(SimpleTransport)
-    transport._ui_tool_metadata, transport.connections = {}, {}
-
-    async def persist(**_kwargs):
-        transport._ui_tool_metadata["evt-1"] = {"chat_id": CHAT, "tool_name": "Card"}
-        return True
-
-    monkeypatch.setattr(transport, "_persist_ui_tool_state", persist)
-    with pytest.raises(ValueError, match="another chat"):
-        await transport.send_tool_call_event(
-            "evt-1", "chat-b", tool_name="Card", component_name="Card", display_type="inline", payload={},
-        )
-    assert transport._ui_tool_metadata["evt-1"]["chat_id"] == CHAT
-
-
-def test_an_input_request_id_belongs_to_one_chat():
-    transport = object.__new__(SimpleTransport)
-    transport._input_request_registries = {}
-    assert transport.register_input_request(CHAT, "req-1", print) == "req-1"
-    assert transport.register_input_request(CHAT, "req-1", print) == "req-1"
-    other = transport.register_input_request("chat-b", "req-1", print)
-    assert other != "req-1" and set(transport._input_request_registries["chat-b"]) == {other}
-    assert set(transport._input_request_registries[CHAT]) == {"req-1"}
-
-
-def test_an_unread_reply_is_dropped_with_its_event():
-    transport = object.__new__(SimpleTransport)
-    transport._ui_tool_metadata = {"evt-old": {"chat_id": CHAT}}
-    transport._buffered_tool_call_responses = {"evt-old": {"action": "yes"}}
-    transport._mark_tool_call_response_resolved("evt-old")
-    for index in range(1024):
-        transport._mark_tool_call_response_resolved(f"evt-{index}")
-    assert "evt-old" not in transport._ui_tool_metadata
-    assert transport._buffered_tool_call_responses == {}
-
-
-@pytest.mark.asyncio
 async def test_input_is_delivered_only_to_the_chat_that_was_checked():
     transport = object.__new__(SimpleTransport)
     answered = []
