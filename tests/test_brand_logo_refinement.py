@@ -159,23 +159,32 @@ async def test_losing_logo_is_never_available_for_acceptance(selection):
     fixture.store.set_validation_status_for_build_record.assert_not_awaited()
 
 
-def test_actual_brand_tool_schema_excludes_server_context(monkeypatch):
+def test_actual_brand_tool_schema_excludes_server_context():
+    import os
+    import subprocess
+    import sys
+    import textwrap
     from pathlib import Path
 
-    from ag2.tools.final import FunctionTool
+    # The real loader hot-reloads shared Factory modules. Keep that process-local
+    # behavior away from other tests holding references to their imported modules.
+    root = Path(__file__).resolve().parents[1]
+    check = textwrap.dedent("""
+        from ag2.tools.final import FunctionTool
+        from mozaiksai.core.workflow.agents.factory import _wrap_tool_with_context
+        from mozaiksai.core.workflow.agents.tools import load_agent_tool_functions
 
-    from mozaiksai.core.workflow.agents import tools
-    from mozaiksai.core.workflow.agents.factory import _wrap_tool_with_context
-
-    workflow = "BrandAssetGeneratorWorkflow"
-    folder = Path(__file__).resolve().parents[1] / "factory_app" / "workflows" / workflow
-    monkeypatch.setattr(tools.workflow_manager, "resolve_workflow_path", lambda name: folder)
-    (promote,) = tools.load_agent_tool_functions(workflow)["BrandDesignerAgent"]
-    registered = FunctionTool.ensure_tool(_wrap_tool_with_context(promote, {}))
-    assert registered.name == "promote_brand_asset"
-    schema = registered.schema.function.parameters
-    assert set(schema["properties"]) == {"asset_id", "role", "alt_text"}
-    assert set(schema["required"]) == {"asset_id", "role"}
+        (promote,) = load_agent_tool_functions("BrandAssetGeneratorWorkflow")["BrandDesignerAgent"]
+        registered = FunctionTool.ensure_tool(_wrap_tool_with_context(promote, {}))
+        assert registered.name == "promote_brand_asset"
+        schema = registered.schema.function.parameters
+        assert set(schema["properties"]) == {"asset_id", "role", "alt_text"}
+        assert set(schema["required"]) == {"asset_id", "role"}
+    """)
+    subprocess.run(
+        [sys.executable, "-c", check], cwd=root, check=True, timeout=90,
+        env={**os.environ, "MOZAIKS_WORKFLOWS_PATH": str(root / "factory_app" / "workflows")},
+    )
 
 
 @pytest.mark.asyncio
