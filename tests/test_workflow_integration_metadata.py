@@ -17,7 +17,7 @@ from factory_app.workflows._shared.workflow_integration import (
     workflow_integration_source_pin,
     workflow_name_to_capability_id,
 )
-from mozaiksai.core.artifacts.models import BuildRecord
+from mozaiksai.core.artifacts.models import BuildRecord, BuildRecordStatus
 from tests.factory_context import factory_context
 
 
@@ -241,6 +241,8 @@ def test_missing_pinned_workflow_bundle_never_substitutes_another_catalog() -> N
     ("workflow_bundle", {"workflow_name": "PackWithTwoWorkflows", "workflow_integration_metadata": None}),
     ("workflow_bundle", {"summary_payload": {"name": "PackWithTwoWorkflows"}}),
     ("workflow_bundle", {"summary_payload": {"workflows": [{"name": "GuessedCapability"}]}}),
+    ("workflow_bundle", {"workflows": [{"workflow_name": "Review", "capability_id": "review",
+                                        "trigger_events": [{"event_type": "orders.future"}]}]}),
     ("app_bundle", {"summary_payload": {"name": "Invoice App"}}),
     ("app_bundle", {"workflow_integration_metadata": _metadata()}),
     ("workflow_bundle", {"workflow_integration_metadata": {**_metadata(), "source_artifact_version_id": "elsewhere"}}),
@@ -264,6 +266,18 @@ def test_saved_workflow_bundle_reads_exact_catalog_on_model_and_storage_document
         result = workflow_integration_metadata_from_artifact(stored)
         assert result["workflows"] == workflows
         assert result["source_artifact_version_id"] == "saved"
+
+
+@pytest.mark.parametrize("status", list(BuildRecordStatus))
+def test_pinned_workflow_lifecycle_matches_owned_revision_sources(status):
+    record = _record("saved", {"workflow_integration_metadata": _metadata()})
+    record.lifecycle_status = status
+    for stored in [record, record.model_dump(by_alias=True)]:
+        metadata = workflow_integration_metadata_from_artifact(stored)
+        if status in {BuildRecordStatus.ARCHIVED, BuildRecordStatus.DELETED}:
+            assert metadata is None
+        else:
+            assert metadata["source_artifact_version_id"] == "saved"
 
 
 @pytest.mark.parametrize("input_id", ["earlier-workflow", None])

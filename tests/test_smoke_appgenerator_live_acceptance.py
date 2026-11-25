@@ -273,7 +273,7 @@ def test_workflow_integration_gate_requires_the_pinned_source_even_with_no_workf
         assert result["failed_tests"][0]["test"] == "workflow_integration_source"
 
 
-@pytest.mark.parametrize("external", ["platform.identity.signed_in", "hosted.billing.activated"])
+@pytest.mark.parametrize("external", ["platform.identity.signed_in", "hosted.billing.activated", "mozaikspay.billing.checkout"])
 def test_generated_module_emit_cannot_verify_an_external_workflow_event(external):
     workflow = default_workflow_integration()
     workflow["trigger_events"][0]["event_type"] = external

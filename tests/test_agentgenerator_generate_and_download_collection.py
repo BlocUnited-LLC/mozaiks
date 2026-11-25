@@ -731,6 +731,27 @@ def test_duplicate_event_binding_routes_to_the_conflicting_workflow_for_repair(m
     ui.assert_not_awaited()
 
 
+def test_unknown_event_namespace_returns_the_owning_workflow_for_repair(monkeypatch, tmp_path: Path) -> None:
+    name = "ReviewOrder"
+    trigger = {"type": "event", "event": "orders.future", "capability_id": "review",
+               "description": "Review an order before it is sent to fulfillment."}
+    context = _Context({
+        "chat_id": "review-orders", "app_id": "orders", "pack_name": "Orders",
+        "workflows_spec": [{"name": name}],
+        "workflow_bundle_results": _make_bundle_results([{
+            "workflow_name": name, "files": _minimal_workflow_files(name, startup_mode="BackendOnly", triggers=[trigger]),
+        }]),
+    })
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
+    result = asyncio.run(generate_and_download_module.generate_and_download(
+        DownloadRequest={"confirmation_only": False, "storage_backend": "none"},
+        agent_message="Ready.", context_variables=context,
+    ))
+    assert result["outcome"] == "needs_revision"
+    assert result["workflow_bundle_repair"]["failed_workflows"] == [name]
+    assert any("orders.future" in issue and "must use" in issue for issue in result["validation_errors"])
+
+
 def test_generate_and_download_blocks_event_trigger_semantic_drift_before_ui(
     monkeypatch,
     tmp_path: Path,

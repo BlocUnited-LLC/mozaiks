@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 
-from mozaiksai.core.artifacts.models import BuildRecord
+from mozaiksai.core.artifacts.models import BuildRecord, BuildRecordStatus
 from mozaiksai.core.artifacts.summary_artifacts import _summary_bytes
 from mozaiksai.core.validation import (
     GeneratedAppValidationRequest,
@@ -173,7 +173,7 @@ async def test_explicit_candidate_checks_pinned_workflow_against_edited_files(sa
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("damage", ["missing", "catalog", "source_id", "app", "owner", "registry", "family"])
+@pytest.mark.parametrize("damage", ["missing", "catalog", "source_id", "app", "owner", "registry", "family", "archived", "deleted"])
 async def test_workflow_approval_requires_owned_exact_catalog(saved, workflow, damage):
     store, _, _ = saved
     if damage == "missing":
@@ -188,6 +188,8 @@ async def test_workflow_approval_requires_owned_exact_catalog(saved, workflow, d
         workflow.commit_metadata.author_user_id = "other"
     elif damage == "registry":
         workflow.commit_metadata.metadata["build_registry_id"] = "other"
+    elif damage in {"archived", "deleted"}:
+        workflow.lifecycle_status = BuildRecordStatus(damage)
     else:
         workflow.build_family = "design_docs"
     with pytest.raises(ValueError, match="workflow bundle"):

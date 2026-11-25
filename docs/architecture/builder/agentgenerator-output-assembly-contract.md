@@ -279,7 +279,8 @@ and build run. A refinement can also select a specific workflow bundle or
 inherit the workflow input recorded by its source app. A source app with no
 workflow input keeps that choice. Only an unbound build can look up the app's
 current workflow bundle. A pinned run must supply metadata from that exact
-workflow bundle to pass app acceptance.
+workflow bundle to pass app acceptance. Archiving or deleting that input
+blocks subsequent refinements that depend on it.
 The saved app records the workflow source verified at acceptance, including
 when another workflow bundle becomes current before the app is registered.
 AppPlanAgent receives every workflow and assigns each named trigger to a
@@ -287,9 +288,10 @@ module contract task. ConfigMiddlewareAgent declares the corresponding workflow
 capability in `module.yaml` and each assigned event-to-capability pair in
 `contracts/reactions.yaml`. When two workflows subscribe to the same event,
 the module declares both reactions. A workflow with no named event triggers has
-no generated event reaction. AgentGenerator sends duplicate event-and-capability
-pairs back to the workflow builder for repair. AppGenerator verifies the
-materialized bindings before export.
+no generated event reaction. AgentGenerator returns unknown event namespaces
+and duplicate event-and-capability pairs to the workflow builder for repair.
+AppGenerator verifies the materialized bindings before export. A generated
+subscription to an external event also needs evidence from its publisher.
 
 Smoke coverage:
 
