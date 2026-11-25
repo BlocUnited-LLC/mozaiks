@@ -141,6 +141,7 @@ class AgentSpec(DeclarativeModel):
     human_input_mode: str | None = None
     max_consecutive_auto_reply: int = 2
     pending_turn_replay: Literal["allow", "block"] = "allow"
+    reply_tool: str | None = Field(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
     structured_outputs_required: bool
     multimodal_inputs_enabled: bool = False
     image_generation_enabled: bool = False
@@ -171,7 +172,13 @@ class AgentSpec(DeclarativeModel):
     def _validate_prompt_shape(self) -> AgentSpec:
         has_prompt_sections = bool(self.prompt_sections or self.prompt_sections_custom)
         has_system_message = bool(self.system_message)
-        if not has_prompt_sections and not has_system_message:
+        if self.reply_tool:
+            if (self.structured_outputs_required or self.multimodal_inputs_enabled or self.image_generation_enabled
+                    or self.image_generation or self.sandbox_shell or self.web_search or self.web_fetch or self.duck_search):
+                raise ValueError(f"{self.name}: a reply_tool agent cannot use model output or built-in tools")
+            if has_prompt_sections or has_system_message:
+                raise ValueError(f"{self.name}: a reply_tool agent does not take a model prompt")
+        elif not has_prompt_sections and not has_system_message:
             raise ValueError(
                 f"agent '{self.name}' must provide prompt_sections/prompt_sections_custom or system_message"
             )
