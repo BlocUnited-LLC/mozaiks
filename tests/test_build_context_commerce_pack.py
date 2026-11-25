@@ -87,14 +87,16 @@ def test_commerce_contract_required_outputs_exist_under_templates() -> None:
     } <= forbidden
 
 
-def test_commerce_pack_pin_matches_across_git_line_endings(tmp_path: Path) -> None:
+@pytest.mark.parametrize("pack_id", ["commerce", "mozaikspay"])
+def test_store_pack_pins_match_across_git_line_endings(tmp_path: Path, pack_id: str) -> None:
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         verify_pack_integrity,
     )
 
     repo = tmp_path / "source"
-    pack_path = COMMERCE.relative_to(WORKSPACE)
-    shutil.copytree(COMMERCE, repo / pack_path, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    source = BUILD_CONTEXT / pack_id
+    pack_path = source.relative_to(WORKSPACE)
+    shutil.copytree(source, repo / pack_path, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     shutil.copyfile(WORKSPACE / ".gitattributes", repo / ".gitattributes")
     git = ["git", "-C", str(repo)]
     subprocess.run([*git, "init", "--quiet"], check=True)
@@ -107,7 +109,7 @@ def test_commerce_pack_pin_matches_across_git_line_endings(tmp_path: Path) -> No
             [*git, "-c", f"core.autocrlf={autocrlf}", "checkout-index", "--all", f"--prefix={output.as_posix()}/"],
             check=True,
         )
-        pins.append(verify_pack_integrity(output / pack_path, "commerce")["digest"])
+        pins.append(verify_pack_integrity(output / pack_path, pack_id)["digest"])
     assert pins[0] == pins[1]
 
 
