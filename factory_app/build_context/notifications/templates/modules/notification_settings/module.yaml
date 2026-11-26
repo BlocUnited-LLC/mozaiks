@@ -5,8 +5,8 @@ module:
   version: 1.0.0
   description: >
     User notification preference management. Stores per-channel opt-in preferences
-    (email, push, SMS). Does not own external delivery — delivery adapters live in
-    services/adapters/notifications/ and are invoked from reactions.yaml.
+    (email, push, SMS). Does not own external delivery — the email adapter lives in
+    services/adapters/notifications/ and is invoked from reactions.yaml.
   owner: app
   visibility: private
   handler: backend.handler:NotificationSettingsHandler

@@ -1062,6 +1062,49 @@ For that reason, a reusable builder pack should be designed in this order:
 4. Add templates only for deterministic files the pack owns.
 5. Use prompt projections to give each agent only the relevant catalog slice.
 
+## Notifications email delivery
+
+The notifications pack delivers email. Its adapter,
+`services/adapters/notifications/email.py`, exposes
+`send_email(to, subject, body)` and speaks SMTP, so the mail service is a
+deployment choice rather than generated code:
+
+| Where the app runs | Who supplies the SMTP settings |
+| --- | --- |
+| Self-hosted | The operator, from any SMTP service or their own server |
+| Managed hosting | The host, which injects the same names at deployment |
+
+The app never names a provider or branches on who hosts it. Moving between the
+two changes configuration only.
+
+| Name | Meaning |
+| --- | --- |
+| `SMTP_HOST` | SMTP server hostname or address; required to send |
+| `SMTP_FROM` | Sender mailbox, with or without a display name; required to send |
+| `SMTP_SECURITY` | `starttls` (default), `ssl`, or `none` |
+| `SMTP_PORT` | Defaults to 587, or 465 for `ssl` |
+| `SMTP_USER`, `SMTP_PASSWORD` | Optional pair for servers that authenticate |
+
+The pack declares these names in `pack.deployment_env`, so generated env examples
+and the deployment manifest list them. They are optional because an app runs
+without email; sending before configuration raises an error that names what is
+missing. `SMTP_PASSWORD` resolves through the app secret contract: a direct
+environment value first, then a vault entry the app declares. Never put
+credential values in generated files.
+
+`none` permits only a credential-free loopback test server. Other connections
+require certificate-verified TLS and never fall back to plaintext. `True` means
+the SMTP server accepted the message, not that it reached an inbox.
+
+The reacting app module owns the triggering domain event, recipient identity,
+ownership and opt-in check. Resolve those from app-owned records before calling
+the adapter; an address or opt-in flag carried by an event is not approval. The
+[module reaction rules](../modules-systems/module-system.md) describe the scoped
+persistence a handler reaction receives. The pack ships no reaction of its own.
+
+The pack has no push or SMS delivery. Its preference fields for those channels
+only store a user's choice.
+
 ## Cross References
 
 - [Workflow Architecture](workflow-architecture.md)
