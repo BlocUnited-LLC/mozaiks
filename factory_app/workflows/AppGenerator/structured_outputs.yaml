@@ -2459,6 +2459,8 @@ models:
           meta.ask_context to ground ask-mode answers. The runtime dispatches
           these with an EMPTY permission grant, so the action must also declare
           permissions: [] and must scope its own reads to the requesting user.
+          When refining a read used by an existing page's meta.ask_context,
+          preserve its reviewed eligibility or revise the page and action together.
           This is independent of api_surface and never widens HTTP exposure; do
           not set it on any action that writes, emits events, or returns another
           user's data.

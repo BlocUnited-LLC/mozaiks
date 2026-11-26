@@ -58,8 +58,9 @@ from .generator_support.module_entitlement_gates import (
 from .generator_support.module_policy import materialize_task_module_policies, policy_module_id
 from .generator_support.module_read_actions import materialize_module_read_implementations
 from .generator_support.module_revision import (
-    retained_custom_action_prompt,
+    retained_custom_action_context,
     scoped_service_revision_paths,
+    validate_retained_ask_callers,
     validate_scoped_service_repositories,
 )
 from .generator_support.module_smoke_fixtures import pack_smoke_fixture_task_output
@@ -1149,8 +1150,12 @@ async def _run_one_task(
                 "and checks their acceptance criteria after your response."
             )
     scoped_prompt = _build_scoped_worker_prompt(prompt, task_context)
+    retained_ask_callers: dict[str, str] = {}
     if workflow_name == "AppGenerator" and task.get("task_type") == "module_contract":
-        scoped_prompt += await retained_custom_action_prompt(base_context, str(task.get("capability_pack_id") or ""))
+        retained_prompt, retained_ask_callers = await retained_custom_action_context(
+            base_context, str(task.get("capability_pack_id") or ""), all_task_items,
+        )
+        scoped_prompt += retained_prompt
 
     if fresh_agents_per_task:
         if agents_factory is None:
@@ -1273,6 +1278,8 @@ async def _run_one_task(
                     subscription_contract=subscription_contract, companion_files=companion_files,
                     result_action_schemas=result_schemas,
                 ))
+                if retained_ask_callers:
+                    validate_retained_ask_callers(output.get("module_contract") or {}, retained_ask_callers)
                 if result_schemas:
                     from factory_app.workflows.AppGenerator.tools.workflow_result_writes import (
                         compile_result_task_bindings,

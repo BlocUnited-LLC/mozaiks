@@ -130,25 +130,42 @@ def test_module_worker_compiles_internal_receiver_and_retains_custom_reads():
 async def test_revision_worker_reads_retained_signatures_only_from_the_selected_app(monkeypatch):
     from factory_app.workflows._shared import revision_app_source
     from mozaiksai.core.workflow.generator_support.module_revision import (
-        retained_custom_action_prompt,
+        retained_custom_action_context,
+        validate_retained_ask_callers,
     )
 
     action = {"id": "summarize", "api_surface": "public", "permissions": [], "handler_method": "summarize",
               "output_schema": {"type": "object", "properties": {"last_updated": {"type": ["string", "null"]}},
                                 "required": ["last_updated"]}}
     path = "modules/tasks/module.yaml"
+    page = "ui/pages/tasks.yaml"
+    action["ask_context_safe"] = True
     prior = yaml.safe_dump({"module": {"id": "tasks"}, "actions": [action, {"id": "retired"}]})
-    read = AsyncMock(return_value={path: prior})
+    read = AsyncMock(return_value={path: prior, page: yaml.safe_dump({"meta": {"ask_context": [{"module": "tasks", "action": "summarize"}]}})})
     monkeypatch.setattr(revision_app_source, "read_bound_revision_files", read)
     ctx = {"build_mode": "revision", "workflow_sequence": "app_revision", "revision_source_artifact_version_id": "source",
            "design_surface_map": {"surfaces": [{"owner": "app", "surface_id": "tasks", "surface_kind": "module",
                                                  "custom_reads": ["summarize", "new_read"]}]},
            "generated_files": {path: prior.replace("last_updated", "forged")}}
-    prompt = await retained_custom_action_prompt(ctx, "tasks")
+    prompt, callers = await retained_custom_action_context(ctx, "tasks", [])
     read.assert_awaited_once_with(ctx)
     assert json.loads(prompt.splitlines()[-1]) == [action]
     assert "forged" not in prompt and "retired" not in prompt
-    assert await retained_custom_action_prompt({**ctx, "build_mode": "new"}, "tasks") == ""
+    assert callers == {"summarize": page}
+    assert "Keep ask_context_safe true" in prompt
+    changed = {"module_id": "tasks", "module_yaml": {"actions": [{**action, "ask_context_safe": False}]}}
+    with pytest.raises(ValueError, match="tasks.yaml.*tasks/summarize"):
+        validate_retained_ask_callers(changed, callers)
+    assert changed["module_yaml"]["actions"][0]["ask_context_safe"] is False
+    validate_retained_ask_callers({"module_id": "tasks", "module_yaml": {"actions": [action]}}, callers)
+    for disqualifying in ({"emits": ["domain.tasks.changed"]}, {"permissions": ["admin"]}):
+        with pytest.raises(ValueError, match="tasks.yaml.*tasks/summarize"):
+            validate_retained_ask_callers({"module_id": "tasks", "module_yaml": {"actions": [{**action, **disqualifying}]}}, callers)
+    assert (await retained_custom_action_context(ctx, "tasks", [{"owned_paths": [page]}]))[1] == {}
+    manifest = "ui/route_manifest.json"
+    read.return_value[manifest] = json.dumps({"pages": [{"meta": {"ask_context": [{"module": "tasks", "action": "summarize"}]}}]})
+    assert (await retained_custom_action_context(ctx, "tasks", [{"owned_paths": [page]}]))[1] == {"summarize": manifest}
+    assert await retained_custom_action_context({**ctx, "build_mode": "new"}, "tasks", []) == ("", {})
 
 
 @pytest.mark.parametrize("field,value", [("api_surface", "public"), ("permissions", ["extra"]), ("emits", [EVENT]),

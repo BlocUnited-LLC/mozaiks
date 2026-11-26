@@ -152,6 +152,13 @@ controlled only by `depends_on`, `concurrency`, and the batch failure policy.
 Once all ready tasks complete, the downstream parent workflow phase starts with
 the updated `result.context_key` and `status_key` context values.
 
+On an app revision, the module worker receives the retained custom action
+contracts from the selected app archive. If an unchanged schema page or route
+uses one of those reads for Ask, the worker must preserve its Ask eligibility,
+empty permissions, and absence of emitted events. An incompatible module
+response fails the worker task. A coordinated change may edit the referring
+page in the same plan and must pass normal app-level reference validation.
+
 For both explicit batches and decomposition conveyors, `depends_on` controls
 both scheduling and context routing. A downstream task receives:
 
