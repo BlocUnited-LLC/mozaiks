@@ -107,6 +107,14 @@ records fail closed; they never authorize first generation or fallback to an
 older bundle. Direct app-bundle revisions retain their existing selected-source
 rules. Neither path changes routing, schema approval or runtime permissions.
 
+For a feature revision confined to modules, data and schema pages, AppGenerator
+can retain the accepted sign-in settings for privately owned data. It checks
+the original compiled plan against the app manifest and validated auth contract
+under the same owner and build registry. This applies to signed-in apps with
+registration disabled and no named roles when the reviewed design also has no
+role grants. A conflicting registration or role request goes back to plan
+review. A revision scoped to authentication follows the regular auth plan.
+
 Registration and export normally finish in the same tool invocation. If the
 process stops after publishing the first draft bundle but before export finishes,
 hydration sees that draft and refuses to reclassify the app as empty. Recovery

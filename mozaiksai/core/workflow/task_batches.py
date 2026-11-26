@@ -59,6 +59,7 @@ from .generator_support.module_policy import materialize_task_module_policies, p
 from .generator_support.module_read_actions import materialize_module_read_implementations
 from .generator_support.module_revision import (
     retained_custom_action_context,
+    retained_workflow_page_prompt,
     scoped_service_revision_paths,
     validate_retained_ask_callers,
     validate_scoped_service_repositories,
@@ -1152,6 +1153,8 @@ async def _run_one_task(
                 "and checks their acceptance criteria after your response."
             )
     scoped_prompt = _build_scoped_worker_prompt(prompt, task_context)
+    if workflow_name == "AppGenerator" and task.get("task_type") == "page_bundle":
+        scoped_prompt += await retained_workflow_page_prompt(base_context, _normalize_owned_paths(task.get("owned_paths")))
     retained_ask_callers: dict[str, str] = {}
     if workflow_name == "AppGenerator" and task.get("task_type") == "module_contract":
         retained_prompt, retained_ask_callers = await retained_custom_action_context(

@@ -744,6 +744,8 @@ async def test_scoped_assembly_hydrates_verified_archive_and_preserves_baseline(
 ])
 async def test_bad_revision_baseline_fails_without_mutating_generated_files(baseline, fault):
     context = baseline.context
+    context.update(app_plan_ready=True, app_task_batch_items=[{"task_id": "cached"}],
+                   app_build_plan={"auth_mode": "public_self_signup"}, app_task_batch_status="planned")
     if fault == "missing_id":
         context["artifact_version_id"] = None
     elif fault == "missing_artifact":
@@ -765,6 +767,8 @@ async def test_bad_revision_baseline_fails_without_mutating_generated_files(base
     with pytest.raises(ValueError):
         await revision.hydrate_app_revision_context(context)
     assert "generated_files" not in context
+    assert not context["app_plan_ready"] and not context["app_task_batch_items"]
+    assert context["app_build_plan"] is None and context["app_task_batch_status"] == "planned"
 
 
 @pytest.mark.asyncio
@@ -1193,6 +1197,41 @@ async def test_baseline_loader_uses_declared_lifecycle_context_authority(baselin
     assert revision.revision_source_artifact_id(context) == ("artifact_1" if has_bundle else None)
 
 
+@pytest.mark.parametrize(("fault", "expected"), [
+    ("none", True), ("auth_scope", False), ("missing_scope", False), ("public_source", False),
+    ("registration_enabled", False), ("prior_mode_drift", False), ("unbound", False),
+])
+async def test_feature_auth_projection_uses_verified_compilation_and_retained_files(baseline, monkeypatch, fault, expected):
+    document = yaml.safe_load((Path(__file__).resolve().parents[1] / "factory_app/app/config/auth.yaml").read_text())
+    document.update(mode="brokered_oidc", signup_enabled=fault == "registration_enabled", authorization={"roles": []})
+    _replace_archive(baseline, {
+        "app.json": json.dumps({"appId": "customer-app", "authRequired": fault != "public_source"}),
+        "config/auth.yaml": yaml.safe_dump(document),
+    })
+    _upstream_design_revision(baseline, bundles=[baseline.artifact])
+    baseline.artifact.commit_metadata.metadata["compilation_inputs"] = {"version": 1 if fault == "unbound" else 2}
+    prior_mode = "public_self_signup" if fault == "prior_mode_drift" else "brokered_oidc"
+    resolver = AsyncMock(return_value=SimpleNamespace(context_for=lambda app_id: {
+        "app_build_plan": {"auth_strategy": "basic-login", "auth_mode": prior_mode, "roles": []},
+    }))
+    monkeypatch.setattr(revision, "resolve_app_compilation_inputs", resolver)
+    paths = {"auth_scope": ["config/auth.yaml"], "missing_scope": []}.get(fault, ["modules/records/module.yaml"])
+    baseline.context.update(revision_scope="feature", impact_set={"affected_bundle_paths": paths},
+                            generated_files={"config/auth.yaml": "untrusted: true"})
+    await revision.hydrate_app_revision_context(baseline.context)
+    assert baseline.context["retained_feature_login"] == ({
+        "source_artifact_version_id": baseline.artifact.id, "auth_strategy": "basic-login", "auth_mode": "brokered_oidc",
+    } if expected else {})
+    if expected:
+        resolver.assert_awaited_once_with(app_id="customer-app", build_record_id=baseline.artifact.id,
+                                         owner_user_id="owner", build_registry_id="registry_1")
+        # Assembly also re-verifies the source before using a previously hydrated plan.
+        baseline.context["retained_feature_login"] = {"auth_mode": "public_self_signup"}
+        await revision.hydrate_revision_files(baseline.context)
+        assert baseline.context["retained_feature_login"]["auth_mode"] == "brokered_oidc"
+        assert resolver.await_count == 2
+
+
 def test_launch_context_cannot_inject_first_generation_or_baseline_selection(monkeypatch):
     from mozaiksai.core.session.launcher import validate_context_for_workflow
     from mozaiksai.core.workflow.context.authority import ContextAuthorityError
@@ -1201,7 +1240,8 @@ def test_launch_context_cannot_inject_first_generation_or_baseline_selection(mon
     config = yaml.safe_load((Path(__file__).resolve().parents[1] / "factory_app/workflows/AppGenerator/context_variables.yaml").read_text(encoding="utf-8"))
     monkeypatch.setattr(workflow_manager, "get_config", lambda name: {"context_variables": config})
     for writer in ("caller_input", "transition_router"):
-        for seed in ({"revision_first_generation": True}, {"revision_source_artifact_version_id": "foreign"}):
+        for seed in ({"revision_first_generation": True}, {"revision_source_artifact_version_id": "foreign"},
+                     {"retained_feature_login": {"auth_strategy": "basic-login"}}):
             with pytest.raises(ContextAuthorityError):
                 validate_context_for_workflow("AppGenerator", seed, writer_id=writer)
 

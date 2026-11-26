@@ -877,7 +877,11 @@ def validate_planned_page(content: str, planned: dict[str, Any], path: str) -> N
         if "retained_ask_context" in planned:
             refs = page.meta.ask_context if page.meta else []
             current = [ref.model_dump(mode="json", exclude_none=True) for ref in refs or []]
-            if current != planned["retained_ask_context"]:
+            expected = planned["retained_ask_context"]
+            if planned.get("partial_ask_context"):
+                targets = {(ref["module"], ref["action"]) for ref in expected}
+                current = [ref for ref in current if (ref["module"], ref["action"]) in targets]
+            if current != expected:
                 raise ValueError(f"Adding the reviewed controls must preserve the accepted meta.ask_context "
                                  f"on route {planned['route']!r}, including its parameters and labels.")
         if page.route != planned["route"]:

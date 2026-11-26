@@ -41,6 +41,7 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     release_subscriptions_config,
 )
 from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
+    discard_executable_plan,
     revision_baseline_required,
 )
 from factory_app.workflows.AppGenerator.tools.plan_page_data_sources import (
@@ -88,9 +89,7 @@ _WORKFLOWS_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _clear_plan(context: Any) -> None:
-    context.set("app_plan_ready", False)
-    context.set("app_build_plan", None)
-    context.set("app_task_batch_items", [])
+    discard_executable_plan(context)
     context.set("app_task_batch_status", None)
 
 
@@ -1174,7 +1173,7 @@ def validate_plan_dependencies(plan: dict[str, Any], context: Any) -> None:
         )
         raise ValueError(
             "Every depends_on must name a task_id this plan declares. "
-            f"{detail}. Either declare the missing tasks, or drop the dependency "
+            f"{detail}. Declared task IDs: {sorted(declared)}. Either declare the missing tasks, or drop the dependency "
             "if the work is already covered by a task that is present."
         )
     deterministic_topological_order(
@@ -2376,6 +2375,7 @@ def review_app_build_plan(
                     # Cached plans carry this projection. Review binds it again from DesignDocs.
                     page.pop("required_write_actions", None)
                     page.pop("retained_ask_context", None)
+                    page.pop("partial_ask_context", None)
         plan = models["AppBuildPlan"].model_validate(payload).model_dump(mode="json")
         for repair in _strip_workspace_app_root(plan):
             logger.info("[AppGenerator] plan repaired: %s", repair)

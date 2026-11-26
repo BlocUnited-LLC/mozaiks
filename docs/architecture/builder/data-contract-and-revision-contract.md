@@ -452,6 +452,15 @@ reads against the accepted archive. A separately planned change can revise
 both the page and its read access. Already reachable controls keep their page.
 If a retained plan loses its dispatch rows, Factory checks the accepted archive
 again. A plan with ambiguous page ownership goes back through plan review.
+For an indirect page edit in a workflow feature revision, Factory also retains
+the existing control that triggers the reviewed workflow when its owning module
+and action remain in DesignDocs. The page worker receives its owned page from
+the accepted archive. Eligible Ask reads still declared by that page's owning
+module retain their parameters and labels. On pages shared by several modules,
+this check applies only to the eligible reads. Each other reference is still
+validated against the assembled app. These rules apply whether the
+affected path is exact or a pattern. A page-only revision, or a revised design
+that removes the page's ownership of the workflow trigger, keeps its own scope.
 Page bindings use the full approved action inventory. Managed facade entries use
 the pack contract's full action set even when DesignDocs names a subset.
 Subscription gate targets are restricted to approved writes and custom reads;
@@ -593,11 +602,14 @@ Default rule:
 
 ## Safe Migration Categories
 
+The runtime executes `ensure_collection` and `ensure_index`. Adding an
+optional field to an existing collection only changes `data/contract.json`.
+Stored documents can omit the field. A required backfill needs its own
+reviewed implementation.
+
 Safe to auto-apply:
 
 - create collection
-- add nullable field
-- add field with deterministic backfill/default
 - add non-conflicting index
 
 Needs explicit review:

@@ -8,10 +8,17 @@ from factory_app.workflows._shared.revision_app_source import (
     read_bound_revision_files,
     revision_baseline_required,
 )
-from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
+from factory_app.workflows.AppGenerator.tools.app_build_plan import (
+    _apply_reviewed_page_writes,
+    app_build_plan,
+)
 from factory_app.workflows.AppGenerator.tools.app_plan_review import (
     _clear_plan,
     _missing_revision_page_tasks,
+)
+from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
+    bind_retained_feature_login,
+    discard_executable_plan,
 )
 from mozaiksai.core.workflow.generator_support.code_files import planned_page_path
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
@@ -46,7 +53,17 @@ async def hydrate_app_build_plan_context(context_variables: Any = None) -> dict[
     existing_items = data.get("app_task_batch_items")
     if isinstance(existing_items, list) and existing_items:
         rebound = dict(plan)
-        bind_legacy_read_timestamps(rebound, data)
+        try:
+            bindings = data.get("retained_workflow_page_bindings") or {}
+            if bindings:
+                pages = [dict(page) for page in plan.get("pages") or []]
+                _apply_reviewed_page_writes([page for page in pages if planned_page_path(page) in bindings], data)
+                rebound["pages"] = pages
+            bind_legacy_read_timestamps(rebound, data)
+            bind_retained_feature_login(rebound, data)
+        except ValueError:
+            discard_executable_plan(context_variables)
+            raise
         if rebound != plan:
             if isinstance(context_variables, dict):
                 context_variables["app_build_plan"] = rebound

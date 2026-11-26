@@ -243,6 +243,26 @@ definitions:
     source:
       type: state
       default: null
+  retained_feature_login:
+    type: object
+    description: Prior sign-in policy verified against the accepted compilation and auth manifest for a scoped feature revision.
+    authority_class: closed_writer_quality_state
+    writer_ids: [lifecycle_tool, deterministic_tool]
+    model_visible: false
+    persisted: true
+    source:
+      type: state
+      default: {}
+  retained_workflow_page_bindings:
+    type: object
+    description: Accepted page controls and Ask references retained for an indirectly affected workflow feature.
+    authority_class: closed_writer_quality_state
+    writer_ids: [lifecycle_tool, deterministic_tool]
+    model_visible: false
+    persisted: true
+    source:
+      type: state
+      default: {}
   legacy_optional_updated_at_reads:
     type: object
     description: Existing canonical record reads on the verified revision source that permit a missing updated_at.

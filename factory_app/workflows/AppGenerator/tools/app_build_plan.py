@@ -7,6 +7,9 @@ from typing import Annotated, Any, get_args
 
 from pydantic import Field
 
+from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
+    bind_retained_feature_login,
+)
 from mozaiksai.core.runtime.app.auth_contract import AuthMode
 from mozaiksai.core.runtime.app.paths import (
     APP_AUTH_CONFIG_PATH,
@@ -1364,12 +1367,17 @@ def _apply_reviewed_page_writes(
     for page in pages:
         page.pop("required_write_actions", None)  # The plan cannot author this projection.
         page.pop("retained_ask_context", None)
+        page.pop("partial_ask_context", None)
         route = page.get("route", "")
         required = by_route.get(route, [])
         if page.get("ui_surface") != "declarative_page":
             if required:
                 raise ValueError(f"Reviewed writes on {route!r} require its approved declarative_page")
             continue
+        path = planned_page_path(page)
+        retained = (context.get("retained_workflow_page_bindings") or {}).get(path) if context is not None else None
+        if required and retained:
+            required = [*required, *(ref for ref in retained["writes"] if ref not in required)]
         for source in required:
             module, action = source["module_id"], source["action_id"]
             if action not in inventory.get(module, []):
@@ -1378,8 +1386,12 @@ def _apply_reviewed_page_writes(
                     "Revise the approved DesignDocs action reference."
                 )
         page["required_write_actions"] = required
-        path = planned_page_path(page)
-        if required and retained_asks is not None and path in retained_asks:
+        if required and retained:
+            if "ask_context" in retained:
+                page["retained_ask_context"] = retained["ask_context"]
+                if retained.get("partial_ask_context"):
+                    page["partial_ask_context"] = True
+        elif required and retained_asks is not None and path in retained_asks:
             page["retained_ask_context"] = retained_asks[path]
 
 
@@ -2219,13 +2231,17 @@ def app_build_plan(
     pages = _normalize_object_list(AppBuildPlan.get("pages"))
     entities = _normalize_object_list(AppBuildPlan.get("entities"))
     roles = _normalize_string_list(AppBuildPlan.get("roles"))
+    bind_retained_feature_login(AppBuildPlan, context_variables)
     auth_strategy = AppBuildPlan.get("auth_strategy")
     auth_required_from_strategy(auth_strategy, roles=roles, field="AppBuildPlan.auth_strategy")
     auth_mode = AppBuildPlan.get("auth_mode")
     if auth_mode is not None and auth_mode not in get_args(AuthMode):
         raise ValueError("AppBuildPlan.auth_mode must use a canonical runtime auth mode")
     if auth_mode is not None and auth_strategy in (None, "public"):
-        raise ValueError("AppBuildPlan.auth_mode requires a sign-in auth_strategy")
+        raise ValueError(
+            "AppBuildPlan.auth_mode requires a sign-in auth_strategy. Public means anonymous access. "
+            "Use the approved sign-in strategy for a private app; name roles only when the design declares them."
+        )
     service_scope = _normalize_string_list(AppBuildPlan.get("service_scope"))
     frontend_scope = _normalize_string_list(AppBuildPlan.get("frontend_scope"))
     theme_preferences = AppBuildPlan.get("theme_preferences")

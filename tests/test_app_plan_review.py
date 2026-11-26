@@ -133,6 +133,99 @@ def test_capability_source_uses_canonical_finite_vocabulary():
     assert set(field["values"]) == VALID_CAPABILITY_SOURCES | {"host_universal"}
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["indirect", "known_path", "known_path_and_wildcard", "direct_page", "unrelated_workflow", "removed_create",
+                                   "different_page_owner", "mixed_ask", "restricted_ask"])
+async def test_explicit_page_task_retains_only_reviewed_workflow_controls(change, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from factory_app.workflows.AppGenerator.tools.app_build_plan import _apply_reviewed_page_writes
+    from mozaiksai.core.workflow.generator_support import module_revision
+    from mozaiksai.core.workflow.generator_support.page_action_bindings import (
+        planned_page_writes,
+        validate_required_page_writes,
+    )
+
+    plan, ctx, path, ask = _revision_with_form("update_report")
+    ctx = ctx.snapshot()
+    surface = ctx["design_surface_map"]["surfaces"][0]
+    surface.update(owned_mutations=["create_report", "update_report"], owned_pages=["Reports"], custom_reads=["summary"])
+    if change == "removed_create":
+        surface["owned_mutations"].remove("create_report")
+    if change == "different_page_owner":
+        surface["owned_pages"] = ["Other"]
+    ctx["design_docs_build_artifact"]["commit_metadata"]["metadata"]["summary_payload"]["surface_map"] = deepcopy(ctx["design_surface_map"])
+    paths = {"known_path": [path], "known_path_and_wildcard": [path, "ui/pages/*.yaml"]}.get(change, ["ui/pages/*.yaml"])
+    ctx.update(revision_scope="feature", change_intent={"requires_workflow_revision": change != "unrelated_workflow"},
+               impact_set={"affected_bundle_paths": paths})
+    if change == "direct_page":
+        ctx["workflow_sequence"] = "app_revision"
+    monkeypatch.setattr(module_revision, "pinned_result_workflows", lambda context: [{"result_write_plans": [
+        {"module_id": "reports", "result_write": {"source_action": "create_report"}}]}])
+    document = yaml.safe_load(ctx["generated_files"][path])
+    document["sections"].append({"id": "create", "primitive": "Form", "config": {
+        "submit_action": {"action_type": "submit", "href": "/api/modules/reports/create_report"}}})
+    if change == "mixed_ask":
+        document["meta"]["ask_context"].append({"module": "another", "action": "summary"})
+    files = {path: yaml.safe_dump(document), "modules/reports/module.yaml": yaml.safe_dump({
+        "module": {"id": "reports"}, "actions": [{"id": "create_report"},
+        {"id": "summary", "ask_context_safe": True, "permissions": ["restricted"] if change == "restricted_ask" else []}]})}
+    bindings = module_revision.retained_workflow_page_bindings(ctx, files)
+    if change in {"direct_page", "unrelated_workflow", "removed_create", "different_page_owner"}:
+        assert bindings == {}
+        return
+    assert bindings[path]["writes"] == [{"module_id": "reports", "action_id": "create_report"}]
+    if change == "restricted_ask":
+        assert "ask_context" not in bindings[path]
+        return
+    assert bindings[path]["ask_context"] == ask
+    assert bool(bindings[path].get("partial_ask_context")) == (change == "mixed_ask")
+    ctx["retained_workflow_page_bindings"] = bindings
+    page = {**plan["pages"][0], "ui_surface": "declarative_page"}
+    _apply_reviewed_page_writes([page], ctx)
+    assert page["retained_ask_context"] == ask
+    if change == "mixed_ask":
+        from mozaiksai.core.workflow.generator_support.page_plan_utils import validate_planned_page
+
+        minimal = {"schema_version": "mozaiks.app_page.v1", "name": "reports", "title": "Reports",
+                   "route": "/reports", "page_type": "record_list", "layout": "full-width",
+                   "sections": [{"id": "header", "primitive": "PageHeader", "config": {"title": "Reports"}}],
+                   "meta": {"ask_context": document["meta"]["ask_context"]}}
+        validate_planned_page(yaml.safe_dump(minimal), page, path)
+        minimal["meta"]["ask_context"] = deepcopy(ask)
+        validate_planned_page(yaml.safe_dump(minimal), page, path)
+        minimal["meta"]["ask_context"][0]["params"] = {}
+        with pytest.raises(ValueError, match="meta.ask_context"):
+            validate_planned_page(yaml.safe_dump(minimal), page, path)
+    required = planned_page_writes([page])
+    assert required == {"/reports": {"reports/create_report", "reports/update_report"}}
+    with pytest.raises(ValueError, match="update_report"):
+        validate_required_page_writes(files[path], "/reports", required, path, identity_validated=True)
+    read = AsyncMock(return_value={**files, "ui/pages/unrelated.yaml": "private-other-page"})
+    monkeypatch.setattr("factory_app.workflows._shared.revision_app_source.read_bound_revision_files", read)
+    prompt = await module_revision.retained_workflow_page_prompt(ctx, [path, path, "app.json"])
+    rows = json.loads(prompt.split("app data.\n")[1])
+    assert list(rows) == [path] and rows[path]["source"] == files[path]
+    assert rows[path]["retained"]["ask_context"] == ask and rows[path]["truncated"] is False
+    read.assert_awaited_once_with(ctx)
+    assert not await module_revision.retained_workflow_page_prompt(ctx, ["ui/pages/unrelated.yaml"])
+
+
+@pytest.mark.asyncio
+async def test_rejected_cached_page_projection_discards_dispatch_rows():
+    from factory_app.workflows.AppGenerator.tools.hydrate_app_build_plan_context import (
+        hydrate_app_build_plan_context,
+    )
+
+    plan, context, path, _ = _revision_with_form("update_report")
+    context.set("app_build_plan", plan)
+    context.set("app_task_batch_items", [{"task_id": "past-executable-page"}])
+    context.set("retained_workflow_page_bindings", {path: {"writes": [{"module_id": "reports", "action_id": "unknown"}]}})
+    with pytest.raises(ValueError, match="unknown or non-page-callable action"):
+        await hydrate_app_build_plan_context(context)
+    assert not context.get("app_task_batch_items") and not context.get("app_plan_ready")
+
+
 def test_complete_plan_is_cached_without_losing_typed_fields():
     plan = _plan()
     plan["shell_preset_hint"] = "operations"

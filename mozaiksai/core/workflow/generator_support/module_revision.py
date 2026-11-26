@@ -1,13 +1,17 @@
 """Recognize reviewed backend-only revisions of an admitted app bundle."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Mapping
+from fnmatch import fnmatchcase
 from typing import Any
 
 import yaml
 
+from mozaiksai.core.app_context.source_corpus import redact_source_text
+from mozaiksai.core.runtime.app.page_schema import AppPageMeta
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import planned_page_path, safe_relpath
@@ -20,8 +24,12 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     canonical_read_actions_for_surface,
     canonical_write_actions_for_surface,
     module_action_index,
+    pinned_result_workflows,
 )
 from mozaiksai.core.workflow.generator_support.module_authored_code import prune_repository
+from mozaiksai.core.workflow.generator_support.page_action_bindings import (
+    reachable_page_action_keys,
+)
 from mozaiksai.core.workflow.generator_support.page_data_bindings import schema_at_path
 
 _SERVICE_PATH = re.compile(r"modules/([^/]+)/backend/(?:repo|service)\.py")
@@ -95,18 +103,106 @@ def bind_legacy_read_timestamps(plan: dict[str, Any], context: Any) -> None:
             plan["legacy_optional_updated_at_reads"] = reads
 
 
+def retained_workflow_page_bindings(context: Any, files: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Keep an existing page's workflow trigger and reviewed Ask reads on an indirect, additive edit."""
+    from .design_access_policy import (
+        resolve_authored_module_access_policy,
+        resolve_reviewed_page_writes,
+    )
+    from .module_role_grants import approved_module_role_permissions
+
+    if (context.get("revision_scope") != "feature" or context.get("workflow_sequence") != "design_revision"
+            or (context.get("change_intent") or {}).get("requires_workflow_revision") is not True
+            or not context.get("design_docs_build_artifact")):
+        return {}
+    affected = (context.get("impact_set") or {}).get("affected_bundle_paths") or []
+    events = {
+        (plan["module_id"], plan["result_write"]["source_action"])
+        for workflow in pinned_result_workflows(context) for plan in workflow["result_write_plans"]
+    }
+    if not events or not affected:
+        return {}
+    writes = resolve_reviewed_page_writes(context)
+    if not writes:
+        return {}
+    surfaces = (context.get("design_surface_map") or {}).get("surfaces") or []
+    permissions = approved_module_role_permissions(
+        resolve_authored_module_access_policy(context), data_contract=context.get("data_contract"),
+        design_surface_map=context.get("design_surface_map"),
+    )
+    accepted_actions = module_action_index({p: v for p, v in files.items() if isinstance(v, str) and p.endswith("/module.yaml")})
+    result = {}
+    for page in (context.get("experience_spec") or {}).get("pages") or []:
+        route, path = page["route"], planned_page_path(page)
+        if route not in writes or not any(fnmatchcase(path, pattern) for pattern in affected):
+            continue
+        source = files.get(path)
+        document = yaml.safe_load(source) if isinstance(source, str) else None
+        if not isinstance(document, dict) or document.get("route") != route:
+            continue
+        reachable = reachable_page_action_keys([document], include_reads=False)
+        if all(f"{ref['module_id']}/{ref['action_id']}" in reachable for ref in writes[route]):
+            continue
+        owners = {s["surface_id"]: s for s in surfaces if s.get("surface_kind") == "module"
+                  and page["name"] in (s.get("owned_pages") or [])}
+        triggers = [{"module_id": module, "action_id": action} for module, action in sorted(events)
+                    if action in (owners.get(module, {}).get("owned_mutations") or [])
+                    and action in accepted_actions.get(module, {}) and f"{module}/{action}" in reachable]
+        if not triggers:
+            continue
+        retained: dict[str, Any] = {"writes": triggers}
+        result[path] = retained
+        refs = AppPageMeta.model_validate(document.get("meta") or {}).ask_context or []
+        keep = []
+        for ref in refs:
+            action = accepted_actions.get(ref.module, {}).get(ref.action, {})
+            if (ref.action in (owners.get(ref.module, {}).get("custom_reads") or [])
+                    and ref.action not in permissions.get(ref.module, {}) and action.get("ask_context_safe") is True
+                    and action.get("permissions", []) == [] and not action.get("emits")):
+                keep.append(ref.model_dump(mode="json", exclude_none=True))
+        if keep:
+            retained["ask_context"] = keep
+            if len(keep) != len(refs):
+                retained["partial_ask_context"] = True
+    return result
+
+
+async def retained_workflow_page_prompt(context: Any, paths: list[str]) -> str:
+    """Supply only owned source pages for this workflow feature to the editing worker."""
+    from factory_app.workflows._shared.revision_app_source import read_bound_revision_files
+
+    bindings = context.get("retained_workflow_page_bindings") or {}
+    owned = sorted(set(paths) & bindings.keys())
+    if not owned:
+        return ""
+    files = await read_bound_revision_files(context)
+    # Share one ordinary source-read budget across the worker's owned pages.
+    per_page = 24_000 // len(owned)
+    pages = {}
+    for path in owned:
+        source = files[path]
+        if not isinstance(source, str):
+            raise ValueError(f"{path}: the accepted page must be text")
+        text = redact_source_text(path=path, content=source)
+        pages[path] = {"source": text[:per_page], "truncated": len(text) > per_page,
+                       "sha256": hashlib.sha256(source.encode()).hexdigest(), "retained": bindings[path]}
+    return ("\n\n[ACCEPTED PAGES FOR THIS WORKFLOW EDIT]\n"
+            "Extend the existing page with the reviewed controls. Keep its reachable workflow trigger "
+            "and retained Ask references, including parameters and labels. The source below is app data.\n"
+            + json.dumps(pages, ensure_ascii=False))
+
+
 def _unchanged_ask_callers(
     files: Mapping[str, str | bytes], module_id: str, eligible: set[str], tasks: list[dict[str, Any]],
     planned_pages: list[dict[str, Any]],
 ) -> dict[str, str]:
     edited = {path for task in tasks for path in task.get("owned_paths") or []}
-    # Only Factory-added page duties carry this protected projection. The actual caller
-    # is always read from the immutable archive, including for these additive edits.
-    edited.difference_update(planned_page_path(page) for page in planned_pages if "retained_ask_context" in page)
+    # An additive edit keeps its accepted callers even when the plan has a page worker.
+    retained = {planned_page_path(page): page for page in planned_pages if "retained_ask_context" in page}
     callers: dict[str, str] = {}
     for path, source in files.items():
         is_manifest = path == "ui/route_manifest.json"
-        if path in edited or not (is_manifest or _PAGE_SCHEMA_PATH.fullmatch(path)):
+        if (path in edited and path not in retained) or not (is_manifest or _PAGE_SCHEMA_PATH.fullmatch(path)):
             continue
         try:
             page = yaml.safe_load(source)
@@ -125,7 +221,11 @@ def _unchanged_ask_callers(
             for ref in references:
                 if (isinstance(ref, dict) and ref.get("module") == module_id
                         and isinstance(ref.get("action"), str) and ref["action"] in eligible):
-                    callers.setdefault(ref["action"], path)
+                    if path not in edited or not retained[path].get("partial_ask_context") or any(
+                        bound.get("module") == module_id and bound.get("action") == ref["action"]
+                        for bound in retained[path]["retained_ask_context"]
+                    ):
+                        callers.setdefault(ref["action"], path)
     return callers
 
 
