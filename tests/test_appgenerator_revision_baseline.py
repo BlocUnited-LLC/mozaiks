@@ -254,8 +254,7 @@ def baseline(monkeypatch):
         }},
     )
     store = SimpleNamespace(get_build_record=AsyncMock(return_value=artifact))
-    monkeypatch.setattr(revision_app_source, "get_artifact_store", lambda: store)
-    monkeypatch.setattr("mozaiksai.core.artifacts.get_artifact_store", lambda: store)
+    monkeypatch.setattr("mozaiksai.core.artifacts.store.get_build_record_store", lambda: store)
     monkeypatch.setattr(content_store, "get_artifact_content_store", lambda: content)
     context = {
         "app_id": "factory-host", "user_id": "owner", "build_mode": "revision",
