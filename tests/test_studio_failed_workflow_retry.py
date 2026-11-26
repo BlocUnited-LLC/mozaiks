@@ -350,7 +350,8 @@ async def test_retry_seed_runs_canonical_before_chat_baseline_loader(retry, monk
     seed = create_context_container(fresh, authority_policy=policy, writer_id=TRANSITION_ROUTER_WRITER)
     seed.set("artifact_version_id", artifact_id)
     context = create_context_container(seed.snapshot(), authority_policy=policy)
-    monkeypatch.setattr("factory_app.workflows._shared.revision_app_source.get_artifact_store", lambda: retry.store)
+    # Both the reloaded lifecycle hook and assembly use the runtime's build-record store.
+    monkeypatch.setattr("mozaiksai.core.artifacts.store.get_build_record_store", lambda: retry.store)
     monkeypatch.setattr(lifecycle, "resolve_workflow_path", lambda _: ROOT / "factory_app/workflows/AppGenerator")
     manager = lifecycle.get_lifecycle_manager("AppGenerator")
     baseline_hooks = [
@@ -359,7 +360,6 @@ async def test_retry_seed_runs_canonical_before_chat_baseline_loader(retry, monk
     ]
     assert len(baseline_hooks) == 1
     baseline_hook = baseline_hooks[0]
-    monkeypatch.setitem(baseline_hook.callable.__globals__, "get_artifact_store", lambda: retry.store)
     # Other lifecycle hooks have unrelated stores; execute the real baseline hook only.
     manager.tools[lifecycle.LifecycleTrigger.BEFORE_CHAT] = [baseline_hook]
     monkeypatch.setattr(manager, "_emit_lifecycle_event", AsyncMock())
