@@ -624,6 +624,26 @@ This project follows a practical pre-1.0 changelog format:
   approved build inputs while rejecting changes to verified implementations.
   Commerce no longer requires fixed pricing gates, uses current schema admin panels,
   and declares the product response envelopes used by its mutation actions.
+- Stores built with Commerce pack `0.1.17` can browse and edit products without a
+  payment integration. Checkout creates a pending order and emits
+  `domain.commerce.checkout.requested`. If your workflow used the `0.1.16`
+  `commerce_checkout_requested_payment_facade` reaction, move that single row into
+  the payment module's `contracts/reactions.yaml` in the same reviewed upgrade.
+  Keep its workflow trigger and capability declaration. The upgrade preview
+  lists the changed file. Verify that the receiving module owns exactly one
+  subscription before activating the upgraded app.
+- MozaiksPay pack `0.1.13` shows the approved recurring plan price on the
+  app's Pricing and Billing pages. Fresh Windows and Linux checkouts produce
+  the same integrity pins for both Commerce and MozaiksPay.
+- For new paid memberships or usage billing, DesignDocs proposes MozaiksPay
+  for owner review. A self-hoster can remove the optional
+  `build_context/billing_offering/context.yaml` registry or choose an
+  alternative in the design. CLI initialization preserves an existing registry.
+  One-time Store orders use Commerce and require a merchant payment receiver.
+- The subscription designer can submit an optional recurring price in cents.
+  The owner reviews the amount, currency, interval and display label before the
+  Factory writes them to `app/config/subscriptions.yaml`. Include the cadence
+  in a custom label to show it on the buyer's Pricing and Billing pages.
 - Failed automatic workflow steps now show a safe conversation notice without
   enabling debug messages, exposing result details, or changing retry eligibility.
 

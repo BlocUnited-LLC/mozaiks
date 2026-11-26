@@ -147,7 +147,19 @@ def test_context_yaml_uses_explicit_assets_not_implicit_lanes() -> None:
             f"{sorted(forbidden_top_level & set(data))}"
         )
         assets = data.get("assets")
-        assert isinstance(assets, list) and assets, f"{context_path} must declare assets"
+        assert isinstance(assets, list), f"{context_path} must declare assets"
+        if not assets:
+            # An operator offering only names installed packs. Their source files
+            # belong to the packs themselves.
+            assert set(context_path.parent.iterdir()) == {context_path}
+            assert set(data) == {"context_id", "applies_to_workflows", "assets", "values", "projections"}
+            assert set(data["values"]) == {"operator_capabilities"}
+            offered = data["values"]["operator_capabilities"]
+            assert isinstance(offered, list) and offered
+            assert all(isinstance(item, str) and item.strip() for item in offered)
+            assert data["projections"] == {
+                "context_variables": {"operator_capabilities": {"from": "operator_capabilities"}}
+            }
         for asset in assets:
             assert isinstance(asset, dict), f"{context_path} asset must be a mapping"
             assert {"path", "kind"} <= set(asset), (

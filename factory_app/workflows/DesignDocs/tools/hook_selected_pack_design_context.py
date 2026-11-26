@@ -16,6 +16,7 @@ from factory_app.workflows._shared.hook_utils import (
     workflow_context_path,
 )
 from factory_app.workflows._shared.pack_selection import available_pack_rows
+from factory_app.workflows._shared.subscription_contract_context import concept_requires_contract
 from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.workflow.context.frozen import detach
@@ -76,7 +77,9 @@ def inject_pack_selection_context(agent: Any, messages: list[dict[str, Any]]) ->
             continue
         if not isinstance(condition, str) or not condition.strip():
             continue
-        if recipe.get("requires_monetization") and context.get("monetization_enabled") is not True:
+        if recipe.get("requires_subscription_contract") and (
+            context.get("build_mode") == "revision" or not concept_requires_contract(context)
+        ):
             continue
         catalog[pack_id].setdefault("app_recipes", {})[domain] = condition
     update_agent_section(
