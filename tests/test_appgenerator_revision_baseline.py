@@ -45,13 +45,19 @@ from mozaiksai.core.workflow.task_batches import (
 )
 
 
-async def test_design_prompt_projects_the_original_accepted_actions_after_an_upstream_export(baseline):
+@pytest.mark.parametrize("role", ["DesignDocsAgent", "DesignPackSelectionAgent"])
+async def test_design_prompt_projects_the_original_accepted_actions_after_an_upstream_export(baseline, role):
+    from factory_app.workflows._shared.pack_selection import pin_pack_choices
     from factory_app.workflows.DesignDocs.tools.hook_accepted_module_actions import (
         inject_accepted_module_actions,
     )
+    from mozaiksai.core.workflow.execution.middleware import load_prompt_middleware_entries
+
+    assert any(entry["agent"] == role and entry["function"] == "inject_accepted_module_actions"
+               for entry in load_prompt_middleware_entries("DesignDocs", base_path="factory_app/workflows"))
 
     class Capture:
-        name = "DesignDocsAgent"
+        name = role
         system_message = "Design this app."
 
         def update_system_message(self, message):
@@ -69,22 +75,38 @@ async def test_design_prompt_projects_the_original_accepted_actions_after_an_ups
     _replace_archive(baseline, {"modules/records/module.yaml": yaml.safe_dump(manifest)})
     baseline.artifact.lifecycle_status = "current"
     baseline.artifact.validation_status = "passed"
+    baseline.artifact.commit_metadata.metadata["capability_packs"] = [
+        {"capability_pack_id": "content", "capability_source": "generated_module"},
+        *pin_pack_choices(baseline.context, ["files"]),
+    ]
     agent = Capture()
     agent.context_variables = {**baseline.context, "workflow_sequence": "full_rebuild", "artifact_version_id": "upstream-export",
                                "refinement_request_meta": {"build_family": "app_bundle", "build_record_id": baseline.artifact.id}}
     await inject_accepted_module_actions(agent, [])
     assert "Accepted app record artifact_1" in agent.system_message
-    [row] = [json.loads(line) for line in agent.system_message.splitlines() if line.startswith("{")]
-    assert row["module"] == "records" and row["action"] == "create_record"
-    assert row["input"] == {"type": "object", "fields": {"body": "string", "label": "string"}, "required": ["body"]}
-    assert set(row["output"]["fields"]) == {"record_id", "summary"}
+    assert f"sha256:{baseline.artifact.files_manifest[0].sha256}" in agent.system_message
+    rows = [json.loads(line) for line in agent.system_message.splitlines() if line.startswith("{")]
+    if role == "DesignPackSelectionAgent":
+        pack, module = rows
+        assert pack["pack_id"] == "files" and pack["digest"].startswith("sha256:")
+        assert module == {"module": "records", "actions": ["create_record"]}
+        assert "source_path" not in agent.system_message
+        baseline.artifact.commit_metadata.metadata["capability_packs"][1]["digest"] = "sha256:" + "0" * 64
+        await inject_accepted_module_actions(agent, [])
+        assert "could not be verified" in agent.system_message and "create_record" not in agent.system_message
+        baseline.artifact.commit_metadata.metadata["capability_packs"] = []
+    else:
+        [row] = rows
+        assert row["module"] == "records" and row["action"] == "create_record"
+        assert row["input"] == {"type": "object", "fields": {"body": "string", "label": "string"}, "required": ["body"]}
+        assert set(row["output"]["fields"]) == {"record_id", "summary"}
     assert "private source description" not in agent.system_message and "ORIGINAL" not in agent.system_message
+    digest = baseline.artifact.files_manifest[0].sha256
     for failure in ("wrong_owner", "bad_archive", "unaccepted"):
         agent.system_message = "Design this app."
         agent.context_variables["user_id"] = "other" if failure == "wrong_owner" else "owner"
         baseline.artifact.validation_status = "failed" if failure == "unaccepted" else "passed"
-        if failure == "bad_archive":
-            baseline.artifact.files_manifest[0].sha256 = "0" * 64
+        baseline.artifact.files_manifest[0].sha256 = "0" * 64 if failure == "bad_archive" else digest
         await inject_accepted_module_actions(agent, [])
         assert "could not be verified" in agent.system_message and "create_record" not in agent.system_message
     agent.system_message = "Design this app."

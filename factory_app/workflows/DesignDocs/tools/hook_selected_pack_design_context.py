@@ -81,8 +81,10 @@ def inject_pack_selection_context(agent: Any, messages: list[dict[str, Any]]) ->
         catalog[pack_id].setdefault("app_recipes", {})[domain] = condition
     update_agent_section(
         agent, "[AVAILABLE PACK CATALOG]",
-        "These verified offerings are available, not selected. Reason from the supplied approved "
-        "concept_blueprint, concept_overview and monetization_enabled. Return DesignPackSelection "
+        "These verified offerings are available, not selected. For a new app, reason from the approved "
+        "concept_blueprint, concept_overview and monetization_enabled. For a revision, start from the "
+        "accepted app's reusable packs and implemented actions. Use the requested change to identify "
+        "any additional capabilities the existing app needs. Return DesignPackSelection "
         "with the exact reusable pack_ids this app needs; [] explicitly selects none. "
         "Include declared dependencies; repair any missing dependency named in selection feedback. "
         "Use app_recipes when their stated behavior matches the approved requirements. "

@@ -130,6 +130,15 @@ def _require_design_revision_baseline(artifact: BuildRecord) -> None:
 async def read_revision_files(
     context_variables: Any, artifact_id: str | None, *, include_binary: bool = False, require_accepted: bool = False,
 ) -> dict[str, str | bytes]:
+    _, files = await _read_revision_source(
+        context_variables, artifact_id, include_binary=include_binary, require_accepted=require_accepted,
+    )
+    return files
+
+
+async def _read_revision_source(
+    context_variables: Any, artifact_id: str | None, *, include_binary: bool = False, require_accepted: bool = False,
+) -> tuple[BuildRecord, dict[str, str | bytes]]:
     binding = require_build_binding(context_variables)
     if binding.phase != "refinement" or not artifact_id:
         raise ValueError("revision_baseline_binding_missing")
@@ -157,7 +166,7 @@ async def read_revision_files(
     manifest = files.get("app.json")
     if not isinstance(manifest, str) or json.loads(manifest).get("appId") != binding.target_app_id:
         raise ValueError("revision_baseline_app_identity_mismatch")
-    return files
+    return artifact, files
 
 
 async def design_revision_source(context_variables: Any) -> str | None:
@@ -200,7 +209,7 @@ async def design_revision_source(context_variables: Any) -> str | None:
     return candidate.id
 
 
-async def read_accepted_design_app_files(context_variables: Any) -> tuple[str, dict[str, str | bytes]] | None:
+async def read_accepted_design_app_files(context_variables: Any) -> tuple[BuildRecord, dict[str, str | bytes]] | None:
     """Read the original accepted implementation associated with the design being refined."""
     if context_variables is None or context_variables.get("build_mode") != "revision":
         return None
@@ -211,4 +220,4 @@ async def read_accepted_design_app_files(context_variables: Any) -> tuple[str, d
         source_id = _requested_app_source_id(request) or context_variables.get("revision_source_artifact_version_id")
     if not source_id:
         return None
-    return source_id, await read_revision_files(context_variables, source_id, require_accepted=True)
+    return await _read_revision_source(context_variables, source_id, require_accepted=True)

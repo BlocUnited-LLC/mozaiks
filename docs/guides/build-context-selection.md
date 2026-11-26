@@ -41,7 +41,10 @@ tracking to an order, and a community can add an appeals workflow for moderators
 The recipes live in `factory_app/build_context/AppGenerator/domain_catalogs.yaml`.
 
 DesignDocs first asks `DesignPackSelectionAgent` for a list of pack IDs. That
-turn sees the app concept and a compact catalog. The deterministic selector
+turn sees the app concept and a compact catalog. For a revision it also receives
+the verified reusable pack identities and a bounded inventory of modules and
+actions from the accepted app. The selector uses the requested change to decide
+which capabilities to reuse, extend or add. The deterministic selector
 checks the requested IDs, dependencies and source digests. An invalid choice
 returns to the selection step before the Factory spends a turn writing the
 design.
