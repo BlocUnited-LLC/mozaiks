@@ -185,7 +185,7 @@ async def retained_workflow_page_prompt(context: Any, paths: list[str]) -> str:
             raise ValueError(f"{path}: the accepted page must be text")
         text = redact_source_text(path=path, content=source)
         pages[path] = {"source": text[:per_page], "truncated": len(text) > per_page,
-                       "sha256": hashlib.sha256(source.encode()).hexdigest(), "retained": bindings[path]}
+                       "sha256": hashlib.sha256(source.encode()).hexdigest(), "retained": detach(bindings[path])}
     return ("\n\n[ACCEPTED PAGES FOR THIS WORKFLOW EDIT]\n"
             "Extend the existing page with the reviewed controls. Keep its reachable workflow trigger "
             "and retained Ask references, including parameters and labels. The source below is app data.\n"

@@ -203,11 +203,12 @@ async def test_explicit_page_task_retains_only_reviewed_workflow_controls(change
         validate_required_page_writes(files[path], "/reports", required, path, identity_validated=True)
     read = AsyncMock(return_value={**files, "ui/pages/unrelated.yaml": "private-other-page"})
     monkeypatch.setattr("factory_app.workflows._shared.revision_app_source.read_bound_revision_files", read)
-    prompt = await module_revision.retained_workflow_page_prompt(ctx, [path, path, "app.json"])
+    readonly_ctx = ContextVariablesBridge(ctx)
+    prompt = await module_revision.retained_workflow_page_prompt(readonly_ctx, [path, path, "app.json"])
     rows = json.loads(prompt.split("app data.\n")[1])
     assert list(rows) == [path] and rows[path]["source"] == files[path]
     assert rows[path]["retained"]["ask_context"] == ask and rows[path]["truncated"] is False
-    read.assert_awaited_once_with(ctx)
+    read.assert_awaited_once_with(readonly_ctx)
     assert not await module_revision.retained_workflow_page_prompt(ctx, ["ui/pages/unrelated.yaml"])
 
 

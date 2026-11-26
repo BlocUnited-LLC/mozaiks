@@ -18,6 +18,9 @@ from factory_app.workflows._shared.revision_app_source import (
     revision_baseline_required,
     revision_source_artifact_id,
 )
+from factory_app.workflows._shared.workflow_integration import (
+    hydrate_workflow_integration_context_from_latest_artifact,
+)
 from mozaiksai.core.artifacts.models import BuildRecord
 from mozaiksai.core.runtime.app.auth_contract import validate_app_auth_contract
 from mozaiksai.core.runtime.app.paths import APP_AUTH_CONFIG_PATH
@@ -86,10 +89,13 @@ async def revision_asset_evidence(
     return assets, evidence
 
 
-async def hydrate_app_revision_context(context_variables: Any = None) -> dict[str, Any]:
+async def hydrate_app_revision_context(context_variables: Any = None, *, load_workflows: bool = False) -> dict[str, Any]:
     """Verify the source before exposing its theme or resuming cached work."""
     try:
-        return await hydrate_revision_files(context_variables, initialize_theme=True)
+        result = await hydrate_revision_files(context_variables, initialize_theme=True, load_workflows=load_workflows)
+        if load_workflows and result["status"] == "skipped":
+            return await hydrate_workflow_integration_context_from_latest_artifact(context_variables)
+        return result
     except Exception:
         if context_variables is not None and (context_variables.get("app_build_plan") or context_variables.get("app_task_batch_items")):
             discard_executable_plan(context_variables)
@@ -159,7 +165,9 @@ def bind_retained_feature_login(plan: dict[str, Any], context: Any) -> None:
     plan.update(auth_strategy=retained["auth_strategy"], auth_mode=retained["auth_mode"])
 
 
-async def hydrate_revision_files(context_variables: Any, *, initialize_theme: bool = False) -> dict[str, Any]:
+async def hydrate_revision_files(
+    context_variables: Any, *, initialize_theme: bool = False, load_workflows: bool = False,
+) -> dict[str, Any]:
     if context_variables is None:
         return {"status": "skipped", "reason": "not_revision"}
     _set(context_variables, "legacy_optional_updated_at_reads", {})
@@ -182,6 +190,9 @@ async def hydrate_revision_files(context_variables: Any, *, initialize_theme: bo
         artifact_id = revision_source_artifact_id(context_variables)
     artifact, files = await read_revision_source(context_variables, artifact_id)
     _set(context_variables, "revision_source_artifact_version_id", artifact.id)
+    if load_workflows:
+        # The active cursor can be a new workflow. Resolve it only after pinning its original app.
+        await hydrate_workflow_integration_context_from_latest_artifact(context_variables)
     login = await _retained_feature_login(context_variables, artifact, files)
     _set(context_variables, "retained_feature_login", login)
     existing_plan = context_variables.get("app_build_plan")

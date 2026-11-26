@@ -773,7 +773,7 @@ async def test_retry_seed_runs_canonical_before_chat_baseline_loader(retry, monk
     manager = lifecycle.get_lifecycle_manager("AppGenerator")
     baseline_hooks = [
         hook for hook in manager.tools[lifecycle.LifecycleTrigger.BEFORE_CHAT]
-        if hook.function == "hydrate_app_revision_context" and hook.file == "hydrate_app_revision_context.py"
+        if hook.function == "hydrate_app_build_inputs" and hook.file == "hydrate_workflow_integration_context.py"
     ]
     assert len(baseline_hooks) == 1
     baseline_hook = baseline_hooks[0]

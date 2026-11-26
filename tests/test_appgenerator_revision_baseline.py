@@ -937,6 +937,55 @@ async def test_design_revision_current_bundle_retains_lifecycle_acceptance(basel
     assert (await revision.hydrate_app_revision_context(baseline.context))["status"] == "hydrated"
 
 
+@pytest.mark.parametrize("fault", [None, "missing", "retired", "other_workflow"])
+async def test_cold_workflow_feature_resolves_source_then_exact_workflow_before_plan(baseline, monkeypatch, fault):
+    from mozaiksai.core.workflow.execution import lifecycle
+
+    _upstream_design_revision(baseline, bundles=[baseline.artifact])
+    ctx = baseline.context
+    ctx.update(artifact_kind="app_bundle", artifact_version_id="new-workflow",
+               refinement_request_meta={"build_family": "app_bundle", "build_record_id": baseline.artifact.id},
+               upstream_workflow_bundle_artifact_version_id="other-workflow" if fault == "other_workflow" else "new-workflow",
+               app_plan_ready=True, app_build_plan={"pages": []}, app_task_batch_items=[{"task_id": "cached"}])
+    metadata = {"bundle_name": "Reports", "workflows": [{"workflow_name": "ReviewReport",
+                "capability_id": "review-report", "startup_mode": "BackendOnly", "trigger_events": []}]}
+    workflow = BuildRecord.model_validate({
+        "id": "new-workflow", "app_id": baseline.artifact.app_id, "build_family": "workflow_bundle",
+        "build_key": "Reports", "version_number": 1, "lineage_root_id": "new-workflow",
+        "lifecycle_status": "archived" if fault == "retired" else "draft",
+        "source_chat_id": "workflow-chat", "source_workflow": "AgentGenerator",
+        "commit_metadata": {"author_user_id": "owner", "source_chat_id": "workflow-chat", "source_workflow": "AgentGenerator",
+                            "metadata": {**ctx["run_build_binding"], "workflow_integration_metadata": metadata}},
+    })
+    records = {baseline.artifact.id: baseline.artifact, workflow.id: None if fault == "missing" else workflow}
+    baseline.store.get_build_record.side_effect = lambda **kw: records[kw["build_record_id"]]
+    assert not ctx.get("workflow_integration_metadata") and not ctx.get("revision_source_artifact_version_id")
+    observed = []
+    project = revision.retained_workflow_page_bindings
+
+    def observe(context, files):
+        observed.append((context["revision_source_artifact_version_id"], context["workflow_bundle_artifact_version_id"]))
+        assert files == baseline.files
+        return project(context, files)
+
+    monkeypatch.setattr(revision, "retained_workflow_page_bindings", observe)
+    monkeypatch.setattr(lifecycle, "resolve_workflow_path", lambda _: Path(__file__).parents[1] / "factory_app/workflows/AppGenerator")
+    manager = lifecycle.LifecycleToolManager("AppGenerator")
+    manager.load_lifecycle_tools()
+    hooks = [h.function for h in manager.tools[lifecycle.LifecycleTrigger.BEFORE_CHAT]]
+    assert hooks.index("hydrate_app_build_inputs") < hooks.index("hydrate_app_build_plan_context")
+    [inputs] = [h for h in manager.tools[lifecycle.LifecycleTrigger.BEFORE_CHAT] if h.function == "hydrate_app_build_inputs"]
+    if fault:
+        with pytest.raises(ValueError):
+            await inputs.callable(context_variables=ctx)
+        assert not ctx["app_plan_ready"] and ctx["app_task_batch_items"] == [] and not observed
+    else:
+        await inputs.callable(context_variables=ctx)
+        assert observed == [(baseline.artifact.id, workflow.id)]
+        assert ctx["workflow_integration_metadata"]["source_artifact_version_id"] == workflow.id
+    baseline.content.get_bundle.assert_awaited_once_with("immutable-archive")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("accepted", [False, True])
 async def test_design_revision_imported_stale_bundle_uses_canonical_receipt(baseline, monkeypatch, accepted):

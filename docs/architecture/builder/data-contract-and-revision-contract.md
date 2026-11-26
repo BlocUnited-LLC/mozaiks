@@ -454,7 +454,9 @@ If a retained plan loses its dispatch rows, Factory checks the accepted archive
 again. A plan with ambiguous page ownership goes back through plan review.
 For an indirect page edit in a workflow feature revision, Factory also retains
 the existing control that triggers the reviewed workflow when its owning module
-and action remain in DesignDocs. The page worker receives its owned page from
+and action remain in DesignDocs. On a fresh or resumed chat, AppGenerator
+verifies the source app, resolves its workflow inputs, and derives these
+bindings before restoring executable plan rows. The page worker receives its owned page from
 the accepted archive. Eligible Ask reads still declared by that page's owning
 module retain their parameters and labels. On pages shared by several modules,
 this check applies only to the eligible reads. Each other reference is still
