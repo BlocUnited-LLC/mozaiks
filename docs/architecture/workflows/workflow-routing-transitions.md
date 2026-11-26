@@ -125,6 +125,14 @@ interrupted after the claim, session insert, or router bind. Once publication
 finishes, repeating the request returns the existing chat without resetting its
 review. A later failure in that replacement can be retried from its own chat ID.
 
+When AgentGenerator hands a reviewed workflow to AppGenerator, the workflow
+record and the original app record serve different purposes. The failed app
+stage must identify both. Studio verifies the workflow archive digest, its
+generating session, its approved result plan, and the design and subscription
+records that produced it. The original app stays bound to the change request.
+A workflow export citing a different version of those inputs cannot start an
+app-stage retry.
+
 AppGenerator retains its declared InterviewAgent entry and revision prompt.
 Its existing first `before_chat` hook verifies the committed baseline archive
 and hydrates `generated_files`; it does not read a mutable workspace fallback.

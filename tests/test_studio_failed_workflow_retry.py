@@ -294,6 +294,71 @@ async def test_same_request_finishes_an_interrupted_downstream_publication(downs
     assert docs[chat]["journey_parent_chat_id"] == "subscription" and docs[chat]["journey_position"] == 2
 
 
+@pytest.mark.parametrize("fault", [None, "app_source", "workflow_pin", "input_version", "review",
+                                   "catalog_differs", "archive", "wrong_build"])
+async def test_app_stage_retry_requires_its_reviewed_export_and_distinct_app_source(downstream, tmp_path, fault):
+    from factory_app.workflows.AgentGenerator.tools.pattern_selection import selection_fingerprint
+
+    r = downstream
+    selection = {"workflows": [{"name": "RecordAssistant"}]}
+    review = {"status": "approved", "review_id": "owner-review", "selection_hash": selection_fingerprint(selection)}
+    parent = {**deepcopy(r.source), "_id": "generator", "status": 1, "journey_parent_chat_id": "subscription",
+              "completed_at": r.source["created_at"] + timedelta(seconds=1), "artifact_version_id": "workflow-v2",
+              "workflow_plan_review": review, "PatternSelection": selection, "workflow_review_outcome": "approved",
+              "workflow_bundle_export_outcome": "ready", "workflow_bundle_validation_status": "passed"}
+    r.pm._default._docs[parent["_id"]] = parent
+    r.source.update(workflow_name="AppGenerator", journey_position=3, journey_parent_chat_id="generator",
+                    created_at=parent["completed_at"] + timedelta(seconds=1), artifact_version_id="workflow-v2",
+                    revision_source_artifact_version_id="baseline", workflow_bundle_artifact_version_id="workflow-v2",
+                    refinement_request_meta={"build_record_id": "baseline", "build_family": "app_bundle"})
+    r.record["current_build_run"]["active_workflow_id"] = r.record["active_workflow_id"] = "AppGenerator"
+    archive = tmp_path / "RecordAssistant.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("RecordAssistant/orchestrator.yaml", "workflow_name: RecordAssistant\n")
+    raw = archive.read_bytes()
+    record = BuildRecord(
+        _id="workflow-v2", app_id="target", build_family="workflow_bundle", build_key="RecordAssistant", version_number=2,
+        lineage_root_id="workflow-v1", source_chat_id="generator", source_workflow="AgentGenerator", created_at=parent["completed_at"],
+        canonical_inputs_version={"design_docs": "design_docs_v1", "subscription_contract": "subscription_contract_v1"},
+        files_manifest=[{"path": "RecordAssistant/RecordAssistant.zip", "content_type": "application/zip",
+                         "size_bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}],
+        commit_metadata={"author_user_id": "owner", "source_chat_id": "generator", "source_workflow": "AgentGenerator",
+                         "metadata": {**parent["run_build_binding"], "artifact_path": str(archive), "workflow_plan_review": deepcopy(review),
+                                      "workflow_integration_metadata": {"workflows": [{"workflow_name": "RecordAssistant",
+                                                                                     "capability_id": "record-assistant"}]}}},
+    )
+    r.outputs["generator"] = [record]
+    if fault == "app_source":
+        r.source["refinement_request_meta"]["build_record_id"] = "other-app-version"
+    elif fault == "workflow_pin":
+        r.source["artifact_version_id"] = "other-workflow"
+    elif fault == "input_version":
+        record.canonical_inputs_version["design_docs"] = "unrelated-current-design"
+    elif fault == "review":
+        parent["PatternSelection"] = {"workflows": [{"name": "Other"}]}
+    elif fault == "catalog_differs":
+        record.commit_metadata.metadata["workflow_integration_metadata"]["workflows"][0]["workflow_name"] = "Other"
+    elif fault == "archive":
+        archive.write_bytes(b"changed")
+    elif fault == "wrong_build":
+        record.commit_metadata.metadata["build_id"] = "other-build"
+    if fault:
+        with pytest.raises(HTTPException) as exc:
+            await launch(r, workflow_id="AppGenerator")
+        assert exc.value.status_code == 400
+        r.service.update_build_status.assert_not_called()
+        return
+    result = await launch(r, workflow_id="AppGenerator")
+    fresh = r.pm._default._docs[result["chat_id"]]
+    assert fresh["journey_parent_chat_id"] == parent["_id"]
+    assert fresh["artifact_version_id"] == record.id
+    assert fresh["refinement_request_meta"]["build_record_id"] == fresh["trigger_meta"]["build_record_id"] == "baseline"
+    assert fresh["subscription_contract_artifact_version_id"] == "subscription_contract_v1"
+    assert fresh["design_docs_artifact_version_id"] == "design_docs_v1"
+    assert "workflow_result_grant" not in fresh and "generated_files" not in fresh
+    assert await launch(r, workflow_id="AppGenerator") == result
+
+
 async def test_inserted_retry_remains_recoverable_after_a_transient_binding_error(downstream, monkeypatch):
     r = downstream
     with monkeypatch.context() as unavailable:
