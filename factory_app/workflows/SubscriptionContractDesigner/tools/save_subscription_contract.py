@@ -20,6 +20,7 @@ from factory_app.workflows._shared.subscription_contract_context import (
     concept_requires_contract,
     selected_feature_gates,
     subscription_assignment_store,
+    subscription_design_context,
     validate_module_contract_updates,
 )
 from mozaiksai.core.artifacts import persist_summary_artifact
@@ -674,8 +675,9 @@ async def save_subscription_contract(
         output = {**output, "contract_required": True}
 
     try:
-        normalized = normalize_subscription_contract(output, context_variables)
-        validate_module_contract_updates(normalized, context_variables)
+        design_context = await subscription_design_context(context_variables)
+        normalized = normalize_subscription_contract(output, design_context)
+        validate_module_contract_updates(normalized, design_context)
         page_conflict = (
             _page_inventory_conflict(normalized, context_variables) if binding.phase == "genesis" else None
         )

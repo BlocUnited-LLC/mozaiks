@@ -22,6 +22,21 @@ def verify_subscription_design_input(subscription: BuildRecord, design_id: str) 
         raise ValueError("The saved subscription did not use the pinned design; rerun SubscriptionContractDesigner from that design")
 
 
+async def load_pinned_input_record(
+    *, artifact_store: Any, family: str, record_id: str, app_id: str, user_id: str,
+) -> BuildRecord:
+    producer = _PRODUCERS[family]
+    record: BuildRecord | None = await artifact_store.get_build_record(app_id=app_id, build_record_id=record_id)
+    if (record is None or record.id != record_id or record.app_id != app_id
+            or record.build_family != family or record.build_key != family
+            or record.lifecycle_status not in {"draft", "current"} or not record.source_chat_id
+            or record.source_workflow != producer or record.commit_metadata.source_workflow != producer
+            or record.commit_metadata.source_chat_id != record.source_chat_id
+            or record.commit_metadata.author_user_id != user_id):
+        raise ValueError(f"The pinned {family} input is unavailable or outside this build")
+    return record
+
+
 async def export_input_versions(
     context: Any, *, workflow: str, app_id: str, user_id: str | None, artifact_store: Any,
     additional_families: tuple[str, ...] = (),
@@ -49,15 +64,11 @@ async def export_input_versions(
             current_families.append(family)
             continue
         binding = require_build_binding(context)
-        record = await artifact_store.get_build_record(app_id=app_id, build_record_id=record_id)
-        if (not user_id or app_id != binding.target_app_id or record is None
-                or record.id != record_id or record.app_id != app_id
-                or record.build_family != family or record.build_key != family
-                or record.lifecycle_status not in {"draft", "current"} or not record.source_chat_id
-                or record.source_workflow != producer or record.commit_metadata.source_workflow != producer
-                or record.commit_metadata.source_chat_id != record.source_chat_id
-                or record.commit_metadata.author_user_id != user_id):
+        if not user_id or app_id != binding.target_app_id:
             raise ValueError(f"The pinned {family} input is unavailable or outside this build")
+        record = await load_pinned_input_record(
+            artifact_store=artifact_store, family=family, record_id=record_id, app_id=app_id, user_id=user_id,
+        )
         if family == "design_docs":
             verify_generator_design_inputs(context, record, user_id=user_id, build_id=binding.build_id)
         else:

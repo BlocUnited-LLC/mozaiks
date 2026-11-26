@@ -24,6 +24,7 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
 from mozaiksai.core.workflow.generator_support.module_action_inventory import all_module_actions
 from tests.factory_context import factory_context
+from tests.factory_export_fixture import summary_record
 
 
 def _surface_map() -> dict:
@@ -99,7 +100,7 @@ def side_effects(monkeypatch):
     return review, persist
 
 
-def test_inventory_excludes_canonical_reads_facades_and_unapproved_workflows() -> None:
+async def test_inventory_excludes_canonical_reads_facades_and_unapproved_workflows() -> None:
     context = _context()
     assert isinstance(context.get("design_surface_map"), MappingProxyType)
     assert approved_module_actions(context) == {
@@ -113,11 +114,87 @@ def test_inventory_excludes_canonical_reads_facades_and_unapproved_workflows() -
     }
     assert "workflow.TaskAnalysis" not in approved_feature_inventory(_context(agentic=True))
     agent = SimpleNamespace(name="ContractDesignerAgent", context_variables=context, system_message="base")
-    inject_subscription_action_inventory(agent, [])
+    await inject_subscription_action_inventory(agent, [])
     assert "[APPROVED PRICING FEATURE INVENTORY]" in agent.system_message
     assert "module.tasks.create_task" in agent.system_message
     assert "list_tasks" not in agent.system_message
     assert "workflow.TaskAnalysis" not in agent.system_message
+
+
+@pytest.fixture
+def reviewed_write_design(monkeypatch):
+    from factory_app.workflows._shared import subscription_contract_context
+    from mozaiksai.core.workflow.generator_support.design_access_policy import (
+        access_policy_sha256,
+        explicit_module_writes,
+    )
+
+    data = _context().snapshot()
+    data["user_id"] = "owner"
+    data["experience_spec"] = {"pages": []}
+    surface = data["design_surface_map"]["surfaces"][0]
+    surface["owned_mutations"] = ["create_task", "update_task"]
+    collection = data["data_contract"]["surfaces"][0]["collections"][0]
+    collection["fields"].extend([{"name": "title", "type": "string"}, {"name": "summary", "type": "string"}])
+    collection["lifecycle"]["module_writes"] = [{"operation": op, "fields": ["title"]} for op in ("create", "update")]
+    policy = {"roles": [], "grants": []}
+    summary = {
+        "backend_markdown": "Private design sentinel", "experience_spec": data["experience_spec"],
+        "data_contract": data["data_contract"], "surface_map": data["design_surface_map"], "access_policy": policy,
+        "access_policy_review": {
+            "status": "approved", "target_app_id": "task-tracker", "build_id": "build-test",
+            "review_id": "review-1", "reviewed_by": "owner", "policy_sha256": access_policy_sha256(
+                policy, data["experience_spec"], module_writes=explicit_module_writes(data["data_contract"])),
+        },
+    }
+    record = summary_record("design_docs", summary, app="task-tracker")
+    data["design_docs_artifact_version_id"] = record.id
+    store = SimpleNamespace(get_build_record=AsyncMock(return_value=record))
+    monkeypatch.setattr(subscription_contract_context, "get_artifact_store", lambda: store)
+    return data, record, store
+
+
+async def test_pricing_prompt_and_save_use_exact_reviewed_write_inventory(reviewed_write_design, side_effects):
+    data, record, store = reviewed_write_design
+    context = ContextVariablesBridge(data)
+    agent = SimpleNamespace(name="ContractDesignerAgent", context_variables=context, system_message="base")
+    await inject_subscription_action_inventory(agent, [])
+    assert "module.tasks.summarize_tasks" in agent.system_message and "module.tasks.update_task" in agent.system_message
+    assert "delete_task" not in agent.system_message and "Private design sentinel" not in agent.system_message
+    assert "design_docs_build_artifact" not in context.snapshot()
+    output = _design()
+    for plan in output["subscription_config_file"]["plans"]:
+        plan["included_features"].remove("module.tasks.delete_task")
+    result = await module.save_subscription_contract(StructuredOutputOverlay(context, output))
+    assert result["success"] and store.get_build_record.await_count == 2
+    store.get_build_record.assert_awaited_with(app_id="task-tracker", build_record_id=record.id)
+    assert side_effects[1].await_args.kwargs["canonical_inputs_version"] == {"design_docs": record.id}
+    assert "design_docs_build_artifact" not in context.snapshot()
+
+
+@pytest.mark.parametrize("problem", ["absent", "foreign_owner", "changed_manifest", "different_surface", "foreign_pin"])
+async def test_invalid_design_cannot_supply_inventory_or_save_a_subscription(reviewed_write_design, side_effects, problem):
+    data, record, _store = reviewed_write_design
+    data["design_docs_build_artifact"] = record.model_dump(mode="json", by_alias=True)
+    if problem == "absent":
+        data.pop("design_docs_artifact_version_id")
+    elif problem == "foreign_owner":
+        data["user_id"] = "another-owner"
+    elif problem == "foreign_pin":
+        data["design_docs_artifact_version_id"] = "different-design"
+    elif problem == "changed_manifest":
+        record.files_manifest[0].sha256 = "0" * 64
+    else:
+        data["design_surface_map"] = {"surfaces": []}
+    context = ContextVariablesBridge(data)
+    agent = SimpleNamespace(name="ContractDesignerAgent", context_variables=context, system_message="base")
+    with pytest.raises(ValueError):
+        await inject_subscription_action_inventory(agent, [])
+    assert agent.system_message == "base"
+    result = await module.save_subscription_contract(StructuredOutputOverlay(context, _design()))
+    assert result["review_status"] == "changes_requested" and result.get("error")
+    side_effects[0].assert_not_awaited()
+    side_effects[1].assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -339,7 +416,16 @@ def test_noop_contract_does_not_require_action_inventory() -> None:
 
 
 def test_designer_declares_inventory_hook_and_no_model_authored_gates() -> None:
+    from mozaiksai.core.workflow.context.authority import build_context_authority_policy
+
     root = Path(__file__).resolve().parents[1] / "factory_app/workflows/SubscriptionContractDesigner"
+    context = yaml.safe_load((root / "context_variables.yaml").read_text(encoding="utf-8"))
+    pin = "design_docs_artifact_version_id"
+    authority = build_context_authority_policy(workflow_name="SubscriptionContractDesigner", definitions=context["definitions"])
+    assert authority.can_write(pin, writer_id="transition_router")
+    for writer in ("caller_input", "agent_text", "structured_output", "deterministic_tool"):
+        assert not authority.can_write(pin, writer_id=writer)
+    assert context["definitions"][pin]["model_visible"] is False
     middleware = yaml.safe_load((root / "middleware.yaml").read_text(encoding="utf-8"))
     assert middleware["prompt_middleware"] == [{
         "agent": "ContractDesignerAgent", "filename": "../_shared/subscription_contract_context.py",

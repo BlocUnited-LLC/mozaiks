@@ -16,7 +16,9 @@ import yaml
 
 from factory_app.workflows._shared.hook_utils import update_agent_section
 from factory_app.workflows._shared.pack_selection import subscription_assignment_writers
+from mozaiksai.core.artifacts import get_artifact_store
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionAssignmentStoreDef
+from mozaiksai.core.workflow.context.context_utils import context_to_dict
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     all_module_actions,
@@ -335,11 +337,44 @@ def _apply_text(agent: Any, text: str, *, prepend: bool = False) -> None:
     agent._mozaiks_base_system_message = updated
 
 
-def inject_subscription_action_inventory(agent: Any, messages: list[dict[str, Any]]) -> None:
+async def subscription_design_context(context: Any) -> dict[str, Any]:
+    """Give the pricing compiler a turn-local view of the design reviewed for this build."""
+    from factory_app.workflows._shared.export_inputs import load_pinned_input_record
+    from factory_app.workflows._shared.platform.build_target import require_build_binding
+    from factory_app.workflows.DesignDocs.tools.save_design_doc import verified_design_summary
+    from mozaiksai.core.workflow.generator_support.design_access_policy import (
+        resolve_design_access_policy,
+    )
+
+    data = context_to_dict(context)
+    # This workflow receives an exact record ID from the router. Request data cannot supply its record.
+    data.pop("design_docs_artifact", None)
+    data.pop("design_docs_build_artifact", None)
+    design_id = data.get("design_docs_artifact_version_id")
+    if not design_id:
+        return data
+    binding = require_build_binding(data)
+    owner = data.get("user_id")
+    if not owner:
+        raise ValueError("The pinned design requires a build owner")
+    record = await load_pinned_input_record(
+        artifact_store=get_artifact_store(), family="design_docs", record_id=design_id,
+        app_id=binding.target_app_id, user_id=owner,
+    )
+    summary = verified_design_summary(record, user_id=owner, build_id=binding.build_id)
+    for key, source in (("design_surface_map", "surface_map"), ("experience_spec", "experience_spec"), ("data_contract", "data_contract")):
+        if data.get(key) != summary.get(source):
+            raise ValueError(f"The subscription designer's {key} differs from its pinned design")
+    data["design_docs_build_artifact"] = record.model_dump(mode="json", by_alias=True)
+    resolve_design_access_policy(data)
+    return data
+
+
+async def inject_subscription_action_inventory(agent: Any, messages: list[dict[str, Any]]) -> None:
     """Give the designer the finite feature choices its save validator accepts."""
     if getattr(agent, "name", None) != "ContractDesignerAgent":
         return
-    data = _context_data(agent)
+    data = await subscription_design_context(_context_data(agent))
     inventory = approved_feature_inventory(data)
     rendered = yaml.safe_dump(inventory, sort_keys=True).strip()
     _apply_text(agent, "\n".join([

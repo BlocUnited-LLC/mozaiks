@@ -1075,7 +1075,7 @@ def _experience_spec_to_yaml(
     return content
 
 
-def _verified_design_summary(output: BuildRecord, *, user_id: str, build_id: str) -> dict[str, Any]:
+def verified_design_summary(output: BuildRecord, *, user_id: str, build_id: str) -> dict[str, Any]:
     summary = verified_summary_payload(output)
     surface_map, experience = summary.get("surface_map"), summary.get("experience_spec")
     if (not isinstance(surface_map, dict) or not isinstance(experience, dict)
@@ -1091,7 +1091,7 @@ def _verified_design_summary(output: BuildRecord, *, user_id: str, build_id: str
 
 def verify_generator_design_inputs(context: Any, output: BuildRecord, *, user_id: str, build_id: str) -> None:
     """Verify the generator's loaded design against its reviewed artifact."""
-    summary = _verified_design_summary(output, user_id=user_id, build_id=build_id)
+    summary = verified_design_summary(output, user_id=user_id, build_id=build_id)
     surface_map = summary["surface_map"]
     ui_spec = _experience_spec_to_yaml(summary["experience_spec"], surface_map, summary.get("ownership_normalizations"))
     if (context.get("backend_design_document") != summary["backend_markdown"]
@@ -1102,7 +1102,7 @@ def verify_generator_design_inputs(context: Any, output: BuildRecord, *, user_id
 
 async def verify_design_projections(output: BuildRecord, *, user_id: str, build_id: str) -> None:
     """Check the target's DesignDocuments against this completed DesignDocs output at retry admission."""
-    summary = _verified_design_summary(output, user_id=user_id, build_id=build_id)
+    summary = verified_design_summary(output, user_id=user_id, build_id=build_id)
     surface_map, experience = summary["surface_map"], summary["experience_spec"]
     expected: dict[str, dict[str, Any]] = {
         DesignDocKinds.FRONTEND: {"content": summary.get("frontend_markdown")},
