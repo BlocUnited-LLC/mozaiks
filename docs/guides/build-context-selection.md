@@ -49,9 +49,12 @@ checks the requested IDs, dependencies and source digests. An invalid choice
 returns to the selection step before the Factory spends a turn writing the
 design.
 
-`DesignDocsAgent` receives the verified contracts for the chosen packs. A
-surface names a pack only when that selected pack supplies it. An app-owned
-module or workflow can have an empty `source_capability_packs` list.
+`DesignDocsAgent` receives the verified contracts for the chosen packs.
+`source_capability_packs` on a design surface describes capability categories.
+Reusable pack identities come from the verified selection. An approved agentic
+capability can use an app-owned workflow with an empty pack selection.
+AppGenerator reads module archetypes from the saved app build plan and workflow
+event bindings from the corresponding workflow bundle.
 For revisions the design agent also sees a bounded projection of the accepted
 app archive. It lists module-owned collections, record and ownership keys,
 typed fields, schema-page paths and access gates, app roles, and module action
