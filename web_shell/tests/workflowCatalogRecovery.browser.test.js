@@ -57,8 +57,13 @@ test('a saved workflow opens after catalog discovery recovers', async t => {
       await page.route('**/*', async route => {
         const { pathname } = new URL(route.request().url());
         if (pathname === '/chat') return route.fulfill({ contentType:'text/html', body:'<!doctype html><main></main>' });
-        if (pathname === '/api/workflows') return route.fulfill(available
-          ? { json:{workflows:[{name:'Study', startup_mode:'AgentDriven'}]} } : {status:503});
+        if (pathname === '/api/workflows') {
+          const recovered = recovery === 'Reconnect'
+            ? await page.evaluate(() => window.manualReconnectClicked === true)
+            : available;
+          return route.fulfill(recovered
+            ? { json:{workflows:[{name:'Study', startup_mode:'AgentDriven'}]} } : {status:503});
+        }
         if (pathname.includes('/api/chats/exists/')) return route.fulfill({json:{exists:true,workflow_name:'Study'}});
         if (pathname.includes('/api/chats/meta/')) return route.fulfill({json:{chat_id:'saved-study',workflow_name:'Study',status:0}});
         if (pathname.endsWith('/start') && route.request().method() === 'POST') starts.push(pathname);
@@ -83,9 +88,16 @@ test('a saved workflow opens after catalog discovery recovers', async t => {
       await page.addScriptTag({type:'module',content:bundle.outputFiles.find(file => file.path.endsWith('.js')).text});
       await expect.poll(() => errors[0] || discoveryFailed).toBe(true);
       assert.deepEqual(sockets, []);
-      available = true;
-      if (recovery === 'Reconnect') await page.getByRole('button', {name:'Reconnect'}).click();
-      else await page.evaluate(() => window.refreshCatalog());
+      if (recovery === 'Reconnect') {
+        const reconnect = page.getByRole('button', {name:'Reconnect'});
+        await reconnect.evaluate(button => button.addEventListener('click', () => {
+          window.manualReconnectClicked = true;
+        }, {capture:true, once:true}));
+        await reconnect.click();
+      } else {
+        available = true;
+        await page.evaluate(() => window.refreshCatalog());
+      }
       await expect(page.getByText('Saved study conversation', {exact:true})).toBeVisible();
       assert.deepEqual(closed, []);
       await expect.poll(() => errors[0] || sockets).toEqual(['/ws/Study/sample/saved-study/owner']);
