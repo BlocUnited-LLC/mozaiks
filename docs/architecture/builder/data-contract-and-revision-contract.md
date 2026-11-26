@@ -340,6 +340,12 @@ be a user-entered natural key, which is never overwritten with a generated id.
 Canonical get resolves `search_by`, then a declared `id`, then Mongo `_id`.
 List/get responses retain Mongo `_id` as a string when it supplies either the
 generated record identity or the get lookup, alongside the declared fields.
+When a revision introduces a managed `updated_at` timestamp, Factory checks the
+accepted get and list response contracts for that collection. A read that
+previously allowed the timestamp to be absent continues to allow existing
+records without it. Creation and updates record the actual timestamp. A read
+that already required the timestamp keeps that guarantee. Fresh apps follow
+the required fields in their reviewed collection contract.
 Runtime smoke uses the stored lookup value for both the owner's successful get
 and another user's denied get, while updates/deletes use the generated record id.
 Create stamps declared `created_at`/`updated_at` fields; update and delete
