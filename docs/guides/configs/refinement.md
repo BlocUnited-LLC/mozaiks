@@ -192,6 +192,14 @@ and records the revised workflow separately. A new app without
 a source build has no dependency assessment. An unavailable or invalid
 requested build has no fallback to current app evidence.
 
+## Reviewing workflow revisions
+
+When DesignDocs asks the owner to review permissions, the card also lists
+workflow surfaces, the events modules emit, and the triggers each surface
+declares. For a workflow revision that declares no workflow surfaces, the
+card says so and the owner can request changes before the design is saved.
+AgentGenerator presents the executable workflow plan in its own review.
+
 ## AppGenerator backend revisions
 
 When a reviewed app revision owns only existing module `backend/repo.py` and

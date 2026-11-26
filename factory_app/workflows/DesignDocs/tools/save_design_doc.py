@@ -76,8 +76,42 @@ class _AccessPolicyCancellation(BaseModel):
     ui_event_id: str | None = None
 
 
+def _workflow_review_checkpoints(surface_map: dict[str, Any], context: Any) -> list[str]:
+    surfaces = surface_map["surfaces"]
+    has_workflow = any(surface["surface_kind"] == "workflow" for surface in surfaces)
+    checkpoints = []
+    if not has_workflow:
+        intent = _cv_get(context, "change_intent") or {}
+        impact = _cv_get(context, "impact_set") or {}
+        if context.get("build_mode") != "revision" or not (
+            intent.get("requires_workflow_revision") is True
+            or "workflow_bundle" in (impact.get("affected_declarative_families") or [])
+        ):
+            return []
+        checkpoints.append("This design declares no workflow surfaces.")
+
+    for surface in surfaces:
+        kind = surface["surface_kind"]
+        events = surface.get("events_emitted") or []
+        triggers = surface.get("workflow_triggers") or []
+        facts = []
+        if events and kind in {"module", "workflow"}:
+            facts.append("Emitted events include " + ", ".join(events) + ".")
+        if triggers:
+            facts.append("Declared workflow triggers include " + ", ".join(triggers) + ".")
+        elif kind == "workflow":
+            facts.append("No workflow triggers are declared.")
+        if facts:
+            name = surface["surface_id"]
+            if kind == "workflow" and surface.get("label") and surface["label"] != name:
+                name = f"{surface['label']} ({name})"
+            checkpoints.append(f"{kind.replace('_', ' ').capitalize()} {name}. " + " ".join(facts))
+    return checkpoints
+
+
 async def _review_access_policy(
-    policy: dict[str, Any], *, experience_spec: dict[str, Any], binding: Any, context_variables: Any,
+    policy: dict[str, Any], *, experience_spec: dict[str, Any], surface_map: dict[str, Any],
+    binding: Any, context_variables: Any,
     pack_authorization: PackAuthorization | None = None, data_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     page_roles = validate_design_page_roles(experience_spec, policy)
@@ -98,7 +132,8 @@ async def _review_access_policy(
         raise ValueError("Design permissions require an authenticated owner review in this chat")
     review_id = uuid4().hex
     labels = {role["role_id"]: role["label"] for role in policy["roles"]}
-    checkpoints = [f"{role['label']} ({role['role_id']}): {role['description']}" for role in policy["roles"]]
+    checkpoints = _workflow_review_checkpoints(surface_map, context_variables)
+    checkpoints.extend(f"{role['label']} ({role['role_id']}): {role['description']}" for role in policy["roles"])
     if empty_scope:
         checkpoints.append("The revised design selects no reusable packs, grants no role permissions and has no role-gated pages.")
     checkpoints.extend(
@@ -1306,8 +1341,8 @@ async def save_design_docs_bundle(
 
     try:
         access_policy_review = await _review_access_policy(
-            access_policy, experience_spec=experience_spec, binding=binding, context_variables=context_variables,
-            pack_authorization=pack_authorization, data_contract=data_contract,
+            access_policy, experience_spec=experience_spec, surface_map=surface_map, binding=binding,
+            context_variables=context_variables, pack_authorization=pack_authorization, data_contract=data_contract,
         )
         if access_policy_review["status"] == "approve":
             if detach(context_variables.get("pack_selection")) != selection:

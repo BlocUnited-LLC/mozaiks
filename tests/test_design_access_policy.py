@@ -478,10 +478,14 @@ def test_stale_or_malformed_review_fails_closed(monkeypatch, persistence, overri
     persistence[1].assert_not_called()
 
 
-def test_empty_policy_needs_no_review(monkeypatch, persistence):
+@pytest.mark.parametrize("workflow_requested", [False, True])
+def test_empty_policy_needs_no_review(monkeypatch, persistence, workflow_requested):
     ui = AsyncMock(side_effect=AssertionError("No grants need review"))
     monkeypatch.setattr(save_design_doc, "use_ui_tool", ui)
     context = ownership._context(managed=False)
+    if workflow_requested:
+        context.set("build_mode", "revision")
+        context.set("change_intent", {"requires_workflow_revision": True})
     result = inventory._save(context, inventory._bundle(pricing=False))
     assert result["outcome"] == "saved", result
     ui.assert_not_awaited()
@@ -490,6 +494,55 @@ def test_empty_policy_needs_no_review(monkeypatch, persistence):
     assert summary["access_policy_review"]["status"] == "not_required"
     context.set("design_docs_artifact", _record(summary))
     assert resolve_design_access_policy(context) == {"roles": [], "grants": []}
+
+
+@pytest.mark.parametrize("context_key,context_value", [
+    ("change_intent", {"requires_workflow_revision": True}),
+    ("impact_set", {"affected_declarative_families": ["workflow_bundle", "app_bundle"]}),
+])
+def test_workflow_revision_shows_missing_surface_on_existing_review(monkeypatch, persistence, context_key, context_value):
+    context = ownership._context(managed=False)
+    context.set("build_mode", "revision")
+    context.set(context_key, context_value)
+    bundle = _bundle()
+    bundle["surface_map"]["surfaces"][0]["events_emitted"] = ["domain.reports.created"]
+    ui = _approve(monkeypatch, persistence, action="request_changes")
+    assert inventory._save(context, bundle)["outcome"] == "review_changes"
+    card = ui.await_args.args[1]
+    assert "This design declares no workflow surfaces." in card["checkpoints"]
+    assert "Module reports. Emitted events include domain.reports.created." in card["checkpoints"]
+    assert [button["id"] for button in card["actions"]] == ["approve", "request_changes"]
+    persistence[2].assert_not_awaited()
+
+
+@pytest.mark.parametrize("triggers,workflow_line", [
+    (["summarize-report"], "Declared workflow triggers include summarize-report."),
+    ([], "No workflow triggers are declared."),
+])
+def test_design_review_shows_typed_workflow_surfaces_and_source_declarations(monkeypatch, persistence, triggers, workflow_line):
+    context = ownership._context(managed=False)
+    context.set("concept_blueprint", {
+        **context.get("concept_blueprint"), "agentic_capabilities": ["Generate report summaries."],
+    })
+    bundle = _bundle()
+    reports, = bundle["surface_map"]["surfaces"]
+    reports["events_emitted"] = ["domain.reports.created", "domain.reports.edited"]
+    reports["workflow_triggers"] = ["summarize-report"]
+    bundle["surface_map"]["surfaces"].append({
+        "surface_id": "report_summary", "label": "Report summary", "surface_kind": "workflow",
+        "owner": "app", "workflow_triggers": triggers,
+    })
+    ui = _approve(monkeypatch, persistence)
+    result = inventory._save(context, bundle)
+    assert result["outcome"] == "saved", result
+    card = ui.await_args.args[1]
+    assert "Workflow Report summary (report_summary). " + workflow_line in card["checkpoints"]
+    assert (
+        "Module reports. Emitted events include domain.reports.created, domain.reports.edited. "
+        "Declared workflow triggers include summarize-report."
+    ) in card["checkpoints"]
+    summary = persistence[2].await_args.kwargs["summary_payload"]
+    assert summary["access_policy_review"]["policy_sha256"] == access_policy_sha256(bundle["access_policy"], summary["experience_spec"])
 
 
 @pytest.mark.parametrize("field,value,error", [

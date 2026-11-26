@@ -93,7 +93,8 @@ async def test_actual_auto_tool_pins_content_then_prompt_and_owner_gate(selector
     monkeypatch.setattr(save_design_doc, "use_ui_tool", approve)
     policy = {"roles": [], "grants": []}
     receipt = await save_design_doc._review_access_policy(
-        policy, experience_spec={"pages": []}, binding=SimpleNamespace(target_app_id="target", build_id="genesis"),
+        policy, experience_spec={"pages": []}, surface_map={"surfaces": []},
+        binding=SimpleNamespace(target_app_id="target", build_id="genesis"),
         context_variables=bridge, pack_authorization=authorization,
     )
     assert receipt["status"] == "approve" and receipt["reviewed_by"] == "owner"
