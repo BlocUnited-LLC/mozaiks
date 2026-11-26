@@ -67,13 +67,7 @@ def _reviewed(context, pack_ids):
     return ContextVariablesBridge(reviewed_pack_fixture(context.snapshot(), pack_ids))
 
 
-@pytest.mark.parametrize(("source", "reachable", "needs_task"), [
-    ("update_report", False, True), ("update_report", True, False),
-    ("list_reports", False, False), ("save_private_result", False, False), (None, False, False),
-])
-def test_revision_schedules_only_missing_reviewed_form_write(source, reachable, needs_task):
-    from factory_app.workflows.AppGenerator.tools.repair_policy import owned_diagnostics
-
+def _revision_with_form(source, reachable=False):
     plan = _plan()
     plan["build_tasks"] = [task for task in plan["build_tasks"] if task["task_type"] != "page_bundle"]
     path = "ui/pages/reports.yaml"
@@ -96,7 +90,17 @@ def test_revision_schedules_only_missing_reviewed_form_write(source, reachable, 
             "submit_action": {"action_type": "submit", "href": "/api/modules/reports/update_report"},
         }})
     values["generated_files"] = {path: yaml.safe_dump(baseline)}
-    context = ContextVariablesBridge(values)
+    return plan, ContextVariablesBridge(values), path, ask
+
+
+@pytest.mark.parametrize(("source", "reachable", "needs_task"), [
+    ("update_report", False, True), ("update_report", True, False),
+    ("list_reports", False, False), ("save_private_result", False, False), (None, False, False),
+])
+def test_revision_schedules_only_missing_reviewed_form_write(source, reachable, needs_task):
+    from factory_app.workflows.AppGenerator.tools.repair_policy import owned_diagnostics
+
+    plan, context, path, ask = _revision_with_form(source, reachable)
     if needs_task:
         with pytest.raises(ValueError, match="Missing page_bundle task ownership"):
             validate_plan_coverage(plan, context)
@@ -220,6 +224,38 @@ def test_revision_page_output_contract_preserves_page_only_scope_and_is_idempote
     assert result["outcome"] == "ready", result
     accepted = next(item for item in detach(context.get("app_task_batch_items")) if item["task_id"] == task["task_id"])
     assert accepted == first
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["forged_refs", "removed_mark", "unreviewed"])
+async def test_recover_revision_page_duty_from_immutable_source_or_require_plan_review(state, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from factory_app.workflows.AppGenerator.tools import hydrate_app_build_plan_context as hydration
+
+    plan, context, path, ask = _revision_with_form("update_report")
+    assert review_app_build_plan(AppBuildPlan=plan, context_variables=context)["outcome"] == "ready"
+    approved = detach(context.get("app_build_plan"))
+    source = detach(context.get("generated_files"))
+    read = AsyncMock(return_value=source)
+    monkeypatch.setattr(hydration, "read_bound_revision_files", read)
+    context.set("generated_files", {path: yaml.safe_dump({"route": "/reports", "sections": []})})
+    if state == "removed_mark":
+        approved["pages"][0].pop("retained_ask_context")
+    else:
+        approved["pages"][0]["retained_ask_context"] = [{"module": "other", "action": "wrong"}]
+    context.set("app_build_plan", approved)
+    context.set("app_plan_ready", state != "unreviewed")
+    context.set("app_task_batch_items", [])
+    result = await hydration.hydrate_app_build_plan_context(context)
+    read.assert_awaited_once_with(context)
+    if state == "forged_refs":
+        assert result["status"] == "hydrated"
+        assert detach(context.get("app_build_plan"))["pages"][0]["retained_ask_context"] == ask
+        assert context.get("app_task_batch_items")
+    else:
+        assert result == {"status": "skipped", "reason": "revision_page_plan_requires_review"}
+        assert not context.get("app_plan_ready") and not context.get("app_task_batch_items")
 
 
 @pytest.mark.parametrize("replacement", [[], [{"module_id": "reports", "action_id": "erase_all"}]])

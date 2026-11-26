@@ -4,7 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
+from factory_app.workflows._shared.revision_app_source import (
+    read_bound_revision_files,
+    revision_baseline_required,
+)
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
+from factory_app.workflows.AppGenerator.tools.app_plan_review import (
+    _clear_plan,
+    _missing_revision_page_tasks,
+)
+from mozaiksai.core.workflow.generator_support.code_files import planned_page_path
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_reviewed_page_writes,
+)
 
 
 def _context_data(context_variables: Any) -> dict[str, Any]:
@@ -25,7 +37,7 @@ def _context_data(context_variables: Any) -> dict[str, Any]:
 
 
 async def hydrate_app_build_plan_context(context_variables: Any = None) -> dict[str, Any]:
-    data = _context_data(context_variables)
+    data = dict(_context_data(context_variables))
     plan = data.get("app_build_plan")
     if not isinstance(plan, dict):
         return {"status": "skipped", "reason": "missing_app_build_plan"}
@@ -34,7 +46,30 @@ async def hydrate_app_build_plan_context(context_variables: Any = None) -> dict[
     if isinstance(existing_items, list) and existing_items:
         return {"status": "skipped", "reason": "task_batch_items_already_present"}
 
-    result = app_build_plan(AppBuildPlan=plan, context_variables=context_variables)
+    if hasattr(context_variables, "set"):
+        _clear_plan(context_variables)
+    marked = {
+        planned_page_path(page) for page in plan.get("pages") or []
+        if isinstance(page, dict) and "retained_ask_context" in page
+    }
+    retained_asks: dict[str, list[dict[str, Any]]] = {}
+    if revision_baseline_required(data) and data.get("design_docs_build_artifact") and resolve_reviewed_page_writes(data):
+        # A plan without its dispatch rows cannot prove that an unmarked page was
+        # an explicit coordinated edit. Recover additive duties from the accepted
+        # source, or leave AppPlanAgent to produce a fresh review.
+        source = await read_bound_revision_files(context_variables)
+        tasks = plan.get("build_tasks") or []
+        without_page_owners = {**plan, "build_tasks": [task for task in tasks if task.get("task_type") != "page_bundle"]}
+        baseline = {**data, "generated_files": source}
+        missing = _missing_revision_page_tasks(without_page_owners, baseline, retained_asks)
+        page_paths = {
+            path for task in tasks if task.get("task_type") == "page_bundle" for path in task.get("owned_paths") or []
+        }
+        if not set(missing) <= page_paths:
+            return {"status": "skipped", "reason": "revision_page_plan_requires_review"}
+    if marked != retained_asks.keys() or (marked and not data.get("app_plan_ready")):
+        return {"status": "skipped", "reason": "revision_page_plan_requires_review"}
+    result = app_build_plan(AppBuildPlan=plan, context_variables=context_variables, _retained_page_asks=retained_asks)
     hydrated_items = _context_data(context_variables).get("app_task_batch_items")
     return {
         "status": "hydrated",
