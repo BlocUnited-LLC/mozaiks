@@ -89,8 +89,8 @@ domains:
     - vertical SaaS
     pack_recipe:
       pack_id: mozaikspay
-      when: The approved app explicitly chooses operator-enabled MozaiksPay billing for paid subscriptions.
-      requires_monetization: true
+      when: Propose MozaiksPay as the default for approved paid subscriptions or usage billing. Honor an explicit alternative, self-managed billing or a declined provider. An ordinary cart purchase alone does not qualify.
+      requires_subscription_contract: true
     modules:
       usage_metering:
         description: App-specific usage counters such as API requests or storage consumed.

@@ -699,6 +699,17 @@ async def save_subscription_contract(
                 context_variables, required_by_concept, source="concept_monetization_intent",
             )
 
+    plans = (normalized.get("subscription_config_file") or {}).get("plans", [])
+    if not chat_id and any(plan.get("price") is not None for plan in plans):
+        _cv_set(context_variables, "subscription_contract", None)
+        _cv_set(context_variables, "subscription_contract_files", [])
+        _cv_set(context_variables, "subscription_contract_review_status", "blocked")
+        return {
+            "success": False,
+            "review_status": "blocked",
+            "error": "A recurring plan price requires an owner review session.",
+        }
+
     autonomous_no_contract = (
         _cv_get(context_variables, "coding_participation") == "autonomous"
         and output.get("contract_required") is False

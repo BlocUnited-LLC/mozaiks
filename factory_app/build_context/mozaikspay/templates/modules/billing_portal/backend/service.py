@@ -4,7 +4,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from pydantic import ValidationError
 from services.integrations.mozaikspay_client import MozaiksPayClient
+
+from mozaiksai.core.runtime.app.subscriptions_loader import PlanPriceDef
 
 from .schemas import SubscriptionStatus, safe_checkout_response, safe_portal_response
 
@@ -80,7 +83,7 @@ def _positive_int(value: Any) -> int:
 
 
 def _safe_plan(plan: dict[str, Any]) -> dict[str, Any]:
-    return {
+    public_plan = {
         "plan_id": plan.get("plan_id", ""),
         "label": plan.get("label", ""),
         "description": plan.get("description", ""),
@@ -88,6 +91,18 @@ def _safe_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "usage_limits": plan.get("usage_limits", {}),
         "token_allowances": plan.get("token_allowances", []),
     }
+    if plan.get("price") is None:
+        return public_plan
+    try:
+        price = PlanPriceDef.model_validate(plan["price"])
+    except ValidationError:
+        return public_plan
+    if price.display:
+        public_plan["price_display"] = price.display
+    else:
+        whole, cents = divmod(price.amount_cents, 100)
+        public_plan["price_display"] = f"{price.currency.upper()} {whole}.{cents:02d}/{price.interval}"
+    return public_plan
 
 
 def _safe_token_wallet(wallet: dict[str, Any]) -> dict[str, Any]:

@@ -1226,6 +1226,17 @@ class SubscriptionsConfig(BaseModel):
         return self.plans[0]
 
     @property
+    def llm_usage_wallets(self) -> list[TokenWalletDef]:
+        """Auto-debit wallets that LLM usage is checked against and charged to.
+
+        Only wallets on the ``ai_tokens`` meter. A v1 config that declares none
+        keeps using every auto-debit wallet, so a custom meter name stays gated.
+        """
+        wallets = [wallet for wallet in self.effective_token_wallets if wallet.auto_debit_usage]
+        metered = [wallet for wallet in wallets if wallet.usage_meter_id == "ai_tokens"]
+        return metered if metered or self.products else wallets
+
+    @property
     def effective_token_wallets(self) -> list[TokenWalletDef]:
         """Root and product-local wallets, deduplicated by wallet identity."""
         wallets: dict[str, TokenWalletDef] = {}
