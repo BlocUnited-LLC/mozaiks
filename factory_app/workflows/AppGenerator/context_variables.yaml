@@ -243,6 +243,16 @@ definitions:
     source:
       type: state
       default: null
+  legacy_optional_updated_at_reads:
+    type: object
+    description: Existing canonical record reads on the verified revision source that permit a missing updated_at.
+    authority_class: closed_writer_quality_state
+    writer_ids: [lifecycle_tool, deterministic_tool]
+    model_visible: false
+    persisted: true
+    source:
+      type: state
+      default: {}
   revision_first_generation:
     type: boolean
     description: >

@@ -1072,6 +1072,81 @@ async def test_design_revision_actual_assembly_selects_only_implementation_basel
     assert context.get("artifact_version_id") == "design_1"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sequence", ["app_revision", "design_revision"])
+@pytest.mark.parametrize("old_timestamp", ["absent", "optional", "required"])
+async def test_revision_hydrates_only_previously_unrequired_read_timestamps(scoped_module_revision, sequence, old_timestamp):
+    from copy import deepcopy
+
+    source = scoped_module_revision.baseline
+    stored = json.loads(source.files["data/contract.json"])
+    current = deepcopy(stored)
+    timestamp = {"name": "updated_at", "type": "datetime", "required": True}
+    current["surfaces"][0]["collections"][0]["fields"].append(timestamp)
+    if old_timestamp != "absent":
+        stored["surfaces"][0]["collections"][0]["fields"].append(timestamp)
+    stored["surfaces"][0]["collections"].append({"name": "older_partial_metadata"})
+    record = {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}
+    if old_timestamp != "absent":
+        record["properties"]["updated_at"] = {}
+    if old_timestamp == "required":
+        record["required"].append("updated_at")
+    get = {"id": "get_records", "handler_method": "get_records",
+           "output_schema": {"type": "object", "properties": {"item": record}}}
+    listing = {"id": "list_records", "handler_method": "list_records", "output_schema": {"type": "object", "properties": {
+        "items": {"type": "array", "items": {**deepcopy(record), "required": ["id", "updated_at"]}}}}}
+    path = "modules/records/module.yaml"
+    manifest = yaml.safe_dump({"module": {"id": "records"}, "actions": [get, listing]})
+    _replace_archive(source, {path: manifest, "data/contract.json": json.dumps(stored)})
+    if sequence == "design_revision":
+        _upstream_design_revision(source, bundles=[source.artifact])
+    else:
+        source.artifact.validation_status = "passed"
+        source.artifact.commit_metadata.metadata["acceptance"] = build_acceptance_evidence(
+            source.artifact, accepted_by="owner", accepted_at="2026-11-07T12:00:00Z", transition="studio_accept")
+    context = {**source.context, "data_contract": current, "generated_files": {path: "actions: []"}}
+    await revision.hydrate_app_revision_context(context)
+    expected = {} if old_timestamp == "required" else {"records": ["get_records"]}
+    assert context["legacy_optional_updated_at_reads"] == expected
+    assert context["revision_source_artifact_version_id"] == source.artifact.id
+    assert context["generated_files"][path] == "actions: []"
+    if sequence == "app_revision":
+        source.artifact.commit_metadata.metadata.pop("acceptance")
+        await revision.hydrate_app_revision_context(context)
+        assert context["legacy_optional_updated_at_reads"] == {}
+
+
+def test_old_read_timestamp_projection_requires_matching_record_and_action(scoped_module_revision):
+    from copy import deepcopy
+
+    from mozaiksai.core.workflow.generator_support.module_revision import (
+        legacy_optional_updated_at_reads,
+    )
+
+    base = scoped_module_revision.baseline
+    stored = json.loads(base.files["data/contract.json"])
+    current = deepcopy(stored)
+    collection = current["surfaces"][0]["collections"][0]
+    collection["fields"].append({"name": "updated_at", "type": "datetime", "required": True})
+    path = "modules/records/module.yaml"
+    record = {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}
+    good = {"id": "list_records", "handler_method": "list_records", "output_schema": {"type": "object",
+            "properties": {"items": {"type": "array", "items": record}}}}
+    compound = {**deepcopy(good), "output_schema": {**deepcopy(good["output_schema"]), "allOf": [{"required": ["updated_at"]}]}}
+    for candidate in ({**good, "id": "custom"}, {**good, "handler_method": "custom"}, compound, {},
+                      {**good, "output_schema": {"type": "object", "properties": {"items": True}}},
+                      {**good, "output_schema": {"type": "object", "properties": {"items": {"items": record}}}}):
+        files = {**base.files, path: yaml.safe_dump({"module": {"id": "records"}, "actions": [candidate]})}
+        assert legacy_optional_updated_at_reads(files, current) == {}
+    files = {**base.files, path: yaml.safe_dump({"module": {"id": "records"}, "actions": [good]})}
+    assert legacy_optional_updated_at_reads(files, current) == {"records": ["list_records"]}
+    collection["fields"].append({"name": "record_id", "type": "string", "required": True})
+    assert legacy_optional_updated_at_reads(files, current) == {}
+    collection["fields"].pop()
+    collection["entity"] = "Different"
+    assert legacy_optional_updated_at_reads(files, current) == {}
+
+
 def test_first_generation_state_has_closed_authority_and_reaches_generation_agents():
     from mozaiksai.core.workflow.context.authority import (
         ContextAuthorityError,
@@ -1080,13 +1155,14 @@ def test_first_generation_state_has_closed_authority_and_reaches_generation_agen
 
     config = yaml.safe_load((Path(__file__).resolve().parents[1] / "factory_app/workflows/AppGenerator/context_variables.yaml").read_text(encoding="utf-8"))
     policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=config["definitions"])
-    for key in ("revision_first_generation", "revision_source_artifact_version_id"):
+    for key in ("revision_first_generation", "revision_source_artifact_version_id", "legacy_optional_updated_at_reads"):
         for writer in ("caller_input", "transition_router", "structured_output", "context_bridge", "agent_text"):
             with pytest.raises(ContextAuthorityError):
                 policy.require_can_write(key, writer_id=writer)
         for writer in ("lifecycle_tool", "deterministic_tool"):
             policy.require_can_write(key, writer_id=writer)
     assert config["definitions"]["revision_first_generation"]["source"]["default"] is False
+    assert config["definitions"]["legacy_optional_updated_at_reads"]["model_visible"] is False
     for agent in ("InterviewAgent", "AppPlanAgent", "DatabaseAgent"):
         assert {"revision_first_generation", "workflow_sequence"} <= set(config["agents"][agent]["variables"])
 

@@ -34,6 +34,7 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
 )
+from mozaiksai.core.workflow.generator_support.module_revision import bind_legacy_read_timestamps
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_stem_from_path,
     approved_page_action_ids,
@@ -2422,6 +2423,7 @@ def app_build_plan(
         "demo_fixture_sets": demo_fixture_sets,
     }
 
+    bind_legacy_read_timestamps(normalized_plan, context_variables)
     if context_variables is not None and hasattr(context_variables, "set"):
         try:
             context_variables.set("app_build_plan", normalized_plan)

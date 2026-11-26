@@ -8,17 +8,91 @@ from typing import Any
 
 import yaml
 
+from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import planned_page_path, safe_relpath
+from mozaiksai.core.workflow.generator_support.data_contract_fields import (
+    DATE_FIELD_TYPES,
+    record_id_field,
+)
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    canonical_read_action_id,
     canonical_read_actions_for_surface,
     canonical_write_actions_for_surface,
     module_action_index,
 )
 from mozaiksai.core.workflow.generator_support.module_authored_code import prune_repository
+from mozaiksai.core.workflow.generator_support.page_data_bindings import schema_at_path
 
 _SERVICE_PATH = re.compile(r"modules/([^/]+)/backend/(?:repo|service)\.py")
 _PAGE_SCHEMA_PATH = re.compile(r"ui/pages/(?:[^/]+/page|[^/]+)\.ya?ml")
+
+
+def _collection_read_identity(module: str, collection: dict[str, Any]) -> tuple[Any, ...]:
+    fields = [field["name"] for field in collection["fields"] if isinstance(field, dict) and isinstance(field.get("name"), str)]
+    return (module, collection["name"], collection["entity"], collection["tenancy"],
+            collection.get("owner_field"), record_id_field(collection, fields))
+
+
+def legacy_optional_updated_at_reads(files: Mapping[str, str | bytes], data_contract: Any) -> dict[str, list[str]]:
+    """Project prior canonical record reads whose accepted schema permits a missing timestamp."""
+    current = {
+        _collection_read_identity(module, collection)
+        for module, kind, collection in iter_data_contract_collections(detach(data_contract))
+        if kind == "module" and collection.get("scope") == "app"
+        and any(isinstance(f, dict) and f.get("name") == "updated_at" and f.get("type") in DATE_FIELD_TYPES and f.get("required") is True
+                for f in collection.get("fields") or [])
+    }
+    if not current or "data/contract.json" not in files:
+        return {}
+    source_contract = json.loads(files["data/contract.json"])
+    result: dict[str, list[str]] = {}
+    for module, kind, collection in iter_data_contract_collections(source_contract):
+        if kind != "module" or collection.get("scope") != "app":
+            continue
+        name = collection["name"]
+        key = _collection_read_identity(module, collection)
+        if key not in current:
+            continue
+        path = f"modules/{module}/module.yaml"
+        source = files.get(path)
+        if not isinstance(source, str):
+            continue
+        manifest = yaml.safe_load(source)
+        identity = manifest.get("module") if isinstance(manifest, dict) else None
+        if not isinstance(identity, dict) or identity.get("id") != module:
+            continue
+        record_key = key[-1]
+        # Compound JSON schemas can impose guarantees outside the local required list.
+        object_keys = {"type", "properties", "required", "additionalProperties", "title", "description"}
+        for operation in ("get", "list"):
+            action_id = canonical_read_action_id(name, operation)
+            rows = [row for row in manifest.get("actions") or [] if isinstance(row, dict) and row.get("id") == action_id]
+            if len(rows) != 1 or rows[0].get("handler_method") != action_id:
+                continue
+            schema = rows[0].get("output_schema")
+            if not isinstance(schema, dict) or schema.get("type") != "object" or not schema.keys() <= object_keys:
+                continue
+            record = schema_at_path(schema, "item" if operation == "get" else "items")
+            if operation == "list":
+                record = record.get("items") if record and record.get("type") == "array" and (
+                    record.keys() <= {"type", "items", "title", "description"}
+                ) else None
+            if not isinstance(record, dict) or record.get("type") != "object" or not record.keys() <= object_keys:
+                continue
+            required = record.get("required", [])
+            if (schema_at_path(record, record_key) is not None and isinstance(required, list)
+                    and all(isinstance(field, str) for field in required) and "updated_at" not in required):
+                result.setdefault(module, []).append(action_id)
+    return {module: sorted(reads) for module, reads in result.items()}
+
+
+def bind_legacy_read_timestamps(plan: dict[str, Any], context: Any) -> None:
+    """Only the baseline loader can set this projection, including on a preloaded plan."""
+    plan.pop("legacy_optional_updated_at_reads", None)
+    if context is not None and context.get("build_mode") == "revision" and context.get("revision_source_artifact_version_id"):
+        if reads := detach(context.get("legacy_optional_updated_at_reads")):
+            plan["legacy_optional_updated_at_reads"] = reads
 
 
 def _unchanged_ask_callers(

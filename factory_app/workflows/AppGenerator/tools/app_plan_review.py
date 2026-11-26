@@ -2366,6 +2366,8 @@ def review_app_build_plan(
     try:
         models, _ = load_workflow_structured_outputs("AppGenerator")
         payload = detach(AppBuildPlan)
+        if isinstance(payload, dict):
+            payload.pop("legacy_optional_updated_at_reads", None)
         pages = payload.get("pages") if isinstance(payload, dict) else None
         retained_asks = _previous_additive_asks(previous, payload)
         if isinstance(pages, list):

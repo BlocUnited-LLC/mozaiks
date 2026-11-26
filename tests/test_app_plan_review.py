@@ -258,6 +258,26 @@ async def test_recover_revision_page_duty_from_immutable_source_or_require_plan_
         assert not context.get("app_plan_ready") and not context.get("app_task_batch_items")
 
 
+@pytest.mark.asyncio
+async def test_authored_plan_cannot_choose_prior_read_timestamp_guarantees():
+    from factory_app.workflows.AppGenerator.tools.hydrate_app_build_plan_context import (
+        hydrate_app_build_plan_context,
+    )
+    plan, context, _, _ = _revision_with_form("update_report")
+    plan["legacy_optional_updated_at_reads"] = {"other": ["erase"]}
+    context.set("legacy_optional_updated_at_reads", {"reports": ["list_reports"]})
+    assert review_app_build_plan(AppBuildPlan=plan, context_variables=context)["outcome"] == "ready"
+    approved = detach(context.get("app_build_plan"))
+    assert approved["legacy_optional_updated_at_reads"] == {"reports": ["list_reports"]}
+    approved["legacy_optional_updated_at_reads"] = {"other": ["bad"]}
+    context.set("app_build_plan", approved)
+    await hydrate_app_build_plan_context(context)
+    assert detach(context.get("app_build_plan"))["legacy_optional_updated_at_reads"] == {"reports": ["list_reports"]}
+    context.set("build_mode", "genesis")
+    await hydrate_app_build_plan_context(context)
+    assert "legacy_optional_updated_at_reads" not in context.get("app_build_plan")
+
+
 @pytest.mark.parametrize("replacement", [[], [{"module_id": "reports", "action_id": "erase_all"}]])
 def test_rereview_binds_writes_from_design_and_rejects_other_unknown_page_fields(replacement):
     context = _context()

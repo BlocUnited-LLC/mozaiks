@@ -133,16 +133,25 @@ def _require_design_revision_baseline(artifact: BuildRecord) -> None:
         raise ValueError("revision_baseline_not_accepted")
 
 
+def is_accepted_revision_source(artifact: BuildRecord) -> bool:
+    """Whether an already verified source can establish a prior public response guarantee."""
+    try:
+        _require_design_revision_baseline(artifact)
+    except ValueError:
+        return False
+    return True
+
+
 async def read_revision_files(
     context_variables: Any, artifact_id: str | None, *, include_binary: bool = False, require_accepted: bool = False,
 ) -> dict[str, str | bytes]:
-    _, files = await _read_revision_source(
+    _, files = await read_revision_source(
         context_variables, artifact_id, include_binary=include_binary, require_accepted=require_accepted,
     )
     return files
 
 
-async def _read_revision_source(
+async def read_revision_source(
     context_variables: Any, artifact_id: str | None, *, include_binary: bool = False, require_accepted: bool = False,
 ) -> tuple[BuildRecord, dict[str, str | bytes]]:
     binding = require_build_binding(context_variables)
@@ -229,4 +238,4 @@ async def read_accepted_design_app_files(context_variables: Any) -> tuple[BuildR
         source_id = revision_app_source_id(context_variables)
     if not source_id:
         return None
-    return await _read_revision_source(context_variables, source_id, require_accepted=True)
+    return await read_revision_source(context_variables, source_id, require_accepted=True)

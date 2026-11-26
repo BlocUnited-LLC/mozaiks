@@ -17,6 +17,7 @@ from mozaiksai.core.workflow.generator_support.code_files import planned_page_pa
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
     resolve_reviewed_page_writes,
 )
+from mozaiksai.core.workflow.generator_support.module_revision import bind_legacy_read_timestamps
 
 
 def _context_data(context_variables: Any) -> dict[str, Any]:
@@ -44,6 +45,13 @@ async def hydrate_app_build_plan_context(context_variables: Any = None) -> dict[
 
     existing_items = data.get("app_task_batch_items")
     if isinstance(existing_items, list) and existing_items:
+        rebound = dict(plan)
+        bind_legacy_read_timestamps(rebound, data)
+        if rebound != plan:
+            if isinstance(context_variables, dict):
+                context_variables["app_build_plan"] = rebound
+            else:
+                context_variables.set("app_build_plan", rebound)
         return {"status": "skipped", "reason": "task_batch_items_already_present"}
 
     if hasattr(context_variables, "set"):

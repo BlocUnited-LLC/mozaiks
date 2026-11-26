@@ -8,8 +8,9 @@ from typing import Any
 
 from factory_app.workflows._shared.revision_app_source import (
     design_revision_source,
+    is_accepted_revision_source,
     read_bound_revision_files,
-    read_revision_files,
+    read_revision_source,
     revision_baseline_required,
     revision_source_artifact_id,
 )
@@ -17,6 +18,9 @@ from mozaiksai.core.runtime.app.theme_contract import APP_THEME_PATH
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     extract_deleted_file_paths_from_payload,
+)
+from mozaiksai.core.workflow.generator_support.module_revision import (
+    legacy_optional_updated_at_reads,
 )
 
 
@@ -83,7 +87,10 @@ def read_revision_theme(files: dict[str, Any]) -> dict[str, Any] | None:
 
 
 async def hydrate_revision_files(context_variables: Any, *, initialize_theme: bool = False) -> dict[str, Any]:
-    if context_variables is None or context_variables.get("build_mode") != "revision":
+    if context_variables is None:
+        return {"status": "skipped", "reason": "not_revision"}
+    _set(context_variables, "legacy_optional_updated_at_reads", {})
+    if context_variables.get("build_mode") != "revision":
         return {"status": "skipped", "reason": "not_revision"}
     # Recompute even after replay. A carried flag cannot waive source/owner or
     # existence checks, and a failed recheck leaves the baseline required.
@@ -96,13 +103,15 @@ async def hydrate_revision_files(context_variables: Any, *, initialize_theme: bo
         if artifact_id is None:
             _set(context_variables, "revision_first_generation", True)
             return {"status": "skipped", "reason": "first_generation"}
-        files = await read_revision_files(context_variables, artifact_id)
-        _set(context_variables, "revision_source_artifact_version_id", artifact_id)
     else:
-        files = await read_bound_revision_files(context_variables)
         artifact_id = revision_source_artifact_id(context_variables)
+    artifact, files = await read_revision_source(context_variables, artifact_id)
+    _set(context_variables, "revision_source_artifact_version_id", artifact.id)
     if initialize_theme and uses_revision_source_theme(context_variables):
         _set(context_variables, "captured_theme_config", read_revision_theme(files))
+    if is_accepted_revision_source(artifact):
+        reads = legacy_optional_updated_at_reads(files, context_variables.get("data_contract"))
+        _set(context_variables, "legacy_optional_updated_at_reads", reads)
     current = detach(context_variables.get("generated_files")) or {}
     if not isinstance(current, dict):
         raise ValueError("revision_baseline_generated_files_invalid")
