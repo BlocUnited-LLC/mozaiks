@@ -193,7 +193,7 @@ models:
       fields:
         type: list
         items: str
-        description: Exact client-writable field names for this operation. Use an empty list for delete. Exclude identity, ownership, managed timestamps and workflow-computed results.
+        description: Business fields a person can set. The runtime supplies the record selector for update and delete. Keep record keys, ownership, managed timestamps and workflow results out of this list. Use an empty list for delete.
 
   DataContractLifecycle:
     type: model
@@ -208,7 +208,7 @@ models:
       module_writes:
         type: optional_list
         items: DataContractModuleWrite
-        description: For module_action collections, an explicit list enables only the listed operations and input fields. An empty list disables canonical writes. Omit to retain default create, update and delete. Preserve an existing app's approved actions and field inputs when refining it.
+        description: For module_action collections, declare each enabled client operation once. For example, if a person can create and edit a description and a background workflow computes a summary, create and update each list only description. The workflow saves its summary through an internal action. An empty list disables canonical writes. Omit to retain default create, update and delete. Preserve the accepted app's public inputs during refinement.
       migration_policy:
         type: literal
         values:

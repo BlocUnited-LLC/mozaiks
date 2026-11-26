@@ -317,6 +317,9 @@ clients can supply. The list is part of the reviewed data contract. Factory
 projects the same declaration into the action inventory, request schemas and
 generated handlers. During refinement, the accepted app's action schemas are
 the baseline for deciding whether the proposed design widens a write.
+The record key selects a row for an update and is added to the generated action
+schema. A workflow that saves a computed field uses its reviewed internal
+result action. The public update entry lists only the fields a person can edit.
 See the [collection lifecycle example](../app/data-contracts.md#surfaces).
 
 Design surfaces declare `custom_reads` beside `owned_mutations` for actions such

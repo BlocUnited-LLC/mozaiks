@@ -82,7 +82,8 @@ def canonical_write_fields(collection: Mapping[str, Any]) -> dict[str, tuple[str
     if lifecycle.get("write_mode") != "module_action" or not isinstance(entries, list):
         raise DataContractFieldError(f"{location} requires write_mode=module_action and a list of operations")
     fields = {f["name"]: f for f in collection.get("fields") or [] if isinstance(f, Mapping) and isinstance(f.get("name"), str)}
-    reserved = {"_id", record_id_field(collection, list(fields)), collection.get("owner_field"), *SCOPE_FIELDS}
+    selector = record_id_field(collection, list(fields))
+    reserved = {"_id", selector, collection.get("owner_field"), *SCOPE_FIELDS}
     writable = {
         name for name, field in fields.items()
         if name not in reserved and field.get("type") in {"string", "boolean", "integer", "number", *DATE_FIELD_TYPES}
@@ -93,10 +94,24 @@ def canonical_write_fields(collection: Mapping[str, Any]) -> dict[str, tuple[str
         if not isinstance(entry, Mapping) or set(entry) != {"operation", "fields"}:
             raise DataContractFieldError(f"{location} entries require exactly operation and fields")
         operation, names = entry["operation"], entry["fields"]
-        if operation not in CANONICAL_WRITE_OPERATIONS or operation in operations:
-            raise DataContractFieldError(f"{location} requires unique operations from {list(CANONICAL_WRITE_OPERATIONS)}, got {operation!r}")
-        if not isinstance(names, list) or any(not isinstance(name, str) or name not in writable for name in names):
-            raise DataContractFieldError(f"{location}.{operation} fields must be a list of declared writable fields from {sorted(writable)}")
+        if operation not in CANONICAL_WRITE_OPERATIONS:
+            raise DataContractFieldError(f"{location} requires an operation from {list(CANONICAL_WRITE_OPERATIONS)}, got {operation!r}")
+        if operation in operations:
+            raise DataContractFieldError(
+                f"{location} repeats {operation!r}. Declare each client operation once. "
+                "A workflow result is saved through a separate internal action."
+            )
+        if not isinstance(names, list) or any(not isinstance(name, str) for name in names):
+            raise DataContractFieldError(f"{location}.{operation} fields must be a list of client-editable field names")
+        if selector in names:
+            raise DataContractFieldError(
+                f"{location}.{operation} includes the record selector {selector!r}. "
+                "The generated action handles the selector. List only the fields the caller can change, "
+                "with one entry per operation. A workflow result belongs to a separate internal action."
+            )
+        invalid = set(names).difference(writable)
+        if invalid:
+            raise DataContractFieldError(f"{location}.{operation} contains fields unavailable for client writes: {sorted(invalid)}")
         if len(set(names)) != len(names) or (operation == "delete" and names) or (operation == "update" and not names):
             raise DataContractFieldError(f"{location}.{operation} needs unique fields, at least one for update and none for delete")
         operations[operation] = tuple(names)

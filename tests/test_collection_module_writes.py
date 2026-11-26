@@ -48,6 +48,19 @@ def test_invalid_operation_scopes_fail_before_generation(collection, entry):
         canonical_write_fields(collection)
 
 
+def test_repair_distinguishes_public_update_from_record_selector_and_workflow_result(collection):
+    public = {"operation": "update", "fields": ["task_id", "title"]}
+    background = {"operation": "update", "fields": ["summary"]}
+    writes = collection["lifecycle"]["module_writes"] = [public, background]
+    with pytest.raises(DataContractFieldError, match="record selector 'task_id'.*separate internal action"):
+        canonical_write_fields(collection)
+    public["fields"] = ["title"]
+    with pytest.raises(DataContractFieldError, match="repeats 'update'.*separate internal action"):
+        canonical_write_fields(collection)
+    writes.remove(background)
+    assert canonical_write_fields(collection) == {"update": ("title",)}
+
+
 @pytest.mark.parametrize("problem", [
     "none", "disabled", "extra_field", "wrong_type", "no_record_key", "open_schema", "missing_action", "wrong_owner",
 ])
