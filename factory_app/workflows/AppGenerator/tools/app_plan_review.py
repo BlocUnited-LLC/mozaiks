@@ -64,6 +64,7 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     all_module_actions,
     pack_facade_directories,
     pack_owned_output_paths,
+    pinned_result_action_schemas,
 )
 from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
 
@@ -1241,6 +1242,7 @@ def _repair_contract_task_operations(plan: dict[str, Any], context: Any) -> list
     tasks = plan.get("build_tasks") or []
 
     inventory = all_module_actions(context)
+    result_actions = pinned_result_action_schemas(context)
     inventory_note = "Approved module action inventory (DesignDocs and data_contract):"
 
     for pack in plan.get("capability_packs") or []:
@@ -1262,6 +1264,23 @@ def _repair_contract_task_operations(plan: dict[str, Any], context: Any) -> list
         if contract is None:
             continue
         message = str(contract.get("initial_message") or "").rstrip()
+        if receivers := result_actions.get(module_id):
+            reaction_path = f"modules/{module_id}/contracts/reactions.yaml"
+            if reaction_path not in contract["owned_paths"]:
+                contract["owned_paths"].append(reaction_path)
+                repairs.append(f"{module_id}: assigned its approved workflow result reaction to the module contract")
+            receiver_note = (
+                "Factory compiles these internal receivers from the pinned workflow output schemas: "
+                + json.dumps(receivers, sort_keys=True)
+                + ". Omit these actions from your response. Never add a record ID to their inputs. "
+                "Factory wires the reviewed workflow capability and event reaction. The source action must "
+                "publish its declared event. Preserve other module capabilities and reactions. "
+                "Retain every reviewed custom read and custom mutation, including unchanged actions. "
+                "For optional request properties use required: false and nullable: false."
+            )
+            if receiver_note not in message:
+                message = contract["initial_message"] = message + "\n\n" + receiver_note
+                repairs.append(f"{module_id}: projected the pinned workflow receiver contracts into its build task")
         # Word-boundary, so record_checkin does not mask checkin.
         missing = [op for op in operations if not re.search(WORD + re.escape(op) + WORD, message)]
         if not missing and (module_id not in inventory or inventory_note in message):
@@ -1275,7 +1294,8 @@ def _repair_contract_task_operations(plan: dict[str, Any], context: Any) -> list
             "Declare approved writes and custom reads; code constructs owner-scoped reads and ordinary unprotected app-wide reads. "
             "For app_wide collections with protected writes, explicitly declare the canonical "
             "reads and their permissions, API exposure, and handler policy. "
-            "The prose above describes the module; this list defines it. "
+            "The prose above describes the module; this list defines its design actions. "
+            "Factory adds any separately identified internal result receivers. "
             "The module's optional typed fixtures_yaml companion remains permitted even when omitted "
             "from the initial owned_paths list. Supply exact input/setup bindings when admitted reads "
             "cannot use the observer defaults or approved business operations need existing records, "

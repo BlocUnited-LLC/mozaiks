@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 
 from mozaiksai.core.runtime.app.module_loader import (
+    ModuleCapability,
     ModuleDefinition,
     ModuleEventsManifest,
     ModuleReactionsManifest,
@@ -17,7 +18,83 @@ from mozaiksai.core.runtime.app.module_loader import (
 )
 from mozaiksai.core.runtime.app.result_schema import result_object_schema
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    pinned_result_workflows,
+)
 from mozaiksai.core.workflow.generator_support.module_read_actions import _replace_functions
+
+
+def compile_result_task_bindings(output: dict[str, Any], task: dict[str, Any], context: Any) -> None:
+    """Wire the reviewed task's capability and reaction after module action and event closure."""
+    if task.get("task_type") != "module_contract":
+        return
+    module = task.get("capability_pack_id")
+    bindings = [(workflow, plan) for workflow in pinned_result_workflows(context)
+                for plan in workflow["result_write_plans"] if plan["module_id"] == module]
+    if not bindings:
+        return
+    root = f"modules/{module}"
+    reaction_path = f"{root}/contracts/reactions.yaml"
+    if not {reaction_path, f"{root}/module.yaml"}.issubset(task.get("owned_paths") or []):
+        raise ValueError(f"{module}: its result-bearing module contract must own module.yaml and {reaction_path}")
+    contract = output.get("module_contract") or {}
+    if contract.get("module_id") != module:
+        raise ValueError(f"{module}: its result-bearing task requires the matching typed module contract")
+    manifest = contract["module_yaml"]
+    actions = {a["id"]: a for a in manifest.get("actions", [])}
+    declarations = (contract.get("events_yaml") or {}).get("events", [])
+    capabilities = manifest.setdefault("capabilities", [])
+    reactions = contract.get("reactions_yaml")
+    if reactions is None:
+        reactions = contract["reactions_yaml"] = {"schema_version": "mozaiks.reactions.v1", "reactions": []}
+    flows = (context.get("app_build_plan") or {}).get("event_flows", [])
+    for workflow, plan in bindings:
+        event, write = plan["event_type"], plan["result_write"]
+        capability, target = workflow["capability_id"], workflow["workflow_name"]
+        source_action = write["source_action"]
+        if not any(f.get("event_type") == event and f.get("producing_action") == source_action
+                   and f.get("producer_pack_id") == module and capability in (f.get("workflow_capability_ids") or [])
+                   for f in flows):
+            raise ValueError(f"{module}: the build plan must bind {source_action} and {event} to {capability}")
+        if (event not in (actions.get(source_action, {}).get("emits") or [])
+                or not any(e.get("type") == event and e.get("producer") == module for e in declarations)):
+            raise ValueError(f"{module}: {source_action} must emit the declared result event {event}")
+        matching = [c for c in capabilities if c.get("capability_id") == capability]
+        if matching:
+            if len(matching) != 1 or matching[0].get("kind") != "workflow" or matching[0].get("target") != target:
+                raise ValueError(f"{module}: conflicting workflow capability {capability} for {target}")
+        else:
+            capabilities.append(ModuleCapability(capability_id=capability, kind="workflow", target=target,
+                                                 title=target).model_dump(exclude_none=True))
+        approved_events = {owned["event_type"] for flow, owned in bindings if flow["capability_id"] == capability}
+        if any((r.get("target") or {}).get("capability_id") == capability and r.get("event_type") not in approved_events
+               for r in reactions.get("reactions", [])):
+            raise ValueError(f"{module}: conflicting event targeting result capability {capability}")
+        _bind_task_result_reaction(reactions, event, capability, write)
+    ModuleReactionsManifest.model_validate(reactions)
+
+
+def _bind_task_result_reaction(document: dict[str, Any], event: str, capability: str, write: dict[str, Any]) -> None:
+    from factory_app.workflows.AppGenerator.tools.hook_workflow_integration_contract import (
+        _reaction_id_for_event,
+    )
+
+    rows = document["reactions"]
+    reaction_id = _reaction_id_for_event(capability, event, 0)
+    matching = [r for r in rows if r.get("event_type") == event
+                and (r.get("target") or {}).get("capability_id") == capability]
+    if len(matching) > 1:
+        raise ValueError(f"Duplicate result reaction for {event} and {capability}")
+    if matching:
+        target = matching[0]["target"]
+        if target.get("kind") != "capability" or (target.get("result_write") is not None and target["result_write"] != write):
+            raise ValueError(f"Conflicting result reaction for {event} and {capability}")
+        target["result_write"] = write
+    elif any(r.get("id") == reaction_id or (r.get("target") or {}).get("result_write") == write for r in rows):
+        raise ValueError(f"Conflicting result reaction for {event} and {capability}")
+    else:
+        rows.append({"id": reaction_id, "event_type": event,
+                     "target": {"kind": "capability", "capability_id": capability, "result_write": write}})
 
 
 def workflow_result_files(files: dict[str, str], metadata: dict[str, Any] | None) -> dict[str, str]:

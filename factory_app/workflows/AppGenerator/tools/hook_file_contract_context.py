@@ -185,7 +185,9 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
                 "Constructed get_<collection> takes id and returns item; list_<collection> takes page/page_size/search and returns items/total. "
                 "Explicit reviewed read grants supply their exact code-derived permissions without changing ownership. "
                 "Absent those grants, owner-scoped reads require login and ownership without a role gate; never infer read grants from writes. "
-                "These ids establish identity, not a permission or public-access grant."
+                "These ids establish identity, not a permission or public-access grant. Factory compiles the separate internal "
+                "workflow result receivers from the pinned integration contract. Retain all approved custom reads and mutations. "
+                "An omittable input property uses required: false and nullable: false."
             )
 
     if agent_name == "AppPlanAgent":

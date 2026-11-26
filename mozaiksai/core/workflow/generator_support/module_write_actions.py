@@ -24,6 +24,7 @@ from mozaiksai.core.runtime.app.module_loader import (
     validate_collection_write_actions,
 )
 from mozaiksai.core.runtime.app.paths import APP_AUTH_CONFIG_PATH, normalize_app_path
+from mozaiksai.core.runtime.app.result_schema import result_object_schema
 from mozaiksai.core.runtime.persistence.collection_writes import (
     SCOPE_FIELDS,
     canonical_write_fields,
@@ -591,6 +592,28 @@ def _close_manifest_writes(
     _drop_stripped_permission_declarations(module_id, manifest, stripped, companions)
 
 
+def _close_result_actions(manifest: dict[str, Any], schemas: dict[str, dict[str, Any]]) -> None:
+    """The pinned producer owns the internal action's input; record identity stays with the host."""
+    actions = manifest.setdefault("actions", [])
+    for name, schema in schemas.items():
+        existing = [action for action in actions if action.get("id") == name]
+        if not existing:
+            actions.append({
+                "id": name, "handler_method": name, "description": f"Commit the approved {name} workflow result.",
+                "api_surface": "internal", "permissions": [], "emits": [], "input_schema": schema,
+                "output_schema": {"type": "object", "properties": {"accepted": {"type": "boolean"}},
+                                  "required": ["accepted"], "additionalProperties": False},
+            })
+            continue
+        action = existing[0]
+        if (len(existing) != 1 or action.get("api_surface") != "internal" or action.get("permissions")
+                or action.get("emits") or action.get("entitlement_gate") or action.get("ask_context_safe")):
+            raise ValueError(f"{name}: the approved workflow receiver must be one internal action with no grants or events")
+        request = _materialize_schema_contract(action.get("input_schema") or {}, closed_request=True, where=name)
+        if import_closed_contract_schema(result_object_schema(request)) != import_closed_contract_schema(schema):
+            raise ValueError(f"{name}: the receiver input must match the pinned workflow result schema exactly")
+
+
 def _require_declared_design_actions(module_id: str, manifest: dict[str, Any], design_surface_map: Any) -> None:
     surface_map = detach(design_surface_map) or {}
     approved = {
@@ -815,7 +838,7 @@ def close_module_actions(
     payload: Any, *, app_build_plan: Any, data_contract: Any = None, design_surface_map: Any = None,
     subscription_contract: Any = None, declared_auth_scopes: frozenset[str] | None = None,
     companion_files: Mapping[str, str] | None = None, validate_generated_permissions: bool = True,
-    access_policy: Any = None,
+    access_policy: Any = None, result_action_schemas: dict[str, dict[str, dict[str, Any]]] | None = None,
 ) -> Any:
     """Return detached output with every canonical write and read declared.
 
@@ -876,7 +899,7 @@ def close_module_actions(
             module_inputs, app_build_plan=plan, data_contract=contract,
             design_surface_map=design_surface_map, subscription_contract=subscription_contract,
             declared_auth_scopes=granted,
-            access_policy=access_policy,
+            access_policy=access_policy, result_action_schemas=result_action_schemas,
         )
         # A manifest's events companion travels with it: code declares canonical write events.
         changes = {
@@ -938,6 +961,8 @@ def close_module_actions(
     closed = output["module_contract"]
     from .module_smoke_fixtures import validate_module_fixture_record_identities
 
+    if receiver_schemas := (result_action_schemas or {}).get(module_id):
+        _close_result_actions(closed["module_yaml"], receiver_schemas)
     _require_declared_design_actions(module_id, closed["module_yaml"], design_surface_map)
     _close_user_data_scope(module_id, closed["module_yaml"], plan, contract)
     if validate_generated_permissions:
@@ -986,7 +1011,7 @@ def materialize_module_actions(
     design_surface_map: Any = None, subscription_contract: Any = None,
     declared_auth_scopes: frozenset[str] | None = None,
     pack_owned_manifest_paths: frozenset[str] = frozenset(),
-    access_policy: Any = None,
+    access_policy: Any = None, result_action_schemas: dict[str, dict[str, dict[str, Any]]] | None = None,
 ) -> dict[str, str]:
     """Render closed module manifests and their event companions for an admitted app bundle."""
     changed: dict[str, str] = {}
@@ -1023,6 +1048,7 @@ def materialize_module_actions(
             declared_auth_scopes=granted, companion_files=files_map,
             validate_generated_permissions=path not in pack_owned_manifest_paths,
             access_policy=access_policy,
+            result_action_schemas=result_action_schemas if path not in pack_owned_manifest_paths else None,
         )["module_contract"]
         expanded = closed["module_yaml"]
         for action in expanded.get("actions") or []:
@@ -1039,7 +1065,8 @@ def materialize_module_actions(
             surface = next((row for row in (detach(design_surface_map) or {}).get("surfaces", [])
                             if row.get("surface_id") == module_id and row.get("owner") == "app"), None)
             if surface is not None and path not in pack_owned_manifest_paths:
-                approved = {module_id: authored_module_actions(surface, data_contract)}
+                receivers = (result_action_schemas or {}).get(module_id, {})
+                approved = {module_id: [*authored_module_actions(surface, data_contract), *receivers]}
                 if issue := unapproved_module_actions_error(module_id, (a["id"] for a in expanded["actions"]), approved):
                     raise ValueError(issue)
         for key, relative in companion_paths.items():

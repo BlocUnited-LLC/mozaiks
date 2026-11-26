@@ -948,6 +948,8 @@ definitions:
       default: []
   workflow_integration_metadata:
     type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [lifecycle_tool]
     description: >
       Canonical normalized AgentGenerator-to-AppGenerator handoff metadata for the
       latest workflow_bundle artifact. Contains contract_version, bundle_name,
@@ -997,6 +999,8 @@ definitions:
       default: null
   workflow_bundle_artifact_version_id:
     type: string
+    authority_class: closed_writer_quality_state
+    writer_ids: [lifecycle_tool]
     description: >
       Source artifact version id for the workflow_bundle artifact that hydrated
       workflow_integration_metadata. Null when AppGenerator is running without an

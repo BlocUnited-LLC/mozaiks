@@ -48,7 +48,10 @@ from mozaiksai.core.workflow.generator_support.design_access_policy import (
 from mozaiksai.core.workflow.generator_support.module_account_data import (
     materialize_module_account_handlers,
 )
-from mozaiksai.core.workflow.generator_support.module_action_inventory import pack_owned_outputs
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    pack_owned_outputs,
+    pinned_result_action_schemas,
+)
 from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
     materialize_module_read_implementations,
@@ -329,6 +332,7 @@ def _merge_code_files(
         declared_auth_scopes=admitted_scopes,
         access_policy=resolve_authored_module_access_policy(context_variables),
         pack_owned_manifest_paths=pack_manifests,
+        result_action_schemas=pinned_result_action_schemas(context_variables),
     ))
     synthesis_files.update(materialize_module_policies(synthesis_files, data_contract))
     synthesis_files.update(materialize_module_schemas(synthesis_files, app_build_plan=app_build_plan, data_contract=data_contract))

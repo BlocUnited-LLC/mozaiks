@@ -42,8 +42,10 @@ from .generator_support.code_files import (
 from .generator_support.module_account_data import materialize_task_module_account_handlers
 from .generator_support.module_action_inventory import (
     all_module_actions,
+    approved_manifest_action_ids,
     approved_workflow_surface_ids,
     pack_owned_output_paths,
+    pinned_result_action_schemas,
     scoped_module_implementation_sources,
     ungated_module_actions,
 )
@@ -56,6 +58,7 @@ from .generator_support.module_entitlement_gates import (
 from .generator_support.module_policy import materialize_task_module_policies
 from .generator_support.module_read_actions import materialize_module_read_implementations
 from .generator_support.module_revision import (
+    retained_custom_action_prompt,
     scoped_service_revision_paths,
     validate_scoped_service_repositories,
 )
@@ -1133,6 +1136,8 @@ async def _run_one_task(
         context_authority_policy=context_authority_policy,
     )
     scoped_prompt = _build_scoped_worker_prompt(prompt, task_context)
+    if workflow_name == "AppGenerator" and task.get("task_type") == "module_contract":
+        scoped_prompt += await retained_custom_action_prompt(base_context, str(task.get("capability_pack_id") or ""))
 
     if fresh_agents_per_task:
         if agents_factory is None:
@@ -1246,13 +1251,21 @@ async def _run_one_task(
                 companion_files = dict(base_context.get("generated_files") or {})
                 for dependency in (task_context.get("dependency_task_outputs") or {}).values():
                     companion_files.update(extract_code_file_map_from_payload(dependency))
+                result_schemas = pinned_result_action_schemas(base_context) if workflow_name == "AppGenerator" else {}
                 output = cast(dict[str, Any], close_module_actions(
                     output, app_build_plan=base_context.get("app_build_plan"),
                     data_contract=task_context.get("data_contract"),
                     design_surface_map=task_context.get("design_surface_map"),
                     access_policy=authored_access_policy,
                     subscription_contract=subscription_contract, companion_files=companion_files,
+                    result_action_schemas=result_schemas,
                 ))
+                if result_schemas:
+                    from factory_app.workflows.AppGenerator.tools.workflow_result_writes import (
+                        compile_result_task_bindings,
+                    )
+
+                    compile_result_task_bindings(output, task, base_context)
                 canonical_code_files = extract_code_file_entries_from_payload(
                     output, build_timestamp=base_context.get("build_timestamp"),
                 )
@@ -1321,16 +1334,20 @@ async def _run_one_task(
                         access_policy=authored_access_policy,
                         design_surface_map=task_context.get("design_surface_map"),
                     ))
+                inventory_context = base_context if result_schemas else task_context
+                design_actions = all_module_actions(inventory_context)
+                ungated_actions = ungated_module_actions(inventory_context)
                 canonical_file_map = compile_module_entitlement_gates(
                     canonical_file_map,
                     gates_by_module=approved_subscription_gates(
                         subscription_contract,
-                        approved_actions=all_module_actions(task_context),
-                        ungated_actions=ungated_module_actions(task_context),
-                        approved_workflows=approved_workflow_surface_ids(task_context),
+                        approved_actions=design_actions,
+                        ungated_actions=ungated_actions,
+                        approved_workflows=approved_workflow_surface_ids(inventory_context),
                     ),
-                    approved_actions=all_module_actions(task_context),
-                    ungated_actions=ungated_module_actions(task_context),
+                    approved_actions=design_actions,
+                    manifest_actions=approved_manifest_action_ids(base_context, design_actions) if result_schemas else None,
+                    ungated_actions=ungated_actions,
                     existing_files=task_context.get("generated_files") or {},
                 )
                 module_contract = output.get("module_contract")

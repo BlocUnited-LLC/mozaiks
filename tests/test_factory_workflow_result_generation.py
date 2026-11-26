@@ -66,6 +66,188 @@ def workflow_context():
     return context
 
 
+def test_module_worker_compiles_internal_receiver_and_retains_custom_reads():
+    from factory_app.workflows.AppGenerator.tools.app_plan_review import (
+        _repair_contract_task_operations,
+    )
+    from mozaiksai.core.workflow.generator_support.code_files import (
+        extract_code_file_map_from_payload,
+    )
+    from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+        all_module_actions,
+        approved_manifest_action_ids,
+        pinned_result_action_schemas,
+        ungated_module_actions,
+    )
+    from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
+        compile_module_entitlement_gates,
+    )
+    from mozaiksai.core.workflow.generator_support.module_write_actions import (
+        close_module_actions,
+        materialize_module_actions,
+    )
+
+    ctx = workflow_context()
+    design = {"surfaces": [{"owner": "app", "surface_id": "tasks", "surface_kind": "module",
+                            "owned_mutations": ["create"], "custom_reads": ["summarize"]}]}
+    ctx["design_surface_map"] = design
+    plan = {"capability_packs": [{"capability_pack_id": "tasks", "surface_kind": "module", "capability_source": "generated_module"}],
+            "build_tasks": [{"task_type": "module_contract", "task_id": "contract", "capability_pack_id": "tasks",
+                             "initial_message": "Declare the receiver with a task_id input.", "owned_paths": ["modules/tasks/module.yaml"]}]}
+    _repair_contract_task_operations(plan, ctx)
+    brief = plan["build_tasks"][0]["initial_message"]
+    assert "pinned workflow output schemas" in brief and "Never add a record ID" in brief and "`summarize`" in brief
+    assert "nullable: false" in brief and not _repair_contract_task_operations(plan, ctx)
+    receivers = pinned_result_action_schemas(ctx)
+    manifest = {"schema_version": "mozaiks.module.v1", "module": {"id": "tasks", "handler": "backend.handler:TasksModule"},
+                "actions": [{"id": action, "handler_method": action, "description": action, "permissions": [], "emits": []}
+                            for action in ("create", "summarize")]}
+    output = {"module_contract": {"module_id": "tasks", "module_yaml": manifest}}
+    kwargs = dict(app_build_plan=plan, design_surface_map=design, result_action_schemas=receivers)
+    closed = close_module_actions(output, **kwargs)
+    files = extract_code_file_map_from_payload(closed)
+    compiled = yaml.safe_load(files["modules/tasks/module.yaml"])
+    actions = {action["id"]: action for action in compiled["actions"]}
+    assert set(actions) == {"create", "summarize", "save_summary"}
+    assert actions["save_summary"]["input_schema"] == ctx["workflow_integration_metadata"]["workflows"][0]["result_output_schema"]
+    assert actions["save_summary"]["api_surface"] == "internal" and actions["save_summary"]["emits"] == []
+    assert close_module_actions(closed, **kwargs) == closed
+    assert materialize_module_actions(files, **kwargs) == {}
+    public = all_module_actions(ctx)
+    assert "save_summary" not in approved_manifest_action_ids(ctx, public, http_only=True)["tasks"]
+    assert "save_summary" in ungated_module_actions(ctx)["tasks"]
+    approved = approved_manifest_action_ids(ctx, public)
+    gate_args = dict(gates_by_module={}, approved_actions=public, manifest_actions=approved, ungated_actions=ungated_module_actions(ctx))
+    assert compile_module_entitlement_gates(files, **gate_args) == files
+    compiled["actions"].append({"id": "unreviewed"})
+    with pytest.raises(ValueError, match="unapproved module actions"):
+        compile_module_entitlement_gates({"modules/tasks/module.yaml": yaml.safe_dump(compiled)}, **gate_args)
+    manifest["actions"].pop()
+    with pytest.raises(ValueError, match="declare approved actions.*summarize"):
+        close_module_actions(output, **kwargs)
+
+
+async def test_revision_worker_reads_retained_signatures_only_from_the_selected_app(monkeypatch):
+    from factory_app.workflows._shared import revision_app_source
+    from mozaiksai.core.workflow.generator_support.module_revision import (
+        retained_custom_action_prompt,
+    )
+
+    action = {"id": "summarize", "api_surface": "public", "permissions": [], "handler_method": "summarize",
+              "output_schema": {"type": "object", "properties": {"last_updated": {"type": ["string", "null"]}},
+                                "required": ["last_updated"]}}
+    path = "modules/tasks/module.yaml"
+    prior = yaml.safe_dump({"module": {"id": "tasks"}, "actions": [action, {"id": "retired"}]})
+    read = AsyncMock(return_value={path: prior})
+    monkeypatch.setattr(revision_app_source, "read_bound_revision_files", read)
+    ctx = {"build_mode": "revision", "workflow_sequence": "app_revision", "revision_source_artifact_version_id": "source",
+           "design_surface_map": {"surfaces": [{"owner": "app", "surface_id": "tasks", "surface_kind": "module",
+                                                 "custom_reads": ["summarize", "new_read"]}]},
+           "generated_files": {path: prior.replace("last_updated", "forged")}}
+    prompt = await retained_custom_action_prompt(ctx, "tasks")
+    read.assert_awaited_once_with(ctx)
+    assert json.loads(prompt.splitlines()[-1]) == [action]
+    assert "forged" not in prompt and "retired" not in prompt
+    assert await retained_custom_action_prompt({**ctx, "build_mode": "new"}, "tasks") == ""
+
+
+@pytest.mark.parametrize("field,value", [("api_surface", "public"), ("permissions", ["extra"]), ("emits", [EVENT]),
+                                         ("ask_context_safe", True), ("entitlement_gate", "feature.test"),
+                                         ("input_schema", {"type": "object", "properties": {"task_id": {"type": "string"}},
+                                                           "required": ["task_id"], "additionalProperties": False})])
+def test_authored_result_action_cannot_expand_its_pinned_grant(field, value):
+    from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+        pinned_result_action_schemas,
+    )
+    from mozaiksai.core.workflow.generator_support.module_write_actions import close_module_actions
+
+    ctx = workflow_context()
+    actions = [{"id": "save_summary", "handler_method": "store", "api_surface": "internal",
+                "input_schema": ctx["workflow_integration_metadata"]["workflows"][0]["result_output_schema"], field: value}]
+    payload = {"module_contract": {"module_id": "tasks", "module_yaml": {"module": {"id": "tasks"}, "actions": actions}}}
+    with pytest.raises(ValueError, match="internal action|receiver input"):
+        close_module_actions(payload, app_build_plan={}, result_action_schemas=pinned_result_action_schemas(ctx))
+
+
+def test_planned_module_receives_its_missing_result_capability_and_reaction(tmp_path):
+    from factory_app.workflows.AppGenerator.tools.workflow_result_writes import (
+        compile_result_task_bindings,
+    )
+
+    ctx = workflow_context()
+    ctx["app_build_plan"] = {"event_flows": [{"event_type": EVENT, "producing_action": "create", "producer_pack_id": "tasks",
+                                              "workflow_capability_ids": ["tasks.review"]}]}
+    task = {"task_type": "module_contract", "capability_pack_id": "tasks",
+            "owned_paths": ["modules/tasks/module.yaml", "modules/tasks/contracts/reactions.yaml"]}
+    files = app_files(tmp_path)
+    contract = {"module_id": "tasks", "module_yaml": yaml.safe_load(files["modules/tasks/module.yaml"]),
+                "events_yaml": yaml.safe_load(files["modules/tasks/contracts/events.yaml"]), "reactions_yaml": None}
+    original_caps = [c for c in contract["module_yaml"]["capabilities"] if c["kind"] != "workflow"]
+    contract["module_yaml"]["capabilities"] = deepcopy(original_caps)
+    worker = {"module_contract": contract}
+    compile_result_task_bindings(worker, task, ctx)
+    reaction, = contract["reactions_yaml"]["reactions"]
+    assert reaction["target"] == {"kind": "capability", "capability_id": "tasks.review", "result_write": WRITE}
+    assert contract["module_yaml"]["capabilities"][:-1] == original_caps
+    assert contract["module_yaml"]["capabilities"][-1]["target"] == "ReviewWorkflow"
+    unrelated = {"id": "other", "event_type": "domain.other", "target": {"kind": "handler", "handler_method": "other"}}
+    contract["reactions_yaml"]["reactions"].append(unrelated)
+    before = deepcopy(worker)
+    compile_result_task_bindings(worker, task, ctx)
+    assert worker == before
+    path = "modules/tasks/contracts/reactions.yaml"
+    files["modules/tasks/module.yaml"] = yaml.safe_dump(contract["module_yaml"])
+    files[path] = yaml.safe_dump(contract["reactions_yaml"])
+    files.update(workflow_result_files(files, ctx["workflow_integration_metadata"]))
+    assert workflow_result_files(files, ctx["workflow_integration_metadata"]) == {}
+    with pytest.raises(ValueError, match="must own"):
+        compile_result_task_bindings(worker, {**task, "owned_paths": [task["owned_paths"][0]]}, ctx)
+    for field, value, error in [("capability", "WrongWorkflow", "conflicting workflow capability"),
+                                ("event", "domain.unapproved", "conflicting event"),
+                                ("output", ["unapproved"], "Conflicting result reaction"),
+                                ("source", [], "must emit the declared result event")]:
+        altered = deepcopy(worker)
+        target = altered["module_contract"]
+        if field == "capability":
+            target["module_yaml"]["capabilities"][-1]["target"] = value
+        elif field == "event":
+            target["reactions_yaml"]["reactions"][0]["event_type"] = value
+        elif field == "output":
+            target["reactions_yaml"]["reactions"][0]["target"]["result_write"]["fields"] = value
+        else:
+            target["module_yaml"]["actions"][0]["emits"] = value
+        with pytest.raises(ValueError, match=error):
+            compile_result_task_bindings(altered, task, ctx)
+    ctx["app_build_plan"]["event_flows"] = []
+    with pytest.raises(ValueError, match="build plan must bind"):
+        compile_result_task_bindings(worker, task, ctx)
+
+
+def test_task_or_caller_cannot_choose_the_workflow_that_admits_an_internal_action():
+    from pathlib import Path
+
+    from mozaiksai.core.workflow.context.authority import (
+        ContextAuthorityError,
+        build_context_authority_policy,
+    )
+    from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+        pinned_result_action_schemas,
+    )
+
+    path = Path(__file__).parents[1] / "factory_app/workflows/AppGenerator/context_variables.yaml"
+    cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+    policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=cfg["definitions"])
+    for key in ("workflow_integration_metadata", "workflow_bundle_artifact_version_id"):
+        policy.require_can_write(key, writer_id="lifecycle_tool", operation="hydrate")
+        for writer in ("caller_input", "agent_text"):
+            with pytest.raises(ContextAuthorityError):
+                policy.require_can_write(key, writer_id=writer, operation="task_context")
+    ctx = workflow_context()
+    for key in ("workflow_bundle_artifact_version_id", "upstream_workflow_bundle_artifact_version_id"):
+        with pytest.raises(ValueError, match="registered workflow bundle"):
+            pinned_result_action_schemas({**ctx, key: "wrong-record"})
+
+
 def app_files(tmp_path):
     folder = _write_canonical_module(tmp_path, reaction_target="capability")
     module = yaml.safe_load((folder / "module.yaml").read_text())

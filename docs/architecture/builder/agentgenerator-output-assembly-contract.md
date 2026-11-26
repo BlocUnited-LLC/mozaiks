@@ -61,7 +61,11 @@ requests only the approved result fields. The bundle omits worker-authored save 
 outcome plans for that agent. Other agents keep their declared tools and outcomes.
 Factory adds its workflow-local automatic tool and
 pins the result plan and the result agent's compiled output schema in the workflow
-bundle's integration metadata. App validation compares the closed receiver input
+bundle's integration metadata. AppGenerator compiles each receiving module's internal
+action from the hydrated workflow artifact. The module worker retains the design's
+custom reads and writes. Under the owning module task, Factory wires the pinned
+workflow capability and event reaction after the source action and event are declared.
+Page bindings and pricing use the public design inventory. App validation compares the closed receiver input
 with this schema, including nested properties, array items and enum values, and
 checks the result against the private collection's declared field types.
 
