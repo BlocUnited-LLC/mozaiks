@@ -40,7 +40,7 @@ SPEC = {"name": "ReviewWorkflow", "result_write_plans": [
 ]}
 
 
-def entry(*, fields=None, triggers=None, models=None):
+def entry(*, fields=None, triggers=None, models=None, context=None):
     orchestrator = {"workflow_name": "ReviewWorkflow", "workflow_startup_mode": "BackendOnly", "initial_agent": "ResultAgent",
                     "triggers": [{"type": "event", "event": name, "capability_id": "tasks.review"}
                                  for name in triggers or [EVENT]]}
@@ -49,7 +49,7 @@ def entry(*, fields=None, triggers=None, models=None):
     return {"workflow_name": "ReviewWorkflow", "files": [
         {"filename": path, "content": yaml.safe_dump(document)}
         for path, document in [("tools.yaml", {"tools": []}), ("structured_outputs.yaml", outputs),
-                               ("context_variables.yaml", {"definitions": {}}),
+                               ("context_variables.yaml", context or {"definitions": {}}),
                                ("transition_graph.yaml", {"transition_rules": []}),
                                ("agents.yaml", {"agents": [{"name": "ResultAgent", "system_message": "Summarize the task.",
                                                             "structured_outputs_required": True}]}),
@@ -88,6 +88,117 @@ def app_files(tmp_path):
     files["data/contract.json"] = json.dumps(data)
     files["modules/tasks/backend/service.py"] = "def existing_service():\n    return 13\n"
     return files
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_approved_result_wires_host_input_to_the_agent_and_retains_other_context(existing, monkeypatch):
+    from mozaiksai.core.session.launcher import validate_context_for_workflow
+    from mozaiksai.core.workflow.context.authority import ContextAuthorityError
+    from mozaiksai.core.workflow.context.context_utils import apply_context_exposures
+    from mozaiksai.core.workflow.context.schema import load_context_variables_config
+    from mozaiksai.core.workflow.workflow_manager import workflow_manager
+    from mozaiksai.hosts.platform import _build_workflow_trigger_context
+
+    context = {"definitions": {"label": {"type": "string", "source": {"type": "state", "default": "local"}}},
+               "agents": {"Other": {"variables": ["label"]}, "ResultAgent": {"variables": ["label"]}}}
+    if existing:
+        context["definitions"]["event_payload"] = {"description": "Input record", "type": "dict",
+                                                    "source": {"type": "state"}, "tool_visible": False}
+    candidate = entry(context=context)
+    before = deepcopy(candidate)
+    compiled = materialize_workflow_result_write(candidate, SPEC)
+    assert candidate == before and materialize_workflow_result_write(compiled, SPEC) == compiled
+    manifests = {file["filename"]: yaml.safe_load(file["content"]) for file in compiled["files"] if file["filename"].endswith(".yaml")}
+    config = manifests["context_variables.yaml"]
+    assert config["definitions"]["label"] == context["definitions"]["label"]
+    assert config["agents"]["Other"] == context["agents"]["Other"]
+    payload = config["definitions"]["event_payload"]
+    assert payload["model_visible"] is True and payload["writer_ids"] == ["transition_router"]
+    if existing:
+        assert payload["description"] == "Input record" and payload["tool_visible"] is False and payload["type"] == "dict"
+    monkeypatch.setattr(workflow_manager, "get_config", lambda _: {"context_variables": config})
+    trigger, = manifests["orchestrator.yaml"]["triggers"]
+    event = {"type": EVENT, "payload": {"task_id": "t-17", "title": "Stockroom inventory"}}
+    seed = _build_workflow_trigger_context(capability_id=trigger["capability_id"], source_event=event, trigger=trigger)
+    admitted = validate_context_for_workflow("ReviewWorkflow", seed)
+    assert admitted == {"event_payload": event["payload"]}
+    with pytest.raises(ContextAuthorityError):
+        validate_context_for_workflow("ReviewWorkflow", admitted, writer_id="caller_input")
+    view = load_context_variables_config(config).agents["ResultAgent"].variables
+    assert view == ["label", "event_payload"] and event["payload"]["title"] in apply_context_exposures("", [], admitted, view)
+
+
+@pytest.mark.parametrize("overrides", [
+    {"writer_ids": ["caller_input"]}, {"writer_ids": ["transition_router", "agent_text"]},
+    {"type": "string"}, {"source": {"type": "external", "service": "other"}},
+    {"source": {"type": "state", "default": {"title": "different"}}}, {"model_visible": False},
+    {"authority_class": "tool_only_information"}, {"persisted": False}, {"authorization": True},
+])
+def test_result_event_input_rejects_conflicting_authority(overrides):
+    declaration = {"type": "object", "source": {"type": "state"}, **overrides}
+    with pytest.raises(ValueError, match="event_payload as model-visible object state written only by transition_router"):
+        materialize_workflow_result_write(entry(context={"definitions": {"event_payload": declaration}}), SPEC)
+
+
+@pytest.mark.parametrize("existing_events", ["omitted", "empty", "missing_capability", "one_event_and_webhook"])
+def test_missing_reviewed_event_wiring_uses_one_canonical_capability(existing_events):
+    second = deepcopy(SPEC["result_write_plans"][0])
+    second["event_type"] = "domain.tasks.submitted"
+    second["result_write"]["source_action"] = "submit"
+    purpose = "Summarize the task for an owner reviewing a submission."
+    spec = {"description": purpose, "result_write_plans": [*SPEC["result_write_plans"], second]}
+    candidate = entry()
+    manifest = next(file for file in candidate["files"] if file["filename"] == "orchestrator.yaml")
+    orchestrator = yaml.safe_load(manifest["content"])
+    webhook = {"type": "route", "endpoint": "/inbound", "method": "POST"}
+    if existing_events == "omitted":
+        orchestrator.pop("triggers")
+    elif existing_events == "empty":
+        orchestrator["triggers"] = []
+    elif existing_events == "missing_capability":
+        orchestrator["triggers"] = [{"type": "event", "event": EVENT}]
+    else:
+        orchestrator["triggers"][0]["description"] = "Review newly created tasks."
+        orchestrator["triggers"].append(webhook)
+    manifest["content"] = yaml.safe_dump(orchestrator)
+    assert materialize_workflow_result_write(candidate, {}) == candidate
+    compiled = materialize_workflow_result_write(candidate, spec)
+    assert materialize_workflow_result_write(compiled, spec) == compiled
+    metadata = extract_workflow_integration_metadata_from_bundle_entries([compiled])["workflows"][0]
+    assert metadata["capability_id"] == ("tasks.review" if existing_events == "one_event_and_webhook" else "review-workflow")
+    assert {e["event_type"] for e in metadata["trigger_events"]} == {EVENT, second["event_type"]}
+    doc = next(file for file in compiled["files"] if file["filename"] == "orchestrator.yaml")
+    triggers = yaml.safe_load(doc["content"])["triggers"]
+    assert next(trigger for trigger in triggers if trigger.get("event") == second["event_type"])["description"] == purpose
+    if existing_events == "one_event_and_webhook":
+        assert webhook in triggers and next(trigger for trigger in triggers if trigger.get("event") == EVENT)["description"] == "Review newly created tasks."
+
+
+def test_result_materialization_passes_full_gate_only_for_reviewed_events():
+    from factory_app.workflows.AgentGenerator.tools.pattern_selection import selection_fingerprint
+    from factory_app.workflows.AgentGenerator.tools.workflow_quality_gate import (
+        run_workflow_bundle_quality_gate,
+    )
+
+    candidate = entry()
+    candidate["files"].extend([
+        {"filename": "ui_config.yaml", "content": "visual_agents: []"},
+        {"filename": "middleware.yaml", "content": "prompt_middleware: []"},
+    ])
+    manifest = next(file for file in candidate["files"] if file["filename"] == "orchestrator.yaml")
+    orchestrator = {**yaml.safe_load(manifest["content"]), "schema_version": "mozaiks.orchestrator.v1", "triggers": []}
+    manifest["content"] = yaml.safe_dump(orchestrator)
+    spec = {**SPEC, "description": "Summarize task submissions for the owner.", "context_variables": {"expected_event_trigger": EVENT}}
+    selection = {"workflows": [spec]}
+    context = {"PatternSelection": selection, "workflow_plan_review": {"status": "approved", "selection_hash": selection_fingerprint(selection)}}
+    result = run_workflow_bundle_quality_gate(bundle_entries=[candidate], expected_workflows=[spec], context_variables=context)
+    assert result["passed"] and result["errors"] == []
+
+    orchestrator["triggers"] = [{"type": "event", "event": "domain.tasks.unrelated", "capability_id": "review-workflow",
+                                 "description": "Summarize unrelated task submissions."}]
+    manifest["content"] = yaml.safe_dump(orchestrator)
+    rejected = run_workflow_bundle_quality_gate(bundle_entries=[candidate], expected_workflows=[spec], context_variables=context)
+    assert not rejected["passed"] and any("event_trigger_missing" in err for err in rejected["errors"])
 
 
 async def test_reviewed_agent_result_is_flat_and_automatic_for_multiple_triggers(monkeypatch):
