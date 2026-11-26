@@ -19,7 +19,7 @@ global_base:
       description: "Platform admin shell \u2014 configuration, panel registration, operator actions."
       recommended_module_type: standard
     notifications:
-      description: "User-facing notification delivery \u2014 in-app, email, push."
+      description: "User-facing notification delivery \u2014 in-app and email."
       recommended_module_type: standard
     files_media:
       description: "File upload, storage, and retrieval \u2014 documents, images, attachments."

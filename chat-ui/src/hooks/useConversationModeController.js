@@ -106,7 +106,6 @@ export function useConversationModeController({
   navigate,
   setIsInWidgetMode,
   workflowConfigLoaded,
-  setWorkflowConfigLoaded,
   workflowConfig,
   urlWorkflowName,
   restoreViewSnapshot,
@@ -686,7 +685,6 @@ export function useConversationModeController({
       } else {
         if (!workflowConfigLoaded) {
           await workflowConfig.fetchWorkflowConfigs();
-          setWorkflowConfigLoaded(true);
         }
 
         const canonicalWorkflowName =
@@ -1005,7 +1003,6 @@ export function useConversationModeController({
     urlWorkflowName,
     workflowConfig,
     workflowConfigLoaded,
-    setWorkflowConfigLoaded,
     workflowConnectReplayPolicyRef,
   ]);
 

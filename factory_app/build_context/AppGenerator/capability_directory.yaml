@@ -380,7 +380,7 @@ capabilities:
       - email delivery
       - external notifications
     generator_notes:
-      - Generate the notification_settings facade module for user preferences and the configured SMTP email adapter under services/adapters/notifications/. The pack has no push or SMS delivery; do not generate an adapter for them.
+      - Generate the notification_settings facade module for user preferences and the configured SMTP email adapter under services/adapters/notifications/. The pack has no push or SMS delivery. Do not generate an adapter for them, and tell the user they are not included; plan an app-owned external adapter only when the user names a provider.
       - Do not re-implement in-app notification storage or websocket delivery — the runtime handles those via contracts/notifications.yaml on event-producing modules.
       - Do not embed provider SDK calls in module service.py — delivery mechanics belong in services/adapters/notifications/{channel}.py.
       - Generated adapters must not include credential values. SMTP uses SMTP_HOST, SMTP_FROM, SMTP_PORT, SMTP_SECURITY and optional paired SMTP_USER/SMTP_PASSWORD handles. The same code serves self-hosted and managed hosting; only deployment configuration differs.

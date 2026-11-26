@@ -202,6 +202,7 @@ const ModernChatInterface = ({
   onPendingHarnessDecisionAction = null,
   failedWorkflowRetry = null,
   composerDisabled = false,
+  sendDisabled = false,
   composerLabel,
   composerValue,
   rejectedDraft,
@@ -212,8 +213,8 @@ const ModernChatInterface = ({
   const message = composerValue ?? localMessage;
   const setMessage = onComposerChange || setLocalMessage;
   useEffect(() => {
-    if (rejectedDraft) setLocalMessage(current => current || rejectedDraft.text);
-  }, [rejectedDraft]);
+    if (rejectedDraft && composerValue === undefined) setLocalMessage(current => current || rejectedDraft.text);
+  }, [rejectedDraft, composerValue]);
   const [hasUserInteracted, setHasUserInteracted] = useState(false);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const chatEndRef = useRef(null);
@@ -382,7 +383,7 @@ const ModernChatInterface = ({
       if (!startWorkflowDisabled) onStartWorkflow();
       return;
     }
-    if (composerDisabled || modelSaving) return;
+    if (composerDisabled || modelSaving || (sendDisabled && buttonText !== 'NEXT')) return;
     if (buttonText === 'NEXT') {
       const envDefaultAppId =
         (typeof process !== 'undefined' && process.env && (process.env.REACT_APP_DEFAULT_APP_ID || process.env.REACT_APP_DEFAULT_app_id))
@@ -398,8 +399,8 @@ const ModernChatInterface = ({
 
     const newMessage = { "sender": "user", "content": message, "artifactContext": artifactContext || null };
     followingRef.current = true;
-    onSendMessage(newMessage);
     setMessage('');
+    onSendMessage(newMessage);
     setTimeout(focusComposer, 60);
   };
 
@@ -960,6 +961,11 @@ const ModernChatInterface = ({
             )}
           </div>
         )}
+        {rejectedDraft && <aside role="status" className="mb-2 text-sm text-muted-foreground">
+          Your message wasn’t sent.
+          {message !== rejectedDraft.text && <details><summary>View unsent message</summary>
+            <p className="whitespace-pre-wrap break-words">{rejectedDraft.text}</p></details>}
+        </aside>}
         <form
           onSubmit={onSubmitClick}
           className={modelPicker
@@ -1034,7 +1040,7 @@ const ModernChatInterface = ({
             <button
               type="submit"
               aria-label={onStartWorkflow ? 'Start' : buttonText === 'NEXT' ? 'Continue' : 'Send message'}
-              disabled={onStartWorkflow ? startWorkflowDisabled : !message.trim() || hasPendingHarnessDecision || composerDisabled || modelSaving || (waitingForConnection && buttonText !== 'NEXT')}
+              disabled={onStartWorkflow ? startWorkflowDisabled : !message.trim() || hasPendingHarnessDecision || composerDisabled || modelSaving || ((sendDisabled || waitingForConnection) && buttonText !== 'NEXT')}
               className={`
                 px-2 py-1.5 rounded-md transition-all duration-300 min-w-[36px] sm:min-w-[40px] w-auto h-8 sm:h-9 oxanium font-bold text-[13px] flex items-center justify-center letter-spacing-wide border-2 flex-shrink-0
                 ${(onStartWorkflow ? startWorkflowDisabled : !message.trim())

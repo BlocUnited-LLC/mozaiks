@@ -88,6 +88,7 @@ function _writeSessionCache(data) {
 class WorkflowConfig {
   constructor() {
     this.configs = new Map();
+    this.catalogListeners = new Set();
     this.defaultWorkflow = null; // Dynamic discovery from backend
     this.fetchInProgress = false;
     this.fetchPromise = null;
@@ -100,6 +101,13 @@ class WorkflowConfig {
       this._applyWorkflowRecords(cached);
     }
   }
+
+  hasWorkflows = () => this.configs.size > 0;
+
+  subscribe = listener => {
+    this.catalogListeners.add(listener);
+    return () => this.catalogListeners.delete(listener);
+  };
 
   _applyWorkflowRecords(workflows) {
     this.configs.clear();
@@ -115,6 +123,7 @@ class WorkflowConfig {
       this.defaultWorkflow = null;
     }
     this.warnedNoWorkflow = false;
+    for (const listener of this.catalogListeners) listener();
   }
 
   /**

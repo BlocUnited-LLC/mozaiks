@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useSyncExternalStore } from "react";
 import Header from "../components/layout/Header";
 import Footer from "../components/layout/Footer";
 import ChatInterface from '../components/chat/ChatInterface';
@@ -36,6 +36,7 @@ import { mapGeneralMessage } from '../session/generalTranscript';
 import { useChatStartupEffects } from '../hooks/useChatStartupEffects';
 import { useWorkflowStart } from '../hooks/useWorkflowStart';
 import { isFailedWorkflowSession, useFailedWorkflowRetry } from '../hooks/useFailedWorkflowRetry';
+import useWorkflowSubmission, { withoutWorkflowSubmission } from './hooks/useWorkflowSubmission';
 import { applyChatUsageDelta, emptyChatStatusUsage, resetChatStatusRun } from './chatStatusUsage';
 import { applyChatProgressEvent, beginChatStatusProgressTurn, clearChatStatusProgress, emptyChatStatusProgress, getChatStatusProgress } from './chatStatusProgress';
 import {
@@ -137,7 +138,7 @@ const ChatPage = () => {
   }, []);
   const LOCAL_STORAGE_KEY = 'mozaiks.current_chat_id';
   const [, setConnectionInitialized] = useState(false);
-  const [workflowConfigLoaded, setWorkflowConfigLoaded] = useState(false); // becomes true once workflow config resolved
+  const workflowConfigLoaded = useSyncExternalStore(workflowConfig.subscribe, workflowConfig.hasWorkflows, workflowConfig.hasWorkflows);
   const [cacheSeed, setCacheSeed] = useState(null); // per-chat cache seed for unified backend/frontend caching
   const [chatExists, setChatExists] = useState(null); // tri-state: null=unknown, true=exists, false=new
   const connectionInProgressRef = useRef(false);
@@ -661,7 +662,7 @@ const ChatPage = () => {
     for (const list of messageLists) {
       const messagesList = Array.isArray(list) ? list : [];
       for (const message of messagesList) {
-        if (!message || typeof message !== 'object' || message.isThinking) {
+        if (!message || typeof message !== 'object' || message.isThinking || message.awaitingWorkflowAdmission) {
           continue;
         }
         const key = messageKey(message);
@@ -1192,20 +1193,30 @@ const ChatPage = () => {
     'MozaiksAI'
   ).trim() || 'MozaiksAI';
   const currentUserId = user?.id || user?.user_id || user?.sub || getUserIdFromToken() || 'anonymous';
-  const submittedWorkflowMessage = useRef(null);
-  const [rejectedDraft, setRejectedDraft] = useState(null);
-  const composerScope = JSON.stringify([currentAppId, currentUserId, currentWorkflowName, currentChatId]);
+  const composerScope = JSON.stringify([conversationMode, currentAppId, currentUserId, currentWorkflowName,
+    conversationMode === 'ask' ? activeGeneralChatId : currentChatId]);
+  const removeRefusedMessage = useCallback((id, chatId) => {
+    const omit = rows => withoutWorkflowSubmission(rows, id);
+    setMessagesWithLogging(omit);
+    workflowMessagesCacheRef.current = omit(workflowMessagesCacheRef.current);
+    workflowMessagesSharedRef.current = omit(workflowMessagesSharedRef.current);
+    setWorkflowMessages(omit);
+    const snapshot = readStoredWorkflowTranscriptSnapshot(chatId);
+    if (snapshot?.messages?.some(row => row.id === id)) {
+      writeStoredWorkflowTranscriptSnapshot(chatId, { ...snapshot, messages: omit(snapshot.messages) });
+    }
+  }, [setMessagesWithLogging, setWorkflowMessages]);
+  const confirmWorkflowMessage = useCallback(id => {
+    setMessagesWithLogging(rows => rows.map(row => row.id === id && row.awaitingWorkflowAdmission
+      ? { ...row, awaitingWorkflowAdmission: false } : row));
+  }, [setMessagesWithLogging]);
+  const { text: composerDraft, changeDraft, refused: recoveredWorkflowDraft, sending: sendingWorkflowInput,
+    remember: rememberWorkflowSubmission, bindCreatedChat, finish: finishWorkflowSubmission, restore: restoreRefusedDraft, handleAdmission, settleFailure,
+    isCurrent: isCurrentSubmission } =
+    useWorkflowSubmission(composerScope, removeRefusedMessage);
   const workflowSocket = wsRef.current?.socket;
   const waitingForWorkflowSocket = conversationMode === 'workflow' && Boolean(currentChatId) && (!transportType || transportType === 'websocket')
     && (connectionStatus !== 'connected' || wsRef.current?.chatId !== currentChatId || (workflowSocket && workflowSocket.readyState !== WebSocket.OPEN));
-  const recoveredWorkflowDraft = conversationMode === 'workflow' && rejectedDraft?.scope === composerScope
-    ? rejectedDraft : null;
-  const restoreRefusedDraft = useCallback(submitted => {
-    if (!submitted || submitted.rejected) return;
-    submitted.rejected = true;
-    setRejectedDraft({ scope: submitted.scope, text: submitted.message.content });
-    setMessagesWithLogging(previous => previous.filter(message => message.id !== submitted.message.id && !message.isThinking));
-  }, [setMessagesWithLogging]);
   const workflowModel = useWorkflowModelPicker({
     api, appId: currentAppId, userId: currentUserId, chatId: currentChatId,
     workflow: conversationMode === 'workflow' && !showRefinementModelPicker && !refinementModelPicker
@@ -2529,6 +2540,7 @@ const ChatPage = () => {
           // For other events, unwrap and continue processing
           const innerData = inner.data || {};
           data.type = inner.type; // Use the inner type (could be chat.*, unknown, etc.)
+          if (['chat.input_ack', 'chat.error', 'error'].includes(inner.type)) data.data = innerData;
           if (typeof innerData.content === 'string') data.content = innerData.content;
           if (innerData.agent) data.agent = innerData.agent;
           if (innerData.agent_name) data.agent_name = innerData.agent_name;
@@ -2555,7 +2567,7 @@ const ChatPage = () => {
       if (debugFlag('mozaiks.debug_pipeline')) console.warn('⚠️ [PIPELINE] failed to unwrap nested envelope', e);
     }
     
-    if (!data.type.startsWith('chat.') && !data.type.startsWith('ui.') && data.type !== 'unknown') return;
+    if (!data.type.startsWith('chat.') && !data.type.startsWith('ui.') && !['unknown', 'error'].includes(data.type)) return;
 
     // Some events may arrive already as { type:'chat.text', data:{ ...actualFields... } } (no double-serialization)
     // or after the above unwrap we can still retain an inner data object we need to promote.
@@ -2609,7 +2621,7 @@ const ChatPage = () => {
     } catch {}
 
     const evt = data.type.startsWith('chat.') ? data.type.slice(5) : data.type;
-    setChatStatusProgress(current => applyChatProgressEvent(current, {
+    if (evt !== 'error') setChatStatusProgress(current => applyChatProgressEvent(current, {
       mode: conversationModeRef.current,
       chatId: currentChatIdRef.current,
       workflowName: currentWorkflowNameRef.current,
@@ -3939,14 +3951,28 @@ const ChatPage = () => {
           });
       }
       case 'error': {
-        setPendingWorkflowReply(null);
         const errorMsg = data.message || data.data?.message || 'Unknown error';
         const errorCode = data.error_code || data.data?.error_code;
-        if (errorCode === 'WORKFLOW_MODEL_UNAVAILABLE') {
-          const submitted = submittedWorkflowMessage.current;
-          const rejectedChatId = data.chat_id || data.data?.chat_id || currentChatId;
-          if (submitted?.chatId === rejectedChatId) restoreRefusedDraft(submitted);
+        const errorChatId = data.data?.chat_id || data.chat_id;
+        if (errorChatId && currentChatId && errorChatId !== currentChatId) return;
+        const messageId = data.data?.client_message_id || data.client_message_id;
+        const state = data.data?.delivery_state || data.delivery_state;
+        if (['CHAT_BUSY', 'CHAT_LOCK_BUSY', 'CHAT_LOCK_UNAVAILABLE'].includes(errorCode)) {
+          if (messageId && (!state || state === 'refused')) {
+            // A different worker's eventual pause may never reach this socket.
+            if (handleAdmission(false, data)) setLoading(errorCode === 'CHAT_BUSY');
+            return;
+          }
+        }
+        if (['refused', 'accepted', 'unknown'].includes(state) || (messageId && errorCode === 'WORKFLOW_MODEL_UNAVAILABLE')) {
+          if (!settleFailure(state || 'refused', data)) return;
+          if (state === 'accepted') confirmWorkflowMessage(messageId);
           setLoading(false);
+          setPendingWorkflowReply(null);
+          setMessagesWithLogging(rows => rows.filter(row => !row.isThinking));
+          setChatStatusProgress(current => applyChatProgressEvent(current, {
+            mode: 'workflow', chatId: currentChatId, workflowName: currentWorkflowName,
+          }, data));
         }
         // Create a stable ID based on error content to prevent duplicates
         const errorId = `${errorCode || 'error'}-${errorMsg.slice(0, 50)}`;
@@ -3960,9 +3986,15 @@ const ChatPage = () => {
         setMessagesWithLogging(prev => [...prev, { id:`err-${Date.now()}`, sender:'system', agentName:'System', content:`❌ Error: ${errorMsg}`, isStreaming:false }]);
         return;
       }
-      case 'input_ack':
+      case 'input_ack': {
+        const messageId = data.data?.client_message_id || data.client_message_id;
+        if (messageId) {
+          if (!handleAdmission(true, data)) return;
+          confirmWorkflowMessage(messageId);
+        }
         setPendingWorkflowReply(null);
         return;
+      }
       case 'resume_boundary':
         if (workflowReplayPendingRef.current) {
           workflowReplayPendingRef.current = false;
@@ -3983,7 +4015,7 @@ const ChatPage = () => {
       default:
         return;
     }
-  }, [restoreRefusedDraft, adoptInlineRefinement, findRevisionArtifact, activeChatId, activeWorkflowName, appId, auth, config, user, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, urlWorkflowName, observeSessionMeta, hydrateServerArtifactForChat]);
+  }, [confirmWorkflowMessage, handleAdmission, settleFailure, adoptInlineRefinement, findRevisionArtifact, activeChatId, activeWorkflowName, appId, auth, config, user, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, urlWorkflowName, observeSessionMeta, hydrateServerArtifactForChat]);
   useEffect(() => {
     handleIncomingRef.current = handleIncoming;
   }, [handleIncoming]);
@@ -4024,14 +4056,11 @@ const ChatPage = () => {
     }
     // Fetch workflow configs first; only signal ready once the registry is populated.
     // This prevents connectWithCorrectTransport from firing against an empty registry.
-    workflowConfig.fetchWorkflowConfigs().finally(() => {
-      setWorkflowConfigLoaded(true);
-    });
-    // When the URL explicitly targets a chat or requests a fresh start,
-    // clear any stale activeChatId that was hydrated from localStorage so it
-    // doesn't drive the first WS connection before the URL params are consumed.
+    void workflowConfig.fetchWorkflowConfigs();
+    // Keep the routed session active across catalog recovery. Clearing a matching
+    // ID would tear down its live socket as the saved transcript starts to replay.
     if (queryChatId || queryFreshStart) {
-      setActiveChatId(null);
+      setActiveChatId(active => !queryFreshStart && active === queryChatId ? active : null);
     }
 
     if (queryMode !== 'ask' && !queryForceAsk && !currentChatId && !queryChatId && !queryFreshStart) {
@@ -4919,7 +4948,11 @@ const ChatPage = () => {
 
   // Retry connection function
   const retryConnection = useCallback(() => {
-    if (currentChatId && workflowConfigLoaded) setConnectionRetryNonce(value => value + 1);
+    if (!workflowConfigLoaded) {
+      void workflowConfig.fetchWorkflowConfigs();
+    } else if (currentChatId) {
+      setConnectionRetryNonce(value => value + 1);
+    }
   }, [currentChatId, workflowConfigLoaded]);
 
   // Subscribe to DynamicUIHandler updates and insert tool_call render events into chat messages
@@ -5367,15 +5400,17 @@ const ChatPage = () => {
     const artifactContextPayload = buildComposerArtifactContext(
       messageContent?.artifactContext || currentArtifactContext || null
     );
+    const pendingComposerInputRequestToolCall = findPendingComposerInputRequestToolCall(messagesRef.current);
     
     // Create a properly structured user message
     const userMessage = {
-      id: Date.now().toString(),
+      id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       sender: 'user',  // Use 'user' to align message to the right
       agentName: 'You',
       content: messageContent.content,
       timestamp: Date.now(),
       isStreaming: false,
+      awaitingWorkflowAdmission: conversationMode === 'workflow' && !pendingComposerInputRequestToolCall,
       metadata: conversationMode === 'ask'
         ? {
             source: 'general_agent',
@@ -5392,7 +5427,7 @@ const ChatPage = () => {
       }
       
       const thinkingBubble = {
-        id: `thinking-${Date.now()}`,
+        id: `thinking-${userMessage.id}`,
         sender: 'agent',
         agentName: 'Agent',
         content: '',
@@ -5471,7 +5506,6 @@ const ChatPage = () => {
       return;
     }
 
-      const pendingComposerInputRequestToolCall = findPendingComposerInputRequestToolCall(messagesRef.current);
       if (pendingComposerInputRequestToolCall?.tool_call_id) {
         await handleAgentAction(
           buildToolCallTextResponseAction(
@@ -5486,6 +5520,9 @@ const ChatPage = () => {
 
       // Deferred workflow launch: create the runtime chat only when the user
       // sends the first real message, then route that message into the run.
+      lastErrorIdRef.current = null;
+      const submitted = rememberWorkflowSubmission(composerScope, currentChatId, userMessage);
+      let attemptedInput = false;
       try {
       let targetChatId = currentChatId;
       let targetWorkflowName = resolveKnownWorkflowName(currentWorkflowName)
@@ -5495,8 +5532,7 @@ const ChatPage = () => {
 
       if (!targetChatId) {
         if (!targetWorkflowName) {
-          console.error('❌ [SEND] No workflow available for deferred message');
-          return;
+          throw new Error('No workflow is available for this message');
         }
         const startResult = await api.startChat(
           currentAppId,
@@ -5507,12 +5543,13 @@ const ChatPage = () => {
           { trigger_source: queryTriggerSource },
           { forceNew: queryFreshStart },
         );
+        if (!isCurrentSubmission(submitted)) return;
         targetChatId = startResult?.chat_id || startResult?.id || null;
         targetWorkflowName = startResult?.workflow_name || targetWorkflowName;
         if (!targetChatId) {
-          console.error('❌ [SEND] Could not create workflow chat for deferred message');
-          return;
+          throw new Error('Could not open a chat for this workflow');
         }
+        bindCreatedChat(submitted, targetChatId, JSON.stringify(['workflow', currentAppId, currentUserId, targetWorkflowName, targetChatId]));
         setCurrentChatId(targetChatId);
         setActiveChatId(targetChatId);
         setCurrentWorkflowName(targetWorkflowName);
@@ -5532,28 +5569,32 @@ const ChatPage = () => {
         navigate(location.pathname + (nextSearch ? `?${nextSearch}` : ''), { replace: true });
       }
       
-      const submitted = {
-        chatId: targetChatId, scope: JSON.stringify([currentAppId, currentUserId, targetWorkflowName, targetChatId]),
-        message: userMessage, rejected: false,
-      };
-      setRejectedDraft(null);
-      submittedWorkflowMessage.current = submitted;
+      if (pendingWorkflowReply) setPendingWorkflowReply(null);
+      setLoading(true);
+      attemptedInput = true;
       const success = await api.sendMessageToWorkflow(
         messageContent.content, 
         currentAppId, 
         currentUserId, 
         targetWorkflowName,
         targetChatId,
-        artifactContextPayload ? { artifact_context: artifactContextPayload } : null
+        { client_message_id: userMessage.id, ...(artifactContextPayload ? { artifact_context: artifactContextPayload } : {}) }
       );
-      if (submitted.rejected) return;
+      if (!isCurrentSubmission(submitted) || submitted.rejected || submitted.settled) return;
       if (success && success.success !== false) {
-        if (pendingWorkflowReply) {
-          setPendingWorkflowReply(null);
+        if (success.delivery_state === 'accepted') {
+          submitted.accepted = true;
+          confirmWorkflowMessage(userMessage.id);
         }
-        const runFailed = success?.result?.run_status === 'failed';
-        setLoading(!runFailed);
-        if (runFailed) {
+        const runStatus = success.result?.run_status;
+        if (['paused', 'completed', 'failed'].includes(runStatus)) {
+          setLoading(false);
+          setMessagesWithLogging(rows => rows.filter(row => row.id !== `thinking-${userMessage.id}`));
+          if (runStatus === 'paused') {
+            setPendingWorkflowReply(previous => previous || { reason: 'awaiting_user_reply' });
+          }
+        }
+        if (runStatus === 'failed') {
           setMessagesWithLogging(prev => [
             ...prev.filter(message => !message.isThinking),
             {
@@ -5570,21 +5611,24 @@ const ChatPage = () => {
         throw error;
       }
     } catch (error) {
+      if (!isCurrentSubmission(submitted)) return;
       console.error('❌ [SEND] Failed to send message to workflow:', error);
       setLoading(false);
-      const submitted = submittedWorkflowMessage.current;
-      if (error?.deliveryState === 'refused' && submitted?.message.id === userMessage.id) restoreRefusedDraft(submitted);
+      const refused = !attemptedInput || error?.deliveryState === 'refused';
+      if (refused) restoreRefusedDraft(submitted);
       setMessagesWithLogging(prev => [
         ...prev.filter(message => !message.isThinking),
         {
           id: `send-failed-${userMessage.id}`,
           sender: 'system',
-          content: error?.deliveryState === 'refused'
-            ? 'Your message was not sent. Reconnect and try again.'
+          content: refused
+            ? 'Your message was not sent. Check the connection and try again.'
             : 'Could not confirm whether your message was delivered. Check this chat before trying again.',
           timestamp: Date.now(),
         },
       ]);
+    } finally {
+      finishWorkflowSubmission(submitted);
     }
   };
 
@@ -5721,7 +5765,6 @@ const ChatPage = () => {
     navigate,
     setIsInWidgetMode,
     workflowConfigLoaded,
-    setWorkflowConfigLoaded,
     workflowConfig,
     urlWorkflowName,
     restoreViewSnapshot,
@@ -6124,6 +6167,7 @@ const ChatPage = () => {
   const workflowProgress = getChatStatusProgress(chatStatusProgress, progressScope);
   const isWorking = loading || Boolean(activeThinkingMessage) || Boolean(workflowProgress);
   const waitingForInput = Boolean(pendingHarnessDecision || pendingWorkflowReply || pendingComposerInputToolCall);
+  const workflowSendDisabled = conversationMode === 'workflow' && (sendingWorkflowInput || (Boolean(currentChatId) && isWorking && !waitingForInput));
   useEffect(() => {
     const scope = { mode: conversationMode, chatId: currentChatId, workflowName: currentWorkflowName };
     setChatStatusProgress(current => {
@@ -6186,7 +6230,10 @@ const ChatPage = () => {
       workflowName={currentWorkflowName}
       modelPicker={refinementModelPicker || workflowModel.picker}
       modelSaving={workflowModel.saving || (showRefinementModelPicker && refinementModels === null)}
+      composerValue={composerDraft}
+      onComposerChange={changeDraft}
       rejectedDraft={recoveredWorkflowDraft}
+      sendDisabled={workflowSendDisabled}
       waitingForConnection={waitingForWorkflowSocket}
       structuredOutputs={getWorkflow(currentWorkflowName)?.structuredOutputs || {}}
       startupMode={workflowConfig?.getWorkflowConfig(currentWorkflowName)?.startup_mode}
@@ -6428,7 +6475,10 @@ const ChatPage = () => {
         workflowName={currentWorkflowName}
         modelPicker={refinementModelPicker || workflowModel.picker}
         modelSaving={workflowModel.saving || (showRefinementModelPicker && refinementModels === null)}
+        composerValue={composerDraft}
+        onComposerChange={changeDraft}
         rejectedDraft={recoveredWorkflowDraft}
+        sendDisabled={workflowSendDisabled}
         waitingForConnection={waitingForWorkflowSocket}
         structuredOutputs={getWorkflow(currentWorkflowName)?.structuredOutputs || {}}
         startupMode={uiStartupMode}
