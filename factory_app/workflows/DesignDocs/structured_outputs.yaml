@@ -136,7 +136,8 @@ models:
         type: str
         description: Document field path to index.
       order:
-        type: int
+        type: literal
+        values: [1, -1]
         description: Sort order, 1 for ascending or -1 for descending.
 
   DataContractIndex:
