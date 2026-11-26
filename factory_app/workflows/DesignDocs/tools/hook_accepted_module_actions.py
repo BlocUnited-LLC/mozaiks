@@ -145,8 +145,6 @@ def _collection_rows(files: dict[str, str | bytes], modules: dict[str, ModuleDef
             action = actions.get(canonical_write_action_id(shape["entity"], operation))
             if action is None or action.api_surface in {"internal", "admin_internal"}:
                 continue
-            # Some accepted legacy actions use open or otherwise non-canonical inputs.
-            # Their signatures remain available, but cannot establish a closed edit allowlist.
             try:
                 inputs = import_closed_contract_schema(action.input_schema)
             except ClosedContractUnsupported:
