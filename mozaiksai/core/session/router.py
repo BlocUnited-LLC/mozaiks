@@ -1576,7 +1576,7 @@ async def get_session_router_for_chat(
     reference = BuildTargetReference(source_chat_id=chat_id)
     router = session_router or get_session_router()
     coll = await router._persistence._coll()
-    routing_fields = SERVER_OWNED_SESSION_FIELDS - {"workflow_result_grant"}
+    routing_fields = SERVER_OWNED_SESSION_FIELDS - {"workflow_result_grant", "journey_parent_chat_id"}
     doc = await coll.find_one(
         {"_id": reference.source_chat_id, "user_id": user_id, **build_app_scope_filter(app_id)},
         {"workflow_name": 1, **{key: 1 for key in routing_fields}},

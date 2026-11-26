@@ -110,6 +110,15 @@ rejected rather than converted to a partial revision. The trusted contribution's
 state persistence or chat creation. Unmet dependencies or workflow/journey
 drift reject the retry; dependency checks are not bypassed.
 
+For a later stage of a refinement, Studio verifies the failed chat against
+the registered build, saved change, and steps in the declared journey. A
+successful automatic handoff records its source in `journey_parent_chat_id`
+when it creates the child chat. The session store keeps that field outside
+workflow context. For older chats, Studio needs an unambiguous history of
+completed prerequisite stages and their saved outputs for the same owner and
+build. The replacement starts at the verified stage. Any workflow plan that
+authorizes a private-record write goes through review again in the new chat.
+
 AppGenerator retains its declared InterviewAgent entry and revision prompt.
 Its existing first `before_chat` hook verifies the committed baseline archive
 and hydrates `generated_files`; it does not read a mutable workspace fallback.

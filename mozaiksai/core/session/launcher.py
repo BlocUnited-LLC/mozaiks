@@ -42,6 +42,7 @@ _PERSISTENCE_MANAGER = AG2PersistenceManager()
 class _SessionOptions(TypedDict, total=False):
     run_model: RefinementModel
     workflow_result_grant: WorkflowResultGrant
+    journey_parent_chat_id: str
 
 
 @dataclass(slots=True)
@@ -244,6 +245,7 @@ async def create_routed_chat_session(
     persistence_manager: Any | None = None,
     run_model: RefinementModel | None = None,
     workflow_result_grant: WorkflowResultGrant | None = None,
+    journey_parent_chat_id: str | None = None,
 ) -> str:
     persistence = persistence_manager if persistence_manager is not None else _PERSISTENCE_MANAGER
     chat_id = chat_id or str(uuid4())
@@ -282,6 +284,8 @@ async def create_routed_chat_session(
         options["run_model"] = run_model
     if workflow_result_grant is not None:
         options["workflow_result_grant"] = workflow_result_grant
+    if journey_parent_chat_id is not None:
+        options["journey_parent_chat_id"] = journey_parent_chat_id
     await persistence.create_chat_session(
         chat_id=chat_id,
         app_id=app_id,

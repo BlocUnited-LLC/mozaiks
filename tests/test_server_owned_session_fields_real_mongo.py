@@ -39,6 +39,8 @@ _INJECTED = {
     "build_terminal_receipt": {"kind": "success", "forged": True},
     "workflow_result_grant": {"untrusted": True},
     "workflow_result_grant.subject": {"untrusted": True},
+    "journey_parent_chat_id": "untrusted_chat",
+    "journey_parent_chat_id.suffix": "untrusted_chat",
 }
 
 
@@ -463,7 +465,29 @@ def test_reserved_key_set_is_exactly_the_server_authority_fields() -> None:
         "workflow_run_id",
         "workflow_run_model",
         "workflow_result_grant",
+        "journey_parent_chat_id",
     }
+
+
+@pytest.mark.asyncio
+async def test_journey_parent_is_bound_at_creation_and_excluded_from_workflow_context() -> None:
+    client = AsyncIOMotorClient(_MONGO_URI)
+    database_name = f"mozaiks_boundary_test_{uuid4().hex}"
+    try:
+        pm = _pm(client, database_name)
+        scope = {"app_id": _APP_ID, "user_id": "owner", "workflow_name": _WORKFLOW, "chat_id": "child"}
+        await pm.create_chat_session(**scope, journey_parent_chat_id="parent")
+        await pm.create_chat_session(**scope, journey_parent_chat_id="parent")
+        with pytest.raises(ValueError, match="Cannot replace"):
+            await pm.create_chat_session(**scope, journey_parent_chat_id="other")
+        with pytest.raises(ValueError, match="only be bound"):
+            await pm.persist_server_owned_session_fields(**scope, fields={"journey_parent_chat_id": "other"})
+        coll = await pm._coll()
+        assert (await coll.find_one({"_id": "child"}))["journey_parent_chat_id"] == "parent"
+        assert "journey_parent_chat_id" not in await pm.fetch_chat_session_extra_context(**scope)
+    finally:
+        await client.drop_database(database_name)
+        client.close()
 
 
 @pytest.mark.asyncio

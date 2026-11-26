@@ -36,7 +36,7 @@ from logs.logging_config import get_workflow_logger
 from mozaiksai.core.core_config import current_mongo_client, get_mongo_client
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id, dual_write_app_scope
 from mozaiksai.core.runtime.persistence.distributed_lock import assert_chat_mutable
-from mozaiksai.core.session.build_binding import RefinementModel
+from mozaiksai.core.session.build_binding import BuildIdentity, RefinementModel
 from mozaiksai.core.workflow.outputs.runtime_validation import normalize_json_candidate_text
 
 from ..models import WorkflowStatus, WorkflowUIState
@@ -150,6 +150,7 @@ SERVER_OWNED_SESSION_FIELDS = frozenset({
     "platform_user_email",
     "build_terminal_receipt",
     "run_build_binding",
+    "journey_parent_chat_id",
     "workflow_run_id",
     "workflow_run_model",
     "workflow_result_grant",
@@ -501,10 +502,15 @@ class AG2PersistenceManager:
         extra_fields: dict[str, Any] | None = None,
         run_model: RefinementModel | None = None,
         workflow_result_grant: WorkflowResultGrant | None = None,
+        journey_parent_chat_id: str | None = None,
     ) -> None:
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
+        if journey_parent_chat_id is not None:
+            TypeAdapter(BuildIdentity).validate_python(journey_parent_chat_id)
+            if journey_parent_chat_id == chat_id or not user_id or not workflow_name:
+                raise ValueError("Journey handoff requires a distinct parent and an owned workflow session")
         grant_document = None
         if workflow_result_grant is not None:
             from mozaiksai.core.runtime.composition.workflow_result import WorkflowResultGrant
@@ -547,6 +553,11 @@ class AG2PersistenceManager:
             # Scope the duplicate check to this app to maintain tenant isolation.
             existing = await coll.find_one({"_id": chat_id, **build_app_scope_filter(resolved_app_id)})
             if existing:
+                if journey_parent_chat_id is not None and (
+                    existing.get("journey_parent_chat_id") != journey_parent_chat_id
+                    or existing.get("user_id") != user_id or existing.get("workflow_name") != workflow_name
+                ):
+                    raise ValueError("Cannot replace the parent of an existing journey session")
                 if grant_document is not None and existing.get("workflow_result_grant") != grant_document:
                     raise ValueError("Cannot attach result authority to an existing session")
                 if run_model is not None and (
@@ -577,6 +588,8 @@ class AG2PersistenceManager:
                 session_doc["workflow_run_model"] = run_model
             if grant_document is not None:
                 session_doc["workflow_result_grant"] = grant_document
+            if journey_parent_chat_id is not None:
+                session_doc["journey_parent_chat_id"] = journey_parent_chat_id
 
             if isinstance(extra_fields, dict) and extra_fields:
                 # Prevent callers from overwriting canonical identifiers/state.
@@ -696,6 +709,7 @@ class AG2PersistenceManager:
             "workflow_model_rebind_pending",
             "workflow_run_model",
             "workflow_result_grant",
+            "journey_parent_chat_id",
             "workflow_name",
             "user_id",
             "status",
@@ -927,6 +941,8 @@ class AG2PersistenceManager:
                 raise ValueError("A workflow run model can only be bound when its session is created")
             if key == "workflow_result_grant":
                 raise ValueError("A workflow result grant can only be bound when its session is created")
+            if key == "journey_parent_chat_id":
+                raise ValueError("A journey parent can only be bound when its session is created")
             updates[key] = deepcopy(value)
         if not updates:
             return
