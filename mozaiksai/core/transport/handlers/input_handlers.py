@@ -111,6 +111,27 @@ async def handle_user_input_submit(
         # orchestration bridge when workflow context exists. Startup mode only
         # decides who speaks first at session launch; it must not block later
         # human turns after a pause or review checkpoint.
+        client_message_id = ui_context_payload.get("client_message_id") if has_workflow_context else None
+        if not isinstance(client_message_id, str) or len(client_message_id) > 128 or not client_message_id.strip():
+            client_message_id = None
+
+        admitted = False
+
+        async def acknowledge_input() -> None:
+            nonlocal admitted
+            admitted = True
+            try:
+                await send_event_envelope(websocket, {
+                    "schema_version": "mozaiks.ui.event.v1",
+                    "type": "chat.input_ack",
+                    "data": {"chat_id": target_chat_id, "status": "accepted",
+                             **({"client_message_id": client_message_id} if client_message_id else {})},
+                    "timestamp": utc_timestamp(),
+                })
+            except Exception:
+                # An already admitted turn continues even if its sender disconnects.
+                logger.debug("Input acknowledgement undelivered for %s", target_chat_id, exc_info=True)
+
         if has_workflow_context:
             if not target_app_id or not target_workflow_name:
                 await transport._send_ws_error(
@@ -121,21 +142,45 @@ async def handle_user_input_submit(
                 return
             existing = transport._background_tasks.get(target_chat_id)
             if existing is not None and not existing.done():
-                await transport._send_ws_error(websocket, "Workflow is already running", "CHAT_BUSY")
+                await transport._send_ws_error(websocket, "Workflow is already running", "CHAT_BUSY",
+                                               chat_id=target_chat_id, client_message_id=client_message_id,
+                                               delivery_state="refused" if client_message_id else None)
                 return
 
             async def continue_workflow() -> None:
                 try:
-                    await transport.handle_user_input_from_api(
+                    result = await transport.handle_user_input_from_api(
                         chat_id=target_chat_id,
                         user_id=str(target_user_id or conn.get("user_id") or ""),
                         workflow_name=str(target_workflow_name),
                         message=text,
                         app_id=str(target_app_id),
+                        on_input_admitted=acknowledge_input,
                     )
+                    if result and result.get("status") in {"error", "busy"}:
+                        code = result.get("error_code") or "WORKFLOW_EXECUTION_FAILED"
+                        # Previous clients already receive the run's broadcast.
+                        # Direct lock/model refusals are their only error frame.
+                        if not client_message_id and code not in {"CHAT_LOCK_BUSY", "CHAT_LOCK_UNAVAILABLE", "WORKFLOW_MODEL_UNAVAILABLE"}:
+                            return
+                        accepted = result.get("input_accepted")
+                        state = "unknown"
+                        if admitted or accepted is True:
+                            state = "accepted"
+                        elif accepted is False:
+                            state = "refused"
+                        await transport._send_ws_error(
+                            websocket, result.get("error_message") or result.get("message") or "Workflow execution failed.", code,
+                            chat_id=target_chat_id, client_message_id=client_message_id,
+                            delivery_state=state if client_message_id else None,
+                        )
                 except Exception:
                     logger.exception("Workflow input failed for %s", target_chat_id)
-                    await transport._send_ws_error(websocket, "User message failed", "USER_MESSAGE_FAILED")
+                    await transport._send_ws_error(
+                        websocket, "User message failed", "USER_MESSAGE_FAILED",
+                        chat_id=target_chat_id, client_message_id=client_message_id,
+                        delivery_state=("accepted" if admitted else "unknown") if client_message_id else None,
+                    )
                 finally:
                     if transport._background_tasks.get(target_chat_id) is asyncio.current_task():
                         transport._background_tasks.pop(target_chat_id, None)
@@ -145,20 +190,12 @@ async def handle_user_input_submit(
             task = asyncio.create_task(continue_workflow(), name=f"workflow-input:{target_chat_id}")
             transport._background_tasks[target_chat_id] = task
             task.add_done_callback(_background_task_failure_callback(str(target_workflow_name), target_chat_id))
-        else:
-            await transport.process_incoming_user_message(
-                chat_id=target_chat_id,
-                user_id=target_user_id or conn.get('user_id'),
-                content=text,
-                source='ws'
-            )
+            return
 
-        await send_event_envelope(websocket, {
-            "schema_version": "mozaiks.ui.event.v1",
-            "type": "chat.input_ack",
-            "data": {"chat_id": target_chat_id, "status": "accepted"},
-            "timestamp": utc_timestamp()
-        })
+        await transport.process_incoming_user_message(
+            chat_id=target_chat_id, user_id=target_user_id or conn.get("user_id"), content=text, source="ws",
+        )
+        await acknowledge_input()
     except Exception as e:
         logger.error("Failed to process free-form user message for %s: %s", chat_id, e, exc_info=True)
         await transport._send_ws_error(websocket, "User message failed", "USER_MESSAGE_FAILED")

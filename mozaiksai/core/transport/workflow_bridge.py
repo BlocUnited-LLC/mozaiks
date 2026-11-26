@@ -20,6 +20,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, get_args
 
@@ -43,6 +46,13 @@ logger = logging.getLogger("simple_transport.workflow")
 # Failed runs whose reason this process keeps for refusing later input. Input
 # for an ended run follows its end closely, so the most recent ones suffice.
 _RUN_END_REASON_LIMIT = 256
+_turn_pause: ContextVar[dict | None] = ContextVar("workflow_turn_pause", default=None)
+
+
+def _ended_session_message(reason: str | None) -> str:
+    if reason:
+        return f"This workflow session has ended: {reason}\nStart a new run to continue."
+    return "This workflow session has ended. Start a new run to continue."
 
 
 def _persist_context_kwargs(
@@ -298,6 +308,43 @@ class WorkflowBridgeMixin:
             "error_code": "WORKFLOW_REOPEN_UNAVAILABLE", "message": message,
         }
 
+    @asynccontextmanager
+    async def _workflow_turn_lease(self, *, app_id: str, chat_id: str):
+        """Publish a human-wait boundary only after the turn has released its execution lease."""
+        pause: dict[str, dict[str, Any]] = {}
+        scope = {(self, chat_id): pause}
+        async with chat_execution_lease(app_id=app_id, chat_id=chat_id):
+            token = _turn_pause.set(scope)
+            try:
+                yield
+            finally:
+                scope.clear()  # AG2 tasks may outlive the turn which created their context.
+                _turn_pause.reset(token)
+        if pause:
+            tasks = self._background_tasks
+            if tasks.get(chat_id) is asyncio.current_task():
+                tasks.pop(chat_id)
+            # The pause outcome precedes the actionable invitation, so it cannot
+            # clear a new turn's activity after the user has already replied.
+            if "run_complete" in pause:
+                await self.send_event_to_ui(pause["run_complete"], chat_id)
+            if "awaiting_reply" in pause and chat_id not in tasks:
+                await self.send_event_to_ui(pause["awaiting_reply"], chat_id)
+
+    def _defer_pause_event(self, event: Any, chat_id: str | None) -> bool:
+        scope = _turn_pause.get()
+        if not scope or (self, chat_id) not in scope or not isinstance(event, dict):
+            return False
+        pause = scope[self, chat_id]
+        kind = event.get("kind")
+        if kind == "awaiting_reply" or (kind == "run_complete" and event.get("awaiting_user_input")):
+            pause[kind] = event
+            return True
+        if kind == "run_complete":
+            # Cold recovery may pause and then settle the submitted turn under the same lease.
+            pause.clear()
+        return False
+
     async def handle_user_input_from_api(
         self,
         chat_id: str,
@@ -306,6 +353,8 @@ class WorkflowBridgeMixin:
         message: str | None,
         app_id: str,
         initial_agent_name_override: str | None = None,
+        *,
+        on_input_admitted: Callable[[], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """
         Handle user input from the POST API endpoint with smart routing.
@@ -313,8 +362,30 @@ class WorkflowBridgeMixin:
         Checks if there's an active workflow run waiting for input. If yes,
         passes message to the existing run. If no, starts a new workflow run.
         """
+        input_accepted: bool | None = False
+
+        async def mark_input_admitted() -> None:
+            nonlocal input_accepted
+            input_accepted = True
+            if on_input_admitted is not None:
+                await on_input_admitted()
+
+        admission_callback = mark_input_admitted if on_input_admitted is not None else None
+
+        def sender_error(result: dict[str, Any], *, code: str | None = None, message: str | None = None) -> dict[str, Any]:
+            if on_input_admitted is None:
+                return result
+            if result.get("error_code") == "WORKFLOW_SESSION_TERMINAL":
+                message = _ended_session_message(result.get("reason"))
+            return {
+                **result, "input_accepted": input_accepted,
+                **({"error_code": code} if code else {}),
+                **({"error_message": message} if message else {}),
+            }
+
         try:
             starting_new_workflow = False
+            direct_refusals = on_input_admitted is not None
             is_resume_request = bool(
                 isinstance(initial_agent_name_override, str)
                 and initial_agent_name_override.strip()
@@ -354,7 +425,7 @@ class WorkflowBridgeMixin:
                 if rejection is None:
                     rejection = await self._reject_unauthorized_input(chat_id=chat_id, app_id=app_id, user_id=user_id)
                 if rejection is not None:
-                    return rejection
+                    return sender_error(rejection)
                 # Route to existing AG2 session via WebSocket callback mechanism
                 logger.debug("[SMART_ROUTING] Continuing existing AG2 session for chat %s", chat_id)
 
@@ -370,9 +441,16 @@ class WorkflowBridgeMixin:
                         normalized_message = self._build_resume_signal(chat_id, request_id)
                         resume_signal = True
 
-                    success = await self.submit_user_input(request_id, str(normalized_message), chat_id=chat_id)
+                    # A callback can fail after delivering the message. Only an
+                    # explicit acceptance can resolve that ambiguity.
+                    input_accepted = None
+                    success = await self.submit_user_input(
+                        request_id, str(normalized_message), chat_id=chat_id,
+                        **({"acknowledge_request": False} if on_input_admitted is not None else {}),
+                    )
 
                     if success:
+                        await mark_input_admitted()
                         route = "existing_session_resume" if resume_signal else "existing_session"
                         # Don't persist/echo resume signal messages - they're internal coordination only
                         if not resume_signal:
@@ -397,6 +475,9 @@ class WorkflowBridgeMixin:
                                 logger.debug("User message persistence failed (non-fatal): %s", persist_err)
                         return {"status": "success", "chat_id": chat_id, "message": "Input passed to existing AG2 session.", "route": route}
                     else:
+                        # A failed callback may have partially delivered this text.
+                        # Later contention cannot prove it is safe to offer a resend.
+                        direct_refusals = False
                         logger.warning("[SMART_ROUTING] Failed to submit input to existing session, falling back to new workflow")
 
             # Start, restore, and live continuation share one execution lease.
@@ -407,8 +488,10 @@ class WorkflowBridgeMixin:
             # for the entire mutable start/resume. adapter.run()/.resume()
             # return exactly at a durably persisted terminal or human-waiting
             # boundary, so releasing on context exit lands on that boundary.
+            lease_acquired = False
             try:
-                async with chat_execution_lease(app_id=app_id, chat_id=chat_id):
+                async with self._workflow_turn_lease(app_id=app_id, chat_id=chat_id):
+                    lease_acquired = True
                     if passive_start:
                         rejection = await self._passive_start_rejection(
                             chat_id=chat_id, app_id=app_id, user_id=user_id, workflow_name=workflow_name,
@@ -422,16 +505,18 @@ class WorkflowBridgeMixin:
                         require_session=callable(get_live_run) and get_live_run(chat_id) is not None,
                     )
                     if rejection is not None:
-                        return rejection
+                        return sender_error(rejection)
                     # Another request may have opened or ended the channel
                     # while this request waited for the lease. Resolve its
                     # current state before persisting or delivering new input.
                     rejection, preference = await self._resumable_chat_model(chat_id=chat_id, app_id=app_id)
                     if rejection is not None:
-                        return rejection
+                        return sender_error(rejection)
                     workflow_model = preference.selected if preference else None
                     if preference and preference.rebind_pending and is_resume_request:
-                        return await self._reject_workflow_model(chat_id, "Send a message to continue with your selected model.")
+                        return await self._reject_workflow_model(
+                            chat_id, "Send a message to continue with your selected model.", direct=direct_refusals,
+                        )
                     if workflow_model is not None:
                         from mozaiksai.core.session.build_binding import RefinementModel
                         from mozaiksai.core.workflow.llm_config import resolve_workflow_model
@@ -443,7 +528,7 @@ class WorkflowBridgeMixin:
                                 else "Choose another model or Workflow default."
                             )
                             return await self._reject_workflow_model(
-                                chat_id, f"The saved chat model is unavailable. {hint}",
+                                chat_id, f"The saved chat model is unavailable. {hint}", direct=direct_refusals,
                             )
                     if (
                         not is_resume_request
@@ -465,6 +550,7 @@ class WorkflowBridgeMixin:
                                 if not resumable or (live_run is not None and not await live_run.can_rebind_model()):
                                     return await self._reject_workflow_model(
                                         chat_id, "This workflow has unfinished work. Restore the previous model to continue.",
+                                        direct=direct_refusals,
                                     )
                                 from mozaiksai.core.adapters.ag2_orchestration import (
                                     get_ag2_adapter,
@@ -483,6 +569,7 @@ class WorkflowBridgeMixin:
                                 if rebound.status is not RunStatus.PAUSED or replacement is live_run or replacement is None:
                                     return await self._reject_workflow_model(
                                         chat_id, "The selected model could not resume this conversation. Choose another model.",
+                                        direct=direct_refusals,
                                     )
                                 live_run = replacement
                                 if pending_rebind:
@@ -503,7 +590,7 @@ class WorkflowBridgeMixin:
                                     emit_execution_completed=_emit_execution_completed,
                                 )
                                 if recovered.get("status") != "success":
-                                    return recovered
+                                    return sender_error(recovered)
                                 live_run = get_live_run(chat_id) if callable(get_live_run) else None
                                 if (
                                     recovered.get("run_status") != "paused"
@@ -516,30 +603,33 @@ class WorkflowBridgeMixin:
                                         # Recovery has already announced its
                                         # outcome. Refusing this new input must
                                         # not advance the journey a second time.
-                                        return {**rejection, "outcome_announced": True}
+                                        return sender_error({**rejection, "outcome_announced": True})
+                                    recovery_error = "This workflow could not accept your message after recovery. Please retry."
                                     await self.send_error(
-                                        error_message="This workflow could not accept your message after recovery. Please retry.",
+                                        error_message=recovery_error,
                                         error_code="WORKFLOW_EXECUTION_FAILED",
                                         chat_id=chat_id,
                                     )
-                                    return {
+                                    return sender_error({
                                         **recovered,
                                         "status": "error",
                                         "outcome_announced": True,
                                         "error_code": "WORKFLOW_EXECUTION_FAILED",
                                         "message": "Workflow recovery did not accept this input.",
-                                    }
+                                    }, message=recovery_error)
                         if live_run is not None:
                             starting_new_workflow = False
-                            return await self._continue_live_ag2_workflow_run(
+                            outcome = await self._continue_live_ag2_workflow_run(
                                 live_run=live_run,
                                 chat_id=chat_id,
                                 user_id=user_id,
                                 workflow_name=workflow_name,
                                 message=message,
                                 app_id=app_id,
+                                on_input_admitted=admission_callback,
                             )
-                    return await self._launch_workflow_run_locked(
+                            return sender_error(outcome) if outcome.get("route") == "terminal_session" else outcome
+                    outcome = await self._launch_workflow_run_locked(
                         chat_id=chat_id,
                         user_id=user_id,
                         workflow_name=workflow_name,
@@ -549,19 +639,22 @@ class WorkflowBridgeMixin:
                         is_resume_request=is_resume_request,
                         emit_execution_started=_emit_execution_started,
                         emit_execution_completed=_emit_execution_completed,
+                        on_input_admitted=admission_callback,
                     )
+                    return sender_error(outcome) if outcome.get("route") == "terminal_session" else outcome
             except LockAcquisitionError as lock_err:
-                if lock_err.resource != chat_lock_resource(app_id, chat_id):
+                if lease_acquired or lock_err.resource != chat_lock_resource(app_id, chat_id):
                     raise
-                return await self._reject_chat_locked(chat_id=chat_id, busy=True)
+                return await self._reject_chat_locked(chat_id=chat_id, busy=True, direct=direct_refusals)
             except ChatLockAuthorityUnavailableError as lock_err:
-                if lock_err.resource != chat_lock_resource(app_id, chat_id):
+                if lease_acquired or lock_err.resource != chat_lock_resource(app_id, chat_id):
                     raise
-                return await self._reject_chat_locked(chat_id=chat_id, busy=False)
+                return await self._reject_chat_locked(chat_id=chat_id, busy=False, direct=direct_refusals)
             except ChatLeaseLostError as lock_err:
                 if lock_err.resource != chat_lock_resource(app_id, chat_id):
                     raise
-                return await self._reject_chat_lease_lost(chat_id=chat_id)
+                lost = await self._reject_chat_lease_lost(chat_id=chat_id)
+                return sender_error(lost, code="CHAT_LOCK_LOST", message="Chat execution ownership was lost. Please retry shortly.")
 
         except Exception as e:
             # Surface token denial before the generic failure path so the UI
@@ -582,7 +675,10 @@ class WorkflowBridgeMixin:
                     chat_id=chat_id,
                     extra_data=extra_data,
                 )
-                return {"status": "error", "chat_id": chat_id, "message": "Insufficient token balance"}
+                return sender_error(
+                    {"status": "error", "chat_id": chat_id, "message": "Insufficient token balance"},
+                    code=extra_data.get("error_code", "INSUFFICIENT_TOKENS"), message=str(e),
+                )
 
             logger.error("User input handling failed for chat %s: %s", chat_id, e, exc_info=True)
             if starting_new_workflow and _emit_execution_failed is not None:
@@ -626,44 +722,46 @@ class WorkflowBridgeMixin:
                     )
                 except Exception as _rev_exc:
                     logger.debug("REVISION_FAIL_TASK_CREATE_FAILED app=%s workflow=%s: %s", app_id, workflow_name, _rev_exc)
+            error_message = "An internal error occurred. Please try again."
             await self.send_error(
-                error_message="An internal error occurred. Please try again.",
+                error_message=error_message,
                 error_code="WORKFLOW_EXECUTION_FAILED",
                 chat_id=chat_id
             )
-            return {"status": "error", "chat_id": chat_id, "message": "Workflow execution failed"}
+            return sender_error(
+                {"status": "error", "chat_id": chat_id, "message": "Workflow execution failed"},
+                code="WORKFLOW_EXECUTION_FAILED", message=error_message,
+            )
 
-    async def _reject_chat_locked(self, *, chat_id: str, busy: bool) -> dict[str, Any]:
+    async def _reject_chat_locked(self, *, chat_id: str, busy: bool, direct: bool = False) -> dict[str, Any]:
         """Fail closed before any session/WAL mutation with a distinct diagnostic."""
         if busy:
             logger.warning(
                 "CHAT_LOCK_BUSY chat=%s — another execution holds this chat's lease", chat_id
             )
-            await self.send_error(
-                error_message="This chat is already executing elsewhere. Please retry shortly.",
-                error_code="CHAT_LOCK_BUSY",
-                chat_id=chat_id,
-            )
+            message = "This chat is already executing elsewhere. Please retry shortly."
+            if not direct:
+                await self.send_error(error_message=message, error_code="CHAT_LOCK_BUSY", chat_id=chat_id)
             return {
                 "status": "busy",
                 "chat_id": chat_id,
-                "message": "Chat is locked by another execution.",
+                "message": message if direct else "Chat is locked by another execution.",
                 "route": "chat_lock_busy",
+                **({"input_accepted": False, "error_code": "CHAT_LOCK_BUSY"} if direct else {}),
             }
         logger.error(
             "CHAT_LOCK_AUTHORITY_UNAVAILABLE chat=%s — refusing execution before session/WAL mutation",
             chat_id,
         )
-        await self.send_error(
-            error_message="Chat execution is temporarily unavailable. Please retry shortly.",
-            error_code="CHAT_LOCK_UNAVAILABLE",
-            chat_id=chat_id,
-        )
+        message = "Chat execution is temporarily unavailable. Please retry shortly."
+        if not direct:
+            await self.send_error(error_message=message, error_code="CHAT_LOCK_UNAVAILABLE", chat_id=chat_id)
         return {
             "status": "error",
             "chat_id": chat_id,
-            "message": "Chat lock authority unavailable.",
+            "message": message if direct else "Chat lock authority unavailable.",
             "route": "chat_lock_unavailable",
+            **({"input_accepted": False, "error_code": "CHAT_LOCK_UNAVAILABLE"} if direct else {}),
         }
 
     async def _reject_chat_lease_lost(self, *, chat_id: str) -> dict[str, Any]:
@@ -703,21 +801,19 @@ class WorkflowBridgeMixin:
         """Refuse input for an ended run, with the reason it ended when this process saw it."""
         reason = (getattr(self, "_run_end_reasons", None) or {}).get(chat_id)
         await self.send_error(
-            error_message=(
-                f"This workflow session has ended: {reason}\nStart a new run to continue."
-                if reason
-                else "This workflow session has ended. Start a new run to continue."
-            ),
+            error_message=_ended_session_message(reason),
             error_code="WORKFLOW_SESSION_TERMINAL",
             chat_id=chat_id,
             extra_data={"reason": reason} if reason else None,
         )
         return reason
 
-    async def _reject_workflow_model(self, chat_id: str, reason: str) -> dict[str, Any]:
+    async def _reject_workflow_model(self, chat_id: str, reason: str, *, direct: bool = False) -> dict[str, Any]:
         code = "WORKFLOW_MODEL_UNAVAILABLE"
-        await self.send_error(error_message=reason, error_code=code, chat_id=chat_id)
-        return {"status": "error", "chat_id": chat_id, "message": reason, "error_code": code}
+        if not direct:
+            await self.send_error(error_message=reason, error_code=code, chat_id=chat_id)
+        return {"status": "error", "chat_id": chat_id, "message": reason, "error_code": code,
+                **({"input_accepted": False} if direct else {})}
 
     async def _reject_unauthorized_input(
         self, *, chat_id: str, app_id: str, user_id: str | None, require_session: bool = True,
@@ -766,6 +862,7 @@ class WorkflowBridgeMixin:
         is_resume_request: bool,
         emit_execution_started: Any,
         emit_execution_completed: Any,
+        on_input_admitted: Callable[[], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """Start or resume a workflow run for a chat.
 
@@ -780,6 +877,8 @@ class WorkflowBridgeMixin:
         if rejection is not None:
             return rejection
 
+        if on_input_admitted is not None:
+            await on_input_admitted()
         if message or is_resume_request:
             try:
                 pm = self._get_or_create_persistence_manager()
@@ -921,6 +1020,7 @@ class WorkflowBridgeMixin:
         workflow_name: str,
         message: str,
         app_id: str,
+        on_input_admitted: Callable[[], Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         """Continue a process-live AG2 Network workflow channel."""
 
@@ -943,6 +1043,8 @@ class WorkflowBridgeMixin:
         # outcome was never announced, so settle the run before refusing input.
         runner_result = await live_run.end_if_closed()
         if runner_result is None:
+            if on_input_admitted is not None:
+                await on_input_admitted()
             context_updates = await self._apply_user_text_context_updates(
                 chat_id=chat_id,
                 workflow_name=workflow_name,
@@ -1195,14 +1297,6 @@ class WorkflowBridgeMixin:
                             )
                         except Exception as _ev_exc:
                             logger.debug("PROCESS_COMPLETED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
-                    # A paused run is resumable as soon as AG2 has returned its
-                    # checkpoint. Release the background-task slot before the
-                    # pause event reaches the UI so an immediate user reply is
-                    # not rejected as CHAT_BUSY.
-                    if run_status in {"paused", "in_progress"}:
-                        current_task = asyncio.current_task()
-                        if self._background_tasks.get(chat_id) is current_task:
-                            self._background_tasks.pop(chat_id, None)
                     return result
                 except Exception:
                     # Emit failed run_complete before re-raising so listeners can react
@@ -1274,11 +1368,8 @@ class WorkflowBridgeMixin:
             except Exception as _send_exc:
                 logger.debug("WORKFLOW_BACKGROUND_ERROR_SEND_FAILED chat=%s: %s", chat_id, _send_exc)
         finally:
-            # Drop task handle
-            try:
+            if self._background_tasks.get(chat_id) is asyncio.current_task():
                 self._background_tasks.pop(chat_id, None)
-            except Exception:
-                pass
 
             # Only an accepted, completed execution can complete the workflow.
             try:
