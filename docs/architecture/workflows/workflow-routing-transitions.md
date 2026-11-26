@@ -119,6 +119,12 @@ completed prerequisite stages and their saved outputs for the same owner and
 build. The replacement starts at the verified stage. Any workflow plan that
 authorizes a private-record write goes through review again in the new chat.
 
+Repeating the same downstream retry addresses the same replacement chat. Studio
+uses its execution lease and the registry's active-chat claim to finish a launch
+interrupted after the claim, session insert, or router bind. Once publication
+finishes, repeating the request returns the existing chat without resetting its
+review. A later failure in that replacement can be retried from its own chat ID.
+
 AppGenerator retains its declared InterviewAgent entry and revision prompt.
 Its existing first `before_chat` hook verifies the committed baseline archive
 and hydrates `generated_files`; it does not read a mutable workspace fallback.

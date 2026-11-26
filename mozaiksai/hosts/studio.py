@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from difflib import unified_diff
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal, NamedTuple, TypeVar
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import yaml
 from anyio import CancelScope
@@ -3482,6 +3482,29 @@ class _DownstreamRetry(TriggerRoutingContribution):
     binding: RunBuildBinding
     failed_chat_id: str
     parent_chat_id: str
+    journey_scope: dict[str, Any]
+
+
+def _retry_chat_id(app_id: str, user_id: str, failed_chat_id: str, binding: RunBuildBinding) -> str:
+    # One destination per failed attempt lets the same request finish a claim
+    # whose process disappeared before it published the replacement session.
+    scope = ["mozaiks/studio/stage-retry", app_id, user_id, failed_chat_id, binding.model_dump()]
+    return str(uuid5(NAMESPACE_URL, json.dumps(scope, separators=(",", ":"), sort_keys=True)))
+
+
+def _registered_retry_cursor(
+    record: dict[str, Any], binding: RunBuildBinding, workflow_id: str, journey_id: str | None,
+) -> tuple[str, str] | None:
+    """Use the active pointer only when both projections identify the same build stage."""
+    current = record.get("current_build_run") or {}
+    active, status = record.get("active_chat_id"), record.get("lifecycle_state")
+    if (not isinstance(active, str) or not isinstance(status, str)
+            or record.get("active_workflow_id") != workflow_id or current.get("active_workflow_id") != workflow_id
+            or current.get("active_chat_id") != active or current.get("status") != status
+            or current.get("phase") != binding.phase or current.get("build_id") != binding.build_id
+            or current.get("workflow_sequence") != journey_id):
+        return None
+    return status, active
 
 
 async def _verified_retry_predecessor(
@@ -3495,12 +3518,8 @@ async def _verified_retry_predecessor(
     journey_id = change.impact_set.workflow_sequence
     registry = await _get_app_registry_service().get_app_record(build_registry_id=binding.build_registry_id, owner_user_id=user_id)
     record = registry.get("app") or {}
-    current = record.get("current_build_run") or {}
-    if (record.get("lifecycle_state") != "needs_revision" or record.get("active_chat_id") != source["_id"]
-            or record.get("active_workflow_id") != workflow_id
-            or current.get("active_chat_id") != source["_id"] or current.get("active_workflow_id") != workflow_id
-            or current.get("phase") != binding.phase or current.get("status") != "needs_revision"
-            or current.get("build_id") != binding.build_id or current.get("workflow_sequence") != journey_id
+    if (_registered_retry_cursor(record, binding, workflow_id, journey_id) not in {
+            ("needs_revision", source["_id"]), ("building", _retry_chat_id(app_id, user_id, source["_id"], binding))}
             or binding.refinement_model != change.refinement_request.refinement_model):
         raise ValueError("The failed stage no longer matches the active registered refinement")
 
@@ -3724,28 +3743,78 @@ async def _failed_workflow_retry_contribution(
             workflow_id=body.workflow_id, journey_id=journey_id, require_exact_route=True,
             explanation="Retry the verified downstream stage with its completed predecessor's launch inputs",
             binding=binding, failed_chat_id=source["_id"], parent_chat_id=predecessor["_id"],
+            journey_scope={key: source[key] for key in ("journey_instance_id", "journey_key", "journey_position",
+                                                       "journey_total_steps", "session_router_session_id")},
         )
     contribution.context_seed = validate_context_for_workflow(body.workflow_id, seed)
     return contribution
 
 
 async def _launch_downstream_retry(retry: _DownstreamRetry, *, app_id: str, user_id: str) -> WorkflowLaunchResult:
+    from mozaiksai.core.runtime.persistence.distributed_lock import (
+        ChatLeaseLostError,
+        ChatLockAuthorityUnavailableError,
+        LockAcquisitionError,
+        chat_execution_lease,
+    )
+
+    chat_id = _retry_chat_id(app_id, user_id, retry.failed_chat_id, retry.binding)
+    try:
+        async with chat_execution_lease(app_id=app_id, chat_id=chat_id):
+            return await _publish_downstream_retry(retry, app_id=app_id, user_id=user_id, chat_id=chat_id)
+    except LockAcquisitionError as exc:
+        raise HTTPException(409, "The replacement workflow chat is busy") from exc
+    except (ChatLeaseLostError, ChatLockAuthorityUnavailableError) as exc:
+        raise HTTPException(503, "The retry publication lease is unavailable") from exc
+
+
+async def _publish_downstream_retry(retry: _DownstreamRetry, *, app_id: str, user_id: str, chat_id: str) -> WorkflowLaunchResult:
+    from mozaiksai.core.runtime.persistence.distributed_lock import assert_chat_mutable
     from mozaiksai.core.session.launcher import _PERSISTENCE_MANAGER
     from mozaiksai.core.session.persistence import SessionStateStore
 
+    assert retry.workflow_id is not None
     registry = _get_app_registry_service()
     selector = {"build_registry_id": retry.binding.build_registry_id, "owner_user_id": user_id,
                 "expected_build_id": retry.binding.build_id, "active_workflow_id": retry.workflow_id}
-    # Preparing a route persists its cursor. Claim before either preparing or
-    # publishing so a losing retry cannot point the owner back to an older chat.
-    chat_id = str(uuid4())
+    sessions = await _PERSISTENCE_MANAGER._coll()
+    expected = {"user_id": user_id, "app_id": app_id, "workflow_name": retry.workflow_id, "status": 0,
+                "journey_parent_chat_id": retry.parent_chat_id,
+                **{key: retry.context_seed[key] for key in ("artifact_version_id", "change_request_id", "revision_id")}}
+    extra_run_authority = ("workflow_model", "workflow_model_rebind_pending", "workflow_run_model", "workflow_result_grant")
+    projection = dict.fromkeys((*expected, *retry.journey_scope, "trigger_meta", "run_build_binding", *extra_run_authority), 1)
+    existing = await sessions.find_one({"_id": chat_id}, projection)
+    if existing is not None and (
+        any(existing.get(key) != value for key, value in expected.items())
+        or existing.get("run_build_binding") not in (None, retry.binding.model_dump())
+        or any(existing.get(key) is not None for key in extra_run_authority)
+        or (existing.get("trigger_meta") or {}).get("retry_of_chat_id") != retry.failed_chat_id
+        or any(key in existing and existing[key] != value for key, value in retry.journey_scope.items())
+    ):
+        raise HTTPException(409, "The replacement chat does not match this stage retry")
     with CancelScope(shield=True):
+        assert_chat_mutable(app_id=app_id, chat_id=chat_id)
         claim = await registry.update_build_status(
             **selector, expected_active_chat_id=retry.failed_chat_id, expected_lifecycle_state="needs_revision",
             active_chat_id=chat_id, status="building",
         )
         if not claim["success"]:
-            raise HTTPException(status_code=409, detail="Another session already replaced this failed stage")
+            record = (await registry.get_app_record(build_registry_id=retry.binding.build_registry_id, owner_user_id=user_id)).get("app") or {}
+            if _registered_retry_cursor(record, retry.binding, retry.workflow_id, retry.journey_id) != ("building", chat_id):
+                raise HTTPException(409, "Another session already replaced this failed stage")
+        assert_chat_mutable(app_id=app_id, chat_id=chat_id)
+        if existing is not None and existing.get("run_build_binding") and all(key in existing for key in retry.journey_scope):
+            # Journey annotations are the last write in bind_workflow_session. A
+            # replay after an acknowledged bind must not clear an active review.
+            decision = RoutingDecision(workflow_id=retry.workflow_id, requested_workflow_id=retry.workflow_id,
+                                       journey_id=retry.journey_id, explanation=retry.explanation)
+            return WorkflowLaunchResult(
+                chat_id=chat_id, app_id=app_id, user_id=user_id, workflow_id=retry.workflow_id,
+                requested_workflow_id=retry.workflow_id, journey_id=retry.journey_id,
+                websocket_url=f"/ws/{retry.workflow_id}/{app_id}/{chat_id}/{user_id}", trigger_source="manual",
+                routing_explanation=retry.explanation, rerouted_by_dependency=False, validated_context=dict(retry.context_seed),
+                trigger_meta=existing["trigger_meta"], routing_decision=decision,
+            )
         try:
             launch = await prepare_routed_workflow_launch(
                 app_id=app_id, user_id=user_id, chat_id=chat_id, workflow_id=retry.workflow_id, trigger_source="manual",
@@ -3755,13 +3824,18 @@ async def _launch_downstream_retry(retry: _DownstreamRetry, *, app_id: str, user
                                     "change_class": retry.context_seed["revision_scope"], "build_family": retry.context_seed["artifact_kind"],
                                     "build_record_id": retry.context_seed["artifact_version_id"]},
             )
+            assert_chat_mutable(app_id=app_id, chat_id=chat_id)
             return await launch_prepared_workflow(launch, journey_parent_chat_id=retry.parent_chat_id)
-        except BaseException:
+        except Exception:
+            assert_chat_mutable(app_id=app_id, chat_id=chat_id)
+            # An inserted child carries the protected parent. Leave its claim
+            # intact so another submission can finish the binding in place.
+            if await sessions.find_one({"_id": chat_id}, {"_id": 1}) is not None:
+                raise
             restored = await registry.update_build_status(
                 **selector, expected_active_chat_id=chat_id, expected_lifecycle_state="building",
                 active_chat_id=retry.failed_chat_id, status="needs_revision",
             )
-            await _PERSISTENCE_MANAGER.mark_chat_failed(chat_id, app_id=app_id)
             if restored["success"]:
                 await SessionStateStore(_PERSISTENCE_MANAGER).restore_failed_stage_cursor(
                     app_id=app_id, user_id=user_id, target_app_id=retry.binding.target_app_id,

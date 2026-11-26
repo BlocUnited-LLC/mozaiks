@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import zipfile
@@ -143,6 +144,9 @@ async def downstream(retry, monkeypatch):
     create_session = retry.pm.create_chat_session
 
     async def create_with_parent(*args, journey_parent_chat_id=None, **kwargs):
+        if kwargs["chat_id"] in coll._docs:
+            assert coll._docs[kwargs["chat_id"]]["journey_parent_chat_id"] == journey_parent_chat_id
+            return
         await create_session(*args, **kwargs)
         if journey_parent_chat_id is not None:
             coll._docs[kwargs["chat_id"]]["journey_parent_chat_id"] = journey_parent_chat_id
@@ -243,8 +247,83 @@ async def test_downstream_retry_reviews_fresh_plan_from_verified_build(downstrea
     assert fresh["subscription_contract"] == {"plans": []}
     r.design_check.assert_awaited_once_with(r.outputs["design"][0], user_id="owner", build_id="repair_build")
     assert not {"workflow_plan_review", "workflow_result_grant", "generated_files"} & fresh.keys()
-    with pytest.raises(HTTPException, match="active registered refinement"):
+    again = await launch(r, workflow_id="AgentGenerator")
+    assert again == result
+
+
+@pytest.mark.parametrize("interruption", ["claimed", "inserted", "cursor_bound", "published"])
+async def test_same_request_finishes_an_interrupted_downstream_publication(downstream, monkeypatch, interruption):
+    r = downstream
+
+    class ProcessStopped(BaseException):
+        pass
+
+    async def stop(*args, **kwargs):
+        raise ProcessStopped()
+
+    with monkeypatch.context() as stopped:
+        if interruption == "claimed":
+            stopped.setattr(studio, "prepare_routed_workflow_launch", stop)
+        elif interruption == "inserted":
+            stopped.setattr(r.pm, "persist_server_owned_session_fields", stop)
+        elif interruption == "cursor_bound":
+            stopped.setattr(SessionRouter, "_persist_chat_journey_metadata", stop)
+        else:
+            publish = studio.launch_prepared_workflow
+
+            async def stop_after_publish(*args, **kwargs):
+                await publish(*args, **kwargs)
+                raise ProcessStopped()
+
+            stopped.setattr(studio, "launch_prepared_workflow", stop_after_publish)
+        with pytest.raises(ProcessStopped):
+            await launch(r, workflow_id="AgentGenerator")
+    chat = r.record["active_chat_id"]
+    docs = r.pm._default._docs
+    assert r.record["lifecycle_state"] == "building" and chat != "failed"
+    if interruption == "claimed":
+        assert chat not in docs
+    else:
+        assert docs[chat]["journey_parent_chat_id"] == "subscription"
+    if interruption == "published":
+        monkeypatch.setattr(studio, "prepare_routed_workflow_launch", AsyncMock(side_effect=AssertionError("published chat rerouted")))
+    first, second = await asyncio.gather(*(launch(r, workflow_id="AgentGenerator") for _ in range(2)))
+    assert first == second and first["chat_id"] == chat
+    assert [d["_id"] for d in docs.values() if d.get("trigger_meta", {}).get("retry_of_chat_id") == "failed"] == [chat]
+    assert docs[chat]["run_build_binding"] == r.source["run_build_binding"]
+    assert docs[chat]["journey_parent_chat_id"] == "subscription" and docs[chat]["journey_position"] == 2
+
+
+async def test_inserted_retry_remains_recoverable_after_a_transient_binding_error(downstream, monkeypatch):
+    r = downstream
+    with monkeypatch.context() as unavailable:
+        unavailable.setattr(r.pm, "persist_server_owned_session_fields", AsyncMock(side_effect=OSError("write interrupted")))
+        with pytest.raises(OSError, match="write interrupted"):
+            await launch(r, workflow_id="AgentGenerator")
+    chat = r.record["active_chat_id"]
+    assert r.record["lifecycle_state"] == "building" and chat in r.pm._default._docs
+    result = await launch(r, workflow_id="AgentGenerator")
+    assert result["chat_id"] == chat and r.pm._default._docs[chat]["run_build_binding"] == r.source["run_build_binding"]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("user_id", "another"), ("app_id", "other"), ("journey_parent_chat_id", "other"),
+    ("run_build_binding", {**BINDING, "refinement_model": "gemini"}), ("workflow_run_model", "gemini"),
+    ("workflow_model", "gemini"), ("workflow_result_grant", {"unexpected": True}),
+    ("status", 1), ("status", 2), ("change_request_id", "other"), ("journey_instance_id", "other"),
+])
+async def test_recovery_refuses_to_adopt_a_different_or_terminal_session(downstream, field, value):
+    r = downstream
+    result = await launch(r, workflow_id="AgentGenerator")
+    child = r.pm._default._docs[result["chat_id"]]
+    child[field] = value
+    before = deepcopy(child)
+    r.service.update_build_status.reset_mock()
+    with pytest.raises(HTTPException, match="does not match this stage") as error:
         await launch(r, workflow_id="AgentGenerator")
+    assert error.value.status_code == 409
+    assert child == before
+    r.service.update_build_status.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -313,8 +392,6 @@ async def test_downstream_retry_lost_claim_publishes_no_chat(downstream, monkeyp
 async def test_downstream_retry_failed_launch_releases_only_its_own_claim(downstream, monkeypatch):
     r = downstream
     monkeypatch.setattr(studio, "prepare_routed_workflow_launch", AsyncMock(side_effect=ValueError("route changed")))
-    failed = AsyncMock()
-    monkeypatch.setattr(r.pm, "mark_chat_failed", failed, raising=False)
     with pytest.raises(HTTPException, match="route changed"):
         await launch(r, workflow_id="AgentGenerator")
     acquire, restore = (c.kwargs for c in r.service.update_build_status.await_args_list)
@@ -322,7 +399,7 @@ async def test_downstream_retry_failed_launch_releases_only_its_own_claim(downst
     assert restore["active_chat_id"] == r.record["active_chat_id"] == "failed"
     assert r.record["lifecycle_state"] == "needs_revision"
     assert r.state["current_chat_id"] == "design"
-    failed.assert_awaited_once_with(acquire["active_chat_id"], app_id="host")
+    assert acquire["active_chat_id"] not in r.pm._default._docs
 
 
 @pytest.mark.asyncio
