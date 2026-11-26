@@ -11,10 +11,12 @@ from factory_app.workflows._shared.revision_app_source import (
 from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _apply_reviewed_page_writes,
     app_build_plan,
+    batch_item_for_plan_task,
 )
 from factory_app.workflows.AppGenerator.tools.app_plan_review import (
     _clear_plan,
     _missing_revision_page_tasks,
+    validate_revision_result_module_coverage,
 )
 from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
     bind_retained_feature_login,
@@ -51,6 +53,16 @@ async def hydrate_app_build_plan_context(context_variables: Any = None) -> dict[
         return {"status": "skipped", "reason": "missing_app_build_plan"}
 
     existing_items = data.get("app_task_batch_items")
+    try:
+        validate_revision_result_module_coverage(plan, data)
+        if data.get("revision_result_module_coverage") and existing_items and (
+            not data.get("app_plan_ready")
+            or existing_items != [batch_item_for_plan_task(task) for task in plan["build_tasks"]]
+        ):
+            raise ValueError("Saved task dispatch rows differ from the reviewed build plan")
+    except ValueError as error:
+        discard_executable_plan(context_variables)
+        return {"status": "skipped", "reason": "revision_module_plan_requires_review", "detail": str(error)}
     if isinstance(existing_items, list) and existing_items:
         rebound = dict(plan)
         try:

@@ -619,13 +619,7 @@ def validate_module_result_writes(
         event = declared_events.get(reaction.event_type)
         if (source is None or event is None or event.producer != definition.name or event.type not in source.emits):
             raise ValueError("result_write.source_action must declare the reaction event in its emits")
-        event_schema = event.payload_schema
-        _check_result_schema(event_schema)
-        event_key = event_schema.get("properties", {}).get(write.record_key)
-        if (event_schema.get("type") != "object" or "$ref" in event_schema or not isinstance(event_key, dict)
-                or event_key.get("type") != "string" or "$ref" in event_key or event_key.get("nullable")
-                or write.record_key not in event_schema.get("required", [])):
-            raise ValueError("result_write.record_key must be a required string in the source event payload_schema")
+        validate_result_event_record_key(event.payload_schema, write.record_key)
         action = actions.get(write.action)
         if (action is None or action.api_surface != "internal" or action.permissions or action.emits
                 or action.entitlement_gate or action.ask_context_safe):
@@ -641,18 +635,35 @@ def validate_module_result_writes(
 
         result_schema = result_object_schema(schema)
         collection = resolve_result_write_collection(definition.name, write, data_contract)
-        fields = {field["name"]: field for field in collection["fields"]
-                  if isinstance(field, dict) and isinstance(field.get("name"), str)}
-        if fields[write.record_key].get("type") != "string":
-            raise ValueError("result_write.record_key must be a string collection field")
-        for name, prop in result_schema["properties"].items():
-            data_field = fields[name]
-            if data_field.get("type") != prop["type"]:
-                raise ValueError(f"result_write field {name!r}: action input type must match the collection field type")
-            domain = data_field.get("enum")
-            if domain is not None and (not isinstance(domain, list) or not prop.get("enum")
-                                       or any(value not in domain for value in prop["enum"])):
-                raise ValueError(f"result_write field {name!r}: action enum must fit the collection field enum")
+        validate_result_collection_schema(collection, write, result_schema)
+
+
+def validate_result_event_record_key(event_schema: dict[str, Any], record_key: str) -> None:
+    """Verify that an emitted event always identifies the record receiving the result."""
+    _check_result_schema(event_schema)
+    event_key = event_schema.get("properties", {}).get(record_key)
+    if (event_schema.get("type") != "object" or "$ref" in event_schema or not isinstance(event_key, dict)
+            or event_key.get("type") != "string" or "$ref" in event_key or event_key.get("nullable")
+            or record_key not in event_schema.get("required", [])):
+        raise ValueError("result_write.record_key must be a required string in the source event payload_schema")
+
+
+def validate_result_collection_schema(
+    collection: dict[str, Any], write: ModuleReactionResultWrite, result_schema: dict[str, Any],
+) -> None:
+    """Close the verified result schema against the collection resolved for this write."""
+    fields = {field["name"]: field for field in collection["fields"]
+              if isinstance(field, dict) and isinstance(field.get("name"), str)}
+    if fields[write.record_key].get("type") != "string":
+        raise ValueError("result_write.record_key must be a string collection field")
+    for name, prop in result_schema["properties"].items():
+        data_field = fields[name]
+        if data_field.get("type") != prop["type"]:
+            raise ValueError(f"result_write field {name!r}: action input type must match the collection field type")
+        domain = data_field.get("enum")
+        if domain is not None and (not isinstance(domain, list) or not prop.get("enum")
+                                   or any(value not in domain for value in prop["enum"])):
+            raise ValueError(f"result_write field {name!r}: action enum must fit the collection field enum")
 
 
 def _check_result_schema(schema: dict[str, Any]) -> None:

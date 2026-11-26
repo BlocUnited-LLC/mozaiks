@@ -133,6 +133,160 @@ def test_capability_source_uses_canonical_finite_vocabulary():
     assert set(field["values"]) == VALID_CAPABILITY_SOURCES | {"host_universal"}
 
 
+def _revision_waiting_for_module():
+    plan, context, path, ask = _revision_with_form("update_report")
+    persistence = {
+        **plan["build_tasks"][0], "task_id": "reports.storage", "task_type": "persistence_contract",
+        "capability_pack_id": None, "surface_id": "data_contract", "initial_agent": "DatabaseAgent",
+        "description": "Serialize the reviewed reports data contract.",
+        "initial_message": "Materialize the approved collection contract.", "owned_paths": ["data/contract.json"],
+    }
+    plan["build_tasks"] = [persistence]
+    plan["generation_order"] = [persistence["task_id"]]
+    event = "domain.reports.created"
+    capability = "reports.summary"
+    plan["event_flows"] = [{"event_type": event, "producing_action": "create_report",
+                            "producer_pack_id": "reports", "workflow_capability_ids": [capability]}]
+    context.set("workflow_integration_metadata", {"source_artifact_version_id": "workflow-v2", "workflows": [{
+        "workflow_name": "ReportSummary", "capability_id": capability, "startup_mode": "BackendOnly",
+        "trigger_events": [{"event_type": event, "capability_id": capability}],
+        "result_write_plans": [{"module_id": "reports", "event_type": event, "agent": "SummaryAgent",
+                                "result_write": {"source_action": "create_report", "action": "save_summary",
+                                                 "record_key": "report_id", "collection": "reports", "fields": ["summary"]}}],
+        "result_output_schema": {"type": "object", "properties": {"summary": {"type": "string"}},
+                                 "required": ["summary"], "additionalProperties": False},
+    }]})
+    context.set("workflow_bundle_artifact_version_id", "workflow-v2")
+    context.set("upstream_workflow_bundle_artifact_version_id", "workflow-v2")
+    context.set("revision_scope", "feature")
+    context.set("change_intent", {"requires_workflow_revision": True})
+    surface_map = detach(context.get("design_surface_map"))
+    surface_map["surfaces"][0].update(owned_mutations=["create_report", "update_report"], owned_pages=["Reports"])
+    context.set("design_surface_map", surface_map)
+    receipt = detach(context.get("design_docs_build_artifact"))
+    receipt["commit_metadata"]["metadata"]["summary_payload"]["surface_map"] = surface_map
+    context.set("design_docs_build_artifact", receipt)
+    return plan, context, path, ask
+
+
+def test_feature_revision_assigns_missing_result_module_before_the_page():
+    plan, context, path, ask = _revision_waiting_for_module()
+    context.set("revision_result_module_coverage", {
+        "reports": {"module_contract": True, "data_models": True, "business_services": True},
+    })
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert result["outcome"] == "ready", result
+    cached = detach(context.get("app_build_plan"))
+    by_kind = {task["task_type"]: task for task in cached["build_tasks"]}
+    contract = by_kind["module_contract"]
+    assert contract["initial_agent"] == "ConfigMiddlewareAgent"
+    assert set(contract["owned_paths"]) >= {
+        "modules/reports/module.yaml", "modules/reports/contracts/events.yaml",
+        "modules/reports/contracts/reactions.yaml",
+    }
+    models, service, page = (by_kind[k] for k in ("data_models", "business_services", "page_bundle"))
+    assert (models["initial_agent"], service["initial_agent"], page["initial_agent"]) == (
+        "ModelAgent", "ServiceAgent", "AppSchemaAgent",
+    )
+    assert "modules/reports/backend/schemas.py" in models["owned_paths"]
+    assert {"modules/reports/backend/service.py", "modules/reports/backend/handler.py"} <= set(service["owned_paths"])
+    assert {contract["task_id"], "reports.storage"} <= set(models["depends_on"])
+    assert {contract["task_id"], models["task_id"], "reports.storage"} <= set(service["depends_on"])
+    assert page["owned_paths"] == [path] and contract["task_id"] in page["depends_on"]
+    assert cached["pages"][0]["retained_ask_context"] == ask
+    paths = [p for task in cached["build_tasks"] for p in task["owned_paths"]]
+    assert len(paths) == len(set(paths))
+    validate_plan_coverage(cached, context)
+    assert review_app_build_plan(AppBuildPlan=cached, context_variables=context)["outcome"] == "ready"
+    assert [(t["task_id"], t["owned_paths"], t["depends_on"]) for t in detach(context.get("app_build_plan"))["build_tasks"]] == [
+        (t["task_id"], t["owned_paths"], t["depends_on"]) for t in cached["build_tasks"]
+    ]
+
+
+def test_model_cannot_request_result_module_workers_from_the_page_plan():
+    plan, context, _, _ = _revision_waiting_for_module()
+    context.set("revision_result_module_coverage", {})
+    plan["revision_result_module_coverage"] = {
+        "reports": {"module_contract": True, "data_models": True, "business_services": True},
+    }
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert result["outcome"] == "needs_revision"
+    assert "revision_result_module_coverage" in result["error"]
+    assert not context.get("app_task_batch_items")
+
+
+def test_revision_with_only_a_missing_result_binding_keeps_existing_backend_files():
+    plan, context, _, _ = _revision_waiting_for_module()
+    context.set("revision_result_module_coverage", {
+        "reports": {"module_contract": True, "data_models": False, "business_services": False},
+    })
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert result["outcome"] == "ready", result
+    tasks = detach(context.get("app_task_batch_items"))
+    assert {t["task_type"] for t in tasks} == {"page_bundle", "module_contract", "persistence_contract"}
+    assert not any("/backend/" in p for task in tasks for p in task["owned_paths"])
+
+
+@pytest.mark.parametrize("condition", [
+    "missing_hydration", "foreign_module", "unbound_event", "unrelated_revision",
+    "extra_trigger", "duplicate_trigger", "extra_subscriber",
+])
+def test_incompatible_result_revision_never_dispatches_module_work(condition):
+    plan, context, _, _ = _revision_waiting_for_module()
+    module = "foreign_module" if condition == "foreign_module" else "reports"
+    if condition != "missing_hydration":
+        context.set("revision_result_module_coverage", {
+            module: {"module_contract": True, "data_models": False, "business_services": False},
+        })
+    if condition == "unbound_event":
+        plan["event_flows"][0]["producing_action"] = "update_report"
+    if condition == "extra_trigger":
+        plan["event_flows"].append({**plan["event_flows"][0], "event_type": "domain.reports.updated"})
+    if condition == "duplicate_trigger":
+        plan["event_flows"].append(deepcopy(plan["event_flows"][0]))
+    if condition == "extra_subscriber":
+        plan["event_flows"][0]["workflow_capability_ids"].append("unapproved.workflow")
+    if condition == "unrelated_revision":
+        context.set("workflow_sequence", "app_revision")
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert result["outcome"] == "needs_revision", result
+    assert not context.get("app_plan_ready") and not context.get("app_task_batch_items")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stale", ["missing_owner_with_rows", "missing_owner_without_rows", "malformed_plan", "changed_row", "current"])
+async def test_resumed_result_revision_checks_cached_plan_and_dispatch_rows(stale):
+    from factory_app.workflows.AppGenerator.tools.hydrate_app_build_plan_context import (
+        hydrate_app_build_plan_context,
+    )
+
+    plan, context, _, _ = _revision_waiting_for_module()
+    context.set("revision_result_module_coverage", {
+        "reports": {"module_contract": True, "data_models": True, "business_services": True},
+    })
+    assert review_app_build_plan(AppBuildPlan=plan, context_variables=context)["outcome"] == "ready"
+    cached = detach(context.get("app_build_plan"))
+    rows = detach(context.get("app_task_batch_items"))
+    if stale.startswith("missing_owner"):
+        cached["build_tasks"] = [t for t in cached["build_tasks"] if t["task_type"] != "module_contract"]
+        context.set("app_build_plan", cached)
+        if stale == "missing_owner_without_rows":
+            context.set("app_task_batch_items", [])
+    elif stale == "malformed_plan":
+        cached["build_tasks"] = [None]
+        context.set("app_build_plan", cached)
+    elif stale == "changed_row":
+        rows[0]["current_build_task"]["owned_paths"] = ["modules/unrelated/module.yaml"]
+        context.set("app_task_batch_items", rows)
+    result = await hydrate_app_build_plan_context(context)
+    if stale == "current":
+        assert result["reason"] == "task_batch_items_already_present"
+        assert context.get("app_plan_ready")
+    else:
+        assert result["reason"] == "revision_module_plan_requires_review"
+        assert not context.get("app_plan_ready") and not context.get("app_task_batch_items")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", ["indirect", "known_path", "known_path_and_wildcard", "direct_page", "unrelated_workflow", "removed_create",
                                    "different_page_owner", "mixed_ask", "restricted_ask"])

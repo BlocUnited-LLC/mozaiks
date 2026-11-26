@@ -2200,6 +2200,17 @@ def _validate_task_dependencies(
             )
 
 
+def batch_item_for_plan_task(task: dict[str, Any]) -> dict[str, Any]:
+    """Create the dispatch row for a normalized, reviewed plan task."""
+    return {
+        **task,
+        "task_run_mode": True,
+        "current_build_task_id": str(task.get("task_id") or "").strip(),
+        "current_build_task_type": str(task.get("task_type") or "").strip(),
+        "current_build_task": dict(task),
+    }
+
+
 def app_build_plan(
     *,
     AppBuildPlan: Annotated[
@@ -2401,16 +2412,7 @@ def app_build_plan(
         normalized_context = _normalize_context_variables(normalized_task.get("context_variables"))
         if normalized_context is not None:
             normalized_task["context_variables"] = normalized_context
-        task_id = str(normalized_task.get("task_id") or "").strip()
-        task_type = str(normalized_task.get("task_type") or "").strip()
-        item = {
-            **normalized_task,
-            "task_run_mode": True,
-            "current_build_task_id": task_id,
-            "current_build_task_type": task_type,
-            "current_build_task": dict(normalized_task),
-        }
-        task_batch_items.append(item)
+        task_batch_items.append(batch_item_for_plan_task(normalized_task))
         normalized_build_tasks.append(normalized_task)
 
     normalized_plan = {

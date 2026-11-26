@@ -285,7 +285,9 @@ class RetainedReadRepair:
                     for field in ("handler_method", "api_surface", "entitlement_gate", "timeout_seconds")
                 )):
                     raise ValueError(f"The correction cannot change the handler or access or timeout of retained read {key}")
-                inputs = _materialize_schema_contract(choice.get("input_schema") or {}, closed_request=True)
+                inputs = _materialize_schema_contract(
+                    choice.get("input_schema") or {}, where=f"{key}.input_schema", closed_request=True,
+                )
                 if inputs != original.get("input_schema", {}):
                     raise ValueError(f"The correction must keep the accepted inputs of retained read {key}")
                 output = _materialize_schema_contract(choice.get("output_schema") or {}, where=f"{key}.output_schema")

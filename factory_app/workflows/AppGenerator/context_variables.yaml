@@ -253,6 +253,16 @@ definitions:
     source:
       type: state
       default: {}
+  revision_result_module_coverage:
+    type: object
+    description: Required module work derived from the accepted source and the reviewed result workflow.
+    authority_class: closed_writer_quality_state
+    writer_ids: [lifecycle_tool, deterministic_tool]
+    model_visible: false
+    persisted: true
+    source:
+      type: state
+      default: null
   retained_workflow_page_bindings:
     type: object
     description: Accepted page controls and Ask references retained for an indirectly affected workflow feature.

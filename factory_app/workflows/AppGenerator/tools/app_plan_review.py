@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -20,6 +21,9 @@ from factory_app.workflows._shared.pack_selection import (
     validate_reviewed_pack_choices,
 )
 from factory_app.workflows._shared.surface_ownership import validate_surface_ownership
+from factory_app.workflows._shared.workflow_integration import (
+    workflow_integration_metadata_from_context,
+)
 from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _CANONICAL_INITIAL_AGENTS,
     _MODULE_LOCAL_TASK_TYPES,
@@ -68,6 +72,7 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_facade_directories,
     pack_owned_output_paths,
     pinned_result_action_schemas,
+    pinned_result_workflows,
 )
 from mozaiksai.core.workflow.generator_support.page_action_bindings import (
     reachable_page_action_keys,
@@ -742,6 +747,7 @@ def _repair_coverage(
                 "owned_paths": [path], "depends_on": [],
             })
             repairs.append(f"{task_id}: assigned {path} for reviewed writes {actions}")
+        repairs.extend(_repair_revision_result_module_coverage(plan, context))
         return repairs
     if context.get("brownfield_build_path"):
         return repairs
@@ -884,55 +890,11 @@ def _repair_coverage(
     #    right type. The required set is derived exactly as the validator does;
     #    files a selected pack owns (its templates, its facade module) need no task.
     facades = pack_facade_directories(context)
-    path_owners: dict[str, list[str]] = {}
-    for task in tasks:
-        for path in _normalized_owned_paths(task):
-            path_owners.setdefault(path, []).append(str(task.get("task_id")))
     for pack in plan.get("capability_packs") or []:
         if pack.get("surface_kind") != "module" or pack.get("capability_source") != "generated_module":
             continue
-        module_id = _pack_id_from_descriptor(pack)
-        module_tasks = [task for task in tasks if task.get("capability_pack_id") == module_id]
         required = _authored_module_paths(pack, context, pack_paths, facades)
-
-        for kind, paths in required.items():
-            typed = [t for t in module_tasks if t.get("task_type") == kind]
-            owned = {path for t in typed for path in _normalized_owned_paths(t)}
-            missing = sorted(paths - owned)
-            if not missing:
-                continue
-            conflicts = {path: path_owners[path] for path in missing if path in path_owners}
-            if conflicts:
-                raise ValueError(
-                    f"{module_id}/{kind}: cannot repair coverage; required paths already owned "
-                    f"by other tasks: {conflicts}. Correct the existing task's module/type ownership."
-                )
-            if typed:
-                target = typed[0]
-                target["owned_paths"] = list(target.get("owned_paths") or []) + missing
-                repairs.append(f"{target.get('task_id')}: {kind} gained {missing}")
-            else:
-                synthesized = {
-                    "task_id": _available_task_id(
-                        f"task_{module_id}_{kind}", {str(task.get("task_id")) for task in tasks},
-                    ),
-                    "task_type": kind,
-                    "capability_pack_id": module_id,
-                    "surface_id": pack.get("surface_id"),
-                    "surface_kind": "module",
-                    "initial_agent": _CANONICAL_INITIAL_AGENTS[kind],
-                    "execution_target": _CANONICAL_INITIAL_AGENTS[kind],
-                    "description": _synthesized_task_brief(kind, module_id, pack),
-                    "initial_message": _synthesized_task_brief(kind, module_id, pack),
-                    "owned_paths": missing,
-                    "depends_on": [],
-                }
-                tasks.append(synthesized)
-                module_tasks.append(synthesized)
-                repairs.append(f"synthesized {synthesized['task_id']!r} owning {missing}")
-                target = synthesized
-            for path in missing:
-                path_owners[path] = [str(target["task_id"])]
+        repairs.extend(_assign_module_paths(tasks, pack, required))
 
     contract = detach(context.get("data_contract"))
     if contract and not any("data/contract.json" in _normalized_owned_paths(task) for task in tasks):
@@ -958,7 +920,157 @@ def _repair_coverage(
     return repairs
 
 
-def _repair_module_task_dependencies(plan: dict[str, Any], context: Any) -> list[str]:
+def _validate_revision_result_events(plan: dict[str, Any], context: Any, modules: set[str]) -> None:
+    registered = {
+        (binding["module_id"], binding["result_write"]["source_action"], binding["event_type"], workflow["capability_id"])
+        for workflow in pinned_result_workflows(context) for binding in workflow["result_write_plans"]
+    }
+    expected = {binding for binding in registered if binding[0] in modules}
+    if {module for module, _, _, _ in expected} != modules:
+        raise ValueError("Workflow result module coverage has no matching pinned receiving workflow")
+    result_capabilities = {capability for _, _, _, capability in registered}
+    affected_capabilities = {capability for _, _, _, capability in expected}
+    affected_sources = {binding[:3] for binding in expected}
+    metadata = workflow_integration_metadata_from_context(context) or {}
+    triggers = {
+        (trigger["event_type"], workflow["capability_id"]) for workflow in metadata.get("workflows", [])
+        for trigger in workflow.get("trigger_events", [])
+    }
+    observed: set[tuple[str, str, str, str]] = set()
+    for flow in plan.get("event_flows") or []:
+        source = (flow.get("producer_pack_id"), flow.get("producing_action"), flow.get("event_type"))
+        for capability in flow.get("workflow_capability_ids") or []:
+            if capability not in affected_capabilities and source not in affected_sources:
+                continue
+            binding = (*source, capability)
+            approved = binding in registered if capability in result_capabilities else (source[2], capability) in triggers
+            if binding in observed or not approved:
+                raise ValueError(f"Duplicate or conflicting reviewed workflow result event binding: {binding}")
+            observed.add(binding)
+    if missing := expected - observed:
+        raise ValueError(f"The plan must bind the approved module action, event and workflow capability: {sorted(missing)}")
+
+
+def _repair_revision_result_module_coverage(plan: dict[str, Any], context: Any) -> list[str]:
+    """Assign only the source-proved gaps in a reviewed feature's workflow result module."""
+    coverage = detach(context.get("revision_result_module_coverage"))
+    intent = context.get("change_intent") or {}
+    feature = (context.get("workflow_sequence") == "design_revision" and context.get("revision_scope") == "feature"
+               and intent.get("requires_workflow_revision") is True and revision_baseline_required(context))
+    if coverage is None:
+        if feature and pinned_result_workflows(context):
+            raise ValueError("Workflow result module coverage requires verified revision source hydration")
+        return []
+    if coverage == {}:
+        return []
+    if not isinstance(coverage, dict) or not feature:
+        raise ValueError("Workflow result module coverage requires a reviewed workflow-bearing feature design revision")
+    for field in ("build_tasks", "capability_packs", "event_flows"):
+        rows = plan.get(field)
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise ValueError(f"Reviewed workflow result coverage requires valid {field} rows")
+    for task in plan["build_tasks"]:
+        if not all(isinstance(task.get(key), str) and task[key].strip() for key in ("task_id", "task_type", "initial_agent")) or any(
+            not isinstance(task.get(key), list) or not all(isinstance(item, str) for item in task[key])
+            for key in ("owned_paths", "depends_on")
+        ):
+            raise ValueError("Reviewed workflow result coverage requires task identities, owned paths and dependencies")
+    packs = plan["capability_packs"]
+    if any(not all(isinstance(pack.get(key), str) and pack[key].strip()
+                   for key in ("surface_kind", "surface_id", "capability_source")) for pack in packs):
+        raise ValueError("Reviewed workflow result coverage requires identified capability pack owners")
+    for flow in plan["event_flows"]:
+        if not all(isinstance(flow.get(key), str) for key in ("producer_pack_id", "producing_action", "event_type")) or not (
+            isinstance(flow.get("workflow_capability_ids") or [], list)
+            and all(isinstance(cap, str) for cap in flow.get("workflow_capability_ids") or [])
+        ):
+            raise ValueError("Reviewed workflow result coverage requires valid event flow identities")
+    surfaces = (context.get("design_surface_map") or {}).get("surfaces") or []
+    _validate_revision_result_events(plan, context, set(coverage))
+    pack_paths, facades = pack_owned_output_paths(context), pack_facade_directories(context)
+    revision_needs: dict[str, set[str]] = {}
+    repairs = []
+    for module, needs in coverage.items():
+        if (not isinstance(needs, dict) or set(needs) != {"module_contract", "data_models", "business_services"}
+                or not all(isinstance(value, bool) for value in needs.values()) or not any(needs.values())):
+            raise ValueError(f"{module}: invalid verified workflow result task coverage")
+        matches = [p for p in packs if p.get("surface_id") == module and _pack_id_from_descriptor(p) == module]
+        approved = [s for s in surfaces if s.get("surface_id") == module and s.get("surface_kind") == "module"
+                    and s.get("owner") == "app"]
+        if (len(matches) != 1 or matches[0].get("capability_source") != "generated_module"
+                or matches[0].get("surface_kind") != "module" or len(approved) != 1):
+            raise ValueError(f"{module}: reviewed workflow result coverage requires one app-owned generated module")
+        pack = matches[0]
+        required = {k: paths for k, paths in _required_module_paths(pack, context).items() if needs[k]}
+        if "module_contract" in required:
+            required["module_contract"].update(f"modules/{module}/contracts/{kind}.yaml" for kind in ("events", "reactions"))
+        if "business_services" in required:
+            # Existing account export/delete remains independent of the reviewed public/result actions.
+            required["business_services"].discard(f"modules/{module}/backend/account_data_handler.py")
+        protected = sorted(p for paths in required.values() for p in paths if _pack_owns(p, pack_paths, facades))
+        if protected:
+            raise ValueError(f"{module}: reviewed workflow result requires pack-owned paths {protected}")
+        repairs.extend(_assign_module_paths(plan["build_tasks"], pack, required, revision=True))
+        revision_needs[module] = set(required)
+    repairs.extend(_repair_module_task_dependencies(plan, context, revision_needs=revision_needs))
+    repairs.extend(_repair_page_contract_dependencies(plan, context, modules=set(revision_needs)))
+    return repairs
+
+
+def validate_revision_result_module_coverage(plan: dict[str, Any], context: Any) -> None:
+    # Empty/unverified projections never mutate the plan. Only copy plans with pending gaps.
+    candidate = deepcopy(plan) if context.get("revision_result_module_coverage") else plan
+    missing = _repair_revision_result_module_coverage(candidate, context)
+    if missing:
+        raise ValueError(f"Incomplete reviewed workflow result task ownership or dependency links: {missing}")
+
+
+def _assign_module_paths(
+    tasks: list[dict[str, Any]], pack: dict[str, Any], required: dict[str, set[str]],
+    *, revision: bool = False,
+) -> list[str]:
+    module_id = _pack_id_from_descriptor(pack)
+    repairs = []
+    for kind, paths in required.items():
+        typed = [t for t in tasks if t.get("capability_pack_id") == module_id and t.get("task_type") == kind]
+        owned = {path for t in typed for path in _normalized_owned_paths(t)}
+        missing = sorted(paths - owned)
+        conflicts = {
+            path: task["task_id"] for task in tasks if task not in typed for path in _normalized_owned_paths(task)
+            if path in (paths if revision else missing)
+        }
+        if conflicts:
+            raise ValueError(
+                f"{module_id}/{kind}: cannot repair coverage; required paths already owned "
+                f"by other tasks: {conflicts}. Correct the existing task's module/type ownership."
+            )
+        if revision and (len(typed) > 1 or any(
+            t.get("surface_id") != module_id or t.get("surface_kind") != "module"
+            or t.get("initial_agent") != _CANONICAL_INITIAL_AGENTS[kind] for t in typed
+        )):
+            raise ValueError(f"{module_id}/{kind}: reviewed result coverage requires an unambiguous canonical task owner")
+        if not missing:
+            continue
+        if typed:
+            target = typed[0]
+            target["owned_paths"] = list(target.get("owned_paths") or []) + missing
+            repairs.append(f"{target.get('task_id')}: {kind} gained {missing}")
+        else:
+            task_id = _available_task_id(f"task_{module_id}_{kind}", {str(task.get("task_id")) for task in tasks})
+            brief = _synthesized_task_brief(kind, module_id, pack)
+            tasks.append({
+                "task_id": task_id, "task_type": kind, "capability_pack_id": module_id,
+                "surface_id": pack.get("surface_id"), "surface_kind": "module",
+                "initial_agent": _CANONICAL_INITIAL_AGENTS[kind], "execution_target": _CANONICAL_INITIAL_AGENTS[kind],
+                "description": brief, "initial_message": brief, "owned_paths": missing, "depends_on": [],
+            })
+            repairs.append(f"synthesized {task_id!r} owning {missing}")
+    return repairs
+
+
+def _repair_module_task_dependencies(
+    plan: dict[str, Any], context: Any, *, revision_needs: dict[str, set[str]] | None = None,
+) -> list[str]:
     """Supply direct contract inputs after every module task has been synthesized.
 
     The approved data/contract.json serializer is an input of every persistent
@@ -985,6 +1097,8 @@ def _repair_module_task_dependencies(plan: dict[str, Any], context: Any) -> list
         if pack.get("surface_kind") != "module" or pack.get("capability_source") != "generated_module":
             continue
         module_id = _pack_id_from_descriptor(pack)
+        if revision_needs is not None and module_id not in revision_needs:
+            continue
         module_tasks = [task for task in tasks if task.get("capability_pack_id") == module_id]
         prerequisites: dict[str, str] = {}
         required_paths = _authored_module_paths(pack, context, pack_paths, facades)
@@ -996,6 +1110,8 @@ def _repair_module_task_dependencies(plan: dict[str, Any], context: Any) -> list
                 task for task in by_scope_and_type.get((module_id, kind), [])
                 if path in _normalized_owned_paths(task)
             ]
+            if not owners and revision_needs is not None and kind not in revision_needs[module_id]:
+                continue  # The reviewed revision retains this prerequisite from the accepted archive.
             if len(owners) != 1:
                 raise ValueError(
                     f"{path}: expected exactly one {kind} task owner; "
@@ -1086,7 +1202,9 @@ def _synthesized_task_brief(kind: str, module_id: str, pack: dict[str, Any]) -> 
 
 WORD = chr(92) + "b"  # regex word boundary
 
-def _repair_page_contract_dependencies(plan: dict[str, Any], context: Any) -> list[str]:
+def _repair_page_contract_dependencies(
+    plan: dict[str, Any], context: Any, *, modules: set[str] | None = None,
+) -> list[str]:
     """Let a page_bundle task see the module contracts it is told to copy from.
 
     The page agent is instructed to "Copy every module action id exactly from
@@ -1108,7 +1226,8 @@ def _repair_page_contract_dependencies(plan: dict[str, Any], context: Any) -> li
     by_scope_and_type = _tasks_by_scope_and_type(tasks)
     contracts = [
         str(task.get("task_id"))
-        for (_, kind), owners in by_scope_and_type.items() if kind == "module_contract"
+        for (module, kind), owners in by_scope_and_type.items() if kind == "module_contract"
+        and (modules is None or module in modules)
         for task in owners if str(task.get("task_id") or "").strip()
     ]
     if not contracts:
@@ -2197,6 +2316,7 @@ def validate_plan_coverage(plan: dict[str, Any], context: Any) -> None:
             + "; ".join(f"{task_id} owns {paths}" for task_id, paths in sorted(pack_owned.items()))
         )
     if revision_baseline_required(context):
+        validate_revision_result_module_coverage(plan, context)
         if missing_writes := _missing_revision_page_tasks(plan, context):
             raise ValueError(f"Missing page_bundle task ownership for reviewed page writes: {missing_writes}")
         return

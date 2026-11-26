@@ -39,6 +39,8 @@ from mozaiksai.core.workflow.generator_support.module_revision import (
     retained_workflow_page_bindings,
 )
 
+from .revision_result_coverage import revision_result_module_coverage
+
 
 def _set(context_variables: Any, key: str, value: Any) -> None:
     if isinstance(context_variables, dict):
@@ -170,6 +172,7 @@ async def hydrate_revision_files(
 ) -> dict[str, Any]:
     if context_variables is None:
         return {"status": "skipped", "reason": "not_revision"}
+    _set(context_variables, "revision_result_module_coverage", None)
     _set(context_variables, "legacy_optional_updated_at_reads", {})
     _set(context_variables, "retained_workflow_page_bindings", {})
     _set(context_variables, "retained_feature_login", {})
@@ -204,6 +207,8 @@ async def hydrate_revision_files(
     if initialize_theme and uses_revision_source_theme(context_variables):
         _set(context_variables, "captured_theme_config", read_revision_theme(files))
     if is_accepted_revision_source(artifact):
+        coverage = revision_result_module_coverage(context_variables, files)
+        _set(context_variables, "revision_result_module_coverage", coverage)
         _set(context_variables, "retained_workflow_page_bindings", retained_workflow_page_bindings(context_variables, files))
         reads = legacy_optional_updated_at_reads(files, context_variables.get("data_contract"))
         _set(context_variables, "legacy_optional_updated_at_reads", reads)

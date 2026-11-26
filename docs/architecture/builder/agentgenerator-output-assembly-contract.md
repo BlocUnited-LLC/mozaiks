@@ -65,6 +65,11 @@ bundle's integration metadata. AppGenerator compiles each receiving module's int
 action from the hydrated workflow artifact. The module worker retains the design's
 custom reads and writes. Under the owning module task, Factory wires the pinned
 workflow capability and event reaction after the source action and event are declared.
+On a feature revision, Factory compares the approved result binding and public
+writes with the selected app version before dispatch. If an app-owned module
+needs a receiver or a new public write, its plan assigns the missing contract and
+implementation work to the module workers. The page worker receives the module
+contract as a direct dependency so it can bind controls to those public actions.
 Page bindings and pricing use the public design inventory. App validation compares the closed receiver input
 with this schema, including nested properties, array items and enum values, and
 checks the result against the private collection's declared field types.
