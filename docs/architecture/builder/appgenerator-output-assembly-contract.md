@@ -632,6 +632,10 @@ Missing evidence, stale inputs, and uncertain interrupted attempts remain blocke
 See [ADR 0011](../../adr/0011-factory-bounded-task-recovery.md).
 
 AppPlanAgent clears stale plan/task state before validating a replacement.
+For a feature revision that preserves a verified login policy, its first model
+request includes the accepted sign-in strategy, mode and empty role list.
+The file-contract prompt names the reviewed result module's schema and migration
+owners and identifies the business-services owner of per-user account handlers.
 Completed or partial batches advance to assembly; successfully assembled partial
 batches go directly to validation for completeness diagnostics. A materializer
 or assembly contract failure stops the pipeline and records its exception type

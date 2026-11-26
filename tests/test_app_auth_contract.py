@@ -395,6 +395,7 @@ def test_plan_auth_mode_taxonomy_matches_runtime():
 @pytest.mark.parametrize(("strategy", "mode", "roles", "witness", "outcome"), [
     ("public", "private_workspace", [], "verified", "ready"),
     ("basic-login", "private_workspace", [], "verified", "ready"),
+    ("third-party", "brokered_oidc", [], "verified", "needs_revision"),
     ("basic-login", "public_self_signup", [], "verified", "needs_revision"),
     ("role-based", "private_workspace", ["owner"], "verified", "needs_revision"),
     ("public", "private_workspace", [], "wrong-record", "needs_revision"),
