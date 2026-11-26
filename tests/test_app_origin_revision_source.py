@@ -11,10 +11,10 @@ from factory_app.workflows.AppGenerator.tools import generate_and_download
 from factory_app.workflows.AppGenerator.tools import hydrate_app_revision_context as revision
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import _verified_revision_source
 from mozaiksai.control_plane.contracts import build_acceptance_evidence
-from mozaiksai.core import artifacts
 from mozaiksai.core.artifacts import content_store
 from mozaiksai.core.artifacts.models import BuildRecord
 from mozaiksai.core.workflow.context.adapter import create_context_container
+from tests.factory_export_fixture import draft_inputs
 from tests.test_appgenerator_revision_baseline import baseline as baseline
 from tests.test_workflow_dependency_graph_context import _agent, _snapshot
 
@@ -35,7 +35,8 @@ def _app_origin(baseline):
 @pytest.mark.asyncio
 async def test_app_origin_design_revision_hydrates_selected_archive_and_preserves_export(baseline, monkeypatch, tmp_path):
     _app_origin(baseline)
-    context = create_context_container(initial=baseline.context)
+    records, inputs = draft_inputs(app="customer-app", build="new-build")
+    context = create_context_container(initial={**inputs, **baseline.context})
     result = await revision.hydrate_app_revision_context(context)
 
     assert result["artifact_version_id"] == baseline.artifact.id
@@ -52,16 +53,17 @@ async def test_app_origin_design_revision_hydrates_selected_archive_and_preserve
     async def create_record(**fields):
         return BuildRecord(id="new-app-draft", version_number=2, lineage_root_id=baseline.artifact.id, **fields)
 
-    monkeypatch.setattr(artifacts, "resolve_latest_artifact_version_refs", AsyncMock(return_value={"design_docs": "new-design"}))
     monkeypatch.setattr(content_store, "get_artifact_content_store", lambda: SimpleNamespace(backend_name="local"))
     monkeypatch.setattr(generate_and_download, "_register_greenfield_app_context_for_bundle", AsyncMock())
     draft = await generate_and_download._register_app_bundle_artifact_version(
         app_id="customer-app", user_id="owner", workflow_name="AppGenerator", chat_id="chat",
         bundle_name="bundle", zip_path=archive, context_variables=context,
-        artifact_store=SimpleNamespace(create_build_record=create_record),
+        artifact_store=SimpleNamespace(create_build_record=create_record, list_build_records=AsyncMock(return_value=[]),
+                                       get_build_record=AsyncMock(side_effect=lambda *, app_id, build_record_id: records[build_record_id])),
     )
     assert draft.parent_build_record_id == baseline.artifact.id
-    assert draft.canonical_inputs_version == {"design_docs": "new-design", "workflow_bundle": "new-workflow"}
+    assert draft.canonical_inputs_version == {"design_docs": "draft-design_docs", "subscription_contract": "draft-subscription_contract",
+                                            "workflow_bundle": "new-workflow"}
     assert context.get("artifact_version_id") == draft.id
     assert revision.revision_source_artifact_id(context) == baseline.artifact.id
     assert context.get("run_build_binding")["build_id"] == "new-build"

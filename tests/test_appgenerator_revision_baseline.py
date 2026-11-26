@@ -1165,8 +1165,11 @@ async def test_router_seed_survives_upstream_result_id_changes_before_first_gene
 @pytest.mark.asyncio
 @pytest.mark.parametrize("has_bundle", [False, True])
 async def test_design_revision_registration_uses_app_lineage_not_design_parent(baseline, monkeypatch, tmp_path, has_bundle):
+    from tests.factory_export_fixture import draft_inputs
+
     _upstream_design_revision(baseline, bundles=[baseline.artifact] if has_bundle else [])
-    context = create_context_container(initial=baseline.context)
+    records, inputs = draft_inputs(app="customer-app", build="new-build")
+    context = create_context_container(initial={**inputs, **baseline.context})
     await revision.hydrate_app_revision_context(context)
     context.set("app_bundle_acceptance_status", "passed")
     raw = baseline.content.get_bundle.return_value
@@ -1184,17 +1187,16 @@ async def test_design_revision_registration_uses_app_lineage_not_design_parent(b
             files_manifest=kwargs["files_manifest"], commit_metadata=kwargs["commit_metadata"],
         )
 
-    artifacts = importlib.import_module("mozaiksai.core.artifacts")
-    monkeypatch.setattr(artifacts, "resolve_latest_artifact_version_refs", AsyncMock(return_value={"design_docs": "new-approved-design"}))
     monkeypatch.setattr(content_store, "get_artifact_content_store", lambda: SimpleNamespace(backend_name="local"))
     monkeypatch.setattr(generate_and_download, "_register_greenfield_app_context_for_bundle", AsyncMock())
     await generate_and_download._register_app_bundle_artifact_version(
         app_id="customer-app", user_id="owner", workflow_name="AppGenerator", chat_id="new-chat",
         bundle_name="bundle", zip_path=archive, context_variables=context,
-        artifact_store=SimpleNamespace(create_build_record=create_record),
+        artifact_store=SimpleNamespace(create_build_record=create_record, list_build_records=AsyncMock(return_value=[]),
+                                       get_build_record=AsyncMock(side_effect=lambda *, app_id, build_record_id: records[build_record_id])),
     )
     assert recorded[0]["parent_build_record_id"] == ("artifact_1" if has_bundle else None)
-    assert recorded[0]["canonical_inputs_version"] == {"design_docs": "new-approved-design"}
+    assert recorded[0]["canonical_inputs_version"] == {"design_docs": "draft-design_docs", "subscription_contract": "draft-subscription_contract"}
     assert recorded[0]["commit_metadata"]["metadata"]["build_id"] == "new-build"
     assert recorded[0]["commit_metadata"]["metadata"]["phase"] == "refinement"
 

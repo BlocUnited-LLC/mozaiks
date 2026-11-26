@@ -275,7 +275,8 @@ created during an in-flight revision are never included.
 | Stale families query | `mozaiksai/core/artifacts/store.py` — `get_stale_artifact_families()` |
 | Current version refs query | `mozaiksai/core/artifacts/store.py` — `get_current_artifact_version_refs()` |
 | Lifecycle-status filter on `list_artifact_versions` | `mozaiksai/core/artifacts/store.py` — `lifecycle_status` parameter |
-| Canonical input resolution (CURRENT-only) | `mozaiksai/core/artifacts/summary_artifacts.py` — `resolve_latest_artifact_version_refs()` |
+| Current artifact lookup | `mozaiksai/core/artifacts/summary_artifacts.py` — `resolve_latest_artifact_version_refs()` |
+| Factory export inputs | `factory_app/workflows/_shared/export_inputs.py` verifies the exact design and subscription records passed through the build, including reviewed drafts. A generator whose sequence includes the producing stage requires the saved record ID. A standalone generator can resolve an existing current input. |
 | Version refs sync after run | `mozaiksai/core/session/router.py` — `advance_journey_after_run_complete()` |
 | Deterministic pre-check (Tier 1) | `mozaiksai/control_plane/implementations/refinement_router.py` — `_stale_route()` |
 | Stale priority + sequence map | `mozaiksai/control_plane/implementations/refinement_router.py` — `_STALE_PRIORITY`, `_STALE_SEQUENCE_MAP` |

@@ -191,15 +191,6 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     fake_artifact_store = _FakeArtifactStore()
     artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
     monkeypatch.setattr(artifacts_mod, "get_artifact_store", lambda: fake_artifact_store)
-    monkeypatch.setattr(
-        artifacts_mod,
-        "resolve_latest_artifact_version_refs",
-        lambda **kwargs: asyncio.sleep(0, result={
-            "concept": "av_concept_1",
-            "design_docs": "av_design_docs_1",
-            "theme_capture": "av_theme_capture_1",
-        }),
-    )
 
     zip_path = tmp_path / "GeneratedApp.zip"
     zip_path.write_bytes(b"fake bundle bytes")
@@ -227,6 +218,9 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
             "app_bundle_validation_evidence": {"completed": ["bundle_scan"], "failed": []},
         }, reviewed_pack_ids=["operator_readiness"],
     )
+    input_versions = {"design_docs": "av_design_docs_1", "theme_capture": "av_theme_capture_1"}
+    monkeypatch.setattr("factory_app.workflows._shared.export_inputs.export_input_versions",
+                        AsyncMock(return_value=input_versions))
 
     artifact_version = asyncio.run(
         generate_and_download_module._register_app_bundle_artifact_version(
@@ -245,9 +239,7 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     assert fake_artifact_store.calls[0]["build_key"] == "app_bundle"
     assert fake_artifact_store.calls[0]["parent_build_record_id"] == "av_parent_1"
     assert fake_artifact_store.calls[0]["canonical_inputs_version"] == {
-        "concept": "av_concept_1",
-        "design_docs": "av_design_docs_1",
-        "theme_capture": "av_theme_capture_1",
+        **input_versions,
         "workflow_bundle": "av_new_workflow",
     }
     assert fake_artifact_store.calls[0]["lifecycle_status"].value == "draft"

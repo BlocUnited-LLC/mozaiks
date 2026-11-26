@@ -439,7 +439,23 @@ def _source_app_id(context_variables: Any) -> str | None:
     return None
 
 
+def _app_revision_workflow_handoff(context: Any) -> str | None:
+    """A rebuilt workflow replaces the app cursor while the original app stays pinned."""
+    if _context_get(context, "artifact_kind") != "app_bundle":
+        return None
+    baseline = _text(_context_get(context, "revision_source_artifact_version_id"))
+    verified = _context_get(context, "workflow_integration_source_app")
+    if baseline and isinstance(verified, Mapping) and verified.get("build_record_id") == baseline:
+        return _text(verified.get("workflow_bundle_id"))
+    cursor = _text(_context_get(context, "artifact_version_id"))
+    return cursor if baseline and cursor != baseline else None
+
+
 def workflow_integration_source_error(context_variables: Any) -> str | None:
+    handoff = _app_revision_workflow_handoff(context_variables)
+    upstream = _text(_context_get(context_variables, "upstream_workflow_bundle_artifact_version_id"))
+    if handoff and upstream and handoff != upstream:
+        return "The exact workflow handoff differs from the workflow bundle found for this build."
     baseline_id = _source_app_id(context_variables)
     if baseline_id:
         receipt = _context_get(context_variables, "workflow_integration_source_app")
@@ -515,13 +531,12 @@ def workflow_integration_metadata_from_artifact(artifact: Any) -> dict[str, Any]
     return metadata
 
 
-def _restore_archived_result_schemas(record: BuildRecord, catalog: Mapping[str, Any]) -> dict[str, Any]:
-    """Recompile older result-bearing records from their own immutable archive."""
-    from factory_app.workflows._shared.artifact_bundle import (
-        APP_BUNDLE_MAX_FILE_BYTES,
-        APP_BUNDLE_MAX_TOTAL_BYTES,
-    )
+def read_verified_workflow_archive(record: BuildRecord) -> bytes:
+    """Read this workflow pack's single, manifest-bound archive."""
+    from factory_app.workflows._shared.artifact_bundle import APP_BUNDLE_MAX_TOTAL_BYTES
 
+    if record.build_family != "workflow_bundle":
+        raise ValueError("Expected a workflow bundle record")
     metadata = record.commit_metadata.metadata
     expected = canonical_bundle_archive_path(record.build_key)
     entries = [entry for entry in record.files_manifest if entry.content_type == "application/zip"]
@@ -536,7 +551,18 @@ def _restore_archived_result_schemas(record: BuildRecord, catalog: Mapping[str, 
             raw = source.read(entry.size_bytes + 1)
         if len(raw) != entry.size_bytes or hashlib.sha256(raw).hexdigest() != entry.sha256:
             raise ValueError("Recorded workflow archive digest differs from its manifest")
-        rows = []
+    except OSError as exc:
+        raise ValueError("Could not read the recorded workflow archive") from exc
+    return raw
+
+
+def _restore_archived_result_schemas(record: BuildRecord, catalog: Mapping[str, Any]) -> dict[str, Any]:
+    """Recompile older result-bearing records from their own immutable archive."""
+    from factory_app.workflows._shared.artifact_bundle import APP_BUNDLE_MAX_FILE_BYTES
+
+    raw = read_verified_workflow_archive(record)
+    rows = []
+    try:
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             for row in catalog["workflows"]:
                 if row.get("result_write_plans") and "result_output_schema" not in row:
@@ -559,6 +585,12 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
     *,
     artifact_store: Any | None = None,
 ) -> dict[str, Any]:
+    handoff = _app_revision_workflow_handoff(context_variables)
+    upstream = _text(_context_get(context_variables, "upstream_workflow_bundle_artifact_version_id"))
+    if handoff and upstream and (handoff_error := workflow_integration_source_error(context_variables)):
+        apply_workflow_integration_context(context_variables, {"workflows": []})
+        _context_set(context_variables, "workflow_integration_metadata", None)
+        raise ValueError(handoff_error)
     workflow_ref = workflow_integration_source_pin(context_variables)
     baseline_id = _source_app_id(context_variables)
     if baseline_id:
@@ -578,7 +610,8 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
 
     from factory_app.workflows._shared.platform.build_target import require_build_binding
 
-    app_id = require_build_binding(context_variables).target_app_id
+    binding = require_build_binding(context_variables)
+    app_id = binding.target_app_id
 
     if artifact_store is None:
         try:
@@ -608,6 +641,17 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
     candidates: list[Any] = []
     if workflow_ref:
         artifact = await artifact_store.get_build_record(app_id=app_id, build_record_id=str(workflow_ref))
+        if handoff and upstream:
+            record = BuildRecord.model_validate(artifact)
+            owner = _context_get(context_variables, "user_id")
+            if (record.id != handoff or record.app_id != app_id or record.build_family != "workflow_bundle"
+                    or record.source_workflow != "AgentGenerator" or not record.source_chat_id
+                    or record.lifecycle_status not in {"draft", "current"}
+                    or record.commit_metadata.source_workflow != record.source_workflow
+                    or record.commit_metadata.source_chat_id != record.source_chat_id
+                    or not owner or record.commit_metadata.author_user_id != owner
+                    or any(record.commit_metadata.metadata.get(key) != value for key, value in binding.model_dump().items())):
+                raise ValueError("The exact workflow handoff is outside this build")
         candidates.append(artifact)
     elif hasattr(artifact_store, "list_build_records"):
         try:
@@ -632,6 +676,12 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
         if not metadata or (workflow_ref and metadata.get("source_artifact_version_id") != workflow_ref):
             continue
         apply_workflow_integration_context(context_variables, metadata)
+        if handoff and upstream:
+            # App registration later advances artifact_version_id to its own output.
+            _context_set(context_variables, "workflow_integration_source_app", {
+                "build_record_id": _context_get(context_variables, "revision_source_artifact_version_id"),
+                "workflow_bundle_id": handoff,
+            })
         return {
             "status": "hydrated",
             "source": "workflow_bundle_artifact",
@@ -658,6 +708,7 @@ __all__ = [
     "extract_workflow_integration_metadata_from_bundle_entries",
     "hydrate_workflow_integration_context_from_latest_artifact",
     "normalize_workflow_integration_metadata",
+    "read_verified_workflow_archive",
     "validate_pricing_workflow_features",
     "workflow_integration_metadata_from_artifact",
     "workflow_integration_source_error",

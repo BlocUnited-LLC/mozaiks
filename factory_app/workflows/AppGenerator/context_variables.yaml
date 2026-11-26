@@ -1,4 +1,12 @@
 definitions:
+  design_docs_artifact_version_id:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [transition_router]
+    persisted: true
+    model_visible: false
+    description: Exact DesignDocs summary saved for this build and relayed to its downstream workflows.
+    source: {type: state, default: null}
   app_bundle_acceptance_status:
     type: string
     authority_class: closed_writer_quality_state
@@ -823,8 +831,9 @@ definitions:
       default: null
   subscription_contract_artifact_version_id:
     type: string
-    authority_class: tool_only_information
-    writer_ids: [lifecycle_tool, transition_router]
+    authority_class: closed_writer_routing_state
+    writer_ids: [transition_router]
+    persisted: true
     model_visible: false
     description: Exact saved subscription input carried from its owning workflow; never reconstructed from candidate files.
     source: {type: state, default: null}

@@ -570,6 +570,8 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
 
     if price is not None:
         context["structured_output"]["subscription_config_file"]["plans"][1]["price"] = price
+    if read_only:
+        context["design_docs_artifact_version_id"] = "reviewed-design"
     reply = _designer_reply(context["structured_output"])
     assert reply.validation_passed, reply.error
     context["structured_output"] = reply.structured_data
@@ -629,7 +631,9 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
 
     assert persisted["artifact_kind"] == "subscription_contract"
     assert persisted["artifact_key"] == "subscription_contract"
-    assert persisted["input_artifact_kinds"] == ("concept", "design_docs")
+    assert context["subscription_contract_artifact_version_id"] == "av_subscription_contract"
+    assert persisted["input_artifact_kinds"] == (("concept",) if read_only else ("concept", "design_docs"))
+    assert persisted["canonical_inputs_version"] == ({"design_docs": "reviewed-design"} if read_only else None)
 
 
 @pytest.mark.asyncio
