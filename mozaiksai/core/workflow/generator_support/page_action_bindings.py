@@ -171,8 +171,9 @@ def _control_selection(
 ) -> int | None:
     """Maximum selectable row count. None means the control cannot fire."""
     primitive, config = section.get("primitive"), section["config"]
-    if primitive == "Form" and config.get("disabled") and field == "submit_action":
-        return None
+    if primitive == "Form" and field == "submit_action":
+        if config.get("disabled") or (config.get("initial_values_key") == "selected_row" and not inherited):
+            return None
     if primitive == "PricingCatalog":
         rows = config.get("plans" if field == "plan_action" else "add_ons")
         # A catalog button passes its own item. Static arrays override fetched arrays.
@@ -292,11 +293,11 @@ def validate_required_page_writes(
                 f"{path}: form {section.get('id')!r} needs the selected record. Place it in a modal "
                 "opened by an action on the selectable table so the renderer can pass the row."
             )
-        for key, value in _action_payload(action).items():
-            if value == f"selected_row.{key}":
+        for value in _action_payload(action).values():
+            if isinstance(value, str) and re.fullmatch(r"selected_row(?:\.[\w-]+)+", value):
                 raise ValueError(
                     f"{path}: form {section.get('id')!r} submits the literal text {value!r}. "
-                    f"Use {{{value}}} to send the selected record's {key}."
+                    f"Use {{{value}}} to send the selected record's field value."
                 )
     missing = expected - reachable_page_action_keys([document], include_reads=False)
     if missing:

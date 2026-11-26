@@ -77,6 +77,43 @@ def test_reviewed_edit_receives_the_selected_record_and_submits_its_actual_id():
         _validate(page, plan)
 
 
+def test_reviewed_form_rejects_a_bare_selected_row_path_even_when_the_action_renames_it():
+    page = _editor()
+    form = page["sections"][1]["config"]["children"][0]["config"]
+    payload = {"record_id": "selected_row.entry.id", "title": "{form.title}",
+               "description": "Use selected_row.entry.id here."}
+    form.update(initial_values_key="selected_row", submit_action={**_write("update_entry"), "payload": payload})
+    plan = _plan(page, "update_entry")
+    with pytest.raises(ValueError, match=r"literal text.*Use \{selected_row\.entry\.id\}"):
+        _validate(page, plan)
+    payload["record_id"] = "{selected_row.entry.id}"
+    _validate(page, plan)
+    # A create form may intentionally submit this text as a literal.
+    form.pop("initial_values_key")
+    form["submit_action"] = {**_write("create_entry"), "payload": {"record_id": "selected_row.entry.id", "title": "{form.title}"}}
+    _validate(page, _plan(page, "create_entry"))
+
+
+def test_form_bound_edit_needs_an_opener_that_can_supply_its_initial_row():
+    page = _editor()
+    table, modal = page["sections"]
+    form = modal["config"]["children"][0]["config"]
+    form["fields"].append({"name": "entry_id", "type": "text", "label": "Entry ID"})
+    form.update(initial_values_key="selected_row", submit_action={
+        **_write("update_entry"), "payload": {"record_id": "{form.entry_id}", "title": "{form.title}"},
+    })
+    plan = _plan(page, "update_entry")
+    _validate(page, plan)
+    header = {"id": "header", "primitive": "PageHeader", "config": {
+        "title": "Entries", "actions": [table["config"]["actions"][1]],
+    }}
+    page["sections"] = [header, modal]
+    with pytest.raises(ValueError, match="missing reachable write controls for content/update_entry"):
+        _validate(page, plan)
+    page["sections"].append(table)
+    _validate(page, plan)
+
+
 @pytest.mark.parametrize("reference", ["{selected_row.entry_id}", "archived-{ row.entry_id }", "{selected_rows.0.entry_id}"])
 def test_header_cannot_supply_a_record_even_if_it_requests_selection(reference):
     page = _editor()
