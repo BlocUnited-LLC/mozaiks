@@ -1087,7 +1087,7 @@ async def verify_design_projections(output: BuildRecord, *, user_id: str, build_
             or review.get("status") not in {"approved", "not_required"}
             or review.get("status") == "approved" and review.get("reviewed_by") != user_id):
         raise ValueError("The saved design review does not belong to this build and owner")
-    expected = {
+    expected: dict[str, dict[str, Any]] = {
         DesignDocKinds.FRONTEND: {"content": summary.get("frontend_markdown")},
         DesignDocKinds.DATABASE: {"content": summary.get("database_markdown")},
         DesignDocKinds.BACKEND: {"content": summary.get("backend_markdown"), "surface_map": surface_map,
