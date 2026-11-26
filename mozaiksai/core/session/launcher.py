@@ -447,7 +447,9 @@ async def prepare_routed_workflow_launch(
     )
 
 
-async def launch_prepared_workflow(launch: PreparedWorkflowLaunch) -> WorkflowLaunchResult:
+async def launch_prepared_workflow(
+    launch: PreparedWorkflowLaunch, *, journey_parent_chat_id: str | None = None,
+) -> WorkflowLaunchResult:
     chat_id = await create_routed_chat_session(
         workflow_id=launch.workflow_id,
         app_id=launch.app_id,
@@ -458,6 +460,7 @@ async def launch_prepared_workflow(launch: PreparedWorkflowLaunch) -> WorkflowLa
         journey_id=launch.journey_id,
         chat_id=launch.chat_id,
         session_fields=launch.session_fields,
+        **({"journey_parent_chat_id": journey_parent_chat_id} if journey_parent_chat_id is not None else {}),
     )
     return WorkflowLaunchResult(
         chat_id=chat_id,
