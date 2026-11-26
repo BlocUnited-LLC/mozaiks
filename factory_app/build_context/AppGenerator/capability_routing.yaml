@@ -274,7 +274,7 @@ layers:
         covers: app-scoped and workspace-scoped conversation threads, support conversations, and read state
         capability_kind: operator_pack
         use_when: App needs user-to-user messaging, group conversations, threaded conversations, or support conversation storage
-        avoid_when: You only need one-way system alerts or push notifications — use the notifications pack instead
+        avoid_when: You only need one-way system alerts by email — use the notifications pack instead
 
       - id: support
         covers: support request metadata, app-scoped support inboxes, support status, and operator follow-up pages
@@ -303,9 +303,9 @@ layers:
         avoid_when: You only need to store structured data records — a custom module is simpler
 
       - id: notifications
-        covers: external notification delivery adapters (email, push, SMS) beyond the runtime in-app notification record
+        covers: external email delivery beyond the runtime in-app notification record
         capability_kind: operator_pack
-        use_when: App needs to deliver domain-event alerts outside the app through provider-backed channels such as email, push, or SMS
+        use_when: App needs to deliver domain-event alerts outside the app by email
         avoid_when: You only need in-app alerts, unread badge counts, and a notification center — declare contracts/notifications.yaml on the event-producing module instead
 
       - id: operator_readiness
