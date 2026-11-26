@@ -270,6 +270,8 @@ async def test_private_result_plan_is_visible_at_review_and_bound_to_its_task(mo
     assert "host supplies the record key task_key" in brief
     assert "tasks.save_summary is the receiving app module action" in brief
     assert "event_payload as object state with model_visible: true and writer_ids: [transition_router]" in brief
+    assert "variables key from every agents.yaml roster entry" in brief
+    assert "context_variables.yaml -> agents -> actor name -> variables" in brief
     assert "tools: []" in brief and "outcome_plans: []" in brief
     assert "one after_turn success continuation" in brief
     assert json.loads(brief.splitlines()[-1]) == [binding]

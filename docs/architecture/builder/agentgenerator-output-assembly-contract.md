@@ -50,7 +50,13 @@ The builder gives the specified agent a flat structured-output model with exactl
 the required result fields. The worker brief identifies the receiving module action
 and the host-supplied record key. The agent reads the module event's declared
 input fields from the host-seeded `event_payload` object exposed to it through
-`context_variables.yaml` with `transition_router` as its writer. Its prompt
+`context_variables.yaml` with `transition_router` as its writer. Factory materializes
+that input and its exposure to the reviewed result agent. A BackendOnly workflow
+with an empty trigger list takes its events from the approved write plan.
+The roster in `agents.yaml` contains the agent's prompt and structured-output
+requirement. Each repair receives the original task, the current validation
+findings and bounded excerpts from the YAML files named in those findings.
+The agent's prompt
 requests only the approved result fields. The bundle omits worker-authored save tools and
 outcome plans for that agent. Other agents keep their declared tools and outcomes.
 Factory adds its workflow-local automatic tool and

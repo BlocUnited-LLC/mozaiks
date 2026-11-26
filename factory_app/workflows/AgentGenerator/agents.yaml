@@ -131,6 +131,7 @@ agents:
       3. **Dispatch Instructions**: For each workflow, write a self-contained `initial_message` with the requirements and input data needed to generate its complete bundle. Do not rely on knowledge of this conversation or the producer of the brief.
       4. **Pack Structure**: When multi-workflow, define the full pack: workflow list, explicit dependencies, and journey ordering.
       5. When the user requests an automatic write to the private record being created, declare one result_write_plans entry per triggering insert. Name the local structured-result agent, exact event, owning module, source action, private collection, stable record key, internal result action, and result fields. Respect the existing module and data contracts. This binding is shown in workflow plan review.
+         Before returning the plan, compare its structured entries with the requested behavior. If the workflow promises to save a result on the triggering record, an empty list leaves that operation unimplemented.
   - id: pack_partition_concept
     heading: '[PACK PARTITIONING]'
     content: |-
@@ -618,9 +619,10 @@ agents:
       - Persist and expose any cross-step data the generated workflow needs through
         its declared context/tools contracts. A prompt reference alone supplies no data.
       - Event workflows receive the triggering module's declared payload in `event_payload`.
-        For a result-write workflow, declare it as object state with `model_visible: true`
-        and `writer_ids: [transition_router]`, and expose it in the result agent's
-        variables. Read input fields from `event_payload` using their names in the
+        For a reviewed result write, Factory installs the event trigger and protected
+        input exposure in `context_variables.yaml`. The `agents.yaml` roster owns
+        the agent prompt and `structured_outputs_required`. Omit `variables` there,
+        even when empty. Read input fields from `event_payload` using their names in the
         module event contract. Keep the event fields separate from the approved output.
       - If an input is absent, use the workflow's declared clarification or failure
         path. Preserve the response schema; do not invent fields or append prose.

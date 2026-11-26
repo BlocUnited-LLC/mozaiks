@@ -84,14 +84,25 @@ def pattern_selection(
                     "Factory installs the workflow adapter that calls it."
                 )
             instructions.append(
-                "Declare the host-seeded event_payload as object state with model_visible: true and "
-                "writer_ids: [transition_router]. Expose it in the result agent's variables. Its prompt "
+                "Factory installs event_payload as object state with model_visible: true and "
+                "writer_ids: [transition_router] in context_variables.yaml. Factory also installs the "
+                "reviewed event trigger on the BackendOnly orchestrator. The agent roster in agents.yaml "
+                "contains the actor's name, prompt and structured_outputs_required: true. Omit the "
+                "variables key from every agents.yaml roster entry, including empty lists. The exposure "
+                "belongs at context_variables.yaml -> agents -> actor name -> variables. The actor's prompt "
                 "reads the needed fields at event_payload.<field> using the triggering event's declared payload. "
                 "Leave the result agent out of generated tool bindings, tool implementations and outcome_plans. "
                 "Use tools: [] when no other agent needs a tool and outcome_plans: [] when "
                 "no other operation needs an outcome. "
                 "Give the result agent one after_turn success continuation. Factory adds the failure routing."
             )
+            actor = plans[0]["agent"]
+            fields = ", ".join(plans[0]["result_write"]["fields"])
+            roster = {"name": actor, "structured_outputs_required": True,
+                      "system_message": f"{item['description']} Read the triggering content from event_payload. "
+                                        f"Return only the required fields: {fields}."}
+            instructions.append("Valid agents.yaml roster entry for this task; tailor the prompt to the approved design:\n"
+                                + json.dumps(roster, ensure_ascii=True))
             brief = "\n".join(["[WORKFLOW RESULT PLAN]", *instructions, json.dumps(plans, sort_keys=True)])
             item = {**item, "initial_message": f"{item['initial_message']}\n\n{brief}"}
         specs.append(item)

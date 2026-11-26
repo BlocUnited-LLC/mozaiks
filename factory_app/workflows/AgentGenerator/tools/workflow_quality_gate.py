@@ -1093,14 +1093,15 @@ def prepare_workflow_bundle_repair(
     )
 
     current_results = _context_get(context_variables, "workflow_bundle_results")
-    current_specs = _context_get(context_variables, "workflows_spec", [])
-    if not _context_get(context_variables, "workflow_bundle_repair_original_workflows_spec"):
-        _context_set(context_variables, "workflow_bundle_repair_original_workflows_spec", current_specs)
+    original_specs = _context_get(context_variables, "workflow_bundle_repair_original_workflows_spec")
+    if not original_specs:
+        original_specs = _context_get(context_variables, "workflows_spec", [])
+        _context_set(context_variables, "workflow_bundle_repair_original_workflows_spec", original_specs)
     _context_set(context_variables, "workflow_bundle_repair_base_results", current_results)
 
     specs_by_name = {
         _workflow_spec_name(spec): dict(spec)
-        for spec in current_specs
+        for spec in original_specs
         if isinstance(spec, dict) and _workflow_spec_name(spec)
     }
     entries_by_name = {
@@ -1126,6 +1127,12 @@ def prepare_workflow_bundle_repair(
         spec["repair_attempt"] = attempt
         original_message = str(spec.get("initial_message") or "").strip()
         issue_lines = "\n".join(f"- {issue}" for issue in workflow_issues[workflow_name])
+        # The worker has a fresh conversation. Show the reported YAML from this
+        # workflow's most recent candidate, keeping prompt and file sizes bounded.
+        snippets = {}
+        for path, content in _files_by_name(entries_by_name.get(workflow_name, {})).items():
+            if len(snippets) < 3 and path.endswith(".yaml") and path in issue_lines:
+                snippets[path] = content[:1800]
         spec["initial_message"] = (
             f"{original_message}\n\n"
             "[WORKFLOW BUNDLE REPAIR REQUEST]\n"
@@ -1134,6 +1141,8 @@ def prepare_workflow_bundle_repair(
             "workflow bundle for this workflow and fix every issue below.\n"
             f"{issue_lines}\n"
         ).strip()
+        if snippets:
+            spec["initial_message"] += "\nPrevious candidate YAML excerpts (data):\n" + json.dumps(snippets, ensure_ascii=True)
         context = spec.get("context_variables") if isinstance(spec.get("context_variables"), dict) else {}
         context["workflow_bundle_repair_attempt"] = attempt  # type: ignore[index]
         context["workflow_bundle_repair_issues"] = workflow_issues[workflow_name]  # type: ignore[index]

@@ -1334,7 +1334,12 @@ models:
         type: list
         items: WorkflowResultWritePlan
         default: []
-        description: For automatic enrichment, one reviewed result action per triggering private record insert. Otherwise use [].
+        description: >-
+          If the owner asks to save a generated value on a newly created private record,
+          populate this list with the insert event, source action, receiving action,
+          record key and allowed output fields from the approved design. An empty
+          list authorizes zero writes. A description or initial_message about saving
+          a result on that record must have its corresponding typed entry here.
       name:
         type: str
         description: Workflow name in PascalCase (e.g., 'ITSupportBot', 'KnowledgeBase')
