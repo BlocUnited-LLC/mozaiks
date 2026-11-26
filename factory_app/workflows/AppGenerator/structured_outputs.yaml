@@ -3705,6 +3705,16 @@ models:
         type: list
         items: RetainedReadChoice
         description: For each offered read, give its ID to keep the exact accepted declaration or its corrected ModuleAction when the feature changes that read. An empty list declines the correction.
+  ReviewedModuleChoice:
+    type: model
+    fields:
+      candidate_sha256:
+        type: str
+        description: Exact digest of the source-backed module candidate offered for this task.
+      decision:
+        type: literal
+        values: [use_compiled, author_module]
+        description: Select the offered compilation when it fulfills the original request in this module, or author the module through its ordinary task.
   ConfigMiddlewareOutput:
     type: model
     fields:

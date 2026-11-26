@@ -1195,6 +1195,23 @@ async def _run_one_task(
     if getattr(agent, "_mozaiks_tool_outcome", None) is not None:
         raise ValueError(f"task agent {agent_name!r} declares a network-only tool outcome; use the task-batch failure policy")
     code_owned_output = _code_owned_task_output(task, task_context, workflow_name=workflow_name)
+    source_candidate = None
+    source_offer = None
+    if (not prior_failure and code_owned_output is None and workflow_name == "AppGenerator"
+            and task.get("task_type") == "module_contract"):
+        from factory_app.workflows.AppGenerator.tools.reviewed_module_choice import (
+            reviewed_module_choice_prompt,
+            run_reviewed_module_choice,
+        )
+        from factory_app.workflows.AppGenerator.tools.reviewed_result_module_task import (
+            reviewed_result_module_task_output,
+        )
+
+        source_candidate = await reviewed_result_module_task_output(
+            task, base_context, retained_ask_callers=retained_ask_callers,
+        )
+        if source_candidate is not None:
+            source_offer = reviewed_module_choice_prompt(base_context, task, source_candidate, retained_ask_callers)
     pack_paths = pack_owned_output_paths(base_context)
 
     async with semaphore:
@@ -1245,26 +1262,33 @@ async def _run_one_task(
                     task_id=str(task["task_id"]), lifecycle_status="code_owned",
                 )
             else:
-                runner_result = await AG2TaskBatchRunner().run(
-                    AG2TaskBatchRunnerRequest(
-                        workflow_name=workflow_name,
-                        batch_id=batch.id,
-                        task_id=str(task["task_id"]),
-                        chat_id=chat_id,
-                        app_id=app_id,
-                        agent_name=agent_name,
-                        agent=agent,
-                        prompt=attempt_prompt,
-                        context_variables=task_context,
-                        structured_registry=_structured_registry_for_agent(workflow_name, agent_name),
-                        response_model=response_model,
-                        prompt_projection=prompt_projection,
-                        context_authority_policy=context_authority_policy,
-                        timeout_seconds=batch.execution.timeout_seconds,
-                    )
+                request = AG2TaskBatchRunnerRequest(
+                    workflow_name=workflow_name,
+                    batch_id=batch.id,
+                    task_id=str(task["task_id"]),
+                    chat_id=chat_id,
+                    app_id=app_id,
+                    agent_name=agent_name,
+                    agent=agent,
+                    prompt=attempt_prompt,
+                    context_variables=task_context,
+                    structured_registry=_structured_registry_for_agent(workflow_name, agent_name),
+                    response_model=response_model,
+                    prompt_projection=prompt_projection,
+                    context_authority_policy=context_authority_policy,
+                    timeout_seconds=batch.execution.timeout_seconds,
                 )
+                if source_offer is not None and source_candidate is not None and not last_error:
+                    runner_result = await run_reviewed_module_choice(request, source_candidate, source_offer)
+                else:
+                    runner_result = await AG2TaskBatchRunner().run(request)
             if runner_result.status is not RunStatus.COMPLETED:
                 last_error = runner_result.error or runner_result.status.value
+                if runner_result.close_reason == "module_choice_failed":
+                    raise _TaskRejected(TaskBatchFailure(
+                        task_id=str(task["task_id"]), worker_agent=agent_name, failure_kind="execution_failed",
+                        error=last_error, attempts=_attempt + 1,
+                    ))
                 rejected_output = None
                 continue
             candidate_json: str | None = None
