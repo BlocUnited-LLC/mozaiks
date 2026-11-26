@@ -72,7 +72,7 @@ async def test_design_prompt_projects_the_original_accepted_actions_after_an_ups
             "output_schema": {"type": "object", "properties": {"record_id": {"type": "string"}, "summary": {"type": "string"}}},
         }],
     }
-    _replace_archive(baseline, {"modules/records/module.yaml": yaml.safe_dump(manifest)})
+    _replace_archive(baseline, {"modules/records/module.yaml": yaml.safe_dump(manifest), "data/contract.json": "[]"})
     baseline.artifact.lifecycle_status = "current"
     baseline.artifact.validation_status = "passed"
     [accepted_pack] = pin_pack_choices(baseline.context, ["files"])
@@ -96,7 +96,9 @@ async def test_design_prompt_projects_the_original_accepted_actions_after_an_ups
         assert "could not be verified" in agent.system_message and "create_record" not in agent.system_message
         baseline.artifact.commit_metadata.metadata["app_bundle_acceptance"]["resolved_capability_packs"] = []
     else:
-        [row] = rows
+        [row] = [entry for entry in rows if "action" in entry]
+        assert {"schema_page_inventory": "unavailable"} in rows
+        assert {"collection_inventory": "unavailable"} in rows
         assert row["module"] == "records" and row["action"] == "create_record"
         assert row["input"] == {"type": "object", "fields": {"body": "string", "label": "string"}, "required": ["body"]}
         assert set(row["output"]["fields"]) == {"record_id", "summary"}
@@ -113,6 +115,60 @@ async def test_design_prompt_projects_the_original_accepted_actions_after_an_ups
     agent.context_variables = {"build_mode": "genesis"}
     await inject_accepted_module_actions(agent, [])
     assert agent.system_message == "Design this app."
+
+
+@pytest.mark.parametrize("closed", [True, False])
+async def test_revision_design_reads_accepted_collections_routes_and_client_inputs(scoped_module_revision, closed):
+    from factory_app.workflows.DesignDocs.tools.hook_accepted_module_actions import (
+        inject_accepted_module_actions,
+    )
+
+    baseline = scoped_module_revision.baseline
+    baseline.artifact.lifecycle_status = "current"
+    baseline.artifact.validation_status = "passed"
+    manifest = yaml.safe_load(baseline.files["modules/records/module.yaml"])
+    create = manifest["actions"][0]
+    create["description"] = "OMIT_PRIVATE_VALUE"
+    create["input_schema"] = {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}
+    if closed:
+        create["input_schema"]["additionalProperties"] = False
+    manifest["actions"].append({**create, "id": "update_record", "handler_method": "update_record", "api_surface": "internal"})
+    data = json.loads(baseline.files["data/contract.json"])
+    collection = data["surfaces"][0]["collections"][0]
+    collection["fields"].extend([
+        {"name": "created_at", "type": "datetime", "required": True},
+        {"name": "suggestion", "type": "string", "required": False, "default": "OMIT_PRIVATE_VALUE"},
+    ])
+    page = yaml.safe_load(baseline.files["ui/pages/records.yaml"])
+    page["roles"] = ["editor"]
+    page["meta"] = {"requiresAuth": True, "requiresRole": "editor",
+                    "routeAuth": {"module": "records", "action": "can_view", "params": {"key": "OMIT_PRIVATE_VALUE"}}}
+    auth = yaml.safe_load((Path(__file__).parents[1] / "factory_app/app/config/auth.yaml").read_text(encoding="utf-8"))
+    auth["authorization"] = {"roles": [{"id": "editor", "permissions": ["records.read"]}]}
+    auth["routes"]["post_login_default"] = "/records?filter=OMIT_PRIVATE_VALUE"
+    _replace_archive(baseline, {
+        "modules/records/module.yaml": yaml.safe_dump(manifest), "config/auth.yaml": yaml.safe_dump(auth),
+        "data/contract.json": json.dumps(data), "ui/pages/records.yaml": yaml.safe_dump(page),
+    })
+    context = {**baseline.context, "refinement_request_meta": {"build_family": "app_bundle", "build_record_id": baseline.artifact.id}}
+    agent = SimpleNamespace(name="DesignDocsAgent", context_variables=context, system_message="")
+    agent.update_system_message = lambda message: setattr(agent, "system_message", message)
+    await inject_accepted_module_actions(agent, [])
+    assert "OMIT_PRIVATE_VALUE" not in agent.system_message
+    rows = [json.loads(line) for line in agent.system_message.splitlines() if line.startswith("{")]
+    [row] = [r for r in rows if "collection" in r]
+    assert (row["module"], row["collection"], row["entity"], row["scope"], row["tenancy"],
+            row["owner_field"], row["record_id_field"]) == ("records", "records", "Record", "app", "per_user", "user_id", "id")
+    assert row["fields"] == [{"name": f["name"], "type": f["type"], "required": f["required"], "nullable": False}
+                             for f in collection["fields"]]
+    assert row["http_write_actions"] == [
+        {"operation": "create", "action": "create_record", "closed_client_fields": ["title"] if closed else None}]
+    assert {r["action"] for r in rows if "action" in r} == {"create_record", "update_record"}
+    [access] = [r for r in rows if "auth_required" in r]
+    assert access["auth_required"] and access["roles"] == auth["authorization"]["roles"]
+    assert access["auth_routes"]["post_login_default"] == "/records"
+    assert {"schema_page": "records", "route": "/records", "roles": ["editor"], "requires_auth": True,
+            "requires_role": "editor", "route_auth": {"module": "records", "action": "can_view"}} in rows
 
 
 async def test_pack_selector_cannot_relabel_an_accepted_generated_module_after_install(baseline, tmp_path, monkeypatch):

@@ -241,8 +241,10 @@ agents:
         - owner_hint: null → infer owner from likely_surface_kind and source_capability_packs
           using the ownership rules in [SURFACE REALIZATION].
 
-      capability_pack_hints[]: Upstream capability pack signals. Use these to populate
-      source_capability_packs in surface_map entries where hints align.
+      capability_pack_hints[] are concept-time suggestions. Set a surface's
+      source_capability_packs only to verified selected packs whose offered capabilities
+      supply that surface. Use [] for app-owned behavior with no supplying pack,
+      including a workflow triggered by a record creation.
 
       Ownership constraints outrank owner_hint and surface_candidate_hints. The
       platform provides sign-in, sessions, user accounts, and user administration.
@@ -396,7 +398,7 @@ agents:
       - `label`: human-readable label
       - `surface_kind`: one of `module`, `workflow`, `app_policy`, `refinement`, `external_integration`, `ui_only`
       - `owner`: who owns the surface, such as `app`, `hosted`, or `platform`
-      - `source_capability_packs`: capability-pack hints this surface realizes
+      - `source_capability_packs`: verified selected packs supplying this surface, or []
       - `primary_entities`: durable entities or records owned by the surface
       - `owned_pages`: persistent pages primarily owned by the surface
       - `owned_mutations`: deterministic mutations/actions this surface owns
@@ -671,7 +673,7 @@ agents:
               "label": "Projects",
               "surface_kind": "module",
               "owner": "app",
-              "source_capability_packs": ["crud_pack"],
+              "source_capability_packs": [],
               "primary_entities": ["Project"],
               "owned_pages": ["Dashboard", "Projects"],
               "owned_mutations": ["create_project"],

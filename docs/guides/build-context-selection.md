@@ -49,7 +49,17 @@ checks the requested IDs, dependencies and source digests. An invalid choice
 returns to the selection step before the Factory spends a turn writing the
 design.
 
-`DesignDocsAgent` receives the verified contracts for the chosen packs.
+`DesignDocsAgent` receives the verified contracts for the chosen packs. A
+surface names a pack only when that selected pack supplies it. An app-owned
+module or workflow can have an empty `source_capability_packs` list.
+For revisions the design agent also sees a bounded projection of the accepted
+app archive. It lists module-owned collections, record and ownership keys,
+typed fields, schema-page paths and access gates, app roles, and module action
+signatures. Canonical HTTP write operations come from actions present in that
+archive. Their editable fields come from closed inputs and exclude record keys
+and managed fields. An open or unsupported input leaves its editable field
+list unknown. This context guides the proposed design. Owner review and the
+existing save gates still determine the approved contract.
 For each pack-owned module collection the prompt identifies its pack, module,
 collection, entity and tenancy. For example, Content supplies the `entries`
 collection in module `content` with entity `ContentEntry`. A recipe page and a
