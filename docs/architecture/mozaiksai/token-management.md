@@ -105,8 +105,9 @@ and [Responses API](https://developers.openai.com/api/reference/python/resources
 **These controls are not a hard spending cap.** They bound configured request
 output or SDK retry behavior, not cumulative input, workflow turns, AG2 retry
 middleware, parallel calls, provider tool charges, or USD spending. The current
-wallet preflight is a balance check, not an atomic reservation. Post-response
-debit rejection cannot undo a provider call. Sponsored builds must not be opened
+wallet preflight is a balance check, not an atomic reservation. A post-response
+debit can take only what the balance still holds, so calls already running when
+it runs out are not fully charged. Sponsored builds must not be opened
 to unsupervised public use on the assumption that the existing balance check or
 watchdog prevents overspend. Durable pre-call reservation and settlement remain
 required for that guarantee; measurement stays in `TokenManager`, not billing
@@ -185,17 +186,17 @@ Wallet entries are idempotent by key and persisted under:
 - `RuntimeTokenWalletBalances` — projected balance per app/wallet/scope
 
 Balances are scoped by `app_id`, `wallet_id`, and either user, tenant, or app
-scope. A requested debit is rejected when the balance is insufficient. Usage
-is different: the model call has already run, so its debit is always recorded in
-full. A call larger than the balance takes the balance below zero. It is reported
-as zero, further calls are denied, and later credits repay the difference first.
-A wallet with `allow_negative_balance: true` keeps admitting calls after its
-balance is spent, for overage-style products.
+scope. Debits reject by default when the balance is insufficient; wallets can
+explicitly allow negative balances for overage-style products.
 
-The pre-call check compares the current balance with a required amount, 1 token
-unless `MOZAIKS_TOKEN_PREFLIGHT_REQUIRED_TOKENS` or a workflow preflight value
-raises it. It is not a reservation: calls already running when the balance runs
-out still complete and are charged.
+Usage debits run after the model call, so rejecting one would leave the balance
+to admit another call for free. A usage debit larger than the balance takes the
+whole balance instead: the entry keeps the usage as `amount`, reports what was
+taken as `settled_amount`, and further calls are denied. The shortfall is not
+carried as debt. Usage with no balance left to take is rejected.
+
+LLM usage is checked against and charged to auto-debit wallets on the `ai_tokens`
+meter. A v1 config without one uses every auto-debit wallet.
 
 Workspace context participates in active-plan resolution and usage event
 metadata. It does not create a separate wallet balance scope: token balances

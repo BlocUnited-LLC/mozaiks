@@ -30,7 +30,7 @@ models:
         description: Whether runtime usage events auto-debit this wallet.
       allow_negative_balance:
         type: bool
-        description: Whether calls are still admitted after the balance is spent.
+        description: Whether spending may drive balance negative.
       depleted_balance:
         type: union
         variants: [TokenWalletRecovery, 'null']

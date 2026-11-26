@@ -928,11 +928,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
-- AI usage larger than the remaining token balance is charged in full. It was
-  refused and left the balance unchanged, so a small balance admitted calls
-  without limit. The balance now reads zero, further calls are denied, and later
-  credits repay the difference. Wallets declared with `allow_negative_balance`
-  still admit calls after their balance is spent.
+- AI usage larger than the remaining token balance now takes the rest of the
+  balance and stops further calls. It was refused and left the balance unchanged,
+  so a small balance admitted calls without limit. Usage is also charged when an
+  allowance sync fails, when an agent, workspace or app name looks like a secret
+  (`task-planner` contains `sk-`), and on a wallet that may go negative but was
+  never credited. A v1 app's other auto-debit wallets are no longer charged for
+  AI tokens when it declares an `ai_tokens` wallet.
 - Generated app container images now serve as an unprivileged `mozaiks` user
   (uid 10001) that owns `/app`, instead of as root, and write their logs under
   `/app/logs`. The generated `docker-compose.yml` also drops the obsolete

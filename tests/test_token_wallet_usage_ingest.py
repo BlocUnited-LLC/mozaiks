@@ -226,3 +226,45 @@ async def test_usage_ingest_is_noop_when_auto_debit_disabled(tmp_path: Path) -> 
     )
 
     assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_usage_is_charged_when_the_allowance_sync_fails(tmp_path: Path, caplog) -> None:
+    _write_subscriptions(tmp_path, auto_debit_usage=True)
+    charged: list[str] = []
+
+    class _Ledger:
+        async def ensure_plan_allowances(self, **kwargs):
+            raise ValueError("idempotency_key was reused with different token wallet entry data")
+
+        async def record_usage_debit(self, payload, *, wallet):
+            charged.append(wallet.wallet_id)
+
+    client = TokenWalletUsageIngestClient(ledger=_Ledger(), app_root=tmp_path)
+    await client.handle_usage_delta(
+        {"event_id": "usage_evt_1", "app_id": "app_1", "user_id": "user_1", "total_tokens": 25}
+    )
+    assert charged == ["ai_tokens"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_charge_is_logged_and_does_not_break_the_run(tmp_path: Path, monkeypatch) -> None:
+    _write_subscriptions(tmp_path, auto_debit_usage=True)
+    errors: list[str] = []
+    monkeypatch.setattr(
+        "mozaiksai.core.tokens.usage_ingest.logger.error",
+        lambda message, *args, **kwargs: errors.append(message % args),
+    )
+
+    class _Ledger:
+        async def ensure_plan_allowances(self, **kwargs):
+            return []
+
+        async def record_usage_debit(self, payload, *, wallet):
+            raise RuntimeError("database unavailable")
+
+    client = TokenWalletUsageIngestClient(ledger=_Ledger(), app_root=tmp_path)
+    await client.handle_usage_delta(
+        {"event_id": "usage_evt_1", "app_id": "app_1", "user_id": "user_1", "total_tokens": 25}
+    )
+    assert len(errors) == 1 and "usage_evt_1" in errors[0] and "database unavailable" in errors[0]
