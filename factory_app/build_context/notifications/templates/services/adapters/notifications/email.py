@@ -31,16 +31,18 @@ def _set_mailbox(message: EmailMessage, header: str, value: str) -> Address:
         message[header] = value
         parsed = message[header]
         addresses = parsed.addresses
-    except (MessageError, IndexError) as exc:
+    except (MessageError, IndexError, AttributeError) as exc:
+        # The standard parser raises AttributeError for some malformed groups.
         raise ValueError(f"{header} must be one complete mailbox address") from exc
     complete = (
         not parsed.defects
+        and len(parsed.groups) == 1
+        and parsed.groups[0].display_name is None
         and len(addresses) == 1
         and bool(addresses[0].username)
         and bool(addresses[0].domain)
-        # The header parser drops a trailing list separator, and the ";" that
-        # ends group syntax, without reporting a defect.
-        and value.strip()[-1:] not in {",", ";"}
+        # The header parser drops a final list separator without a defect.
+        and value[-1:] not in {",", ";"}
     )
     if not complete:
         raise ValueError(f"{header} must be one complete mailbox address")
