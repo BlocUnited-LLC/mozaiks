@@ -166,7 +166,14 @@ models:
       primary_actions:
         type: optional_list
         items: str
-        description: CRUD or workflow actions supported by the page.
+        description: >-
+          Actions a person can perform from this page. Match the controls in the
+          approved experience to the public module or workflow action IDs. On a
+          revision, include new interactions alongside the retained actions.
+          Creating a record and editing a selected record need distinct bindings
+          when both are in scope. Carry the selected record key, editable fields,
+          and corresponding actions into the page task's acceptance criteria.
+          Background-only result actions have no user control.
       ui_layout:
         type: union
         variants:
