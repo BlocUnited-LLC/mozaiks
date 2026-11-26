@@ -74,6 +74,7 @@ async def test_hydration_verifies_coverage_before_overlay_and_clears_a_failed_re
     monkeypatch.setattr(hydration, "design_revision_source", AsyncMock(return_value=artifact.id))
     monkeypatch.setattr(hydration, "read_revision_source", AsyncMock(return_value=(artifact, files)))
     ctx.update(generated_files={"modules/tasks/module.yaml": "unverified draft overlay"}, app_plan_ready=True,
+               upstream_workflow_bundle_artifact_version_id=ctx["workflow_bundle_artifact_version_id"],
                app_build_plan={"cached": True}, app_task_batch_items=[{"task_id": "previous"}], revision_result_module_coverage={})
     if corrupt:
         ctx["workflow_bundle_artifact_version_id"] = "other-workflow"
