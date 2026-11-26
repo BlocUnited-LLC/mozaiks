@@ -31,6 +31,7 @@ def revision_is_first_generation(context_variables: Any) -> bool:
         and context_variables.get("workflow_sequence") == "design_revision"
         and context_variables.get("artifact_kind") == "design_docs"
         and not context_variables.get("revision_source_artifact_version_id")
+        and not _requested_app_source_id(context_variables.get("refinement_request_meta"))
         and isinstance(binding, Mapping) and binding.get("phase") == "refinement"
     )
 
@@ -53,17 +54,22 @@ def _requested_app_source_id(request: Any) -> str | None:
     return source_id
 
 
+def revision_app_source_id(context_variables: Any) -> str | None:
+    """The explicitly pinned implementation or the app selected in the original request."""
+    selected = _requested_app_source_id(context_variables.get("refinement_request_meta"))
+    pinned = context_variables.get("revision_source_artifact_version_id")
+    if selected and pinned and selected != pinned:
+        raise ValueError("revision_baseline_selection_mismatch")
+    return selected or pinned
+
+
 def revision_source_artifact_id(context_variables: Any) -> str | None:
     """Keep the selected source stable after artifact_version_id becomes the result."""
     if context_variables.get("build_mode") != "revision":
         return None
     if revision_is_first_generation(context_variables):
         return None
-    source = context_variables.get("revision_source_artifact_version_id")
-    if not source and context_variables.get("workflow_sequence") in {"conceptual_replan", "full_rebuild"}:
-        # Rebuilds skip app hydration. Their journey ID advances on each upstream export.
-        source = _requested_app_source_id(context_variables.get("refinement_request_meta"))
-    source = source or context_variables.get("artifact_version_id")
+    source = revision_app_source_id(context_variables) or context_variables.get("artifact_version_id")
     return source if isinstance(source, str) and source else None
 
 
@@ -173,9 +179,12 @@ async def design_revision_source(context_variables: Any) -> str | None:
     """Select an implementation independently of the upstream design being revised."""
     binding = require_build_binding(context_variables)
     request = context_variables.get("refinement_request_meta")
+    if binding.phase != "refinement":
+        raise ValueError("revision_design_source_binding_missing")
+    if isinstance(request, Mapping) and request.get("build_family") == "app_bundle":
+        return revision_app_source_id(context_variables)
     if (
-        binding.phase != "refinement"
-        or context_variables.get("artifact_kind") != "design_docs"
+        context_variables.get("artifact_kind") != "design_docs"
         or not isinstance(request, Mapping)
         or request.get("build_family") != "design_docs"
         or not isinstance(request.get("build_record_id"), str)
@@ -217,7 +226,7 @@ async def read_accepted_design_app_files(context_variables: Any) -> tuple[BuildR
     if isinstance(request, Mapping) and request.get("build_family") == "design_docs":
         source_id = await design_revision_source(context_variables)
     else:
-        source_id = _requested_app_source_id(request) or context_variables.get("revision_source_artifact_version_id")
+        source_id = revision_app_source_id(context_variables)
     if not source_id:
         return None
     return await _read_revision_source(context_variables, source_id, require_accepted=True)
