@@ -10,10 +10,6 @@ import yaml
 
 from factory_app.workflows._shared.hook_utils import update_agent_section
 from factory_app.workflows._shared.revision_app_source import read_accepted_design_app_files
-from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
-    ManagedCapabilityTemplateError,
-    verified_selected_pack_sources,
-)
 from mozaiksai.core.artifacts.models import BuildRecord, resolve_canonical_bundle_entry
 from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
 from mozaiksai.core.runtime.persistence.collection_writes import canonical_write_input_schema
@@ -26,6 +22,7 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     canonical_write_action_id,
     collection_has_canonical_writes,
 )
+from mozaiksai.core.workflow.generator_support.module_role_grants import ReviewedPackIdentity
 from mozaiksai.core.workflow.generator_support.module_write_actions import collection_record_shape
 
 _HEADER = "[ACCEPTED APP MODULE ACTIONS]"
@@ -98,16 +95,22 @@ async def validate_implicit_revision_writes(context: Any, data_contract: dict[st
                 )
 
 
-def _selection_inventory(record: BuildRecord, modules: dict[str, ModuleDefinition], context: Any) -> str:
-    packs = verified_selected_pack_sources(
-        record.commit_metadata.metadata.get("capability_packs") or [], context_variables=context, recorded=True,
-    )
-    rows = [
-        {"pack_id": pack["pack_id"], "version": pack["version"], "digest": pack["digest"]} for pack in packs
-    ]
+def _selection_inventory(record: BuildRecord, modules: dict[str, ModuleDefinition]) -> str:
+    acceptance = record.commit_metadata.metadata.get("app_bundle_acceptance", {})
+    if not isinstance(acceptance, dict):
+        raise ValueError("Invalid app bundle acceptance metadata")
+    pins = acceptance.get("resolved_capability_packs")
+    rows: list[dict[str, Any]] = []
+    if pins is not None:
+        if not isinstance(pins, list) or not all(isinstance(pin, dict) for pin in pins):
+            raise ValueError("Invalid accepted pack inventory")
+        for pin in pins:
+            identity = ReviewedPackIdentity.model_validate({key: pin.get(key) for key in ReviewedPackIdentity.model_fields})
+            rows.append(identity.model_dump())
+    summary = "This build has no recorded pack inventory." if pins is None else f"Verified reusable packs: {len(rows)}."
     for module in modules.values():
         rows.append({"module": module.module.id, "actions": [action.id for action in module.actions]})
-    lines = [f"Verified reusable packs: {len(packs)}. Module and action identifiers describe implemented capabilities."]
+    lines = [f"{summary} Module and action identifiers describe implemented capabilities."]
     remaining = _MAX_SELECTION_CHARS - len(lines[0])
     for index, row in enumerate(rows):
         line = json.dumps(row, separators=(",", ":"), ensure_ascii=False)
@@ -132,7 +135,7 @@ async def inject_accepted_module_actions(agent: Any, messages: list[dict[str, An
         modules = _accepted_modules(files)
         source_label = f"Accepted app record {record.id}. Bundle digest: sha256:{resolve_canonical_bundle_entry(record).sha256}."
         if role == "DesignPackSelectionAgent":
-            update_agent_section(agent, _HEADER, source_label + "\n" + _selection_inventory(record, modules, context))
+            update_agent_section(agent, _HEADER, source_label + "\n" + _selection_inventory(record, modules))
             return
         lines = []
         total = omitted = 0
@@ -157,6 +160,6 @@ async def inject_accepted_module_actions(agent: Any, messages: list[dict[str, An
         )
         if omitted:
             body += f"\n{omitted} additional action signatures exceeded the prompt limit. Their omission does not authorize removal."
-    except (OSError, ValueError, yaml.YAMLError, ManagedCapabilityTemplateError) as exc:
+    except (OSError, ValueError, yaml.YAMLError) as exc:
         body = f"The selected source inventory could not be verified ({type(exc).__name__}). Existing capabilities are unknown."
     update_agent_section(agent, _HEADER, body)

@@ -75,10 +75,10 @@ async def test_design_prompt_projects_the_original_accepted_actions_after_an_ups
     _replace_archive(baseline, {"modules/records/module.yaml": yaml.safe_dump(manifest)})
     baseline.artifact.lifecycle_status = "current"
     baseline.artifact.validation_status = "passed"
-    baseline.artifact.commit_metadata.metadata["capability_packs"] = [
-        {"capability_pack_id": "content", "capability_source": "generated_module"},
-        *pin_pack_choices(baseline.context, ["files"]),
-    ]
+    [accepted_pack] = pin_pack_choices(baseline.context, ["files"])
+    baseline.artifact.commit_metadata.metadata["app_bundle_acceptance"] = {
+        "resolved_capability_packs": [{**accepted_pack, "source": "local_component"}],
+    }
     agent = Capture()
     agent.context_variables = {**baseline.context, "workflow_sequence": "full_rebuild", "artifact_version_id": "upstream-export",
                                "refinement_request_meta": {"build_family": "app_bundle", "build_record_id": baseline.artifact.id}}
@@ -88,13 +88,13 @@ async def test_design_prompt_projects_the_original_accepted_actions_after_an_ups
     rows = [json.loads(line) for line in agent.system_message.splitlines() if line.startswith("{")]
     if role == "DesignPackSelectionAgent":
         pack, module = rows
-        assert pack["pack_id"] == "files" and pack["digest"].startswith("sha256:")
+        assert pack == accepted_pack
         assert module == {"module": "records", "actions": ["create_record"]}
         assert "source_path" not in agent.system_message
-        baseline.artifact.commit_metadata.metadata["capability_packs"][1]["digest"] = "sha256:" + "0" * 64
+        baseline.artifact.commit_metadata.metadata["app_bundle_acceptance"]["resolved_capability_packs"] = [{"digest": "invalid"}]
         await inject_accepted_module_actions(agent, [])
         assert "could not be verified" in agent.system_message and "create_record" not in agent.system_message
-        baseline.artifact.commit_metadata.metadata["capability_packs"] = []
+        baseline.artifact.commit_metadata.metadata["app_bundle_acceptance"]["resolved_capability_packs"] = []
     else:
         [row] = rows
         assert row["module"] == "records" and row["action"] == "create_record"
@@ -113,6 +113,38 @@ async def test_design_prompt_projects_the_original_accepted_actions_after_an_ups
     agent.context_variables = {"build_mode": "genesis"}
     await inject_accepted_module_actions(agent, [])
     assert agent.system_message == "Design this app."
+
+
+async def test_pack_selector_cannot_relabel_an_accepted_generated_module_after_install(baseline, tmp_path, monkeypatch):
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        install_verified_local_pack,
+    )
+    from factory_app.workflows.DesignDocs.tools.hook_accepted_module_actions import (
+        inject_accepted_module_actions,
+    )
+
+    baseline.artifact.lifecycle_status = "current"
+    baseline.artifact.validation_status = "passed"
+    metadata = baseline.artifact.commit_metadata.metadata
+    metadata["capability_packs"] = [{"capability_pack_id": "greetings", "capability_source": "generated_module"}]
+    metadata["app_bundle_acceptance"] = {"resolved_capability_packs": []}
+    context = {**baseline.context, "build_context_root": str(tmp_path),
+               "refinement_request_meta": {"build_family": "app_bundle", "build_record_id": baseline.artifact.id}}
+    agent = SimpleNamespace(name="DesignPackSelectionAgent", context_variables=context, system_message="")
+    agent.update_system_message = lambda message: setattr(agent, "system_message", message)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(tmp_path))
+    await inject_accepted_module_actions(agent, [])
+    before = agent.system_message
+    assert "Verified reusable packs: 0" in before
+
+    install_verified_local_pack(pack_source_path=Path(__file__).parent / "fixtures/community_packs/greetings",
+                                build_context_root=tmp_path)
+    await inject_accepted_module_actions(agent, [])
+    assert agent.system_message == before
+
+    del metadata["app_bundle_acceptance"]
+    await inject_accepted_module_actions(agent, [])
+    assert "no recorded pack inventory" in agent.system_message and '"pack_id"' not in agent.system_message
 
 
 def _replace_archive(baseline, additions):

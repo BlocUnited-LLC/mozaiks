@@ -79,15 +79,23 @@ def inject_pack_selection_context(agent: Any, messages: list[dict[str, Any]]) ->
         if recipe.get("requires_monetization") and context.get("monetization_enabled") is not True:
             continue
         catalog[pack_id].setdefault("app_recipes", {})[domain] = condition
+    if context.get("build_mode") == "revision":
+        selection_rule = (
+            "Start with the accepted reusable pack IDs. Compare the requested change with the accepted module actions. "
+            "Add a new pack only if a capability in its catalog entry directly supplies the newly requested behavior. "
+            "An offering that duplicates an existing capability does not address the change. "
+            "Use accepted pack IDs for app-owned edits and workflows when no new offering provides that behavior. "
+        )
+    else:
+        selection_rule = (
+            "Reason from the approved concept_blueprint, concept_overview and monetization_enabled. "
+            "Use app_recipes when their stated behavior matches the approved requirements. "
+        )
     update_agent_section(
         agent, "[AVAILABLE PACK CATALOG]",
-        "These verified offerings are available, not selected. For a new app, reason from the approved "
-        "concept_blueprint, concept_overview and monetization_enabled. For a revision, start from the "
-        "accepted app's reusable packs and implemented actions. Use the requested change to identify "
-        "any additional capabilities the existing app needs. Return DesignPackSelection "
+        "These verified offerings are available, not selected. " + selection_rule + "Return DesignPackSelection "
         "with the exact reusable pack_ids this app needs; [] explicitly selects none. "
         "Include declared dependencies; repair any missing dependency named in selection feedback. "
-        "Use app_recipes when their stated behavior matches the approved requirements. "
         "A domain label alone does not select a pack. Leave missing app-owned pieces to the design. "
         "Capability-family hints are not pack IDs. "
         "Do not select managed billing for a free/non-monetized app or treat an available provider "

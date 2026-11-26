@@ -32,6 +32,22 @@ persistence = inventory.persistence
 selector = handoff.selector
 
 
+@pytest.mark.parametrize("mode,expected", [
+    ("revision", "directly supplies the newly requested behavior"),
+    ("genesis", "Use app_recipes when their stated behavior matches"),
+])
+def test_revision_catalog_matches_offerings_to_new_behavior(monkeypatch, mode, expected):
+    hook = hook_selected_pack_design_context
+    available = {"messaging": {"capabilities": [{"capability_id": "messaging.inbox"}]}}
+    monkeypatch.setattr(hook, "available_pack_rows", lambda _: available)
+    agent = SimpleNamespace(name="DesignPackSelectionAgent", context_variables={"build_mode": mode}, system_message="")
+    agent.update_system_message = lambda message: setattr(agent, "system_message", message)
+    hook.inject_pack_selection_context(agent, [])
+    assert expected in agent.system_message
+    [offering] = json.loads(next(line for line in agent.system_message.splitlines() if line.startswith("[{")))
+    assert offering["pack_id"] == "messaging" and offering["capabilities"] == available["messaging"]["capabilities"]
+
+
 @pytest.mark.parametrize("domains", [None, {"invalid": {"pack_recipe": {"pack_id": "social"}}}])
 def test_incomplete_recipe_cannot_hide_a_verified_offering(monkeypatch, domains):
     hook = hook_selected_pack_design_context

@@ -765,8 +765,10 @@ agents:
       hints. Do not select managed billing for a free/non-monetized app.
       On design re-entry, use the current refinement_request and revision_scope.
       Keep accepted reusable packs that the revision still needs. Extend an existing
-      module when the change concerns its records or actions. Select another pack
-      when the requested change introduces behavior the accepted app does not provide.
+      module when the change concerns its records or actions. Add a pack only if
+      one of its catalog capabilities provides newly requested behavior. When
+      the new behavior is an app-owned edit or workflow and no offering supplies
+      it, return the accepted pack IDs, including an empty list when appropriate.
       For brownfield adoption and refinement, preserve the supplied adoption_plan,
       ownership_boundary and revision_scope; do not replace existing owned surfaces
       merely because a reusable offering exists.
