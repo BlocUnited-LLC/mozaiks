@@ -54,6 +54,11 @@ _DEBIT_OPERATIONS = {"usage_debit", "debit", "adjustment_debit"}
 # contention at all.
 _RESERVATION_ATTEMPTS = 5
 
+# Attempts to take what a balance holds for one usage charge. A lost swap means
+# another movement committed on this balance, so contention ends as the balance
+# runs out; the bound only stops a pathological loop.
+_SETTLEMENT_ATTEMPTS = 64
+
 
 class TokenWalletReservationUnavailable(RuntimeError):
     """The durable reservation for a movement could not be acquired.
@@ -77,6 +82,12 @@ STALE_SUBJECT_REVISION_REASON = "stale_subject_revision"
 # entitlement subject. Nested under one key so the balance keeps exactly one
 # ordering surface no matter how many subjects share a wallet scope.
 _SUBJECT_REVISIONS_FIELD = "subject_revisions"
+
+
+# Sub-document on the balance holding what each partly funded usage charge took.
+# It is written by the same update that moves the balance, so an interrupted
+# charge can still be finalized with the amount that really moved.
+_PARTIAL_SETTLEMENTS_FIELD = "partial_settlements"
 
 
 def _subject_revision_path(subject_key: str | None) -> str | None:
@@ -207,6 +218,18 @@ def _safe_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
     return value
 
 
+def _usage_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Keep a secret-shaped value out of the ledger without losing the charge.
+
+    Names the app chose reach this metadata: an agent called ``task-planner``
+    contains the ``sk-`` marker.
+    """
+    return {
+        key: "[redacted]" if _forbidden_metadata_path({key: value}) else value
+        for key, value in metadata.items()
+    }
+
+
 def _scope_for(
     *,
     app_id: str,
@@ -325,6 +348,7 @@ def public_balance(balance: dict[str, Any] | None, scope: TokenWalletScope | Non
     data.pop("applied_entry_ids", None)
     # Internal ordering state, never part of the public balance surface.
     data.pop(_SUBJECT_REVISIONS_FIELD, None)
+    data.pop(_PARTIAL_SETTLEMENTS_FIELD, None)
     for key in ("balance", "total_allocated", "total_credited", "total_spent", "total_refunded", "entry_count"):
         data[key] = _positive_int(data.get(key))
     if "_id" in data:
@@ -470,8 +494,13 @@ class TokenWalletLedger:
         usage_event_id: str | None = None,
         subject_key: str | None = None,
         subject_revision: int | None = None,
+        settle_available: bool = False,
     ) -> TokenWalletEntryResult:
         """Record one idempotent wallet movement.
+
+        ``settle_available`` lets a debit larger than the balance take what the
+        balance still holds. The entry keeps the requested ``amount`` and
+        reports what was taken as ``settled_amount``.
 
         ``subject_key`` / ``subject_revision`` are an optional ordering fence.
         When both are supplied, the movement commits only while this revision
@@ -609,18 +638,34 @@ class TokenWalletLedger:
         if fenced:
             update_document["$max"] = {revision_path: subject_revision}
 
+        # Usage on a wallet that may go negative is owed even when nothing was
+        # ever credited to it.
+        upsert = direction == "credit" or (
+            operation == "usage_debit" and allow_negative_balance
+        )
         try:
             balance_doc = await balances.find_one_and_update(
                 update_filter,
                 update_document,
-                upsert=direction == "credit",
+                upsert=upsert,
                 return_document=ReturnDocument.AFTER,
             )
         except DuplicateKeyError:
-            # An upserting credit whose filter missed because the balance
-            # already exists: the deterministic _id collides. Treat it as a
-            # miss and classify below.
-            balance_doc = None
+            # The deterministic _id collides: either this entry is already
+            # applied, which is classified below, or another movement created
+            # the balance first and this one now applies to it.
+            balance_doc = await balances.find_one_and_update(
+                update_filter,
+                update_document,
+                return_document=ReturnDocument.AFTER,
+            )
+        if balance_doc is None and settle_available and direction == "debit":
+            balance_doc = await self._settle_available(
+                balances,
+                update_filter,
+                entry_id=entry_id,
+                amount=resolved_amount,
+            )
 
         if balance_doc is None:
             current_balance = await balances.find_one({"_id": scope.balance_id})
@@ -681,6 +726,45 @@ class TokenWalletLedger:
             balance=public_balance(balance_doc, scope),
         )
 
+    async def _settle_available(
+        self,
+        balances: Any,
+        update_filter: dict[str, Any],
+        *,
+        entry_id: str,
+        amount: int,
+    ) -> dict[str, Any] | None:
+        """Take what the balance holds, or None when it holds nothing.
+
+        Each attempt swaps against the exact balance it read, so a concurrent
+        credit or debit makes it look again instead of taking a stale amount.
+        """
+        for _attempt in range(_SETTLEMENT_ATTEMPTS):
+            current = await balances.find_one({"_id": update_filter["_id"]}) or {}
+            available = int(current.get("balance") or 0)
+            if available <= 0 or entry_id in set(current.get("applied_entry_ids") or []):
+                return None
+            charged = min(available, amount)
+            settled = await balances.find_one_and_update(
+                {**update_filter, "balance": available},
+                {
+                    "$set": {
+                        "updated_at": _now(),
+                        f"{_PARTIAL_SETTLEMENTS_FIELD}.{entry_id}": charged,
+                    },
+                    "$inc": {"balance": -charged, "total_spent": charged, "entry_count": 1},
+                    "$addToSet": {"applied_entry_ids": entry_id},
+                },
+                return_document=ReturnDocument.AFTER,
+            )
+            if settled is not None:
+                return dict(settled)
+        logger.error(
+            "token usage could not take the remaining balance: balance_id=%s entry_id=%s",
+            update_filter["_id"], entry_id,
+        )
+        return None
+
     async def _mark_entry_applied(
         self,
         entries: Any,
@@ -703,6 +787,7 @@ class TokenWalletLedger:
         seed = {key: value for key, value in entry.items() if key != "_id"}
         for key in ("status", "updated_at"):
             seed.pop(key, None)
+        settled_amount = (balance.get(_PARTIAL_SETTLEMENTS_FIELD) or {}).get(entry_id)
         await entries.update_one(
             {"_id": entry_id},
             {
@@ -711,6 +796,7 @@ class TokenWalletLedger:
                     "balance_after": int(balance.get("balance") or 0),
                     "applied_at": now,
                     "updated_at": now,
+                    **({} if settled_amount is None else {"settled_amount": settled_amount}),
                 },
                 "$setOnInsert": seed,
             },
@@ -787,6 +873,7 @@ class TokenWalletLedger:
         metadata: dict[str, Any] | None = None,
         allow_negative_balance: bool = False,
         usage_event_id: str | None = None,
+        settle_available: bool = False,
     ) -> TokenWalletEntryResult:
         return await self.record_entry(
             app_id=app_id,
@@ -802,6 +889,7 @@ class TokenWalletLedger:
             metadata=metadata,
             allow_negative_balance=allow_negative_balance,
             usage_event_id=usage_event_id,
+            settle_available=settle_available,
         )
 
     async def query_balance(
@@ -1234,8 +1322,14 @@ class TokenWalletLedger:
         payload: dict[str, Any],
         *,
         wallet: TokenWalletDef,
-        allow_negative_balance: bool | None = None,
     ) -> TokenWalletEntryResult | None:
+        """Charge usage that has already happened.
+
+        The model call is over, so refusing the charge would not undo it: it
+        would leave the balance in place to admit the next call for free. A
+        call larger than the balance takes the whole balance, and the guard
+        then denies further calls. The shortfall is not carried as debt.
+        """
         amount = _positive_int(payload.get("total_tokens"))
         if amount <= 0:
             return None
@@ -1255,7 +1349,7 @@ class TokenWalletLedger:
             preferred_scope=wallet.scope,
             source="runtime_usage",
             reason="LLM token usage",
-            metadata={
+            metadata=_usage_metadata({
                 "event_id": event_id,
                 "chat_id": _text(payload.get("chat_id")) or None,
                 "workspace_id": _text(payload.get("workspace_id")) or None,
@@ -1265,13 +1359,10 @@ class TokenWalletLedger:
                 "prompt_tokens": _positive_int(payload.get("prompt_tokens")),
                 "completion_tokens": _positive_int(payload.get("completion_tokens")),
                 "total_tokens": amount,
-            },
-            allow_negative_balance=(
-                wallet.allow_negative_balance
-                if allow_negative_balance is None
-                else bool(allow_negative_balance)
-            ),
+            }),
+            allow_negative_balance=wallet.allow_negative_balance,
             usage_event_id=event_id,
+            settle_available=True,
         )
 
 

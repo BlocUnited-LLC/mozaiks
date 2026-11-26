@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
@@ -10,6 +11,7 @@ from pymongo.errors import DuplicateKeyError
 from mozaiksai.core.data.persistence.namespaces import RuntimeCollections
 from mozaiksai.core.runtime.app.entitlements import ProductPlanSelection
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+from mozaiksai.core.tokens.guard import TokenUsageGuard
 from mozaiksai.core.tokens.plan_resolution import resolve_v2_wallet_plans
 from mozaiksai.core.tokens.wallet import TokenWalletLedger
 
@@ -84,7 +86,11 @@ class _Collection:
             for key, value in (update.get("$setOnInsert") or {}).items():
                 doc[key] = deepcopy(value)
         for key, value in (update.get("$set") or {}).items():
-            doc[key] = deepcopy(value)
+            *parents, leaf = key.split(".")
+            target = doc
+            for parent in parents:
+                target = target.setdefault(parent, {})
+            target[leaf] = deepcopy(value)
         for key, value in (update.get("$inc") or {}).items():
             doc[key] = int(doc.get(key) or 0) + int(value)
         for key, value in (update.get("$addToSet") or {}).items():
@@ -667,6 +673,188 @@ async def test_usage_debit_uses_event_id_for_idempotency() -> None:
     balance = await ledger.query_balance(app_id="app_1", user_id="user_1")
     assert balance["balance"] == 75
     assert balance["total_spent"] == 25
+
+
+def _usage(event_id: str, total_tokens: int, **extra: Any) -> dict[str, Any]:
+    return {"event_id": event_id, "app_id": "app_1", "user_id": "user_1", "total_tokens": total_tokens, **extra}
+
+
+def _without_allowance(**wallet: Any) -> SubscriptionsConfig:
+    data = _subscriptions_config().model_dump(mode="json")
+    data["plans"][0].update(token_allowances=[], usage_limits=[])
+    data["token_wallets"][0].update(wallet)
+    return SubscriptionsConfig.model_validate(data)
+
+
+@pytest.mark.asyncio
+async def test_usage_larger_than_the_balance_takes_the_rest_and_stops_further_calls() -> None:
+    """A refused post-call charge would leave the balance to admit calls forever."""
+    ledger = _ledger()
+    config = _without_allowance()
+    wallet = config.token_wallets[0]
+    guard = TokenUsageGuard(config=config, ledger=ledger)
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=500, idempotency_key="payment:1")
+
+    async def admitted() -> bool:
+        return (await guard.check(app_id="app_1", user_id="user_1", required_tokens=1)).allowed
+
+    assert await admitted()
+    for _replay in range(2):
+        result = await ledger.record_usage_debit(_usage("call_1", 20_000), wallet=wallet)
+        assert result is not None and result.status == "applied"
+        assert (result.entry["amount"], result.entry["settled_amount"]) == (20_000, 500)
+        assert "partial_settlements" not in result.balance
+        assert (result.balance["balance"], result.balance["total_spent"]) == (0, 500)
+    assert not await admitted()
+
+    late = await ledger.record_usage_debit(_usage("call_2", 20_000), wallet=wallet)
+    assert late is not None and late.status == "rejected"
+
+    # No debt: a later purchase is whole, and an unused one can be taken back.
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=1_000, idempotency_key="payment:2")
+    assert await admitted()
+    refund = await ledger.debit(app_id="app_1", user_id="user_1", amount=1_000, idempotency_key="refund:2")
+    assert (refund.status, refund.balance["balance"]) == ("applied", 0)
+
+
+@pytest.mark.asyncio
+async def test_calls_already_running_when_the_balance_runs_out_share_what_is_left() -> None:
+    ledger = _ledger()
+    wallet = _without_allowance().token_wallets[0]
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=500, idempotency_key="payment:1")
+    results = await asyncio.gather(*(
+        ledger.record_usage_debit(_usage(f"running_{index}", 400), wallet=wallet) for index in range(3)
+    ))
+    assert sorted(result.status for result in results) == ["applied", "applied", "rejected"]
+    balance = await ledger.query_balance(app_id="app_1", user_id="user_1")
+    assert (balance["balance"], balance["total_spent"]) == (0, 500)
+
+
+@pytest.mark.asyncio
+async def test_an_oversized_charge_keeps_trying_while_other_charges_land() -> None:
+    """Losing the swap to other writers is not a reason to leave the call uncharged."""
+    database = _Database()
+    ledger = TokenWalletLedger(database=database)
+    wallet = _without_allowance().token_wallets[0]
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=500, idempotency_key="payment:1")
+    balances = database[RuntimeCollections.RUNTIME_TOKEN_WALLET_BALANCES]
+    original_find_one = balances.find_one
+    interruptions = {"left": 10}
+
+    async def find_one_then_another_writer_lands(query, projection=None):
+        found = await original_find_one(query, projection)
+        if found is not None and interruptions["left"] and "balance" in found:
+            interruptions["left"] -= 1
+            stored = next(iter(balances.docs.values()))
+            stored["balance"] -= 5
+            stored["total_spent"] = int(stored.get("total_spent") or 0) + 5
+        return found
+
+    balances.find_one = find_one_then_another_writer_lands
+    result = await ledger.record_usage_debit(_usage("big", 20_000), wallet=wallet)
+    assert interruptions["left"] == 0
+    assert result is not None and result.status == "applied"
+    assert result.balance["balance"] == 0
+    assert result.entry["settled_amount"] == 500 - 5 * 10
+
+
+@pytest.mark.asyncio
+async def test_a_replayed_partial_charge_into_a_funded_wallet_is_not_retaken(monkeypatch) -> None:
+    ledger = _ledger()
+    wallet = _without_allowance().token_wallets[0]
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=500, idempotency_key="payment:1")
+    await ledger.record_usage_debit(_usage("big", 20_000), wallet=wallet)
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=9_000, idempotency_key="payment:2")
+    errors: list[str] = []
+    monkeypatch.setattr(
+        "mozaiksai.core.tokens.wallet.logger.error",
+        lambda message, *args, **kwargs: errors.append(message % args),
+    )
+    # A replay that reaches settlement before reading its finished entry.
+    entries = ledger._database[RuntimeCollections.RUNTIME_TOKEN_WALLET_ENTRIES]  # type: ignore[index]
+    entry = next(doc for doc in entries.docs.values() if doc.get("usage_event_id") == "big")
+    entry["status"] = "pending"
+    result = await ledger.record_usage_debit(_usage("big", 20_000), wallet=wallet)
+    assert result is not None and result.status == "applied" and result.entry["settled_amount"] == 500
+    assert (await ledger.query_balance(app_id="app_1", user_id="user_1"))["balance"] == 9_000
+    assert errors == []
+
+
+@pytest.mark.asyncio
+async def test_a_charge_interrupted_after_the_balance_moved_is_finalized_with_what_moved(monkeypatch) -> None:
+    ledger = _ledger()
+    wallet = _without_allowance().token_wallets[0]
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=500, idempotency_key="payment:1")
+
+    async def interrupted(*_args, **_kwargs):
+        raise RuntimeError("process stopped")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ledger, "_mark_entry_applied", interrupted)
+        with pytest.raises(RuntimeError):
+            await ledger.record_usage_debit(_usage("call_1", 20_000), wallet=wallet)
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=9_000, idempotency_key="payment:2")
+    result = await ledger.record_usage_debit(_usage("call_1", 20_000), wallet=wallet)
+    assert result is not None and result.entry["settled_amount"] == 500
+    assert (await ledger.query_balance(app_id="app_1", user_id="user_1"))["balance"] == 9_000
+
+
+@pytest.mark.asyncio
+async def test_a_requested_debit_still_cannot_overdraw() -> None:
+    ledger = _ledger()
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=10, idempotency_key="payment:1")
+    result = await ledger.debit(app_id="app_1", user_id="user_1", amount=11, idempotency_key="spend:1")
+    assert (result.status, result.balance["balance"]) == ("rejected", 10)
+
+
+@pytest.mark.asyncio
+async def test_usage_is_owed_on_a_wallet_that_may_go_negative_and_was_never_credited() -> None:
+    database = _Database()
+    ledger = TokenWalletLedger(database=database)
+    wallet = _without_allowance(allow_negative_balance=True).token_wallets[0]
+    for index in range(2):
+        result = await ledger.record_usage_debit(_usage(f"call_{index}", 20_000), wallet=wallet)
+        assert result is not None and result.status == "applied"
+    stored = await database[RuntimeCollections.RUNTIME_TOKEN_WALLET_BALANCES].find_one({})
+    assert (stored["balance"], stored["total_spent"]) == (-40_000, 40_000)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["agent_name", "workflow_name", "workspace_id", "chat_id"])
+async def test_a_name_that_looks_like_a_secret_does_not_make_usage_free(field: str) -> None:
+    ledger = _ledger()
+    wallet = _without_allowance().token_wallets[0]
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=500, idempotency_key="payment:1")
+    result = await ledger.record_usage_debit(_usage("call_1", 100, **{field: "task-planner"}), wallet=wallet)
+    assert result is not None and result.balance["balance"] == 400
+    assert result.entry["metadata"][field] == "[redacted]"
+
+
+@pytest.mark.parametrize(("meters", "expected"), [
+    (["ai_tokens", "image_credits"], ["w0"]),
+    (["image_credits", "ai_tokens"], ["w1"]),
+    (["custom_tokens"], ["w0"]),
+])
+def test_v1_llm_usage_uses_the_ai_tokens_wallet_when_there_is_one(meters, expected) -> None:
+    data = _without_allowance().model_dump(mode="json")
+    data["token_wallets"] = [
+        {"wallet_id": f"w{index}", "usage_meter_id": meter, "auto_debit_usage": True}
+        for index, meter in enumerate(meters)
+    ]
+    config = SubscriptionsConfig.model_validate(data)
+    assert [wallet.wallet_id for wallet in config.llm_usage_wallets] == expected
+
+
+@pytest.mark.asyncio
+async def test_an_empty_unrelated_wallet_does_not_block_a_funded_user() -> None:
+    data = _without_allowance().model_dump(mode="json")
+    data["token_wallets"].append(
+        {"wallet_id": "image_credits", "unit": "credits", "usage_meter_id": "image_credits", "auto_debit_usage": True}
+    )
+    config = SubscriptionsConfig.model_validate(data)
+    ledger = _ledger()
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=500, idempotency_key="payment:1")
+    assert (await TokenUsageGuard(config=config, ledger=ledger).check(app_id="app_1", user_id="user_1")).allowed
 
 
 @pytest.mark.asyncio
