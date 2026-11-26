@@ -104,6 +104,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Notifications pack `0.1.16`: an email the SMTP server accepted no longer
+  reports failure when the connection then closes badly, so a retry does not
+  send it twice. Group and trailing-separator addresses and non-ASCII
+  credentials are refused, and requests for push or SMS are reported as not
+  included.
 - Apps that select the notifications pack can send email through any SMTP
   service. Self-hosted operators and managed hosts set the same `SMTP_*` names,
   which the generated env examples and deployment manifest now list. The pack's

@@ -262,9 +262,6 @@ def test_notification_settings_service_does_not_call_adapters_directly() -> None
     assert "send_email" not in service, (
         "service.py must not call send_email directly — delivery is triggered by reactions"
     )
-    assert "send_push" not in service, (
-        "service.py must not call send_push directly — delivery is triggered by reactions"
-    )
 
 
 # ---------------------------------------------------------------------------
