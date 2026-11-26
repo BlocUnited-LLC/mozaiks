@@ -1129,7 +1129,7 @@ def prepare_workflow_bundle_repair(
         issue_lines = "\n".join(f"- {issue}" for issue in workflow_issues[workflow_name])
         # The worker has a fresh conversation. Show the reported YAML from this
         # workflow's most recent candidate, keeping prompt and file sizes bounded.
-        snippets = {}
+        snippets: dict[str, str] = {}
         for path, content in _files_by_name(entries_by_name.get(workflow_name, {})).items():
             if len(snippets) < 3 and path.endswith(".yaml") and path in issue_lines:
                 snippets[path] = content[:1800]
