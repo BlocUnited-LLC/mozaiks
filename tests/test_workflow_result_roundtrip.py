@@ -5,6 +5,7 @@ import logging
 import os
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import httpx
@@ -97,6 +98,35 @@ def test_triggered_content_reaches_result_agent_through_its_declared_input(tmp_p
     view = load_context_variables_config(config).agents[AGENT].variables
     prompt = apply_context_exposures(agent["system_message"], [], admitted, view)
     assert event["payload"]["title"] in prompt
+
+
+async def test_public_chat_start_uses_caller_authority(monkeypatch, request):
+    from mozaiksai.hosts import platform
+
+    auth = request.getfixturevalue("http_runtime")
+    definitions = {
+        "event_payload": {"type": "object", "writer_ids": ["transition_router"]},
+        "topic": {"type": "string", "writer_ids": ["caller_input"]},
+    }
+    monkeypatch.setattr(workflow_manager, "get_config", lambda _: {"context_variables": {"definitions": definitions}})
+    monkeypatch.setattr(platform, "get_ordered_workflow_names", lambda: [WORKFLOW])
+    monkeypatch.setattr(platform, "get_platform_hooks", lambda: auth.hooks)
+    monkeypatch.setattr(platform.runtime_app, "_chat_coll", AsyncMock())
+    monkeypatch.setattr(platform.persistence_manager, "get_or_assign_cache_seed", AsyncMock(return_value=1))
+    create = AsyncMock()
+    monkeypatch.setattr(platform, "create_routed_chat_session", create)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=platform.app), base_url="http://test") as api:
+        path = f"/api/chats/{APP}/{WORKFLOW}/start"
+        headers = auth.token("owner", "workspace")
+        denied = await api.post(path, headers=headers, json={"context_variables": {"event_payload": {"title": "demo"}}})
+        assert denied.status_code == 400, denied.text
+        assert denied.json()["detail"] == {"code": "CONTEXT_AUTHORITY_REJECTED"}
+        create.assert_not_awaited()
+        started = await api.post(path, headers=headers, json={"context_variables": {"topic": "weekend"}})
+        assert started.status_code == 200, started.text
+        create.assert_awaited_once()
+        assert create.await_args.kwargs["context_variables"] == {"topic": "weekend"}
 
 
 async def deliver_result(chat_id: str, actor: str, value: str, turn: int):

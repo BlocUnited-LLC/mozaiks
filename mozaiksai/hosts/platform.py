@@ -89,6 +89,7 @@ from mozaiksai.core.session.launcher import (
     validate_context_for_workflow,
 )
 from mozaiksai.core.transport.ui_tools import project_ui_tool_response_state
+from mozaiksai.core.workflow.context.authority import CALLER_INPUT_WRITER, ContextAuthorityError
 from mozaiksai.core.workflow.paths import candidate_app_workflows_roots
 from mozaiksai.hosts import runtime as runtime_app
 from mozaiksai.hosts.source_path_policy import authorize_http_workflow_source_paths
@@ -2506,7 +2507,10 @@ async def start_chat(
     force_new = str(data.get("force_new", "false")).lower() in {"1", "true", "yes", "on"}
     requested_context = data.get("context_variables") if isinstance(data.get("context_variables"), dict) else {}
     authorize_http_workflow_source_paths(requested_context, principal=principal)
-    context_variables = validate_context_for_workflow(workflow_name, requested_context)
+    try:
+        context_variables = validate_context_for_workflow(workflow_name, requested_context, writer_id=CALLER_INPUT_WRITER)
+    except ContextAuthorityError as exc:
+        raise HTTPException(status_code=400, detail={"code": "CONTEXT_AUTHORITY_REJECTED"}) from exc
     trigger_meta = data.get("trigger_meta") if isinstance(data.get("trigger_meta"), dict) else {}
 
     # Factory build sessions use their existing registry-bound model.
