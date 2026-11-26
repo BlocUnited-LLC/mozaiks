@@ -332,14 +332,13 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
                 ownership["authored"],
             ))
         lines.append(
-            "module_contract.python_stubs, downstream_python_defaults, and current_build_task.owned_paths "
-            "describe the final artifact inventory, not a request to author every file. "
-            "Implement only model-owned source; policy.py is rendered from the approved data_contract. "
-            "Do not emit a comment-only or pass stub for a code-rendered artifact. "
-            "Keep its planned path so the canonical renderer can fulfill that task's ownership."
+            "The approved plan and module_contract.python_stubs describe the final artifact inventory, not a request to author every file. "
+            "Return only model-owned paths from current_build_task.owned_paths. "
+            "Factory fulfills factory_rendered_paths from data_contract, including any acceptance criteria about the policy. "
+            "Do not emit a comment-only or pass stub for a code-rendered artifact."
         )
         policy_paths = [
-            str(path) for path in task.get("owned_paths") or []
+            str(path) for path in task.get("factory_rendered_paths", task.get("owned_paths")) or []
             if str(path).endswith("/backend/policy.py")
         ]
         lines.extend(_format_list_block(

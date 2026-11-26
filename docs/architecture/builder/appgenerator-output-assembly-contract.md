@@ -293,12 +293,13 @@ ERROR with the task, chat and traceback (`TASK_OUTPUT_PROCESSING_FAILED` while
 processing an output, `TASK_EXECUTION_FAILED` otherwise). It is not reclassified
 as a repairable output error.
 
-ServiceAgent's declared `python_stubs` and task `owned_paths` describe the final
-backend inventory, including code-rendered artifacts. Its prompt identifies
-task-owned `policy.py` paths as renderer-owned: omit them from `python_files`
-and `code_files`, including comment-only placeholders, while retaining the
-planned paths. Existing admission still rejects authored policy source; no
-source is silently dropped and persistence remains the enforcement owner.
+The approved business-services task keeps the final backend inventory in
+`owned_paths`. At AG2 dispatch, Factory moves each canonical module
+`backend/policy.py` from the worker's `owned_paths` into its
+`factory_rendered_paths`. The same split reaches the system context and
+the task message. Factory renders the policy from the data contract and
+checks the completed output against the full approved inventory.
+Admission rejects a worker-authored policy that differs from the renderer.
 
 `config/subscriptions.yaml` is never model work either. Assembly writes it
 from the approved subscription contract (`materialize_app_config_contracts`,

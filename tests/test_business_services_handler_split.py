@@ -32,6 +32,7 @@ from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow import task_batches
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge, _compose_prompt_sections
 from mozaiksai.core.workflow.context.frozen import detach
+from mozaiksai.core.workflow.generator_support.module_policy import render_module_policy
 from tests.reviewed_pack_fixture import reviewed_pack_fixture
 from tests.test_continuous_deterministic_materialization import _load_models
 
@@ -244,7 +245,7 @@ def _contract_output() -> dict:
     }}
 
 
-async def _run_services_attempt(monkeypatch, authored: dict[str, str]) -> dict:
+async def _run_services_attempt(monkeypatch, authored: dict[str, str], *, service_requests=None) -> dict:
     tasks = [{
         "task_id": "contract", "task_type": "module_contract", "capability_pack_id": MODULE,
         "initial_agent": "ConfigMiddlewareAgent", "initial_message": "Declare task actions.",
@@ -254,6 +255,7 @@ async def _run_services_attempt(monkeypatch, authored: dict[str, str]) -> dict:
         "initial_agent": "ServiceAgent", "initial_message": "Implement task summary dispatch.",
         "owned_paths": [f"{BACKEND}/{name}.py" for name in ("base_handler", "handler", "service", "repo", "policy")],
         "depends_on": ["contract"],
+        "acceptance_criteria": ["policy.py includes per_user isolation matching the approved tenancy."],
     }]
     context = {
         "app_build_plan": {
@@ -273,6 +275,8 @@ async def _run_services_attempt(monkeypatch, authored: dict[str, str]) -> dict:
         if request.task_id == "contract":
             output = _contract_output()
         else:
+            if service_requests is not None:
+                service_requests.append(request)
             output = {"code_files": [{"filename": path, "content": source} for path, source in authored.items()]}
         return AG2TaskBatchRunnerResult(status=RunStatus.COMPLETED, output=deepcopy(output))
 
@@ -356,6 +360,34 @@ _BASE = (
 
 
 @pytest.mark.asyncio
+async def test_service_worker_sees_only_authored_paths_while_batch_still_renders_policy(monkeypatch):
+    requests = []
+    handler = "from .base_handler import TaskManagementBaseModule\n\nclass TaskManagementModule(TaskManagementBaseModule):\n    \"\"\"Workspace extensions.\"\"\"\n"
+    results = await _run_services_attempt(monkeypatch, {
+        f"{BACKEND}/base_handler.py": _BASE,
+        f"{BACKEND}/handler.py": handler,
+        f"{BACKEND}/service.py": _SERVICE,
+    }, service_requests=requests)
+
+    policy = f"{BACKEND}/policy.py"
+    paths = [f"{BACKEND}/{name}.py" for name in ("base_handler", "handler", "service", "repo")]
+    request, = requests
+    variables = request.context_variables
+    envelope = json.loads(request.prompt[request.prompt.index("{"):])
+    for worker_task in (variables["current_task"], variables["current_build_task"], envelope["current_task"]):
+        assert worker_task["owned_paths"] == paths
+        assert worker_task["factory_rendered_paths"] == [policy]
+        assert "per_user isolation" in worker_task["acceptance_criteria"][0]
+    assert variables["owned_paths"] == paths
+    assert "Factory implements current_task.factory_rendered_paths" in request.prompt
+    assert variables["app_build_plan"]["build_tasks"][-1]["owned_paths"] == [*paths, policy]
+    assert results["_meta"]["status"] == "completed"
+    assert results["services"]["_owned_paths"] == [*paths, policy]
+    emitted = {f["filename"]: f["content"] for f in results["services"]["code_files"]}
+    assert emitted[policy] == render_module_policy(MODULE, _contract()["surfaces"][0]["collections"])
+
+
+@pytest.mark.asyncio
 async def test_rejection_reports_an_unowned_file_and_a_missing_file_together(monkeypatch):
     results = await _run_services_attempt(monkeypatch, {
         f"{BACKEND}/handler.py": _FLAT_HANDLER,
@@ -404,7 +436,7 @@ def test_service_agent_worked_example_is_the_handler_split():
     assert "code_files" not in example
     # No example or rule presents a flat module.handler class.
     assert "class TaskManagerModule:" not in prompt
-    assert "`backend/handler.py` — action adapter only" not in prompt
+    assert "`backend/handler.py` â€” action adapter only" not in prompt
 
 
 def test_service_agent_split_is_conditional_on_owning_base_handler():

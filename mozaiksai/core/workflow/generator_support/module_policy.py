@@ -76,6 +76,13 @@ def render_module_policy(module_id: str, collections: list[dict[str, Any]]) -> s
     )
 
 
+def policy_module_id(path: str) -> str | None:
+    parts = path.split("/")
+    if len(parts) == 4 and parts[0] == "modules" and parts[2:] == ["backend", "policy.py"]:
+        return parts[1]
+    return None
+
+
 def materialize_module_policies(
     files: Mapping[str, str],
     data_contract: dict[str, Any] | None = None,
@@ -93,11 +100,7 @@ def materialize_module_policies(
     replaces the copy, so a task attempt can report it together with its other
     rejections; without it the rejection is raised at once.
     """
-    existing_policy_modules = {
-        parts[1] for path in files
-        if len(parts := path.split("/")) == 4
-        and parts[0] == "modules" and parts[2:] == ["backend", "policy.py"]
-    }
+    existing_policy_modules = {module for path in files if (module := policy_module_id(path))}
     if "data/contract.json" in files:
         serialized = json.loads(files["data/contract.json"])
         if serialized != data_contract:
@@ -141,16 +144,8 @@ def materialize_task_module_policies(
     failures: list[str] | None = None,
 ) -> dict[str, str]:
     """Render owned policy artifacts before batch output ownership validation."""
-    selected = {
-        parts[1] for path in task.get("owned_paths") or []
-        if len(parts := str(path).split("/")) == 4
-        and parts[0] == "modules" and parts[2:] == ["backend", "policy.py"]
-    }
-    selected.update(
-        parts[1] for path in files
-        if len(parts := path.split("/")) == 4
-        and parts[0] == "modules" and parts[2:] == ["backend", "policy.py"]
-    )
+    selected = {module for path in task.get("owned_paths") or [] if (module := policy_module_id(str(path)))}
+    selected.update(module for path in files if (module := policy_module_id(path)))
     if not selected:
         return {}
     return materialize_module_policies(files, detach(data_contract), module_ids=selected, failures=failures)

@@ -55,7 +55,7 @@ from .generator_support.module_entitlement_gates import (
     compile_module_entitlement_gates,
     resolve_subscription_contract,
 )
-from .generator_support.module_policy import materialize_task_module_policies
+from .generator_support.module_policy import materialize_task_module_policies, policy_module_id
 from .generator_support.module_read_actions import materialize_module_read_implementations
 from .generator_support.module_revision import (
     retained_custom_action_prompt,
@@ -1135,6 +1135,19 @@ async def _run_one_task(
         user_id=user_id,
         context_authority_policy=context_authority_policy,
     )
+    if workflow_name == "AppGenerator" and task.get("task_type") == "business_services":
+        # Admission uses the complete plan below. Only the worker sees the narrower authoring scope.
+        paths = _normalize_owned_paths(task.get("owned_paths"))
+        rendered = [path for path in paths if policy_module_id(path)]
+        if rendered:
+            authored = [path for path in paths if path not in rendered]
+            task_context["owned_paths"] = authored
+            for key in ("current_task", "current_build_task"):
+                task_context[key].update(owned_paths=authored.copy(), factory_rendered_paths=rendered.copy())
+            prompt += (
+                "\nReturn source only for current_task.owned_paths. Factory implements current_task.factory_rendered_paths "
+                "and checks their acceptance criteria after your response."
+            )
     scoped_prompt = _build_scoped_worker_prompt(prompt, task_context)
     if workflow_name == "AppGenerator" and task.get("task_type") == "module_contract":
         scoped_prompt += await retained_custom_action_prompt(base_context, str(task.get("capability_pack_id") or ""))
