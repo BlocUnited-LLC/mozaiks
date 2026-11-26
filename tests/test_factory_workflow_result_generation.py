@@ -117,7 +117,7 @@ async def test_reviewed_agent_result_is_flat_and_automatic_for_multiple_triggers
     {"nested_result": {"type": "str"}},
 ])
 def test_result_agent_cannot_select_record_or_weaken_approved_output(fields):
-    with pytest.raises(ValueError, match="exactly the approved"):
+    with pytest.raises(ValueError, match="ResultAgent.*exactly the approved.*summary.*host supplies the record key task_id"):
         materialize_workflow_result_write(entry(fields=fields), SPEC)
 
 
@@ -127,6 +127,21 @@ def test_builder_cannot_add_an_unreviewed_result_or_leave_an_unbound_trigger():
     rendered = materialize_workflow_result_write(entry(triggers=[EVENT, "domain.tasks.other"]), SPEC)
     with pytest.raises(ValueError, match="each declared"):
         extract_workflow_integration_metadata_from_bundle_entries([rendered])
+
+
+def test_result_actor_receives_actionable_repair_for_worker_authored_save():
+    candidate = entry()
+    candidate["outcome_plans"] = [{
+        "agent": "ResultAgent", "function": "save_summary", "context_key": "save_status",
+        "attempts_key": "save_attempts", "error_value": "failed",
+        "routes": [{"value": "failed", "target_agent": "terminate"}],
+    }]
+    with pytest.raises(ValueError) as error:
+        materialize_workflow_result_write(candidate, SPEC)
+    message = str(error.value)
+    assert "Factory supplies the save operation for ResultAgent" in message
+    assert "outcome_plan" in message and "generated save tool binding and its Python implementation" in message
+    assert "structured output and one after_turn success continuation" in message
 
 
 def test_required_result_preserves_the_success_continuation_and_refuses_a_bypass():

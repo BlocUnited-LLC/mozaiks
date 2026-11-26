@@ -2449,7 +2449,8 @@ models:
         description: >
           Typed failure-handling plans for workflow operations. The factory materializes
           their tool outcome bindings, protected context definitions, and graph routes.
-          Use [] only for workflows with no outcome-dependent operations.
+          Exclude each result_write_plans agent because Factory supplies its save
+          outcome. Use [] when no worker-authored operation needs an outcome.
       statusbar_middleware:
         type: list
         items: WorkflowStatusbarMiddleware

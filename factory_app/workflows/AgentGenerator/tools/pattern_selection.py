@@ -73,8 +73,27 @@ def pattern_selection(
     for item in selection["workflows"]:
         plans = item.get("result_write_plans")
         if plans:
-            item = {**item, "initial_message": item["initial_message"] + "\n\n[WORKFLOW RESULT PLAN]\n"
-                    + json.dumps(plans, sort_keys=True)}
+            instructions = []
+            for plan in plans:
+                write = plan["result_write"]
+                instructions.append(
+                    f"For {plan['event_type']}, the generated prompt and structured output for {plan['agent']} "
+                    f"must request exactly these required fields: {', '.join(write['fields'])}. "
+                    f"The host supplies the record key {write['record_key']}. "
+                    f"{plan['module_id']}.{write['action']} is the receiving app module action. "
+                    "Factory installs the workflow adapter that calls it."
+                )
+            instructions.append(
+                "Declare the host-seeded event_payload as object state with model_visible: true and "
+                "writer_ids: [transition_router]. Expose it in the result agent's variables. Its prompt "
+                "reads the needed fields at event_payload.<field> using the triggering event's declared payload. "
+                "Leave the result agent out of generated tool bindings, tool implementations and outcome_plans. "
+                "Use tools: [] when no other agent needs a tool and outcome_plans: [] when "
+                "no other operation needs an outcome. "
+                "Give the result agent one after_turn success continuation. Factory adds the failure routing."
+            )
+            brief = "\n".join(["[WORKFLOW RESULT PLAN]", *instructions, json.dumps(plans, sort_keys=True)])
+            item = {**item, "initial_message": f"{item['initial_message']}\n\n{brief}"}
         specs.append(item)
     context_variables.set("workflows_spec", specs)
     context_variables.set("workflow_plan_review", None)

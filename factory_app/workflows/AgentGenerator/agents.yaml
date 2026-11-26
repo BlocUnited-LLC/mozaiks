@@ -497,7 +497,7 @@ agents:
       Generate a production-ready workflow bundle for the assigned workflow. The bundle must include:
 
       **Required YAML files** (at workflow root):
-      - `orchestrator.yaml` — schema_version: mozaiks.orchestrator.v1, workflow_name, max_turns, human_in_the_loop, workflow_startup_mode, orchestration_pattern, initial_agent, initial_message, triggers[]
+      - `orchestrator.yaml` — schema_version: mozaiks.orchestrator.v1, workflow_name, max_turns (1–500, sized for the declared agent path), human_in_the_loop, workflow_startup_mode, orchestration_pattern, initial_agent, initial_message, triggers[]
       - `agents.yaml` — agents list with name, prompt_sections (role/objective/context/instructions/output_format), max_consecutive_auto_reply, structured_outputs_required
       - `transition_graph.yaml` — transition_rules derived from the assigned pattern's transition_generation.strategy
       - `tools.yaml` — tools[] and lifecycle_tools[] matching the agent tools planned below
@@ -617,6 +617,11 @@ agents:
         populated and exposed; never invent a semantic-looking input path.
       - Persist and expose any cross-step data the generated workflow needs through
         its declared context/tools contracts. A prompt reference alone supplies no data.
+      - Event workflows receive the triggering module's declared payload in `event_payload`.
+        For a result-write workflow, declare it as object state with `model_visible: true`
+        and `writer_ids: [transition_router]`, and expose it in the result agent's
+        variables. Read input fields from `event_payload` using their names in the
+        module event contract. Keep the event fields separate from the approved output.
       - If an input is absent, use the workflow's declared clarification or failure
         path. Preserve the response schema; do not invent fields or append prose.
       - Keep exact identifiers in declarative roster, routing, tool, and output
@@ -641,8 +646,10 @@ agents:
     heading: '[OPERATION OUTCOMES]'
     content: |-
       Include outcome_plans in WorkflowBundleBuilderOutput. Declare a plan for every
-      operation whose success or failure determines the workflow's next step, including
-      validation, persistence, and external actions. Use [] only when none exist.
+      worker-authored operation whose success or failure determines the workflow's next
+      step, including validation, persistence, and external actions. Factory owns the
+      operation for each result_write_plans entry. Exclude that agent from outcome_plans
+      and use [] when there are no other operations to declare.
       Each plan names agent, function, context_key, attempts_key, result_field,
       error_value, max_attempts, retry_on, retry_without_attempt, and routes
       [{value, target_agent}].
@@ -777,7 +784,8 @@ agents:
       ## STEP 3: Plan Tools and UI
 
       For each agent:
-      - Does it need to persist structured output to context? → `Agent_Tool` with `auto_tool_call: true`
+      - For a result_write_plans agent, both its generated system prompt and its structured-output model request exactly the approved result fields. The host supplies the record key. Factory supplies the automatic save tool.
+      - Does another agent need to persist structured output to context? → `Agent_Tool` with `auto_tool_call: true`
       - Does it need to present UI to the user? → `UI_Tool` (interactive) or `UI_Surface` (one-way)
       - Does it call an external API? → `Agent_Tool` for the API call
       - Does it route via Coordinator pattern? → `Agent_Tool` for a typed AG2 1.0 `Handoff(target=...)` result when WorkflowAdapter dynamic routing is required

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
@@ -264,7 +265,15 @@ async def test_private_result_plan_is_visible_at_review_and_bound_to_its_task(mo
     item = {**workflow(), "result_write_plans": [binding]}
     ctx = context([item])
     assert partition.pattern_selection(PatternSelection=selection([item]), context_variables=ctx)["outcome"] == "selected"
-    assert "task_key" in ctx.data["workflows_spec"][0]["initial_message"]
+    brief = ctx.data["workflows_spec"][0]["initial_message"]
+    assert "generated prompt and structured output for Result must request exactly these required fields: summary" in brief
+    assert "host supplies the record key task_key" in brief
+    assert "tasks.save_summary is the receiving app module action" in brief
+    assert "event_payload as object state with model_visible: true and writer_ids: [transition_router]" in brief
+    assert "tools: []" in brief and "outcome_plans: []" in brief
+    assert "one after_turn success continuation" in brief
+    assert json.loads(brief.splitlines()[-1]) == [binding]
+    assert ctx.data["PatternSelection"]["workflows"][0]["initial_message"] == item["initial_message"]
 
     async def respond(**kwargs):
         payload = kwargs["payload"]

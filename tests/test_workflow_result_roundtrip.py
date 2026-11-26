@@ -55,7 +55,8 @@ def write_result_workflow(root: Path, declaration: dict):
                                    "system_message": "Write a one-sentence summary of event_payload.title. Return only a JSON object with the summary string."}]},
         "transition_graph.yaml": {"transition_rules": [{"source_agent": AGENT, "target_agent": "terminate",
                                                         "transition_type": "after_turn", "transition_target": "TerminateTarget"}]},
-        "context_variables.yaml": {"definitions": {"event_payload": {"type": "object", "source": {"type": "state", "default": {}}}},
+        "context_variables.yaml": {"definitions": {"event_payload": {"type": "object", "model_visible": True,
+                                                                    "writer_ids": ["transition_router"], "source": {"type": "state", "default": {}}}},
                                    "agents": {AGENT: {"variables": ["event_payload"]}}}, "ui_config.yaml": {"visual_agents": []},
         "structured_outputs.yaml": {"schema_version": "mozaiks.structured_outputs.v1", "registry": {AGENT: "TaskSummary"},
                                     "models": {"TaskSummary": {"type": "model", "fields": {"summary": {"type": "str"}}}}},
@@ -71,6 +72,31 @@ def write_result_workflow(root: Path, declaration: dict):
         path = root / WORKFLOW / entry["filename"]
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(entry["content"], encoding="utf-8")
+
+
+def test_triggered_content_reaches_result_agent_through_its_declared_input(tmp_path, monkeypatch, request):
+    from mozaiksai.core.session.launcher import validate_context_for_workflow
+    from mozaiksai.core.workflow.context.authority import ContextAuthorityError
+    from mozaiksai.core.workflow.context.context_utils import apply_context_exposures
+    from mozaiksai.core.workflow.context.schema import load_context_variables_config
+    from mozaiksai.hosts.platform import _build_workflow_trigger_context
+
+    declaration = request.getfixturevalue("bundle")[1]["reactions"][0]["target"]["result_write"]
+    write_result_workflow(tmp_path, declaration)
+    root = tmp_path / WORKFLOW
+    config = yaml.safe_load((root / "context_variables.yaml").read_text(encoding="utf-8"))
+    trigger, = yaml.safe_load((root / "orchestrator.yaml").read_text(encoding="utf-8"))["triggers"]
+    monkeypatch.setattr(workflow_manager, "get_config", lambda _: {"context_variables": config})
+    event = {"type": CREATED, "payload": {"task_id": "task-42", "title": "Reconcile last month's invoices"}}
+    seed = _build_workflow_trigger_context(capability_id=trigger["capability_id"], source_event=event, trigger=trigger)
+    admitted = validate_context_for_workflow(WORKFLOW, seed)
+    assert admitted == {"event_payload": event["payload"]}
+    with pytest.raises(ContextAuthorityError):
+        validate_context_for_workflow(WORKFLOW, admitted, writer_id="caller_input")
+    agent, = yaml.safe_load((root / "agents.yaml").read_text(encoding="utf-8"))["agents"]
+    view = load_context_variables_config(config).agents[AGENT].variables
+    prompt = apply_context_exposures(agent["system_message"], [], admitted, view)
+    assert event["payload"]["title"] in prompt
 
 
 async def deliver_result(chat_id: str, actor: str, value: str, turn: int):

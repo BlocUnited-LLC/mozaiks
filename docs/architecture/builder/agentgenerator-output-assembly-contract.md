@@ -47,7 +47,13 @@ An event workflow that saves a result on a newly created private record declares
 shows the source module action, event, collection, record key, receiving action,
 local agent, and allowed output fields. The review hash covers those values.
 The builder gives the specified agent a flat structured-output model with exactly
-the required result fields. Factory adds its workflow-local automatic tool and
+the required result fields. The worker brief identifies the receiving module action
+and the host-supplied record key. The agent reads the module event's declared
+input fields from the host-seeded `event_payload` object exposed to it through
+`context_variables.yaml` with `transition_router` as its writer. Its prompt
+requests only the approved result fields. The bundle omits worker-authored save tools and
+outcome plans for that agent. Other agents keep their declared tools and outcomes.
+Factory adds its workflow-local automatic tool and
 pins the result plan and the result agent's compiled output schema in the workflow
 bundle's integration metadata. App validation compares the closed receiver input
 with this schema, including nested properties, array items and enum values, and

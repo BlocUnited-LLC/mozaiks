@@ -173,7 +173,10 @@ def workflow_result_output_schema(entry: Mapping[str, Any], plan: WorkflowResult
         raise ValueError(f"{plan.agent} requires a registered workflow result model")
     schema = result_object_schema(canonical_structured_output_schema(models[model_id]), compiler_output=True)
     if set(schema["properties"]) != set(plan.result_write.fields) or set(schema.get("required", [])) != set(schema["properties"]):
-        raise ValueError("The result agent's structured output must declare exactly the approved result fields")
+        raise ValueError(
+            f"{plan.agent} structured output must declare exactly the approved result fields as required: "
+            f"{', '.join(plan.result_write.fields)}. The host supplies the record key {plan.result_write.record_key}."
+        )
     return schema
 
 

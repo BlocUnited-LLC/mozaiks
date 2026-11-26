@@ -104,7 +104,11 @@ def materialize_workflow_outcomes(
     if required_save is not None:
         agent, function = required_save
         if any(plan.agent == agent for plan in plans):
-            raise ValueError("The workflow result agent's operation outcome is owned by the Factory")
+            raise ValueError(
+                f"Factory supplies the save operation for {agent}. Remove that agent's outcome_plan, "
+                "its generated save tool binding and its Python implementation. Keep the agent's "
+                "structured output and one after_turn success continuation."
+            )
         plans.append(_required_save_plan(agent, function, rules))
     owned_keys: set[str] = set()
     for plan in plans:
