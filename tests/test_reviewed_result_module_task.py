@@ -85,8 +85,9 @@ async def test_verified_compiler_preserves_source_and_leaves_an_untouched_option
     assert admin["sha256"] == hashlib.sha256(files[admin["path"]].encode()).hexdigest()
 
 
-@pytest.mark.parametrize("requirement", ["reservation", "unrelated_manifest", "declared_manifest", "unknown_manifest",
-                                         "selected", "affected", "overlay", "deleted", "integration", "additional_subscriber"])
+@pytest.mark.parametrize("requirement", ["reservation", "named_workflow", "unreviewed_capability", "unrelated_manifest",
+                                         "declared_manifest", "unknown_manifest", "selected", "affected", "overlay",
+                                         "deleted", "integration", "additional_subscriber"])
 async def test_source_omits_only_unrequested_optional_reservations(tmp_path, monkeypatch, requirement):
     task, ctx, files, _, callers, _ = _setup(tmp_path, monkeypatch)
     extras = ["modules/tasks/contracts/policy_hooks.yaml", "modules/tasks/contracts/relationships.yaml",
@@ -110,12 +111,17 @@ async def test_source_omits_only_unrequested_optional_reservations(tmp_path, mon
         task["integration_needs"] = ["integration"]
     elif requirement == "additional_subscriber":
         ctx["app_build_plan"]["event_flows"][0]["subscriber_intents"].append("notification")
+    elif requirement in {"named_workflow", "unreviewed_capability"}:
+        flow = ctx["app_build_plan"]["event_flows"][0]
+        if requirement == "unreviewed_capability":
+            flow["workflow_capability_ids"].append("unreviewed")
+        flow["subscriber_intents"] = list(flow["workflow_capability_ids"])
     plan_row = {k: deepcopy(v) for k, v in task.items() if k != "current_build_task"}
     task["current_build_task"] = deepcopy(plan_row)
     ctx["app_build_plan"]["build_tasks"] = [plan_row]
     ctx["app_task_batch_items"] = [deepcopy(task)]
     source = await compiler.reviewed_result_module_task_output(task, ctx, retained_ask_callers=callers)
-    if requirement in {"reservation", "unrelated_manifest"}:
+    if requirement in {"reservation", "unrelated_manifest", "named_workflow"}:
         assert source is not None and source.absent_optional_paths == extras
         assert not set(extras).intersection(r["path"] for r in source.retained_companions)
     else:

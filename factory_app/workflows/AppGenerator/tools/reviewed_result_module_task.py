@@ -169,7 +169,9 @@ async def reviewed_result_module_task_output(
     bindings = {(p["event_type"], p["result_write"]["source_action"], w["capability_id"]): p["result_write"]
                 for w in pinned_result_workflows(context) for p in w["result_write_plans"] if p["module_id"] == module}
     flows = [f for f in (context.get("app_build_plan") or {}).get("event_flows") or [] if f.get("producer_pack_id") == module]
-    if any(set(f.get("subscriber_intents") or []) - {"workflow"} for f in flows):
+    # A plan may describe the same workflow by its exact capability ID in subscriber_intents.
+    # Every named capability still has to match the reviewed event/producer binding below.
+    if any(set(f.get("subscriber_intents") or []) - {"workflow", *(f.get("workflow_capability_ids") or [])} for f in flows):
         return None
     if {(f["event_type"], f["producing_action"], capability) for f in flows
             for capability in f.get("workflow_capability_ids") or [None]} != bindings.keys():
