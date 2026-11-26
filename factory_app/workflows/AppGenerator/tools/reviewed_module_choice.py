@@ -94,6 +94,13 @@ def reviewed_module_choice_prompt(
             or not isinstance(source_build, str) or not source_build.strip()
             or any(not read.source_accepted or read.source_build_id != source_build for read in reads.values())):
         return None
+    # A valid carried YAML document may use native dates or other non-JSON values. Preserve it for its ordinary author.
+    documents = [candidate, compiled_evidence]
+    try:
+        if json.loads(json.dumps(documents, allow_nan=False, sort_keys=True)) != documents:
+            return None
+    except (TypeError, ValueError, RecursionError):
+        return None
     source = candidate["module_contract"]
     sources = {"module_yaml", "events_yaml", "reactions_yaml"}
     if set(source) - {"module_id"} - sources or source["module_id"] != module:

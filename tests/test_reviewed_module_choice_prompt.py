@@ -11,12 +11,21 @@ from factory_app.workflows.AppGenerator.tools.reviewed_module_choice import (
 from factory_app.workflows.AppGenerator.tools.reviewed_result_module_task import (
     reviewed_result_module_task_output,
 )
+from mozaiksai.core.runtime.app.module_loader import ModuleSettingsManifest
 from mozaiksai.core.workflow.generator_support.code_files import extract_code_file_map_from_payload
 from mozaiksai.core.workflow.task_batches import (
     _apply_task_entitlement_gates,
     _close_task_module_actions,
 )
 from tests.test_reviewed_result_module_task import _setup
+
+
+def _compiled_files(source, task, ctx, callers):
+    closed, _, subscription, results = _close_task_module_actions(source.candidate, workflow_name="AppGenerator",
+                                                                 task=task, base_context=ctx, task_context=ctx,
+                                                                 retained_ask_callers=callers)
+    return _apply_task_entitlement_gates(extract_code_file_map_from_payload(closed), task_context=ctx, base_context=ctx,
+                                         subscription_contract=subscription, result_schemas=results)
 
 
 async def test_choice_binds_the_request_task_accepted_actions_graph_and_compiled_inputs(tmp_path, monkeypatch):
@@ -37,11 +46,7 @@ async def test_choice_binds_the_request_task_accepted_actions_graph_and_compiled
     ctx["app_task_batch_items"] = [deepcopy(task)]
     source = await reviewed_result_module_task_output(task, ctx, retained_ask_callers=callers)
     assert source
-    closed, _, subscription, results = _close_task_module_actions(source.candidate, workflow_name="AppGenerator",
-                                                                 task=task, base_context=ctx, task_context=ctx,
-                                                                 retained_ask_callers=callers)
-    outputs = _apply_task_entitlement_gates(extract_code_file_map_from_payload(closed), task_context=ctx, base_context=ctx,
-                                           subscription_contract=subscription, result_schemas=results)
+    outputs = _compiled_files(source, task, ctx, callers)
     evidence = source.compiled_evidence("tasks", outputs)
     def project():
         return reviewed_module_choice_prompt(ctx, task, source.candidate, callers, compiled_evidence=evidence)
@@ -104,3 +109,18 @@ async def test_choice_binds_the_request_task_accepted_actions_graph_and_compiled
 def test_incomplete_or_conflicting_refinement_request_keeps_the_ordinary_author(text, recorded):
     ctx = {"refinement_request": text, "refinement_request_meta": {"raw_user_request": recorded}}
     assert reviewed_module_choice_prompt(ctx, {}, {}, {}, compiled_evidence={}) is None
+
+
+async def test_ordinary_author_keeps_a_valid_yaml_date_in_an_accepted_optional_setting(tmp_path, monkeypatch):
+    task, ctx, files, _, callers, _ = _setup(tmp_path, monkeypatch)
+    ctx["refinement_request"] = "Suggest a summary for each new task."
+    path = "modules/tasks/contracts/settings.yaml"
+    text = "schema_version: mozaiks.settings.v1\nsettings:\n  - id: start_date\n    default: 2026-11-01\n"
+    files[path] = ctx["generated_files"][path] = text
+    setting = ModuleSettingsManifest.model_validate(yaml.safe_load(text)).settings[0]
+    source = await reviewed_result_module_task_output(task, ctx, retained_ask_callers=callers)
+    evidence = source.compiled_evidence("tasks", _compiled_files(source, task, ctx, callers))
+    carried = next(c["document"] for c in evidence["retained_companions"] if c["path"] == path)
+    assert setting.default.isoformat() == "2026-11-01"
+    assert reviewed_module_choice_prompt(ctx, task, source.candidate, callers, compiled_evidence=evidence) is None
+    assert carried["settings"][0]["default"] == setting.default and files[path] == text
