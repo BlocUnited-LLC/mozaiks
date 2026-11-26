@@ -1144,6 +1144,8 @@ async def _run_one_task(
             authored = [path for path in paths if path not in rendered]
             task_context["owned_paths"] = authored
             for key in ("current_task", "current_build_task"):
+                # AppBuildPlan dispatch rows also embed the pre-projection task.
+                task_context[key].pop("current_build_task", None)
                 task_context[key].update(owned_paths=authored.copy(), factory_rendered_paths=rendered.copy())
             prompt += (
                 "\nReturn source only for current_task.owned_paths. Factory implements current_task.factory_rendered_paths "

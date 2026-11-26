@@ -264,7 +264,8 @@ async def _run_services_attempt(monkeypatch, authored: dict[str, str], *, servic
             }],
             "pages": [], "build_tasks": tasks,
         },
-        "data_contract": _contract(), "app_task_batch_items": tasks,
+        "data_contract": _contract(),
+        "app_task_batch_items": [{**task, "current_build_task": deepcopy(task)} for task in tasks],
         "design_surface_map": {"surfaces": [{
             "surface_id": MODULE, "surface_kind": "module", "owner": "app", "primary_entities": ["Task"],
             "owned_mutations": ["create_task", "update_task", "delete_task"], "custom_reads": ["task_summary"],
@@ -375,6 +376,7 @@ async def test_service_worker_sees_only_authored_paths_while_batch_still_renders
     variables = request.context_variables
     envelope = json.loads(request.prompt[request.prompt.index("{"):])
     for worker_task in (variables["current_task"], variables["current_build_task"], envelope["current_task"]):
+        assert "current_build_task" not in worker_task
         assert worker_task["owned_paths"] == paths
         assert worker_task["factory_rendered_paths"] == [policy]
         assert "per_user isolation" in worker_task["acceptance_criteria"][0]
