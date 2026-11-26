@@ -31,9 +31,20 @@ def _set_mailbox(message: EmailMessage, header: str, value: str) -> Address:
         message[header] = value
         parsed = message[header]
         addresses = parsed.addresses
-    except (MessageError, IndexError) as exc:
+    except (MessageError, IndexError, AttributeError) as exc:
+        # The standard parser raises AttributeError for some malformed groups.
         raise ValueError(f"{header} must be one complete mailbox address") from exc
-    if parsed.defects or len(addresses) != 1 or not addresses[0].username or not addresses[0].domain:
+    complete = (
+        not parsed.defects
+        and len(parsed.groups) == 1
+        and parsed.groups[0].display_name is None
+        and len(addresses) == 1
+        and bool(addresses[0].username)
+        and bool(addresses[0].domain)
+        # The header parser drops a final list separator without a defect.
+        and value[-1:] not in {",", ";"}
+    )
+    if not complete:
         raise ValueError(f"{header} must be one complete mailbox address")
     address: Address = addresses[0]
     return address
@@ -77,17 +88,30 @@ def _deliver(to: str, subject: str, body: str) -> bool:
     message.set_content(body)
 
     password = resolve_secret("SMTP_PASSWORD") if username else ""
+    if not (username + password).isascii():
+        # smtplib's encoding error would carry the credential in its repr.
+        raise ValueError("SMTP_USER and SMTP_PASSWORD must be ASCII")
     client: smtplib.SMTP
     if security == "ssl":
         client = smtplib.SMTP_SSL(host, port, timeout=TIMEOUT_SECONDS, context=ssl.create_default_context())
     else:
         client = smtplib.SMTP(host, port, timeout=TIMEOUT_SECONDS)
-    with client as smtp:
+    try:
         if security == "starttls":
-            smtp.starttls(context=ssl.create_default_context())
+            client.starttls(context=ssl.create_default_context())
         if username:
-            smtp.login(username, password)
-        return not smtp.send_message(message, from_addr=from_address.addr_spec, to_addrs=[to_address.addr_spec])
+            client.login(username, password)
+        refused = client.send_message(message, from_addr=from_address.addr_spec, to_addrs=[to_address.addr_spec])
+    except BaseException:
+        client.close()
+        raise
+    # The server has the message now. A failed goodbye must not read as a failed
+    # send, or a retrying caller would deliver it twice.
+    try:
+        client.quit()
+    except (smtplib.SMTPException, OSError):
+        client.close()
+    return not refused
 
 
 async def send_email(*, to: str, subject: str, body: str) -> bool:
