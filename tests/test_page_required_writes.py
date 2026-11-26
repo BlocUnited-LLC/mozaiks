@@ -60,6 +60,23 @@ def test_required_controls_accept_submit_in_an_openable_modal_and_delete_on_a_se
     _validate(page, _plan(page, "create_entry", "archive_entry"))
 
 
+def test_reviewed_edit_receives_the_selected_record_and_submits_its_actual_id():
+    page = _editor()
+    table, modal = page["sections"]
+    form = modal["config"]["children"][0]
+    submit = {**_write("update_entry"), "payload": {"entry_id": "selected_row.entry_id", "title": "{form.title}"}}
+    form["config"].update(initial_values_key="selected_row", submit_action=submit)
+    plan = _plan(page, "update_entry")
+    with pytest.raises(ValueError, match=r"literal text.*Use \{selected_row.entry_id\}"):
+        _validate(page, plan)
+    submit["payload"]["entry_id"] = "{selected_row.entry_id}"
+    _validate(page, plan)
+    table["config"]["actions"] = []
+    page["sections"] = [table, form]
+    with pytest.raises(ValueError, match="modal opened by an action on the selectable table"):
+        _validate(page, plan)
+
+
 @pytest.mark.parametrize("reference", ["{selected_row.entry_id}", "archived-{ row.entry_id }", "{selected_rows.0.entry_id}"])
 def test_header_cannot_supply_a_record_even_if_it_requests_selection(reference):
     page = _editor()

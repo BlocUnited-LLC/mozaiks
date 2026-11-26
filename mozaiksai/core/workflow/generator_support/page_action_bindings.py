@@ -278,7 +278,27 @@ def validate_required_page_writes(
         from .page_plan_utils import validate_planned_page
 
         validate_planned_page(content, {"route": route}, path)
-    missing = expected - reachable_page_action_keys([yaml.safe_load(content)], include_reads=False)
+    document = yaml.safe_load(content)
+    endpoints = {f"/api/modules/{key}" for key in expected}
+    for section, modals, _ in _sections(document.get("sections") if isinstance(document, dict) else None):
+        config = section["config"]
+        if section.get("primitive") != "Form" or config.get("initial_values_key") != "selected_row":
+            continue
+        action = config.get("submit_action") or {}
+        if action.get("href") not in endpoints or config.get("disabled"):
+            continue
+        if not modals:
+            raise ValueError(
+                f"{path}: form {section.get('id')!r} needs the selected record. Place it in a modal "
+                "opened by an action on the selectable table so the renderer can pass the row."
+            )
+        for key, value in _action_payload(action).items():
+            if value == f"selected_row.{key}":
+                raise ValueError(
+                    f"{path}: form {section.get('id')!r} submits the literal text {value!r}. "
+                    f"Use {{{value}}} to send the selected record's {key}."
+                )
+    missing = expected - reachable_page_action_keys([document], include_reads=False)
     if missing:
         raise ValueError(
             f"{path}: route {route!r} is missing reachable write controls for {', '.join(sorted(missing))}. "
