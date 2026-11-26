@@ -1,3 +1,4 @@
+import hashlib
 import json
 from copy import deepcopy
 from types import SimpleNamespace
@@ -13,6 +14,11 @@ from tests.test_revision_result_module_coverage import _case, _design
 
 def _setup(tmp_path, monkeypatch):
     ctx, files = _case(tmp_path)
+    # This fixture uses the canonical collection create action and its emitted event.
+    from tests.test_factory_workflow_result_generation import EVENT
+
+    ctx = json.loads(json.dumps(ctx).replace(EVENT, "domain.task.created"))
+    files = {path: text.replace(EVENT, "domain.task.created") for path, text in files.items()}
     module = "modules/tasks/"
     manifest = module + "module.yaml"
     document = yaml.safe_load(files[manifest])
@@ -36,7 +42,8 @@ def _setup(tmp_path, monkeypatch):
     old["surfaces"][0]["collections"][0]["fields"] = [f for f in data["surfaces"][0]["collections"][0]["fields"] if f["name"] != "summary"]
     files["data/contract.json"] = json.dumps(old)
     _design(ctx, data, design)
-    pack = {"surface_id": "tasks", "capability_pack_id": "tasks", "capability_source": "generated_module"}
+    pack = {"surface_id": "tasks", "capability_pack_id": "tasks", "capability_source": "generated_module",
+            "primary_entities": ["Task"], "surface_kind": "module"}
     row = {"task_id": "contract", "task_type": "module_contract", "capability_pack_id": "tasks",
            "surface_kind": "module", "surface_id": "tasks", "initial_agent": "ConfigMiddlewareAgent",
            "owned_paths": [manifest, *(module + f"contracts/{suffix}.yaml" for suffix in ("events", "reactions", "admin"))]}
@@ -63,17 +70,23 @@ def _setup(tmp_path, monkeypatch):
 
 async def test_verified_compiler_preserves_source_and_leaves_an_untouched_optional_admin_companion(tmp_path, monkeypatch):
     task, ctx, files, _, callers, lookup = _setup(tmp_path, monkeypatch)
-    candidate = await compiler.reviewed_result_module_task_output(task, ctx, retained_ask_callers=callers)
+    source = await compiler.reviewed_result_module_task_output(task, ctx, retained_ask_callers=callers)
+    candidate = source.candidate
     lookup.assert_awaited_once_with(ctx, "original", require_accepted=True)
     assert candidate["module_contract"]["module_yaml"] == yaml.safe_load(files["modules/tasks/module.yaml"])
     assert candidate["module_contract"]["events_yaml"] == yaml.safe_load(files["modules/tasks/contracts/events.yaml"])
     assert "admin_yaml" not in candidate["module_contract"]
     assert "code_files" not in candidate
+    assert source.accepted_module_ids == ["tasks"]
+    assert source.source_build_id == "v1"
+    admin = next(r for r in source.retained_companions if r["path"] == "modules/tasks/contracts/admin.yaml")
+    assert admin["document"] == yaml.safe_load(files[admin["path"]])
+    assert admin["sha256"] == hashlib.sha256(files[admin["path"]].encode()).hexdigest()
 
 
 @pytest.mark.parametrize("fault", ["new_custom", "unproven_read", "new_field", "changed_scope", "admin_requested",
                                    "selected_companion", "new_subscriber", "new_companion", "access", "prior_missing",
-                                   "overlay", "new_integration"])
+                                   "overlay", "oversize_companion", "new_integration"])
 async def test_discretionary_module_work_uses_the_ordinary_worker(tmp_path, monkeypatch, fault):
     task, ctx, files, prior, callers, _ = _setup(tmp_path, monkeypatch)
     if fault == "new_custom":
@@ -101,6 +114,10 @@ async def test_discretionary_module_work_uses_the_ordinary_worker(tmp_path, monk
         monkeypatch.setattr(compiler, "resolve_app_compilation_inputs", AsyncMock(return_value=None))
     elif fault == "overlay":
         ctx["generated_files"]["modules/tasks/module.yaml"] = "superseding edit"
+    elif fault == "oversize_companion":
+        path = "modules/tasks/contracts/admin.yaml"
+        files[path] += "\n# " + "é" * 16_000
+        ctx["generated_files"][path] = files[path]
     else:
         ctx["design_surface_map"]["surfaces"][0]["integrations"] = ["calendar"]
         _design(ctx, ctx["data_contract"], ctx["design_surface_map"])

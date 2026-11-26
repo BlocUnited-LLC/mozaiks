@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from typing import Any
 
@@ -32,6 +34,27 @@ from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
 from mozaiksai.core.workflow.generator_support.module_revision import RetainedAskRead
 
 from .revision_result_coverage import revision_result_module_coverage
+
+
+@dataclass(frozen=True)
+class VerifiedResultModuleSource:
+    candidate: dict[str, Any]
+    source_build_id: str
+    source_artifact_version_id: str
+    accepted_module_ids: list[str]
+    retained_companions: list[dict[str, Any]]
+
+    def compiled_evidence(self, module: str, files: dict[str, str]) -> dict[str, Any]:
+        """Describe the emitted contract files and the accepted companion documents that travel unchanged."""
+        return {
+            "module_id": module,
+            "source_build_id": self.source_build_id,
+            "source_artifact_version_id": self.source_artifact_version_id,
+            "compiled_files": {path: yaml.safe_load(content) for path, content in files.items()},
+            "compiled_file_sha256": {path: hashlib.sha256(content.encode()).hexdigest() for path, content in files.items()},
+            "retained_companions": self.retained_companions,
+            "accepted_module_ids": self.accepted_module_ids,
+        }
 
 
 def _matches_reviewed_task(task: dict[str, Any], context: Any) -> None:
@@ -74,7 +97,7 @@ def _only_result_fields(module: str, files: dict[str, Any], desired: Any, grants
 
 async def reviewed_result_module_task_output(
     task: dict[str, Any], context: Any, *, retained_ask_callers: Mapping[str, RetainedAskRead] | None = None,
-) -> dict[str, Any] | None:
+) -> VerifiedResultModuleSource | None:
     """Return an immutable input only when all work is retained or deterministically compiled."""
     module = task.get("capability_pack_id")
     coverage = detach(context.get("revision_result_module_coverage")) or {}
@@ -151,9 +174,11 @@ async def reviewed_result_module_task_output(
     actions = {a["id"]: a for a in module_yaml.get("actions", [])}
     callers = retained_ask_callers or {}
     custom = set(after.get("custom_reads") or [])
-    if (custom != set(before.get("custom_reads") or []) or custom != set(callers)
+    source_build_id = record.commit_metadata.metadata.get("build_id")
+    if (not isinstance(source_build_id, str) or not source_build_id.strip()
+            or custom != set(before.get("custom_reads") or []) or custom != set(callers)
             or any(not read.source_accepted or read.source_action != actions.get(name)
-                   or not read.source_build_id or read.source_build_id != record.commit_metadata.metadata.get("build_id")
+                   or read.source_build_id != source_build_id
                    for name, read in callers.items())):
         return None
     compiled = writes | set(canonical_read_actions_for_surface(after, data))
@@ -172,4 +197,19 @@ async def reviewed_result_module_task_output(
     bundle = {"module_id": module, "module_yaml": module_yaml, "events_yaml": event_yaml}
     if reactions in files:
         bundle["reactions_yaml"] = yaml.safe_load(files[reactions])
-    return {"mode": "module_contract_bundle", "module_contract": bundle}
+    retained = []
+    size = 0
+    for path in sorted(companions & files.keys()):
+        content = files[path]
+        if not isinstance(content, str):
+            return None
+        raw = content.encode()
+        size += len(raw)
+        if size > 32_000:
+            return None
+        retained.append({"path": path, "sha256": hashlib.sha256(raw).hexdigest(), "document": yaml.safe_load(content)})
+    modules = sorted(path.split("/")[1] for path in files
+                     if path.startswith("modules/") and path.endswith("/module.yaml") and path.count("/") == 2)
+    return VerifiedResultModuleSource(
+        {"mode": "module_contract_bundle", "module_contract": bundle}, source_build_id, record.id, modules, retained,
+    )

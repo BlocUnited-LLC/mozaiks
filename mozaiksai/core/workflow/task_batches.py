@@ -1197,6 +1197,7 @@ async def _run_one_task(
     code_owned_output = _code_owned_task_output(task, task_context, workflow_name=workflow_name)
     source_candidate = None
     source_offer = None
+    offered_files: dict[str, str] | None = None
     if (not prior_failure and code_owned_output is None and workflow_name == "AppGenerator"
             and task.get("task_type") == "module_contract"):
         from factory_app.workflows.AppGenerator.tools.reviewed_module_choice import (
@@ -1207,11 +1208,29 @@ async def _run_one_task(
             reviewed_result_module_task_output,
         )
 
-        source_candidate = await reviewed_result_module_task_output(
+        source = await reviewed_result_module_task_output(
             task, base_context, retained_ask_callers=retained_ask_callers,
         )
-        if source_candidate is not None:
-            source_offer = reviewed_module_choice_prompt(base_context, task, source_candidate, retained_ask_callers)
+        if source is not None:
+            source_candidate = source.candidate
+            try:
+                preview, _, subscription_contract, result_schemas = _close_task_module_actions(
+                    copy.deepcopy(source_candidate), workflow_name=workflow_name, task=task,
+                    base_context=base_context, task_context=task_context, retained_ask_callers=retained_ask_callers,
+                )
+                offered_files = extract_code_file_map_from_payload(preview, build_timestamp=base_context.get("build_timestamp"))
+                offered_files = _apply_task_entitlement_gates(
+                    offered_files, task_context=task_context, base_context=base_context,
+                    subscription_contract=subscription_contract, result_schemas=result_schemas,
+                )
+                evidence = source.compiled_evidence(str(task["capability_pack_id"]), offered_files)
+            except ValueError:
+                # A partially compilable source is not an offer. Its ordinary module worker still owns the task.
+                logger.info("Module source requires ordinary authoring: task=%s", task["task_id"])
+            else:
+                source_offer = reviewed_module_choice_prompt(
+                    base_context, task, source_candidate, retained_ask_callers, compiled_evidence=evidence,
+                )
     pack_paths = pack_owned_output_paths(base_context)
 
     async with semaphore:
@@ -1298,6 +1317,7 @@ async def _run_one_task(
             rendered_failures: list[str] = []
             try:
                 output = _normalize_agent_reply(runner_result.output)
+                used_offer = source_offer is not None and not last_error and output == source_candidate
                 if not isinstance(output, dict):
                     output = {"agent_message": str(output)}
                 # AG2 task attempts have independent streams; preserve the candidate for repair.
@@ -1316,33 +1336,10 @@ async def _run_one_task(
                         task.get("task_id"), agent_name, discarded,
                     )
                 authored_python = _authored_python_files(output)
-                approved_access_policy = resolve_design_access_policy(base_context)
-                if approved_access_policy and approved_access_policy["grants"]:
-                    for key in ("data_contract", "design_surface_map"):
-                        if detach(task_context.get(key)) != detach(base_context.get(key)):
-                            raise ValueError(f"Task context cannot replace {key} beneath approved role grants")
-                authored_access_policy = resolve_authored_module_access_policy(base_context)
-                subscription_contract = resolve_subscription_contract(task_context)
-                companion_files = dict(base_context.get("generated_files") or {})
-                for dependency in (task_context.get("dependency_task_outputs") or {}).values():
-                    companion_files.update(extract_code_file_map_from_payload(dependency))
-                result_schemas = pinned_result_action_schemas(base_context) if workflow_name == "AppGenerator" else {}
-                output = cast(dict[str, Any], close_module_actions(
-                    output, app_build_plan=base_context.get("app_build_plan"),
-                    data_contract=task_context.get("data_contract"),
-                    design_surface_map=task_context.get("design_surface_map"),
-                    access_policy=authored_access_policy,
-                    subscription_contract=subscription_contract, companion_files=companion_files,
-                    result_action_schemas=result_schemas,
-                ))
-                if retained_ask_callers:
-                    validate_retained_ask_callers(output.get("module_contract") or {}, retained_ask_callers)
-                if result_schemas:
-                    from factory_app.workflows.AppGenerator.tools.workflow_result_writes import (
-                        compile_result_task_bindings,
-                    )
-
-                    compile_result_task_bindings(output, task, base_context)
+                output, authored_access_policy, subscription_contract, result_schemas = _close_task_module_actions(
+                    output, workflow_name=workflow_name, task=task, base_context=base_context,
+                    task_context=task_context, retained_ask_callers=retained_ask_callers,
+                )
                 canonical_code_files = extract_code_file_entries_from_payload(
                     output, build_timestamp=base_context.get("build_timestamp"),
                 )
@@ -1411,21 +1408,9 @@ async def _run_one_task(
                         access_policy=authored_access_policy,
                         design_surface_map=task_context.get("design_surface_map"),
                     ))
-                inventory_context = base_context if result_schemas else task_context
-                design_actions = all_module_actions(inventory_context)
-                ungated_actions = ungated_module_actions(inventory_context)
-                canonical_file_map = compile_module_entitlement_gates(
-                    canonical_file_map,
-                    gates_by_module=approved_subscription_gates(
-                        subscription_contract,
-                        approved_actions=design_actions,
-                        ungated_actions=ungated_actions,
-                        approved_workflows=approved_workflow_surface_ids(inventory_context),
-                    ),
-                    approved_actions=design_actions,
-                    manifest_actions=approved_manifest_action_ids(base_context, design_actions) if result_schemas else None,
-                    ungated_actions=ungated_actions,
-                    existing_files=task_context.get("generated_files") or {},
+                canonical_file_map = _apply_task_entitlement_gates(
+                    canonical_file_map, task_context=task_context, base_context=base_context,
+                    subscription_contract=subscription_contract, result_schemas=result_schemas,
                 )
                 module_contract = output.get("module_contract")
                 if isinstance(module_contract, dict) and isinstance(module_contract.get("module_yaml"), dict):
@@ -1467,6 +1452,8 @@ async def _run_one_task(
                 if ownership_failures:
                     raise ValueError("\n".join(ownership_failures))
                 _validate_exclusive_task_paths(task, output, all_task_items)
+                if used_offer and canonical_file_map != offered_files:
+                    raise ValueError("The admitted module files differ from the worker's verified compilation offer")
             except ValueError as exc:
                 message = str(exc)
                 deferred_failures = [failure for failure in rendered_failures if failure not in message]
@@ -1525,6 +1512,60 @@ async def _run_one_task(
         },
     )
     return output
+
+
+def _apply_task_entitlement_gates(
+    files: dict[str, str], *, task_context: dict[str, Any], base_context: dict[str, Any],
+    subscription_contract: dict[str, Any] | None, result_schemas: dict[str, Any],
+) -> dict[str, str]:
+    inventory_context = base_context if result_schemas else task_context
+    design_actions = all_module_actions(inventory_context)
+    ungated_actions = ungated_module_actions(inventory_context)
+    return compile_module_entitlement_gates(
+        files,
+        gates_by_module=approved_subscription_gates(
+            subscription_contract, approved_actions=design_actions, ungated_actions=ungated_actions,
+            approved_workflows=approved_workflow_surface_ids(inventory_context),
+        ),
+        approved_actions=design_actions,
+        manifest_actions=approved_manifest_action_ids(base_context, design_actions) if result_schemas else None,
+        ungated_actions=ungated_actions, existing_files=task_context.get("generated_files") or {},
+    )
+
+
+def _close_task_module_actions(
+    output: dict[str, Any], *, workflow_name: str, task: dict[str, Any],
+    base_context: dict[str, Any], task_context: dict[str, Any], retained_ask_callers: Mapping[str, RetainedAskRead],
+) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None, dict[str, Any]]:
+    """Close public, retained and result actions identically for a preview and a submitted task."""
+    approved_access_policy = resolve_design_access_policy(base_context)
+    if approved_access_policy and approved_access_policy["grants"]:
+        for key in ("data_contract", "design_surface_map"):
+            if detach(task_context.get(key)) != detach(base_context.get(key)):
+                raise ValueError(f"Task context cannot replace {key} beneath approved role grants")
+    authored_access_policy = resolve_authored_module_access_policy(base_context)
+    subscription_contract = resolve_subscription_contract(task_context)
+    companion_files = dict(base_context.get("generated_files") or {})
+    for dependency in (task_context.get("dependency_task_outputs") or {}).values():
+        companion_files.update(extract_code_file_map_from_payload(dependency))
+    result_schemas = pinned_result_action_schemas(base_context) if workflow_name == "AppGenerator" else {}
+    output = cast(dict[str, Any], close_module_actions(
+        output, app_build_plan=base_context.get("app_build_plan"),
+        data_contract=task_context.get("data_contract"),
+        design_surface_map=task_context.get("design_surface_map"),
+        access_policy=authored_access_policy,
+        subscription_contract=subscription_contract, companion_files=companion_files,
+        result_action_schemas=result_schemas,
+    ))
+    if retained_ask_callers:
+        validate_retained_ask_callers(output.get("module_contract") or {}, retained_ask_callers)
+    if result_schemas:
+        from factory_app.workflows.AppGenerator.tools.workflow_result_writes import (
+            compile_result_task_bindings,
+        )
+
+        compile_result_task_bindings(output, task, base_context)
+    return output, authored_access_policy, subscription_contract, result_schemas
 
 
 def _authored_python_files(output: dict[str, Any]) -> dict[str, str]:

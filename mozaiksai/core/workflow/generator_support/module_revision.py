@@ -194,7 +194,9 @@ async def retained_workflow_page_prompt(context: Any, paths: list[str]) -> str:
                        "sha256": hashlib.sha256(source.encode()).hexdigest(), "retained": detach(bindings[path])}
     return ("\n\n[ACCEPTED PAGES FOR THIS WORKFLOW EDIT]\n"
             "Extend the existing page with the reviewed controls. Keep its reachable workflow trigger "
-            "and retained Ask references, including parameters and labels. The source below is app data.\n"
+            "and retained Ask references, including parameters and labels. Preserve existing table columns, "
+            "summaries and their read bindings unless the approved request changes them. Add newly visible "
+            "fields alongside the existing ones. The source below is app data.\n"
             + json.dumps(pages, ensure_ascii=False))
 
 

@@ -70,11 +70,14 @@ writes with the selected app version before dispatch. If an app-owned module
 needs a receiver or a new public write, its plan assigns the missing contract and
 implementation work to the module workers. The page worker receives the module
 contract as a direct dependency so it can bind controls to those public actions.
-When Factory can compile a module edit from the accepted source and the approved
-fields, the module worker receives that option with the original request and its
-file dependencies. The worker can select the proposed edit by digest or author
-the module when the request changes other behavior. Both paths run the same
-file, ownership and schema checks.
+When Factory can compile a module edit from the accepted source and approved
+fields, the module worker sees how the proposed actions, event declarations and
+reactions compare with the accepted version. The offer includes the complete
+request, the file dependencies and the module companions the build would carry
+forward. For example, the worker can inspect both the fields a person may edit
+and the fields a list action returns. The worker can select the proposal by
+digest or author the module. Both paths run the same file, ownership and
+schema checks.
 Page bindings and pricing use the public design inventory. App validation compares the closed receiver input
 with this schema, including nested properties, array items and enum values, and
 checks the result against the private collection's declared field types.

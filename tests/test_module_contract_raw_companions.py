@@ -75,10 +75,16 @@ async def test_verified_module_choice_uses_regular_file_admission(monkeypatch, d
     task = copy.deepcopy(_plan_task())
     context = copy.deepcopy(FIXTURE["context"])
     candidate = copy.deepcopy(FIXTURE["rejected_output"])
-    verified = AsyncMock(return_value=candidate)
+    verified = AsyncMock(return_value=reviewed_result_module_task.VerifiedResultModuleSource(candidate, "source-build", "source", [], []))
     digest = "a" * 64
     offer = (digest, "Choose the source-based contract or author the module.")
-    monkeypatch.setattr(reviewed_module_choice, "reviewed_module_choice_prompt", lambda *args: offer)
+    evidence = {}
+
+    def capture_offer(*args, compiled_evidence):
+        evidence.update(compiled_evidence)
+        return offer
+
+    monkeypatch.setattr(reviewed_module_choice, "reviewed_module_choice_prompt", capture_offer)
 
     async def reply(request):
         if request.response_model is None:
@@ -115,6 +121,12 @@ async def test_verified_module_choice_uses_regular_file_admission(monkeypatch, d
     assert result["_task_id"] == task["task_id"]
     assert {entry["filename"] for entry in result["code_files"]} == {MANIFEST, EVENTS}
     assert result["module_contract"]["reactions_yaml"] is None
+    if decision == "use_compiled":
+        import hashlib
+
+        emitted = {entry["filename"]: entry["content"] for entry in result["code_files"]}
+        assert evidence["compiled_files"] == {p: yaml.safe_load(text) for p, text in emitted.items()}
+        assert evidence["compiled_file_sha256"] == {p: hashlib.sha256(text.encode()).hexdigest() for p, text in emitted.items()}
     if decision == "author_module":
         assert result["agent_message"] == "Authored"
 
