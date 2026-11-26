@@ -54,6 +54,11 @@ _DEBIT_OPERATIONS = {"usage_debit", "debit", "adjustment_debit"}
 # contention at all.
 _RESERVATION_ATTEMPTS = 5
 
+# Attempts to take what a balance holds for one usage charge. A lost swap means
+# another movement committed on this balance, so contention ends as the balance
+# runs out; the bound only stops a pathological loop.
+_SETTLEMENT_ATTEMPTS = 64
+
 
 class TokenWalletReservationUnavailable(RuntimeError):
     """The durable reservation for a movement could not be acquired.
@@ -734,10 +739,10 @@ class TokenWalletLedger:
         Each attempt swaps against the exact balance it read, so a concurrent
         credit or debit makes it look again instead of taking a stale amount.
         """
-        for _attempt in range(_RESERVATION_ATTEMPTS):
-            current = await balances.find_one({"_id": update_filter["_id"]})
-            available = int((current or {}).get("balance") or 0)
-            if available <= 0:
+        for _attempt in range(_SETTLEMENT_ATTEMPTS):
+            current = await balances.find_one({"_id": update_filter["_id"]}) or {}
+            available = int(current.get("balance") or 0)
+            if available <= 0 or entry_id in set(current.get("applied_entry_ids") or []):
                 return None
             charged = min(available, amount)
             settled = await balances.find_one_and_update(
@@ -754,6 +759,10 @@ class TokenWalletLedger:
             )
             if settled is not None:
                 return dict(settled)
+        logger.error(
+            "token usage could not take the remaining balance: balance_id=%s entry_id=%s",
+            update_filter["_id"], entry_id,
+        )
         return None
 
     async def _mark_entry_applied(

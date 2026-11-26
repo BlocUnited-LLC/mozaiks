@@ -731,6 +731,34 @@ async def test_calls_already_running_when_the_balance_runs_out_share_what_is_lef
 
 
 @pytest.mark.asyncio
+async def test_an_oversized_charge_keeps_trying_while_other_charges_land() -> None:
+    """Losing the swap to other writers is not a reason to leave the call uncharged."""
+    database = _Database()
+    ledger = TokenWalletLedger(database=database)
+    wallet = _without_allowance().token_wallets[0]
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=500, idempotency_key="payment:1")
+    balances = database[RuntimeCollections.RUNTIME_TOKEN_WALLET_BALANCES]
+    original_find_one = balances.find_one
+    interruptions = {"left": 10}
+
+    async def find_one_then_another_writer_lands(query, projection=None):
+        found = await original_find_one(query, projection)
+        if found is not None and interruptions["left"] and "balance" in found:
+            interruptions["left"] -= 1
+            stored = next(iter(balances.docs.values()))
+            stored["balance"] -= 5
+            stored["total_spent"] = int(stored.get("total_spent") or 0) + 5
+        return found
+
+    balances.find_one = find_one_then_another_writer_lands
+    result = await ledger.record_usage_debit(_usage("big", 20_000), wallet=wallet)
+    assert interruptions["left"] == 0
+    assert result is not None and result.status == "applied"
+    assert result.balance["balance"] == 0
+    assert result.entry["settled_amount"] == 500 - 5 * 10
+
+
+@pytest.mark.asyncio
 async def test_a_charge_interrupted_after_the_balance_moved_is_finalized_with_what_moved(monkeypatch) -> None:
     ledger = _ledger()
     wallet = _without_allowance().token_wallets[0]
