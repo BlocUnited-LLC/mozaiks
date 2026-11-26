@@ -47,7 +47,8 @@ test('a saved workflow opens after catalog discovery recovers', async t => {
     await t.test(recovery, async t => {
       const page = await browser.newPage();
       t.after(() => page.close());
-      const errors = [], sockets = [], closed = [], starts = [];
+      const errors = [], sockets = [], closed = [], starts = [], turns = [];
+      let activeSocket;
       let available = false, discoveryFailed = false;
       page.on('pageerror', error => errors.push(error.message));
       page.on('console', entry => {
@@ -64,12 +65,16 @@ test('a saved workflow opens after catalog discovery recovers', async t => {
         return route.fulfill({json:{}});
       });
       await page.routeWebSocket('**/ws/**', socket => {
+        activeSocket = socket;
         const pathname = new URL(socket.url()).pathname;
         sockets.push(pathname);
         socket.onClose(() => closed.push(pathname));
         socket.onMessage(message => {
-          if (JSON.parse(message).type === 'chat.switch_workflow') {
+          const frame = JSON.parse(message);
+          if (frame.type === 'user.input.submit') turns.push(frame);
+          if (frame.type === 'chat.switch_workflow') {
             socket.send(JSON.stringify({type:'chat.text', content:'Saved study conversation', agent:'Guide'}));
+            socket.send(JSON.stringify({type:'chat.awaiting_reply', data:{chat_id:'saved-study'}}));
           }
         });
         socket.send(JSON.stringify({type:'chat_meta', data:{chat_id:'saved-study', workflow_name:'Study', chat_exists:true}}));
@@ -85,6 +90,43 @@ test('a saved workflow opens after catalog discovery recovers', async t => {
       assert.deepEqual(closed, []);
       await expect.poll(() => errors[0] || sockets).toEqual(['/ws/Study/sample/saved-study/owner']);
       assert.deepEqual(starts, []);
+      const accepted = recovery === 'Reconnect';
+      await t.test(accepted ? 'retry after token top-up' : 'continue after uncertain delivery', async () => {
+        const input = page.getByRole('textbox').last();
+        const send = page.getByRole('button', {name:'Send message'}).last();
+        await input.fill('Review the study');
+        await send.click();
+        await expect.poll(() => turns.length).toBe(1);
+        const receipt = (type, data) => activeSocket.send(JSON.stringify({type, data}));
+        const ids = {chat_id:'saved-study', client_message_id:turns[0].context.client_message_id};
+        const error = accepted
+          ? {error_code:'INSUFFICIENT_TOKENS', message:'Insufficient token balance to run this AI action.'}
+          : {error_code:'USER_MESSAGE_FAILED', message:'User message failed'};
+        if (accepted) receipt('chat.input_ack', {...ids,status:'accepted'});
+        await input.fill('My follow-up');
+        if (accepted) {
+          receipt('error', {chat_id:ids.chat_id,...error});
+          await expect(page.getByText(error.message,{exact:false})).toBeVisible();
+        }
+        const failure = {...ids,...error,delivery_state:accepted ? 'accepted' : 'unknown'};
+        receipt('chat.error', {...failure,client_message_id:'previous-send'});
+        receipt('chat.error', {...failure,chat_id:'other-room'});
+        receipt('chat.error', {...failure,replay:true});
+        await expect(send).toBeDisabled();
+        receipt('chat.error', failure);
+        await expect(send).toBeEnabled();
+        await expect(input).toHaveValue('My follow-up');
+        await expect(page.getByRole('status',{name:'Assistant is typing'})).toHaveCount(0);
+        await expect(page.getByText('View unsent message')).toHaveCount(0);
+        assert.equal(turns.length, 1);
+        await send.click();
+        await expect.poll(() => turns.length).toBe(2);
+        assert.equal(turns[1].text,'My follow-up');
+        await input.fill('My next draft');
+        receipt('chat.error', failure);
+        await expect(send).toBeDisabled();
+        await expect(input).toHaveValue('My next draft');
+      });
     });
   }
 });

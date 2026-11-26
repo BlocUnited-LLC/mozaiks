@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from starlette.websockets import WebSocketState
@@ -32,7 +32,7 @@ class _FakeTransport:
         assert chat_id == "chat-1"
         return dict(self._conn_meta)
 
-    async def _send_ws_error(self, websocket: _FakeWebSocket, message: str, code: str) -> None:
+    async def _send_ws_error(self, websocket: _FakeWebSocket, message: str, code: str, **_metadata) -> None:
         self.errors.append((message, code))
 
     async def _handle_general_agent_exchange(self, **kwargs) -> None:
@@ -319,7 +319,7 @@ async def test_socket_authority_outage_refuses_before_ack(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["LockAcquisitionError", "ChatLockAuthorityUnavailableError", "ChatLeaseLostError"])
+@pytest.mark.parametrize("failure", ["LockAcquisitionError", "ChatLockAuthorityUnavailableError", "ChatLeaseLostError", "TokenUsageDenied"])
 async def test_provider_failure_after_admission_never_marks_input_resendable(monkeypatch, failure):
     from mozaiksai.core.runtime.persistence import distributed_lock as dl
     from mozaiksai.core.session import router
@@ -331,20 +331,55 @@ async def test_provider_failure_after_admission_never_marks_input_resendable(mon
     monkeypatch.setattr(_bridge_mod, "get_workflow_lifecycle_hooks", lambda _: {})
     monkeypatch.setattr(router, "get_session_router_for_chat",
                         AsyncMock(return_value=SimpleNamespace(fail_active_revision=AsyncMock())))
-    failure_type = getattr(dl, failure)
-    run = AsyncMock(side_effect=failure_type(dl.chat_lock_resource(app_id, chat_id)))
+    if failure == "TokenUsageDenied":
+        from mozaiksai.core.tokens.guard import TokenUsageDecision, TokenUsageDenied
+
+        exc = TokenUsageDenied(TokenUsageDecision(allowed=False, reason="insufficient_balance", error_code="INSUFFICIENT_TOKENS"))
+    else:
+        exc = getattr(dl, failure)(dl.chat_lock_resource(app_id, chat_id))
+    run = AsyncMock(side_effect=exc)
     monkeypatch.setattr(_ag2_mod, "get_ag2_adapter", lambda: SimpleNamespace(run=run))
     await handle_user_input_submit(transport, {
         "text": "Already admitted", "context": {"client_message_id": "admitted"},
     }, chat_id, websocket)
     await transport._background_tasks[chat_id]
-    assert [(f["type"], f["data"]["status"], f["data"]["client_message_id"]) for f in websocket.sent] == [
-        ("chat.input_ack", "accepted", "admitted"),
-    ]
+    ack, terminal = websocket.sent
+    assert (ack["type"], ack["data"]["status"], ack["data"]["client_message_id"]) == ("chat.input_ack", "accepted", "admitted")
+    assert terminal["type"] == "chat.error"
+    assert terminal["data"]["chat_id"] == chat_id and terminal["data"]["client_message_id"] == "admitted"
+    assert terminal["data"]["delivery_state"] == "accepted"
     assert [m["content"] for m in pm.run_user_messages] == ["Already admitted"]
     transport.send_error.assert_awaited_once()
-    expected = "CHAT_LOCK_LOST" if failure == "ChatLeaseLostError" else "WORKFLOW_EXECUTION_FAILED"
-    assert transport.send_error.await_args.kwargs["error_code"] == expected
+    expected = {"ChatLeaseLostError": "CHAT_LOCK_LOST", "TokenUsageDenied": "INSUFFICIENT_TOKENS"}.get(failure, "WORKFLOW_EXECUTION_FAILED")
+    assert transport.send_error.await_args.kwargs["error_code"] == terminal["data"]["error_code"] == expected
+    assert terminal["data"]["message"] == transport.send_error.await_args.kwargs["error_message"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("callback_attempted", [False, True])
+async def test_failure_before_admission_distinguishes_an_undelivered_turn_from_a_partial_callback(monkeypatch, callback_attempted):
+    from mozaiksai.core.tokens.guard import TokenUsageDecision, TokenUsageDenied
+    from tests.test_chat_execution_lease import _bridge_mod
+
+    chat_id = "admission-error"
+    transport, websocket, pm = _workflow_socket(monkeypatch, "app-1", chat_id)
+    denial = TokenUsageDenied(TokenUsageDecision(allowed=False, reason="insufficient_balance", error_code="INSUFFICIENT_TOKENS"))
+    if callback_attempted:
+        monkeypatch.setattr(_bridge_mod, "get_workflow_lifecycle_hooks", lambda _: {})
+        transport._input_request_registries[chat_id] = {"request": AsyncMock()}
+        monkeypatch.setattr(transport, "submit_user_input", AsyncMock(side_effect=denial))
+    else:
+        monkeypatch.setattr(_bridge_mod, "get_workflow_lifecycle_hooks", Mock(side_effect=denial))
+    await handle_user_input_submit(transport, {
+        "text": "My question", "context": {"client_message_id": "first"},
+    }, chat_id, websocket)
+    await transport._background_tasks[chat_id]
+    receipt, = websocket.sent
+    assert receipt["type"] == "chat.error"
+    assert receipt["data"]["client_message_id"] == "first" and receipt["data"]["chat_id"] == chat_id
+    assert receipt["data"]["delivery_state"] == ("unknown" if callback_attempted else "refused")
+    assert receipt["data"]["error_code"] == "INSUFFICIENT_TOKENS"
+    assert pm.run_user_messages == []
 
 
 @pytest.mark.asyncio

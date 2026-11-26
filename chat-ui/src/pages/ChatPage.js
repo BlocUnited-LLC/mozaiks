@@ -1211,7 +1211,7 @@ const ChatPage = () => {
       ? { ...row, awaitingWorkflowAdmission: false } : row));
   }, [setMessagesWithLogging]);
   const { text: composerDraft, changeDraft, refused: recoveredWorkflowDraft, sending: sendingWorkflowInput,
-    remember: rememberWorkflowSubmission, bindCreatedChat, finish: finishWorkflowSubmission, restore: restoreRefusedDraft, handleAdmission,
+    remember: rememberWorkflowSubmission, bindCreatedChat, finish: finishWorkflowSubmission, restore: restoreRefusedDraft, handleAdmission, settleFailure,
     isCurrent: isCurrentSubmission } =
     useWorkflowSubmission(composerScope, removeRefusedMessage);
   const workflowSocket = wsRef.current?.socket;
@@ -2540,7 +2540,7 @@ const ChatPage = () => {
           // For other events, unwrap and continue processing
           const innerData = inner.data || {};
           data.type = inner.type; // Use the inner type (could be chat.*, unknown, etc.)
-          if (inner.type === 'chat.input_ack' || inner.type === 'chat.error') data.data = innerData;
+          if (['chat.input_ack', 'chat.error', 'error'].includes(inner.type)) data.data = innerData;
           if (typeof innerData.content === 'string') data.content = innerData.content;
           if (innerData.agent) data.agent = innerData.agent;
           if (innerData.agent_name) data.agent_name = innerData.agent_name;
@@ -2567,7 +2567,7 @@ const ChatPage = () => {
       if (debugFlag('mozaiks.debug_pipeline')) console.warn('⚠️ [PIPELINE] failed to unwrap nested envelope', e);
     }
     
-    if (!data.type.startsWith('chat.') && !data.type.startsWith('ui.') && data.type !== 'unknown') return;
+    if (!data.type.startsWith('chat.') && !data.type.startsWith('ui.') && !['unknown', 'error'].includes(data.type)) return;
 
     // Some events may arrive already as { type:'chat.text', data:{ ...actualFields... } } (no double-serialization)
     // or after the above unwrap we can still retain an inner data object we need to promote.
@@ -2621,7 +2621,7 @@ const ChatPage = () => {
     } catch {}
 
     const evt = data.type.startsWith('chat.') ? data.type.slice(5) : data.type;
-    setChatStatusProgress(current => applyChatProgressEvent(current, {
+    if (evt !== 'error') setChatStatusProgress(current => applyChatProgressEvent(current, {
       mode: conversationModeRef.current,
       chatId: currentChatIdRef.current,
       workflowName: currentWorkflowNameRef.current,
@@ -3953,21 +3953,26 @@ const ChatPage = () => {
       case 'error': {
         const errorMsg = data.message || data.data?.message || 'Unknown error';
         const errorCode = data.error_code || data.data?.error_code;
+        const errorChatId = data.data?.chat_id || data.chat_id;
+        if (errorChatId && currentChatId && errorChatId !== currentChatId) return;
+        const messageId = data.data?.client_message_id || data.client_message_id;
+        const state = data.data?.delivery_state || data.delivery_state;
         if (['CHAT_BUSY', 'CHAT_LOCK_BUSY', 'CHAT_LOCK_UNAVAILABLE'].includes(errorCode)) {
-          const messageId = data.data?.client_message_id || data.client_message_id;
-          if (messageId) {
+          if (messageId && (!state || state === 'refused')) {
             // A different worker's eventual pause may never reach this socket.
             if (handleAdmission(false, data)) setLoading(errorCode === 'CHAT_BUSY');
             return;
           }
         }
-        if (errorCode === 'WORKFLOW_MODEL_UNAVAILABLE') {
-          if (handleAdmission(false, data)) {
-            setPendingWorkflowReply(null);
-            setLoading(false);
-          }
-        } else {
+        if (['refused', 'accepted', 'unknown'].includes(state) || (messageId && errorCode === 'WORKFLOW_MODEL_UNAVAILABLE')) {
+          if (!settleFailure(state || 'refused', data)) return;
+          if (state === 'accepted') confirmWorkflowMessage(messageId);
+          setLoading(false);
           setPendingWorkflowReply(null);
+          setMessagesWithLogging(rows => rows.filter(row => !row.isThinking));
+          setChatStatusProgress(current => applyChatProgressEvent(current, {
+            mode: 'workflow', chatId: currentChatId, workflowName: currentWorkflowName,
+          }, data));
         }
         // Create a stable ID based on error content to prevent duplicates
         const errorId = `${errorCode || 'error'}-${errorMsg.slice(0, 50)}`;
@@ -4010,7 +4015,7 @@ const ChatPage = () => {
       default:
         return;
     }
-  }, [confirmWorkflowMessage, handleAdmission, adoptInlineRefinement, findRevisionArtifact, activeChatId, activeWorkflowName, appId, auth, config, user, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, urlWorkflowName, observeSessionMeta, hydrateServerArtifactForChat]);
+  }, [confirmWorkflowMessage, handleAdmission, settleFailure, adoptInlineRefinement, findRevisionArtifact, activeChatId, activeWorkflowName, appId, auth, config, user, currentChatId, currentWorkflowName, rememberWorkflowChatSession, resolveKnownWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages, persistWorkflowTranscriptSnapshot, cacheWorkflowTranscriptMessage, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, setCurrentWorkflowName, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, applySessionStatePendingTransition, buildPendingHarnessDecision, cacheServerLastArtifact, handleMissingBackendArtifact, urlWorkflowName, observeSessionMeta, hydrateServerArtifactForChat]);
   useEffect(() => {
     handleIncomingRef.current = handleIncoming;
   }, [handleIncoming]);
@@ -5515,6 +5520,7 @@ const ChatPage = () => {
 
       // Deferred workflow launch: create the runtime chat only when the user
       // sends the first real message, then route that message into the run.
+      lastErrorIdRef.current = null;
       const submitted = rememberWorkflowSubmission(composerScope, currentChatId, userMessage);
       let attemptedInput = false;
       try {
@@ -5574,7 +5580,7 @@ const ChatPage = () => {
         targetChatId,
         { client_message_id: userMessage.id, ...(artifactContextPayload ? { artifact_context: artifactContextPayload } : {}) }
       );
-      if (!isCurrentSubmission(submitted) || submitted.rejected) return;
+      if (!isCurrentSubmission(submitted) || submitted.rejected || submitted.settled) return;
       if (success && success.success !== false) {
         if (success.delivery_state === 'accepted') {
           submitted.accepted = true;

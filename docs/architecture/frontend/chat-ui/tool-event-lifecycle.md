@@ -145,6 +145,14 @@ error identifies the same turn. ChatUI returns the refused text to the
 original composer for the user to edit and send. An unconfirmed socket or HTTP
 outcome requires checking the conversation before trying again.
 
+When a submitted turn ends with an error, its sender receives `chat.error`
+with the same chat and message IDs and a `delivery_state`. A `refused` turn
+can be edited and sent again. An `accepted` turn stays in the conversation.
+An `unknown` outcome leaves the next draft available while the user checks
+the conversation. A workflow can also broadcast an `error` with recovery
+details such as its token top-up action. The sender uses the matching receipt
+to finish its turn and enable the composer.
+
 ## The key difference from AG-UI and CopilotKit
 
 AG-UI and CopilotKit make the tool call itself the UI interaction contract.

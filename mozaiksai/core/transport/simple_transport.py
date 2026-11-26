@@ -354,6 +354,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         *,
         chat_id: str | None = None,
         client_message_id: str | None = None,
+        delivery_state: str | None = None,
     ) -> None:
         """Send a standardized error response to the WebSocket client."""
         if getattr(websocket, "application_state", None) is not WebSocketState.CONNECTED:
@@ -366,7 +367,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 "type": "chat.error",
                 "data": {"message": message, "error_code": error_code,
                          **({"chat_id": chat_id} if chat_id else {}),
-                         **({"client_message_id": client_message_id} if client_message_id else {})},
+                         **({"client_message_id": client_message_id} if client_message_id else {}),
+                         **({"delivery_state": delivery_state} if delivery_state else {})},
                 "timestamp": _utc_timestamp(),
             })
         except RuntimeError:

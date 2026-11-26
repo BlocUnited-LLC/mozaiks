@@ -57,21 +57,37 @@ export default function useWorkflowSubmission(scope, removeRefusedMessage) {
     return true;
   }, [isCurrent, removeRefusedMessage]);
 
-  const handleAdmission = useCallback((accepted, receipt) => {
+  const matchReceipt = useCallback(receipt => {
     const chatId = receipt.data?.chat_id || receipt.chat_id;
     const messageId = receipt.data?.client_message_id || receipt.client_message_id;
     const entry = submitted.current;
-    if (!isCurrent(entry) || entry.chatId !== chatId ||
-        entry.message.id !== messageId || entry.accepted || entry.rejected) return false;
+    if (!isCurrent(entry) || entry.chatId !== chatId || entry.message.id !== messageId ||
+        entry.rejected || entry.settled || receipt.replay || receipt.data?.replay) return null;
+    return entry;
+  }, [isCurrent]);
+
+  const handleAdmission = useCallback((accepted, receipt) => {
+    const entry = matchReceipt(receipt);
+    if (!entry || entry.accepted) return false;
     if (accepted) entry.accepted = true;
     else restore(entry);
     return true;
-  }, [isCurrent, restore]);
+  }, [matchReceipt, restore]);
+
+  const settleFailure = useCallback((state, receipt) => {
+    const entry = matchReceipt(receipt);
+    if (!entry || (state === 'refused' && entry.accepted)) return false;
+    if (state === 'refused') restore(entry);
+    if (state === 'accepted') entry.accepted = true;
+    entry.settled = true;
+    finish(entry);
+    return true;
+  }, [finish, matchReceipt, restore]);
 
   return {
     text: draft?.scope === scope ? draft.text : '',
     refused: refused?.scope === scope ? refused : null,
     sending: isCurrent(sending) && !sending.rejected,
-    changeDraft, remember, bindCreatedChat, finish, restore, handleAdmission, isCurrent,
+    changeDraft, remember, bindCreatedChat, finish, restore, handleAdmission, settleFailure, isCurrent,
   };
 }
