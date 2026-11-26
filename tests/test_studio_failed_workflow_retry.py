@@ -22,7 +22,7 @@ from mozaiksai.core.artifacts.models import BuildRecord, ChangeRequestDoc
 from mozaiksai.core.auth import UserPrincipal
 from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
 from mozaiksai.core.session import launcher
-from mozaiksai.core.session.model import SessionState, TriggerInput
+from mozaiksai.core.session.model import RevisionEntry, SessionState, TriggerInput
 from mozaiksai.core.session.persistence import SessionStateStore
 from mozaiksai.core.session.router import SessionRouter
 from mozaiksai.core.workflow.context.adapter import create_context_container
@@ -372,6 +372,66 @@ async def test_downstream_retry_rejects_unproven_stage_before_publication(downst
     assert error.value.status_code == 400
     assert docs == before
     r.service.update_build_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", [None, "other_revision", "other_change", "other_stage", "ambiguous_terminal",
+                                    "cancelled", "stale_plan", "missing_parent", "new_decision", "superseded_baseline"])
+async def test_retry_after_real_failure_cleanup_requires_the_last_reviewed_export(downstream, fault):
+    from factory_app.workflows.AgentGenerator.tools.pattern_selection import selection_fingerprint
+
+    r = downstream
+    router = studio.get_session_router().for_target("target")
+    store = SessionStateStore(r.pm)
+    state = await store.load(app_id="host", user_id="owner", target_app_id="target")
+    state.current_chat_id = "failed"
+    state.current_workflow_id = "AgentGenerator"
+    state.journey_position = 2
+    state.artifact_version_refs = {"app_bundle": "baseline"}
+    state.revision_history = [RevisionEntry(revision_id="revision", change_request_id="change", scope="patch",
+                                            origin_workflow="DesignDocs", target_workflow="DesignDocs")]
+    await store.upsert(state)
+    await router.fail_active_revision(app_id="host", user_id="owner", workflow_id="AgentGenerator")
+    selection = {"workflows": [{"name": "TitleAssistant"}]}
+    r.source.update(
+        journey_parent_chat_id="subscription", workflow_review_outcome="approved", PatternSelection=selection,
+        workflow_plan_review={"status": "approved", "selection_hash": selection_fingerprint(selection)},
+        workflow_bundle_validation_status="failed", workflow_bundle_validation_errors=["invalid generated bundle"],
+        workflow_bundle_export_outcome="blocked", workflow_bundle_repair_result={
+            "status": "blocked", "reason": "workflow_bundle_repair_attempts_exhausted", "repairable": False,
+            "attempt": 2, "max_attempts": 2},
+    )
+    row = (await store._coll())._docs[state.session_id]
+    assert row["sequence_status"] == "stale" and row["active_revision_id"] is None
+    if fault == "other_revision":
+        row["revision_history"][-1]["revision_id"] = "another"
+    elif fault == "other_change":
+        row["revision_history"][-1]["change_request_id"] = "another"
+    elif fault == "other_stage":
+        row["current_chat_id"] = "another"
+    elif fault == "ambiguous_terminal":
+        r.source["workflow_bundle_repair_result"] = {}
+    elif fault == "cancelled":
+        r.source["workflow_review_outcome"] = "cancelled"
+    elif fault == "stale_plan":
+        r.source["PatternSelection"] = {"workflows": ["changed"]}
+    elif fault == "missing_parent":
+        del r.source["journey_parent_chat_id"]
+    elif fault == "new_decision":
+        row["pending_transition_id"] = "new-transition"
+    elif fault == "superseded_baseline":
+        row["artifact_version_refs"]["app_bundle"] = "new-baseline"
+    if fault is not None:
+        with pytest.raises(HTTPException, match="does not belong to the active refinement"):
+            await launch(r, workflow_id="AgentGenerator")
+        r.service.update_build_status.assert_not_called()
+        return
+    result = await launch(r, workflow_id="AgentGenerator")
+    fresh = r.pm._default._docs[result["chat_id"]]
+    assert fresh["journey_parent_chat_id"] == "subscription" and fresh["revision_id"] == "revision"
+    assert not {"workflow_plan_review", "PatternSelection", "workflow_bundle_repair_result"} & fresh.keys()
+    snapshot = await router.get_session_snapshot(app_id="host", user_id="owner")
+    assert snapshot["active_revision_id"] == "revision" and snapshot["active_change_request_id"] == "change"
 
 
 @pytest.mark.asyncio

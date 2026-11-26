@@ -3507,6 +3507,45 @@ def _registered_retry_cursor(
     return status, active
 
 
+def _matches_failed_revision(snapshot: dict[str, Any], source: dict[str, Any], change: ChangeRequestDoc) -> bool:
+    review = source.get("workflow_plan_review") or {}
+    if not isinstance(review, dict) or source.get("workflow_review_outcome") == "cancelled" or review.get("status") == "cancelled":
+        return False
+    active = (snapshot.get("active_change_request_id"), snapshot.get("active_revision_id"))
+    if active == (change.id, source["revision_id"]):
+        return True
+    # fail_active_revision closes a failed revision, including its two active
+    # IDs. Re-open only the current, reviewed export that exhausted its repairs.
+    # A cancelled plan and a superseding revision cannot use this evidence.
+    history = snapshot.get("revision_history") or []
+    if (active != (None, None) or snapshot.get("sequence_status") != "stale"
+            or snapshot.get("sequence_completed_at") or snapshot.get("pending_harness_decision") or snapshot.get("pending_transition_id")
+            or snapshot.get("current_chat_id") != source["_id"] or snapshot.get("current_workflow_id") != "AgentGenerator"
+            or source.get("workflow_name") != "AgentGenerator" or not source.get("journey_parent_chat_id")
+            or snapshot.get("journey_position") != source.get("journey_position") or not history):
+        return False
+    if (history[-1].get("change_request_id") != change.id or history[-1].get("revision_id") != source["revision_id"]
+            or history[-1].get("target_workflow") != change.router_decision.get("workflow_id")
+            or history[-1].get("scope") != change.classification.value
+            or (history[-1].get("to_version_refs") or {}).get(change.build_family) != change.build_record_id
+            or (snapshot.get("artifact_version_refs") or {}).get(change.build_family) != change.build_record_id):
+        return False
+    from factory_app.workflows.AgentGenerator.tools.pattern_selection import selection_fingerprint
+
+    repair = source.get("workflow_bundle_repair_result") or {}
+    selection = source.get("PatternSelection")
+    return (
+        isinstance(repair, dict) and repair.get("status") == "blocked" and repair.get("reason") == "workflow_bundle_repair_attempts_exhausted"
+        and repair.get("repairable") is False and type(repair.get("attempt")) is int
+        and repair["attempt"] > 0 and repair["attempt"] == repair.get("max_attempts")
+        and source.get("workflow_bundle_export_outcome") == "blocked"
+        and source.get("workflow_bundle_validation_status") == "failed" and bool(source.get("workflow_bundle_validation_errors"))
+        and source.get("workflow_review_outcome") == "approved" and review.get("status") == "approved"
+        and isinstance(selection, dict) and isinstance(selection.get("workflows"), list) and bool(selection["workflows"])
+        and review.get("selection_hash") == selection_fingerprint(selection)
+    )
+
+
 async def _verified_retry_predecessor(
     *, source: dict[str, Any], change: ChangeRequestDoc, binding: RunBuildBinding,
     app_id: str, user_id: str, workflow_id: str, sessions: Any,
@@ -3526,7 +3565,7 @@ async def _verified_retry_predecessor(
     snapshot = await get_session_router().for_target(binding.target_app_id).get_session_snapshot(app_id=app_id, user_id=user_id) or {}
     instance = TypeAdapter(BuildIdentity).validate_python(source.get("journey_instance_id"))
     if (snapshot.get("journey_instance_id") != instance or snapshot.get("journey_key") != journey_id
-            or snapshot.get("active_change_request_id") != change.id or snapshot.get("active_revision_id") != source["revision_id"]):
+            or not _matches_failed_revision(snapshot, source, change)):
         raise ValueError("The failed stage does not belong to the active refinement journey")
 
     pack = load_global_pack_graph()
@@ -3636,7 +3675,9 @@ async def _failed_workflow_retry_contribution(
         {"status": 1, "run_build_binding": 1, "trigger_meta": 1, "change_request_id": 1,
          "revision_id": 1, "coding_participation": 1, "workflow_name": 1, "created_at": 1,
          "session_router_session_id": 1, "journey_position": 1, "journey_key": 1,
-         "journey_instance_id": 1, "journey_total_steps": 1, "journey_parent_chat_id": 1, "artifact_version_id": 1},
+         "journey_instance_id": 1, "journey_total_steps": 1, "journey_parent_chat_id": 1, "artifact_version_id": 1,
+         "workflow_bundle_repair_result": 1, "workflow_bundle_export_outcome": 1, "workflow_bundle_validation_status": 1,
+         "workflow_bundle_validation_errors": 1, "workflow_review_outcome": 1, "workflow_plan_review": 1, "PatternSelection": 1},
     )
     if not source or source.get("status") != 2:
         raise ValueError("Source workflow session is not an owned failed run")
