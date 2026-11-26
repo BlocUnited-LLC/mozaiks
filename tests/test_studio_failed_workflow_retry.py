@@ -199,6 +199,7 @@ async def downstream(retry, monkeypatch):
         outputs[pred["_id"]] = [BuildRecord(
             _id=f"{family}_v1", app_id="target", build_family=family, build_key=family, version_number=1,
             lineage_root_id=family, source_chat_id=pred["_id"], source_workflow=pred["workflow_name"],
+            canonical_inputs_version={"design_docs": "design_docs_v1"} if family == "subscription_contract" else {},
             validation_status="skipped", created_at=pred["completed_at"],
             files_manifest=[{"path": f"{family}.json", "content_type": "application/json",
                              "size_bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}],
@@ -394,6 +395,7 @@ async def test_recovery_refuses_to_adopt_a_different_or_terminal_session(downstr
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fault", ["parent_edge", "missing", "duplicate", "later", "other_provider", "root_scope",
                                     "stage_position", "stage_journey", "output_owner", "output_missing", "output_payload",
+                                    "subscription_old_design", "subscription_missing_design",
                                     "request_model", "input_stage", "registration", "revision", "unrelated_manual"])
 async def test_downstream_retry_rejects_unproven_stage_before_publication(downstream, fault):
     r = downstream
@@ -421,6 +423,10 @@ async def test_downstream_retry_rejects_unproven_stage_before_publication(downst
         r.outputs["design"] = []
     elif fault == "output_payload":
         parent["subscription_contract"] = {"plans": ["unapproved"]}
+    elif fault == "subscription_old_design":
+        r.outputs["subscription"][0].canonical_inputs_version["design_docs"] = "original-design"
+    elif fault == "subscription_missing_design":
+        r.outputs["subscription"][0].canonical_inputs_version.clear()
     elif fault == "request_model":
         r.change.refinement_request.refinement_model = "gemini"
     elif fault == "input_stage":

@@ -6,6 +6,7 @@ from typing import Any
 
 from factory_app.workflows._shared.platform.build_target import require_build_binding
 from factory_app.workflows.DesignDocs.tools.save_design_doc import verify_generator_design_inputs
+from mozaiksai.core.artifacts.models import BuildRecord
 from mozaiksai.core.artifacts.summary_artifacts import verified_summary_payload
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
@@ -13,6 +14,12 @@ from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
 from mozaiksai.core.workflow.pack.config import get_workflow_sequence, load_global_pack_graph
 
 _PRODUCERS = {"design_docs": "DesignDocs", "subscription_contract": "SubscriptionContractDesigner"}
+
+
+def verify_subscription_design_input(subscription: BuildRecord, design_id: str) -> None:
+    """A verified subscription can only follow the immutable design it actually records."""
+    if subscription.canonical_inputs_version.get("design_docs") != design_id:
+        raise ValueError("The saved subscription did not use the pinned design; rerun SubscriptionContractDesigner from that design")
 
 
 async def export_input_versions(
@@ -53,8 +60,11 @@ async def export_input_versions(
             raise ValueError(f"The pinned {family} input is unavailable or outside this build")
         if family == "design_docs":
             verify_generator_design_inputs(context, record, user_id=user_id, build_id=binding.build_id)
-        elif resolve_subscription_contract(context) != verified_summary_payload(record):
-            raise ValueError("The subscription presented to the generator differs from its pinned input")
+        else:
+            if resolve_subscription_contract(context) != verified_summary_payload(record):
+                raise ValueError("The subscription presented to the generator differs from its pinned input")
+            if design_id := context.get("design_docs_artifact_version_id"):
+                verify_subscription_design_input(record, design_id)
         owned[family] = record.id
     current = await resolve_latest_artifact_version_refs(
         app_id=app_id, artifact_kinds=current_families, artifact_store=artifact_store,

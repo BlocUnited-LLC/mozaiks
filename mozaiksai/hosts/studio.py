@@ -3629,6 +3629,7 @@ async def _verified_retry_predecessor(
     child = source
     immediate_parent = None
     workflow_record = None
+    subscription_record = None
     upstream_records: dict[str, str] = {}
     for index in reversed(range(position)):
         name = journey.steps[index].workflows[0]
@@ -3689,6 +3690,7 @@ async def _verified_retry_predecessor(
 
                 if output.build_family != "subscription_contract" or parent.get("subscription_contract") != verified_summary_payload(output):
                     raise ValueError("Completed predecessor's launch input differs from its saved output")
+                subscription_record = output
                 upstream_records["subscription_contract"] = output.id
             elif is_workflow_parent:
                 await _verify_reviewed_workflow_export(output, parent, binding)
@@ -3704,6 +3706,10 @@ async def _verified_retry_predecessor(
             or root_meta.get("build_family") != change.build_family):
         raise ValueError("The completed journey root does not prove the saved refinement launch")
     assert immediate_parent is not None
+    if subscription_record is not None and "design_docs" in upstream_records:
+        from factory_app.workflows._shared.export_inputs import verify_subscription_design_input
+
+        verify_subscription_design_input(subscription_record, upstream_records["design_docs"])
     if workflow_record is not None and workflow_record.canonical_inputs_version != upstream_records:
         raise ValueError("The workflow export references different upstream artifacts than its verified journey")
     projected_inputs = {f"{family}_artifact_version_id": record_id for family, record_id in upstream_records.items()}

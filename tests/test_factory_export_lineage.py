@@ -42,7 +42,8 @@ async def test_export_uses_actual_draft_predecessors_over_unrelated_current(monk
         "design_docs": "draft-design_docs", "subscription_contract": "draft-subscription_contract"}
 
 
-@pytest.mark.parametrize("damage", ["missing", "scope", "manifest", "projection", "subscription", "review", "source"])
+@pytest.mark.parametrize("damage", ["missing", "scope", "manifest", "projection", "subscription", "review", "source",
+                                     "subscription_missing_design", "subscription_old_design"])
 @pytest.mark.asyncio
 async def test_export_refuses_unprovable_same_build_inputs(damage, monkeypatch):
     records, context = draft_inputs()
@@ -58,6 +59,10 @@ async def test_export_refuses_unprovable_same_build_inputs(damage, monkeypatch):
         context["experience_spec_document"] += "other design"
     elif damage == "subscription":
         context["subscription_contract"] = {"contract_required": True}
+    elif damage == "subscription_missing_design":
+        subscription.canonical_inputs_version.clear()
+    elif damage == "subscription_old_design":
+        subscription.canonical_inputs_version["design_docs"] = design.lineage_root_id
     elif damage == "review":
         context["run_build_binding"]["build_id"] = "another-build"
     else:
@@ -67,6 +72,21 @@ async def test_export_refuses_unprovable_same_build_inputs(damage, monkeypatch):
     with pytest.raises(ValueError):
         await export_input_versions(context, workflow="AgentGenerator", app_id="app", user_id="owner", artifact_store=store)
     store.list_build_records.assert_not_awaited()
+
+
+async def test_standalone_subscription_without_a_selected_design_keeps_its_own_provenance(monkeypatch):
+    records, context = draft_inputs()
+    context.pop("workflow_sequence")
+    context.pop("design_docs_artifact_version_id")
+    store = AsyncMock()
+    subscription = records["draft-subscription_contract"]
+    store.get_build_record.return_value = subscription
+    design_id = subscription.canonical_inputs_version["design_docs"]
+    latest = AsyncMock(return_value={"design_docs": design_id})
+    monkeypatch.setattr("mozaiksai.core.artifacts.resolve_latest_artifact_version_refs", latest)
+    pins = await export_input_versions(context, workflow="AgentGenerator", app_id="app", user_id="owner", artifact_store=store)
+    assert pins == {"subscription_contract": subscription.id, "design_docs": design_id}
+    latest.assert_awaited_once_with(app_id="app", artifact_kinds=["design_docs"], artifact_store=store)
 
 
 def test_workflow_archive_digest_and_file_existence(tmp_path):

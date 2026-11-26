@@ -27,6 +27,7 @@ def draft_inputs(*, app="app", user="owner", build="build"):
     subscription = {"contract_required": False, "rationale": "Reviewed draft"}
     records = [summary_record("design_docs", design, app=app, user=user),
                summary_record("subscription_contract", subscription, app=app, user=user)]
+    records[1].canonical_inputs_version["design_docs"] = records[0].id
     context = {"run_build_binding": {"target_app_id": app, "build_id": build, "build_registry_id": "reg", "phase": "refinement"},
                "workflow_sequence": "full_rebuild", "design_surface_map": surface_map,
                "backend_design_document": "Reviewed draft", "experience_spec_document": _experience_spec_to_yaml(experience, surface_map),
