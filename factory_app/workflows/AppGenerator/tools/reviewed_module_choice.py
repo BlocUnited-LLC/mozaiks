@@ -21,7 +21,7 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.execution.middleware import TaskPromptProjection
 from mozaiksai.core.workflow.generator_support.module_revision import RetainedAskRead
 from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
-from mozaiksai.core.workflow.task_batches import task_evidence_digest
+from mozaiksai.core.workflow.task_batches import optional_task_output_paths, task_evidence_digest
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ def reviewed_module_choice_prompt(
     callers = {name: read.page for name, read in reads.items()}
     if set(compiled_evidence) != {
         "module_id", "source_build_id", "source_artifact_version_id", "accepted_module_ids", "compiled_files",
-        "compiled_file_sha256", "retained_companions",
+        "compiled_file_sha256", "retained_companions", "absent_optional_paths",
     } or compiled_evidence["module_id"] != module:
         return None
     source_build = compiled_evidence["source_build_id"]
@@ -115,8 +115,18 @@ def reviewed_module_choice_prompt(
     proposed = {path: {"document": doc, "accepted_differences": _accepted_differences(baseline[path], doc)}
                 for path, doc in compiled.items()}
     companions = compiled_evidence["retained_companions"]
+    absent_paths = compiled_evidence["absent_optional_paths"]
+    if (not isinstance(absent_paths, list) or not all(isinstance(path, str) for path in absent_paths)
+            or not isinstance(companions, list)
+            or not all(isinstance(row, dict) and isinstance(row.get("path"), str) for row in companions)):
+        return None
     carried = {row["path"] for row in companions}
-    if not set(task["owned_paths"]) <= (proposed.keys() | carried):
+    absent = set(absent_paths)
+    owned = set(task["owned_paths"])
+    optional = optional_task_output_paths(task) - proposed.keys()
+    if (len(absent) != len(absent_paths) or len(carried) != len(companions)
+            or not absent <= (owned & optional) or not carried <= optional or absent & carried
+            or not proposed.keys() <= owned or not owned <= (proposed.keys() | carried | absent)):
         return None
     plan = context.get("app_build_plan") or {}
     siblings = [
@@ -140,6 +150,12 @@ def reviewed_module_choice_prompt(
         "proposed_files": proposed, "compiled_file_sha256": digests, "retained_companions": companions,
         "dependency_graph": module_read_dependencies(context, module, set(callers.values())),
     }
+    if absent:
+        evidence["absent_optional_paths"] = sorted(absent)
+        evidence["absent_optional_path_decision"] = (
+            "These optional files are absent from the verified source and stay absent in this compilation. "
+            "Choose author_module if the request or task requires creating any of them."
+        )
     digest = task_evidence_digest(evidence)
     prompt = json.dumps({**evidence, "candidate_sha256": digest}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     if len(prompt.encode()) > 32_000:

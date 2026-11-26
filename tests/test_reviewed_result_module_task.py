@@ -79,9 +79,47 @@ async def test_verified_compiler_preserves_source_and_leaves_an_untouched_option
     assert "code_files" not in candidate
     assert source.accepted_module_ids == ["tasks"]
     assert source.source_build_id == "v1"
+    assert source.absent_optional_paths == []
     admin = next(r for r in source.retained_companions if r["path"] == "modules/tasks/contracts/admin.yaml")
     assert admin["document"] == yaml.safe_load(files[admin["path"]])
     assert admin["sha256"] == hashlib.sha256(files[admin["path"]].encode()).hexdigest()
+
+
+@pytest.mark.parametrize("requirement", ["reservation", "unrelated_manifest", "declared_manifest", "unknown_manifest",
+                                         "selected", "affected", "overlay", "deleted", "integration", "additional_subscriber"])
+async def test_source_omits_only_unrequested_optional_reservations(tmp_path, monkeypatch, requirement):
+    task, ctx, files, _, callers, _ = _setup(tmp_path, monkeypatch)
+    extras = ["modules/tasks/contracts/policy_hooks.yaml", "modules/tasks/contracts/relationships.yaml",
+              "modules/tasks/runtime_extensions.yaml"]
+    for path in extras:
+        files.pop(path, None)
+        ctx["generated_files"].pop(path, None)
+    task["owned_paths"].extend(extras)
+    if requirement in {"unrelated_manifest", "declared_manifest", "unknown_manifest"}:
+        task["file_manifest"] = {"yaml_files": [{"unrelated_manifest": "events.yaml", "declared_manifest": "policy_hooks.yaml",
+                                                "unknown_manifest": "unknown.yaml"}[requirement]]}
+    elif requirement == "selected":
+        ctx["refinement_request_meta"] = {"extra": {"selected_file_paths": extras[:1]}}
+    elif requirement == "affected":
+        ctx["impact_set"]["affected_bundle_paths"].append("modules/*/contracts/policy_hooks.yaml")
+    elif requirement == "overlay":
+        ctx["generated_files"][extras[0]] = "{}"
+    elif requirement == "deleted":
+        ctx["deleted_files"] = extras[:1]
+    elif requirement == "integration":
+        task["integration_needs"] = ["integration"]
+    elif requirement == "additional_subscriber":
+        ctx["app_build_plan"]["event_flows"][0]["subscriber_intents"].append("notification")
+    plan_row = {k: deepcopy(v) for k, v in task.items() if k != "current_build_task"}
+    task["current_build_task"] = deepcopy(plan_row)
+    ctx["app_build_plan"]["build_tasks"] = [plan_row]
+    ctx["app_task_batch_items"] = [deepcopy(task)]
+    source = await compiler.reviewed_result_module_task_output(task, ctx, retained_ask_callers=callers)
+    if requirement in {"reservation", "unrelated_manifest"}:
+        assert source is not None and source.absent_optional_paths == extras
+        assert not set(extras).intersection(r["path"] for r in source.retained_companions)
+    else:
+        assert source is None
 
 
 @pytest.mark.parametrize("fault", ["new_custom", "unproven_read", "new_field", "changed_scope", "admin_requested",

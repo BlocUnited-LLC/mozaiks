@@ -43,6 +43,7 @@ class VerifiedResultModuleSource:
     source_artifact_version_id: str
     accepted_module_ids: list[str]
     retained_companions: list[dict[str, Any]]
+    absent_optional_paths: list[str]
 
     def compiled_evidence(self, module: str, files: dict[str, str]) -> dict[str, Any]:
         """Describe the emitted contract files and the accepted companion documents that travel unchanged."""
@@ -53,6 +54,7 @@ class VerifiedResultModuleSource:
             "compiled_files": {path: yaml.safe_load(content) for path, content in files.items()},
             "compiled_file_sha256": {path: hashlib.sha256(content.encode()).hexdigest() for path, content in files.items()},
             "retained_companions": self.retained_companions,
+            "absent_optional_paths": self.absent_optional_paths,
             "accepted_module_ids": self.accepted_module_ids,
         }
 
@@ -128,10 +130,15 @@ async def reviewed_result_module_task_output(
             or not all(isinstance(path, str) for path in [*impact, *selected]) or not owned <= (companions | required)
             or any(fnmatchcase(path, pattern) for path in companions for pattern in [*impact, *selected])):
         return None
-    for path in owned - required:
-        # Optional compiled companions survive through the ordinary baseline overlay. A request to edit any
-        # of them, or to create a new companion, needs its normal author and cannot be satisfied by copying.
-        if path not in files:
+    absent = (owned & companions) - files.keys()
+    manifest_spec = task.get("file_manifest")
+    if absent and manifest_spec is not None:
+        # The manifest guard interprets yaml_files as explicit module filenames. An ownership
+        # reservation alone permits a null typed field, but an explicit file still needs its author.
+        declared = manifest_spec.get("yaml_files", []) if isinstance(manifest_spec, Mapping) else None
+        known_names = {path.rsplit("/", 1)[-1] for path in required | companions}
+        if (not isinstance(declared, (list, tuple)) or not all(isinstance(name, str) and name in known_names for name in declared)
+                or any(path.rsplit("/", 1)[-1] in declared for path in absent)):
             return None
     for path in owned:
         current = (context.get("generated_files") or {}).get(path)
@@ -211,5 +218,5 @@ async def reviewed_result_module_task_output(
     modules = sorted(path.split("/")[1] for path in files
                      if path.startswith("modules/") and path.endswith("/module.yaml") and path.count("/") == 2)
     return VerifiedResultModuleSource(
-        {"mode": "module_contract_bundle", "module_contract": bundle}, source_build_id, record.id, modules, retained,
+        {"mode": "module_contract_bundle", "module_contract": bundle}, source_build_id, record.id, modules, retained, sorted(absent),
     )

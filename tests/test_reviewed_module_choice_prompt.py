@@ -74,6 +74,7 @@ async def test_choice_binds_the_request_task_accepted_actions_graph_and_compiled
     admin = next(c for c in offer["retained_companions"] if c["path"] == "modules/tasks/contracts/admin.yaml")
     assert admin["document"] == yaml.safe_load(files[admin["path"]])
     assert offer["accepted_module_ids"] == offer["planned_module_ids"] == ["tasks"]
+    assert "absent_optional_paths" not in offer
     for key in ("bundle_digest", "graph_hash"):
         assert offer["dependency_graph"][key] == identity[key]
     assert offer["dependency_graph"]["dependencies"] == [edge]
@@ -124,3 +125,28 @@ async def test_ordinary_author_keeps_a_valid_yaml_date_in_an_accepted_optional_s
     assert setting.default.isoformat() == "2026-11-01"
     assert reviewed_module_choice_prompt(ctx, task, source.candidate, callers, compiled_evidence=evidence) is None
     assert carried["settings"][0]["default"] == setting.default and files[path] == text
+
+
+async def test_only_proven_absent_owned_optional_contracts_can_remain_absent(tmp_path, monkeypatch):
+    task, ctx, files, _, callers, _ = _setup(tmp_path, monkeypatch)
+    ctx["refinement_request"] = "Suggest a summary. Keep existing task settings and notifications."
+    path = "modules/tasks/contracts/notifications.yaml"
+    assert path not in files
+    for row in (task, task["current_build_task"], ctx["app_build_plan"]["build_tasks"][0]):
+        row["owned_paths"] = [*row["owned_paths"], path]
+    ctx["app_task_batch_items"] = [deepcopy(task)]
+    source = await reviewed_result_module_task_output(task, ctx, retained_ask_callers=callers)
+    assert source
+    proof = source.compiled_evidence("tasks", _compiled_files(source, task, ctx, callers))
+    def select(evidence):
+        return reviewed_module_choice_prompt(ctx, task, source.candidate, callers, compiled_evidence=evidence)
+    digest, message = select(proof)
+    offer = json.loads(message)
+    assert digest == offer["candidate_sha256"] and offer["absent_optional_paths"] == [path]
+    assert path not in offer["proposed_files"] and path not in {c["path"] for c in offer["retained_companions"]}
+    assert "author_module" in offer["absent_optional_path_decision"]
+    without_absence = {key: value for key, value in proof.items() if key != "absent_optional_paths"}
+    assert select(without_absence) is None
+    for invalid in ([], [path, path], [path, "modules/tasks/contracts/admin.yaml"], [path, "modules/tasks/module.yaml"],
+                    [path, "modules/tasks/contracts/fixtures.yaml"], [path, "modules/unrelated/contracts/notifications.yaml"]):
+        assert select({**proof, "absent_optional_paths": invalid}) is None

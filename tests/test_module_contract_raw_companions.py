@@ -75,7 +75,7 @@ async def test_verified_module_choice_uses_regular_file_admission(monkeypatch, d
     task = copy.deepcopy(_plan_task())
     context = copy.deepcopy(FIXTURE["context"])
     candidate = copy.deepcopy(FIXTURE["rejected_output"])
-    verified = AsyncMock(return_value=reviewed_result_module_task.VerifiedResultModuleSource(candidate, "source-build", "source", [], []))
+    verified = AsyncMock(return_value=reviewed_result_module_task.VerifiedResultModuleSource(candidate, "source-build", "source", [], [], []))
     digest = "a" * 64
     offer = (digest, "Choose the source-based contract or author the module.")
     evidence = {}
