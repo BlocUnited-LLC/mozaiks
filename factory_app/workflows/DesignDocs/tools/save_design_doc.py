@@ -21,6 +21,8 @@ from factory_app.workflows.DesignDocs.tools.hook_accepted_module_actions import 
 )
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.artifacts import persist_summary_artifact
+from mozaiksai.core.artifacts.models import BuildRecord
+from mozaiksai.core.artifacts.summary_artifacts import verified_summary_payload
 from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.runtime.persistence.intent_loader import (
@@ -1045,7 +1047,9 @@ def _complete_monetization_pages(
             )
 
 
-def _experience_spec_to_yaml(experience_spec: dict[str, Any], surface_map: dict[str, Any]) -> str:
+def _experience_spec_to_yaml(
+    experience_spec: dict[str, Any], surface_map: dict[str, Any], ownership_normalizations: list | None = None,
+) -> str:
     """Generate a human-readable YAML representation of the typed ExperienceSpec.
 
     This is stored as the `content` field in DesignDocuments so that agents that
@@ -1060,12 +1064,48 @@ def _experience_spec_to_yaml(experience_spec: dict[str, Any], surface_map: dict[
         "surface_map": surface_map,
         "pages": experience_spec.get("pages", []),
     }
-    return str(yaml.safe_dump(
+    content = str(yaml.safe_dump(
         doc,
         sort_keys=False,
         allow_unicode=False,
         default_flow_style=False,
     )).strip() + "\n"
+    if ownership_normalizations:
+        content += yaml.safe_dump({"ownership_normalizations": ownership_normalizations}, sort_keys=False)
+    return content
+
+
+async def verify_design_projections(output: BuildRecord, *, user_id: str, build_id: str) -> None:
+    """Check the target's DesignDocuments against this completed DesignDocs output at retry admission."""
+    summary = verified_summary_payload(output)
+    surface_map, experience = summary.get("surface_map"), summary.get("experience_spec")
+    if (not isinstance(surface_map, dict) or not isinstance(experience, dict)
+            or not output.source_chat_id or output.source_workflow != "DesignDocs"):
+        raise ValueError("Saved design is missing the source or the reviewed design surfaces")
+    review = summary.get("access_policy_review") or {}
+    if (review.get("build_id") != build_id or review.get("target_app_id") != output.app_id
+            or review.get("status") not in {"approved", "not_required"}
+            or review.get("status") == "approved" and review.get("reviewed_by") != user_id):
+        raise ValueError("The saved design review does not belong to this build and owner")
+    expected = {
+        DesignDocKinds.FRONTEND: {"content": summary.get("frontend_markdown")},
+        DesignDocKinds.DATABASE: {"content": summary.get("database_markdown")},
+        DesignDocKinds.BACKEND: {"content": summary.get("backend_markdown"), "surface_map": surface_map,
+                                 "access_policy": summary.get("access_policy"),
+                                 "access_policy_review": summary.get("access_policy_review")},
+        DesignDocKinds.UI_SCHEMA: {
+            "content": _experience_spec_to_yaml(experience, surface_map, summary.get("ownership_normalizations", [])),
+            "experience_spec": experience, "surface_map": surface_map,
+        },
+    }
+    docs = await BuilderArtifactStore().list_design_docs(app_id=output.app_id)
+    indexed = {doc["kind"]: doc for doc in docs}
+    for kind, fields in expected.items():
+        doc = indexed.get(kind, {})
+        if (not fields["content"] or doc.get("status") != "succeeded" or doc.get("user_id") != user_id
+                or doc.get("source") != {"workflow": output.source_workflow, "chat_id": output.source_chat_id}
+                or any(doc.get(key) != value for key, value in fields.items())):
+            raise ValueError(f"The {kind} design input no longer matches the saved design for this stage")
 
 
 async def save_design_doc(
@@ -1333,9 +1373,7 @@ async def save_design_docs_bundle(
             {"access_policy": access_policy}, sort_keys=False,
         ) + "```\n"
         # Generate human-readable YAML for agents that consume ui_schema as a string
-        ui_schema_content = _experience_spec_to_yaml(experience_spec, surface_map)
-        if ownership_normalizations:
-            ui_schema_content += yaml.safe_dump({"ownership_normalizations": ownership_normalizations}, sort_keys=False)
+        ui_schema_content = _experience_spec_to_yaml(experience_spec, surface_map, ownership_normalizations)
     except Exception as err:
         return _refused(context_variables, "invalid_design_docs_bundle", str(err))
 

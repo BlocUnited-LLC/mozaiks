@@ -350,10 +350,11 @@ async def prepare_routed_workflow_launch(
     source_chat_id: str | None = None,
     routing_contribution: TriggerRoutingContribution | None = None,
     refinement_model: RefinementModel | None = None,
+    chat_id: str | None = None,
 ) -> PreparedWorkflowLaunch:
     from .router import get_session_router
 
-    chat_id = str(uuid4())
+    chat_id = chat_id or str(uuid4())
     allowed, reason = await get_platform_hooks().call_chat_prereqs(
         app_id, user_id, workflow_id or "", _PERSISTENCE_MANAGER,
     )

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -208,6 +210,21 @@ def test_save_design_docs_bundle_persists_surface_map_and_data_contract(monkeypa
     assert summary_artifact["summary_payload"]["surface_map"]["surfaces"][0]["surface_id"] == "users"
     assert summary_artifact["summary_payload"]["experience_spec"]["pages"][0]["name"] == "Users"
     assert result["page_count"] == 1
+
+    # Replay the actual producer's four projections at downstream retry admission.
+    projections = {q["kind"]: dict(update["$set"]) for q, update, _ in design_docs_collection.updates
+                   if "content" in update["$set"] and q["app_id"] == "app_123"}
+    summary = summary_artifact["summary_payload"]
+    monkeypatch.setattr(design_docs_module, "verified_summary_payload", lambda _: summary)
+    monkeypatch.setattr(design_docs_module.BuilderArtifactStore, "list_design_docs", AsyncMock(return_value=list(projections.values())))
+    output = SimpleNamespace(app_id="app_123", source_chat_id="chat_123", source_workflow="DesignDocs")
+    scope = {"user_id": "user_123", "build_id": summary["access_policy_review"]["build_id"]}
+    asyncio.run(design_docs_module.verify_design_projections(output, **scope))
+    with pytest.raises(ValueError, match="review"):
+        asyncio.run(design_docs_module.verify_design_projections(output, **{**scope, "build_id": "other"}))
+    projections["backend"]["content"] += "new draft"
+    with pytest.raises(ValueError, match="backend design input"):
+        asyncio.run(design_docs_module.verify_design_projections(output, **scope))
 
 
 def test_save_design_docs_bundle_propagates_summary_persistence_failure(monkeypatch) -> None:
