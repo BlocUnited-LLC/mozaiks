@@ -4052,11 +4052,10 @@ const ChatPage = () => {
     // Fetch workflow configs first; only signal ready once the registry is populated.
     // This prevents connectWithCorrectTransport from firing against an empty registry.
     void workflowConfig.fetchWorkflowConfigs();
-    // When the URL explicitly targets a chat or requests a fresh start,
-    // clear any stale activeChatId that was hydrated from localStorage so it
-    // doesn't drive the first WS connection before the URL params are consumed.
+    // Keep the routed session active across catalog recovery. Clearing a matching
+    // ID would tear down its live socket as the saved transcript starts to replay.
     if (queryChatId || queryFreshStart) {
-      setActiveChatId(null);
+      setActiveChatId(active => !queryFreshStart && active === queryChatId ? active : null);
     }
 
     if (queryMode !== 'ask' && !queryForceAsk && !currentChatId && !queryChatId && !queryFreshStart) {

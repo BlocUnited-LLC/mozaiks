@@ -47,7 +47,7 @@ test('a saved workflow opens after catalog discovery recovers', async t => {
     await t.test(recovery, async t => {
       const page = await browser.newPage();
       t.after(() => page.close());
-      const errors = [], sockets = [], starts = [];
+      const errors = [], sockets = [], closed = [], starts = [];
       let available = false, discoveryFailed = false;
       page.on('pageerror', error => errors.push(error.message));
       page.on('console', entry => {
@@ -63,7 +63,17 @@ test('a saved workflow opens after catalog discovery recovers', async t => {
         if (pathname.endsWith('/start') && route.request().method() === 'POST') starts.push(pathname);
         return route.fulfill({json:{}});
       });
-      await page.routeWebSocket('**/ws/**', socket => sockets.push(new URL(socket.url()).pathname));
+      await page.routeWebSocket('**/ws/**', socket => {
+        const pathname = new URL(socket.url()).pathname;
+        sockets.push(pathname);
+        socket.onClose(() => closed.push(pathname));
+        socket.onMessage(message => {
+          if (JSON.parse(message).type === 'chat.switch_workflow') {
+            socket.send(JSON.stringify({type:'chat.text', content:'Saved study conversation', agent:'Guide'}));
+          }
+        });
+        socket.send(JSON.stringify({type:'chat_meta', data:{chat_id:'saved-study', workflow_name:'Study', chat_exists:true}}));
+      });
       await page.goto('http://catalog.test/chat?workflow=Study&chat_id=saved-study&mode=workflow');
       await page.addScriptTag({type:'module',content:bundle.outputFiles.find(file => file.path.endsWith('.js')).text});
       await expect.poll(() => errors[0] || discoveryFailed).toBe(true);
@@ -71,6 +81,8 @@ test('a saved workflow opens after catalog discovery recovers', async t => {
       available = true;
       if (recovery === 'Reconnect') await page.getByRole('button', {name:'Reconnect'}).click();
       else await page.evaluate(() => window.refreshCatalog());
+      await expect(page.getByText('Saved study conversation', {exact:true})).toBeVisible();
+      assert.deepEqual(closed, []);
       await expect.poll(() => errors[0] || sockets).toEqual(['/ws/Study/sample/saved-study/owner']);
       assert.deepEqual(starts, []);
     });
