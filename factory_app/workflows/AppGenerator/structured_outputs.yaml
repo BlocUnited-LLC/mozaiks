@@ -2707,10 +2707,6 @@ models:
       target:
         type: ModuleReactionTarget
         description: Handler, capability, or notification target.
-      filters:
-        type: optional_list
-        items: str
-        description: Optional declarative filter expressions based on event envelope/payload.
       idempotency_key:
         type: str
         description: Template used to prevent duplicate reaction execution.
@@ -3696,6 +3692,16 @@ models:
         - 'null'
         description: Optional concise summary.
 
+  RetainAskReads:
+    type: model
+    fields:
+      candidate_sha256:
+        type: str
+        description: Exact digest from the current task's retained-read repair request.
+      action_ids:
+        type: list
+        items: str
+        description: Listed existing page reads whose complete accepted declaration should be reused.
   ConfigMiddlewareOutput:
     type: model
     fields:
@@ -3710,7 +3716,14 @@ models:
         variants:
         - ModuleContractBundle
         - 'null'
-        description: Required in module_contract_bundle mode; null for service_foundation mode.
+        description: Required for complete module output. Null for a retained-read correction or service_foundation mode.
+      retain_ask_reads:
+        type: union
+        default: null
+        variants:
+        - RetainAskReads
+        - 'null'
+        description: Only when the current correction offers existing Ask reads. Select their accepted declarations by ID and digest. All other output lanes must be empty. Otherwise return null.
       service_foundation_bundle:
         type: union
         variants:

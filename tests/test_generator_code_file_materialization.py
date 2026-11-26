@@ -10,7 +10,7 @@ from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     extract_code_file_map_from_payload as extract_appgenerator_code_file_map,
 )
-from mozaiksai.core.runtime.app.module_loader import ModuleDefinition
+from mozaiksai.core.runtime.app.module_loader import ModuleDefinition, ModuleReactionsManifest
 from mozaiksai.core.runtime.composition.schema_validation import validate_json_schema
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
 from mozaiksai.core.workflow.generator_support.code_files import (
@@ -315,6 +315,36 @@ def test_typed_reactions_materialize_incoming_and_workflow_triggered_targets() -
     assert rendered["schema_version"] == "mozaiks.reactions.v1"
     assert [item["target"]["kind"] for item in rendered["reactions"]] == ["notification", "capability"]
     assert rendered["reactions"][1]["target"]["capability_id"] == "orders-review"
+
+
+@pytest.mark.parametrize("filters", [None, [], {}, ["payload.approved"], {"approved": True}])
+def test_generated_reaction_filters_preserve_only_unconditional_legacy_shapes(filters):
+    reaction = {"id": "review", "event_type": "domain.orders.approved", "filters": filters,
+                "target": {"kind": "capability", "capability_id": "order-review"}}
+    payload = {"module_contract": {"module_id": "orders", "reactions_yaml": {
+        "schema_version": "mozaiks.reactions.v1", "reactions": [reaction]}}}
+    if filters:
+        with pytest.raises(ValueError, match="filters the event router cannot enforce"):
+            extract_code_file_map_from_payload(payload)
+    else:
+        path = "modules/orders/contracts/reactions.yaml"
+        manifest = ModuleReactionsManifest.model_validate(yaml.safe_load(extract_code_file_map_from_payload(payload)[path]))
+        assert manifest.reactions[0].event_type == "domain.orders.approved"
+        assert manifest.reactions[0].filters in (None, {})
+    assert reaction["filters"] == filters
+
+
+def test_factory_provider_schema_rejects_a_reaction_filter_expression():
+    config = Path(__file__).parents[1] / "factory_app/workflows/AppGenerator/structured_outputs.yaml"
+    definitions = yaml.safe_load(config.read_text(encoding="utf-8"))["models"]
+    models = build_models_from_config(definitions, exact_model_ids=frozenset(definitions))
+    reaction = models["ModuleReaction"]
+    assert "filters" not in reaction.model_json_schema()["properties"]
+    with pytest.raises(ValueError, match="filters"):
+        reaction.model_validate({"id": "review", "event_type": "domain.orders.approved",
+                                 "target": {"kind": "capability", "handler_method": None,
+                                            "capability_id": "order-review", "notification_id": None},
+                                 "idempotency_key": "review", "permissions": [], "filters": ["payload.approved"]})
 
 
 def test_extract_code_file_map_materializes_module_contract_with_profile_yaml() -> None:

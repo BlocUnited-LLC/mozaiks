@@ -1526,6 +1526,11 @@ export-blocking. AppGenerator must wire each generated workflow through:
 - `modules/{module}/contracts/reactions.yaml` routing each trigger event to the
   AgentGenerator workflow capability id
 
+Generated module reactions match the declared event type. A conditional
+workflow needs a reviewed event emitted when the condition holds. Factory
+accepts older empty reaction filter lists as unconditional and rejects
+populated filters because the event router does not evaluate them.
+
 The gate also blocks semantic drift: trigger-event `capability_id` values must
 match the workflow capability id from AgentGenerator metadata, generated app
 modules must not invent workflow capabilities absent from that metadata, and a

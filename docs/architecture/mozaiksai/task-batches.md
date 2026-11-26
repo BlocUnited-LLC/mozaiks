@@ -156,7 +156,13 @@ On an app revision, the module worker receives the retained custom action
 contracts from the selected app archive. If an unchanged schema page or route
 uses one of those reads for Ask, the worker must preserve its Ask eligibility,
 empty permissions, and absence of emitted events. An incompatible module
-response fails the worker task. A coordinated change may edit the referring
+response fails the worker task. Accepted response keys that guarantee presence
+while permitting null retain both properties. During bounded recovery, the
+module worker can select the unchanged read declarations from the verified app
+archive by returning the offered action IDs and rejected-candidate SHA-256 in
+`retain_ask_reads`. The runner restores those complete declarations in the
+same task's candidate and applies the ordinary module and file validation.
+This choice requires a matching handler and access policy. A coordinated change may edit the referring
 page in the same plan and must pass normal app-level reference validation.
 
 For both explicit batches and decomposition conveyors, `depends_on` controls

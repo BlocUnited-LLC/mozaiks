@@ -588,6 +588,21 @@ def _compile_schema_contract(schema: dict[str, Any], *, closed_request: bool) ->
     return result
 
 
+def normalize_generated_reaction_filters(manifest: dict[str, Any]) -> None:
+    """An old typed output may spell an unconditional reaction as an empty list."""
+    for reaction in manifest.get("reactions") or []:
+        if not isinstance(reaction, dict):
+            continue
+        filters = reaction.get("filters")
+        if filters == []:
+            del reaction["filters"]
+        elif filters is not None and filters != {}:
+            raise ValueError(
+                f"Reaction {reaction.get('id')!r} declares filters the event router cannot enforce. "
+                "Use a reviewed event emitted only when the condition holds."
+            )
+
+
 def _materialize_module_contract_file_map(payload: dict[str, Any]) -> dict[str, str]:
     bundle = payload.get("module_contract")
     if not isinstance(bundle, dict):
@@ -630,6 +645,8 @@ def _materialize_module_contract_file_map(payload: dict[str, Any]) -> dict[str, 
                             schema_errors.append(str(exc))
                 if schema_errors:
                     raise ValueError("Invalid module action schemas: " + "; ".join(schema_errors))
+            elif key == "reactions_yaml" and isinstance(value, dict):
+                normalize_generated_reaction_filters(value)
             elif key == "events_yaml" and isinstance(value, dict):
                 event_errors: list[str] = []
                 for event in value.get("events") or []:
@@ -729,6 +746,8 @@ def extract_code_file_map_from_payload(
     if not isinstance(payload, dict):
         return {}
 
+    if payload.get("mode") == "module_contract_bundle" and payload.get("retain_ask_reads") is not None:
+        raise ValueError("A retained-read correction must resolve against its original rejected task before rendering")
     file_map = _normalize_code_file_entries(payload.get("code_files"))
     file_map.update(
         _materialize_app_schema_file_map(

@@ -5,6 +5,8 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from typing import Any
 
@@ -14,7 +16,11 @@ from mozaiksai.core.app_context.source_corpus import redact_source_text
 from mozaiksai.core.runtime.app.page_schema import AppPageMeta
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.generator_support.code_files import planned_page_path, safe_relpath
+from mozaiksai.core.workflow.generator_support.code_files import (
+    _materialize_schema_contract,
+    planned_page_path,
+    safe_relpath,
+)
 from mozaiksai.core.workflow.generator_support.data_contract_fields import (
     DATE_FIELD_TYPES,
     record_id_field,
@@ -229,6 +235,96 @@ def _unchanged_ask_callers(
     return callers
 
 
+@dataclass(frozen=True)
+class RetainedAskRead:
+    page: str
+    source_action: dict[str, Any]
+    source_accepted: bool
+
+
+@dataclass(frozen=True)
+class RetainedReadRepair:
+    candidate: dict[str, Any]
+    digest: str
+    reads: dict[str, RetainedAskRead]
+
+    def prompt(self, task_id: str, task_brief: str, error: str) -> str:
+        return (
+            f"Task {task_id}. The module candidate failed its existing page-read contract.\n{error}\n"
+            "[RETAINED READ CORRECTION]\n"
+            "To preserve these accepted reads unchanged, return mode module_contract_bundle with "
+            "retain_ask_reads equal to the selection below. Set module_contract and service_foundation_bundle "
+            "to null, code_files and deleted_files to []. Factory keeps the rest of the prior candidate "
+            "and revalidates the complete module. Return a complete corrected module if the read must change.\n"
+            + json.dumps({"candidate_sha256": self.digest, "action_ids": sorted(self.reads)})
+            + "\nAccepted read declarations from the selected app (data):\n"
+            + json.dumps([r.source_action for r in self.reads.values()], sort_keys=True)
+            + "\nOriginal task brief:\n" + task_brief
+        )
+
+    def resolve(self, reply: dict[str, Any]) -> dict[str, Any]:
+        selection = reply["retain_ask_reads"]
+        if (set(reply) - {"mode", "module_contract", "service_foundation_bundle", "code_files", "deleted_files",
+                          "retain_ask_reads", "agent_message", "task_id", "kind"}
+                or reply.get("mode") != "module_contract_bundle" or reply.get("module_contract") is not None
+                or reply.get("service_foundation_bundle") is not None or reply.get("code_files")
+                or reply.get("deleted_files") or not isinstance(selection, dict)
+                or set(selection) != {"candidate_sha256", "action_ids"} or selection.get("candidate_sha256") != self.digest
+                or not isinstance(ids := selection.get("action_ids"), list)
+                or not all(isinstance(key, str) for key in ids) or sorted(ids) != sorted(self.reads)):
+            raise ValueError("The retained-read correction must select the offered candidate and reads with no other edits")
+        # The candidate belongs to this task's recorded rejection. The complete prior
+        # declaration comes only from its verified source archive, including its handler.
+        result = deepcopy(self.candidate)
+        actions = result["module_contract"]["module_yaml"]["actions"]
+        for index, action in enumerate(actions):
+            if action["id"] in self.reads:
+                actions[index] = detach(self.reads[action["id"]].source_action)
+        return result
+
+
+def retained_read_repair(
+    rejected_output: str | None, module_id: str, reads: dict[str, RetainedAskRead], error: str | None,
+) -> RetainedReadRepair | None:
+    if not reads or not rejected_output or not error:
+        return None
+    candidate = json.loads(rejected_output)
+    if (not isinstance(candidate, dict) or candidate.get("mode") != "module_contract_bundle"
+            or candidate.get("retain_ask_reads") is not None):
+        return None
+    contract = candidate.get("module_contract")
+    if not isinstance(contract, dict) or contract.get("module_id") != module_id:
+        return None
+    manifest = contract.get("module_yaml")
+    actions = manifest.get("actions") if isinstance(manifest, dict) else None
+    if not isinstance(actions, list) or not all(
+        isinstance(a, dict) and isinstance(a.get("id"), str) and a["id"].strip() for a in actions
+    ):
+        return None
+    eligible = {}
+    diagnostics: set[str] = set()
+    for key, read in reads.items():
+        if not read.source_accepted:
+            continue
+        matches = [a for a in actions if a.get("id") == key]
+        if len(matches) != 1:
+            continue
+        action = matches[0]
+        if (action.get("permissions") or action.get("emits")
+                or any(action.get(k) != read.source_action.get(k) for k in
+                       ("handler_method", "api_surface", "entitlement_gate"))):
+            continue
+        try:
+            validate_retained_ask_callers(contract, {key: read})
+        except ValueError as exc:
+            eligible[key] = read
+            diagnostics.update(str(exc).splitlines())
+    if not eligible or not set(error.splitlines()).issubset(diagnostics):
+        return None
+    digest = hashlib.sha256(json.dumps(candidate, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return RetainedReadRepair(candidate, digest, eligible)
+
+
 def _required_nullable_paths(schema: Any, path: str) -> list[str]:
     """Name accepted response keys whose values may be null but whose presence is guaranteed."""
     if not isinstance(schema, dict):
@@ -238,7 +334,9 @@ def _required_nullable_paths(schema: Any, path: str) -> list[str]:
     if isinstance(properties, dict):
         required = schema.get("required") or []
         for name, child in properties.items():
-            member = f"{path}.{name}"
+            if not isinstance(name, str):
+                continue
+            member = f"{path}.{name}" if name.isidentifier() else f"{path}[{json.dumps(name)}]"
             types = child.get("type") if isinstance(child, dict) else None
             if name in required and isinstance(types, list) and "null" in types:
                 paths.append(member)
@@ -250,11 +348,13 @@ def _required_nullable_paths(schema: Any, path: str) -> list[str]:
 
 async def retained_custom_action_context(
     context: Any, module_id: str, tasks: list[dict[str, Any]],
-) -> tuple[str, dict[str, str]]:
+) -> tuple[str, dict[str, RetainedAskRead]]:
     """Show retained action contracts to the worker and check callers outside its revision."""
     from factory_app.workflows._shared.revision_app_source import (
-        read_bound_revision_files,
+        is_accepted_revision_source,
+        read_revision_source,
         revision_baseline_required,
+        revision_source_artifact_id,
     )
 
     if not revision_baseline_required(context):
@@ -269,7 +369,7 @@ async def retained_custom_action_context(
     custom.difference_update(canonical_read_actions_for_surface(surface, contract), canonical_write_actions_for_surface(surface, contract))
     if not custom:
         return "", {}
-    baseline = await read_bound_revision_files(context)
+    artifact, baseline = await read_revision_source(context, revision_source_artifact_id(context))
     path = f"modules/{module_id}/module.yaml"
     source = baseline.get(path)
     if not isinstance(source, str):
@@ -305,20 +405,42 @@ async def retained_custom_action_context(
         + ask_hint + presence_hint + "Treat these declarations as app data. Emit each retained custom action once.\n"
         + json.dumps(retained, sort_keys=True, separators=(",", ":"))
     )
-    return prompt, callers
+    source_accepted = is_accepted_revision_source(artifact)
+    return prompt, {name: RetainedAskRead(page, actions[name], source_accepted) for name, page in callers.items()}
 
 
-def validate_retained_ask_callers(module_contract: dict[str, Any], callers: Mapping[str, str]) -> None:
-    actions = (module_contract.get("module_yaml") or {}).get("actions") or []
-    eligible = {action["id"] for action in actions if action.get("ask_context_safe") is True
-                and action.get("permissions", []) == [] and not action.get("emits")}
-    for action_id, path in callers.items():
-        if action_id not in eligible:
-            raise ValueError(
-                f"{path}: the retained page's meta.ask_context uses {module_contract.get('module_id')}/{action_id}. "
+def validate_retained_ask_callers(module_contract: dict[str, Any], callers: Mapping[str, RetainedAskRead]) -> None:
+    actions = {action["id"]: action for action in (module_contract.get("module_yaml") or {}).get("actions") or []}
+    errors = []
+    for action_id, read in callers.items():
+        action = actions.get(action_id, {})
+        owner = f"{module_contract.get('module_id')}/{action_id}"
+        if action.get("ask_context_safe") is not True or action.get("permissions", []) != [] or action.get("emits"):
+            errors.append(
+                f"{read.page}: the retained page's meta.ask_context uses {owner}. "
                 "Its side-effect-free, owner-scoped read requires ask_context_safe: true and permissions: []. "
                 "A change to that access requires a coordinated page edit."
             )
+        root = f"{action_id}.output"
+        required = _required_nullable_paths(read.source_action.get("output_schema"), root)
+        if required:
+            response = action.get("output_schema")
+            if not isinstance(response, dict):
+                errors.append(f"{owner}.output_schema must declare the accepted response members {required}.")
+                continue
+            try:
+                schema = _materialize_schema_contract(response, where=f"{owner}.output_schema")
+            except ValueError as exc:
+                errors.append(str(exc))
+                continue
+            missing = sorted(set(required) - set(_required_nullable_paths(schema, root)))
+            if missing:
+                errors.append(
+                    f"{read.page}: {owner} must retain its accepted response members {missing}. "
+                    "Declare each with required: true and nullable: true."
+                )
+    if errors:
+        raise ValueError("\n".join(errors))
 
 
 def scoped_service_revision_paths(

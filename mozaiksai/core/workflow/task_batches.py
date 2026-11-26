@@ -58,7 +58,9 @@ from .generator_support.module_entitlement_gates import (
 from .generator_support.module_policy import materialize_task_module_policies, policy_module_id
 from .generator_support.module_read_actions import materialize_module_read_implementations
 from .generator_support.module_revision import (
+    RetainedAskRead,
     retained_custom_action_context,
+    retained_read_repair,
     retained_workflow_page_prompt,
     scoped_service_revision_paths,
     validate_retained_ask_callers,
@@ -1155,7 +1157,7 @@ async def _run_one_task(
     scoped_prompt = _build_scoped_worker_prompt(prompt, task_context)
     if workflow_name == "AppGenerator" and task.get("task_type") == "page_bundle":
         scoped_prompt += await retained_workflow_page_prompt(base_context, _normalize_owned_paths(task.get("owned_paths")))
-    retained_ask_callers: dict[str, str] = {}
+    retained_ask_callers: dict[str, RetainedAskRead] = {}
     if workflow_name == "AppGenerator" and task.get("task_type") == "module_contract":
         retained_prompt, retained_ask_callers = await retained_custom_action_context(
             base_context, str(task.get("capability_pack_id") or ""), all_task_items,
@@ -1207,7 +1209,12 @@ async def _run_one_task(
         stop_at = min(attempts, spent + 1) if prior_failure else attempts
         for _attempt in range(spent, stop_at):
             attempt_prompt = scoped_prompt
-            if last_error:
+            read_repair = retained_read_repair(
+                rejected_output, str(task.get("capability_pack_id") or ""), retained_ask_callers, last_error,
+            )
+            if last_error and read_repair:
+                attempt_prompt = read_repair.prompt(str(task["task_id"]), prompt, last_error)
+            elif last_error:
                 attempt_prompt += _validation_feedback(last_error, rejected_output)
             if before_attempt:
                 await before_attempt(str(task["task_id"]), _attempt + 1)
@@ -1255,6 +1262,12 @@ async def _run_one_task(
                 # AG2 task attempts have independent streams; preserve the candidate for repair.
                 candidate_json = json.dumps(output, separators=(",", ":"), default=str)
                 _reject_task_output_identity_drift(task, output)
+                if workflow_name == "AppGenerator" and output.get("retain_ask_reads") is not None:
+                    if read_repair is None:
+                        raise ValueError("No retained-read correction was offered for this module candidate")
+                    output = read_repair.resolve(output)
+                    candidate_json = json.dumps(output, separators=(",", ":"), default=str)
+                    _reject_task_output_identity_drift(task, output)
                 # Selected packs write their declared outputs from templates; a
                 # worker's copy of one is never validated or assembled.
                 output, discarded = discard_pack_owned_outputs(output, pack_paths)

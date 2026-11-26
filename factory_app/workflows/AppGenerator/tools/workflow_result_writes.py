@@ -18,6 +18,9 @@ from mozaiksai.core.runtime.app.module_loader import (
 )
 from mozaiksai.core.runtime.app.result_schema import result_object_schema
 from mozaiksai.core.semantics.closed_contract_schema import import_closed_contract_schema
+from mozaiksai.core.workflow.generator_support.code_files import (
+    normalize_generated_reaction_filters,
+)
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pinned_result_workflows,
 )
@@ -47,6 +50,7 @@ def compile_result_task_bindings(output: dict[str, Any], task: dict[str, Any], c
     reactions = contract.get("reactions_yaml")
     if reactions is None:
         reactions = contract["reactions_yaml"] = {"schema_version": "mozaiks.reactions.v1", "reactions": []}
+    normalize_generated_reaction_filters(reactions)
     flows = (context.get("app_build_plan") or {}).get("event_flows", [])
     for workflow, plan in bindings:
         event, write = plan["event_type"], plan["result_write"]
