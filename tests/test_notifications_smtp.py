@@ -234,6 +234,7 @@ async def test_password_resolves_from_the_vault_entry_the_app_declares(email_ada
     "Group: recipient@example.test;",
     "recipient@example.test,",
     "recipient@example.test;",
+    ", recipient@example.test",
     "recipient@example.test;other@example.test",
     "recip\x00ient@example.test",
 ])
@@ -246,6 +247,17 @@ async def test_only_one_plain_mailbox_is_accepted(email_adapter, smtp_sink, monk
         with pytest.raises(ValueError, match=header):
             await email_adapter.send_email(**{"to": "recipient@example.test", "subject": "S", "body": "B", **call})
     assert smtp_sink == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [
+    "recipient@[127.0.0.1]",
+    '"john..doe"@example.test',
+    '"Smith, J; Jr" <recipient@example.test>',
+    "Example App <recipient+tag@example.test>",
+])
+async def test_unusual_but_valid_mailboxes_are_accepted(email_adapter, smtp_sink, value):
+    assert await email_adapter.send_email(to=value, subject="S", body="B") is True
 
 
 @pytest.mark.asyncio
@@ -285,16 +297,20 @@ async def test_surrounding_spaces_in_settings_are_ignored(email_adapter, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_non_ascii_credentials_are_refused_without_echoing_them(email_adapter, monkeypatch):
+@pytest.mark.parametrize(("user", "password", "secret"), [
+    ("test-user", "pässword-test-only", "pässword"),
+    ("tëst-user", "test-only-password", "tëst"),
+])
+async def test_non_ascii_credentials_are_refused_without_echoing_them(email_adapter, monkeypatch, user, password, secret):
     monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
     monkeypatch.setenv("SMTP_FROM", "sender@example.test")
-    monkeypatch.setenv("SMTP_USER", "test-user")
-    monkeypatch.setenv("SMTP_PASSWORD", "pässword-test-only")
+    monkeypatch.setenv("SMTP_USER", user)
+    monkeypatch.setenv("SMTP_PASSWORD", password)
     client = MagicMock()
     monkeypatch.setattr(email_adapter.smtplib, "SMTP", client)
     with pytest.raises(ValueError) as raised:
         await email_adapter.send_email(to="recipient@example.test", subject="S", body="B")
-    assert "pässword" not in repr(raised.value) and "pässword" not in str(raised.value)
+    assert secret not in repr(raised.value) and secret not in str(raised.value)
     client.assert_not_called()
 
 
@@ -313,16 +329,26 @@ async def test_an_accepted_message_is_reported_sent_when_the_goodbye_fails(email
 
 
 @pytest.mark.asyncio
-async def test_a_failed_send_is_still_reported_when_the_goodbye_also_fails(email_adapter, monkeypatch):
+@pytest.mark.parametrize(("step", "failure"), [
+    ("starttls", smtplib.SMTPNotSupportedError("STARTTLS extension not supported by server.")),
+    ("login", smtplib.SMTPAuthenticationError(535, b"bad credentials")),
+    ("send_message", smtplib.SMTPRecipientsRefused({"recipient@example.test": (550, b"no such user")})),
+    ("send_message", smtplib.SMTPDataError(554, b"rejected")),
+])
+async def test_the_real_failure_is_raised_and_no_goodbye_is_attempted(email_adapter, monkeypatch, step, failure):
     monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
     monkeypatch.setenv("SMTP_FROM", "sender@example.test")
+    monkeypatch.setenv("SMTP_USER", "test-user")
+    monkeypatch.setenv("SMTP_PASSWORD", "test-only-password")
     client = MagicMock()
     smtp = client.return_value
-    smtp.send_message.side_effect = smtplib.SMTPDataError(554, b"rejected")
+    getattr(smtp, step).side_effect = failure
     smtp.quit.side_effect = smtplib.SMTPServerDisconnected()
     monkeypatch.setattr(email_adapter.smtplib, "SMTP", client)
-    with pytest.raises(smtplib.SMTPServerDisconnected):
+    with pytest.raises(type(failure)):
         await email_adapter.send_email(to="recipient@example.test", subject="S", body="B")
+    smtp.quit.assert_not_called()
+    smtp.close.assert_called_once()
 
 
 @pytest.mark.asyncio

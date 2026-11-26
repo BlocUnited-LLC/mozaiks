@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from email.errors import MessageError
 from email.headerregistry import Address
 from email.message import EmailMessage
-from email.utils import getaddresses, make_msgid
+from email.utils import make_msgid
 
 from mozaiksai.core.secrets import resolve_secret
 
@@ -35,14 +35,14 @@ def _set_mailbox(message: EmailMessage, header: str, value: str) -> Address:
         raise ValueError(f"{header} must be one complete mailbox address") from exc
     complete = (
         not parsed.defects
-        and len(parsed.groups) == 1
-        and parsed.groups[0].display_name is None
         and len(addresses) == 1
         and bool(addresses[0].username)
         and bool(addresses[0].domain)
+        # The header parser drops a trailing list separator, and the ";" that
+        # ends group syntax, without reporting a defect.
+        and value.strip()[-1:] not in {",", ";"}
     )
-    # The strict parser also refuses what the header parser tolerates, such as a trailing separator.
-    if not complete or [address for _, address in getaddresses([value])] != [addresses[0].addr_spec]:
+    if not complete:
         raise ValueError(f"{header} must be one complete mailbox address")
     address: Address = addresses[0]
     return address
@@ -94,24 +94,22 @@ def _deliver(to: str, subject: str, body: str) -> bool:
         client = smtplib.SMTP_SSL(host, port, timeout=TIMEOUT_SECONDS, context=ssl.create_default_context())
     else:
         client = smtplib.SMTP(host, port, timeout=TIMEOUT_SECONDS)
-    accepted = False
     try:
         if security == "starttls":
             client.starttls(context=ssl.create_default_context())
         if username:
             client.login(username, password)
         refused = client.send_message(message, from_addr=from_address.addr_spec, to_addrs=[to_address.addr_spec])
-        accepted = not refused
-    finally:
-        try:
-            client.quit()
-        except (smtplib.SMTPException, OSError):
-            client.close()
-            # Once the server has accepted the message, a failed goodbye must not
-            # read as a failed send: a retrying caller would deliver it twice.
-            if not accepted:
-                raise
-    return accepted
+    except BaseException:
+        client.close()
+        raise
+    # The server has the message now. A failed goodbye must not read as a failed
+    # send, or a retrying caller would deliver it twice.
+    try:
+        client.quit()
+    except (smtplib.SMTPException, OSError):
+        client.close()
+    return not refused
 
 
 async def send_email(*, to: str, subject: str, body: str) -> bool:
