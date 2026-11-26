@@ -759,6 +759,28 @@ async def test_an_oversized_charge_keeps_trying_while_other_charges_land() -> No
 
 
 @pytest.mark.asyncio
+async def test_a_replayed_partial_charge_into_a_funded_wallet_is_not_retaken(monkeypatch) -> None:
+    ledger = _ledger()
+    wallet = _without_allowance().token_wallets[0]
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=500, idempotency_key="payment:1")
+    await ledger.record_usage_debit(_usage("big", 20_000), wallet=wallet)
+    await ledger.credit(app_id="app_1", user_id="user_1", amount=9_000, idempotency_key="payment:2")
+    errors: list[str] = []
+    monkeypatch.setattr(
+        "mozaiksai.core.tokens.wallet.logger.error",
+        lambda message, *args, **kwargs: errors.append(message % args),
+    )
+    # A replay that reaches settlement before reading its finished entry.
+    entries = ledger._database[RuntimeCollections.RUNTIME_TOKEN_WALLET_ENTRIES]  # type: ignore[index]
+    entry = next(doc for doc in entries.docs.values() if doc.get("usage_event_id") == "big")
+    entry["status"] = "pending"
+    result = await ledger.record_usage_debit(_usage("big", 20_000), wallet=wallet)
+    assert result is not None and result.status == "applied" and result.entry["settled_amount"] == 500
+    assert (await ledger.query_balance(app_id="app_1", user_id="user_1"))["balance"] == 9_000
+    assert errors == []
+
+
+@pytest.mark.asyncio
 async def test_a_charge_interrupted_after_the_balance_moved_is_finalized_with_what_moved(monkeypatch) -> None:
     ledger = _ledger()
     wallet = _without_allowance().token_wallets[0]

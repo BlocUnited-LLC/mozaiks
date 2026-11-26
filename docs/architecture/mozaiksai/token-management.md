@@ -196,8 +196,9 @@ taken as `settled_amount`, and further calls are denied. The shortfall is not
 carried as debt. Usage with no balance left to take is rejected.
 
 LLM usage is checked against and charged to auto-debit wallets on the `ai_tokens`
-meter. A v1 config without one uses every auto-debit wallet, so calls are denied
-once any of them is empty; declare the AI wallet on the `ai_tokens` meter.
+meter, which is also the default `usage_meter_id`. A v1 config without one uses
+every auto-debit wallet, so calls are denied once any of them is empty; declare
+the AI wallet on the `ai_tokens` meter.
 
 Workspace context participates in active-plan resolution and usage event
 metadata. It does not create a separate wallet balance scope: token balances
