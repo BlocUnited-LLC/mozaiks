@@ -34,6 +34,7 @@ def build_context_graph_prompt_pack(
         "status": status,
         "reason": reason,
         "source": source,
+        "verified": catalog.get("verified") is True,
         "graph_id": catalog.get("graph_id"),
         "app_id": catalog.get("app_id"),
         "stale_status": catalog.get("stale_status"),

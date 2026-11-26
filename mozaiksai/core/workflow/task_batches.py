@@ -1212,8 +1212,23 @@ async def _run_one_task(
             read_repair = retained_read_repair(
                 rejected_output, str(task.get("capability_pack_id") or ""), retained_ask_callers, last_error,
             )
+            response_model = None
+            prompt_projection = None
             if last_error and read_repair:
+                from factory_app.workflows.AppGenerator.tools.retained_read_prompt import (
+                    RETAINED_READ_SYSTEM_PROMPT,
+                    retained_read_evidence,
+                )
+
+                from .outputs.structured import load_workflow_structured_outputs
+
+                models, _ = load_workflow_structured_outputs(workflow_name)
+                response_model = models["RetainedReadCorrection"]
+                prompt_projection = RETAINED_READ_SYSTEM_PROMPT
                 attempt_prompt = read_repair.prompt(str(task["task_id"]), prompt, last_error)
+                attempt_prompt += retained_read_evidence(
+                    base_context, str(task.get("capability_pack_id") or ""), {read.page for read in read_repair.reads.values()},
+                )
             elif last_error:
                 attempt_prompt += _validation_feedback(last_error, rejected_output)
             if before_attempt:
@@ -1242,6 +1257,8 @@ async def _run_one_task(
                         prompt=attempt_prompt,
                         context_variables=task_context,
                         structured_registry=_structured_registry_for_agent(workflow_name, agent_name),
+                        response_model=response_model,
+                        prompt_projection=prompt_projection,
                         context_authority_policy=context_authority_policy,
                         timeout_seconds=batch.execution.timeout_seconds,
                     )
@@ -1262,9 +1279,7 @@ async def _run_one_task(
                 # AG2 task attempts have independent streams; preserve the candidate for repair.
                 candidate_json = json.dumps(output, separators=(",", ":"), default=str)
                 _reject_task_output_identity_drift(task, output)
-                if workflow_name == "AppGenerator" and output.get("retain_ask_reads") is not None:
-                    if read_repair is None:
-                        raise ValueError("No retained-read correction was offered for this module candidate")
+                if read_repair is not None:
                     output = read_repair.resolve(output)
                     candidate_json = json.dumps(output, separators=(",", ":"), default=str)
                     _reject_task_output_identity_drift(task, output)

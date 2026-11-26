@@ -12,7 +12,7 @@ from ag2.context import ConversationContext
 from ag2.network.policies import CHANNEL_STATE_DEP
 from ag2.stream import MemoryStream
 from ag2.testing import TestConfig
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from mozaiksai.core.adapters.ag2_task_batch_runner import (
     AG2TaskBatchRunner,
@@ -26,6 +26,7 @@ from mozaiksai.core.workflow.context.authority import (
     ScopedContextWriter,
     build_context_authority_policy,
 )
+from mozaiksai.core.workflow.execution.middleware import TaskPromptProjection
 from mozaiksai.core.workflow.task_batches import (
     execute_task_batches_for_trigger,
     load_task_batches_config,
@@ -239,6 +240,8 @@ async def test_ag2_task_batch_runner_emits_authentic_start_and_completion_eviden
     assert result.completed_at
 
     ask_kwargs = agent.ask_calls[0]["kwargs"]
+    assert "response_schema" not in ask_kwargs
+    assert TaskPromptProjection not in ask_kwargs["dependencies"]
     assert "TaskConfig" not in repr(ask_kwargs)
     assert not ask_kwargs.get("tools")
     assert "run_subtask" not in repr(ask_kwargs)
@@ -265,6 +268,74 @@ async def test_ag2_task_batch_runner_composes_task_with_public_agent_ask() -> No
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["native", "prompted"])
+async def test_per_call_response_contract_reaches_provider_and_preserves_worker_default(monkeypatch, mode):
+    pytest.importorskip("openai")
+    httpx2 = pytest.importorskip("httpx2")
+    from ag2.config import OpenAICompletionsConfig
+
+    from mozaiksai.core.workflow.agents import factory
+    from tests.test_structured_output_fail_closed import _patch_agent_factory
+
+    class Correction(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        decision: str
+
+    bodies = [{"decision": "reuse"}, {"ok": True}, {"decision": "reuse", "ok": True}]
+    requests = []
+
+    def respond(request):
+        assert request.url.host == "provider.invalid"
+        body = bodies[len(requests)]
+        requests.append(json.loads(request.content))
+        return httpx2.Response(200, json={
+            "id": "test-response", "object": "chat.completion", "created": 1, "model": "test-model",
+            "choices": [{"index": 0, "finish_reason": "stop", "message": {
+                "role": "assistant", "content": json.dumps(body),
+            }}],
+            "usage": {"prompt_tokens": 8, "completion_tokens": 4, "total_tokens": 12},
+        })
+
+    registry = {"WorkerAgent": _RequiredWorkerOutput}
+    _patch_agent_factory(monkeypatch, agent_config={"name": "WorkerAgent", "structured_outputs_required": True},
+                         registry=registry)
+    monkeypatch.setenv("LLM_STRUCTURED_OUTPUT_MODE", mode)
+    monkeypatch.setattr(factory, "Agent", Agent)
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as http:
+        provider = OpenAICompletionsConfig("test-model", api_key="test-only", base_url="https://provider.invalid",
+                                           max_retries=0, streaming=False, http_client=http)
+        monkeypatch.setattr(factory, "llm_config_to_ag2_config", lambda _: provider)
+        agent = (await factory.create_agents("TaskBatchWorkflow"))["WorkerAgent"]
+        # Per-call preparation uses the worker's creation-time transport, including on resume.
+        monkeypatch.setenv("LLM_STRUCTURED_OUTPUT_MODE", "native" if mode == "prompted" else "prompted")
+        for i, model in enumerate([Correction, None, Correction]):
+            result = await AG2TaskBatchRunner().run(_runner_request(
+                agent, response_model=model, structured_registry=registry,
+            ))
+            if i == 2:
+                assert result.status is RunStatus.FAILED
+                assert result.close_reason == "structured_output_validation_failed"
+            else:
+                assert result.status is RunStatus.COMPLETED, result.error
+                assert result.output == bodies[i]
+                assert _event_names(result) == ["TaskStarted", "TaskCompleted"]
+
+    assert registry == {"WorkerAgent": _RequiredWorkerOutput}
+    assert len(requests) == 3
+    for request, field in zip(requests, ["decision", "ok", "decision"], strict=True):
+        if mode == "native":
+            schema = request["response_format"]["json_schema"]["schema"]
+            assert list(schema["properties"]) == [field]
+            assert schema["additionalProperties"] is False
+        else:
+            assert "response_format" not in request
+            prompt = "\n".join(str(message["content"]) for message in request["messages"])
+            assert f'"{field}"' in prompt
+            other_field = "ok" if field == "decision" else "decision"
+            assert f'"{other_field}"' not in prompt
+
+
+@pytest.mark.asyncio
 async def test_ag2_task_batch_runner_exposes_scoped_writer_through_dependencies_only() -> None:
     policy = build_context_authority_policy(
         workflow_name="TaskBatchWorkflow",
@@ -277,17 +348,21 @@ async def test_ag2_task_batch_runner_exposes_scoped_writer_through_dependencies_
         },
     )
     agent = _RunnerAgent('{"ok": true}')
+    projection = TaskPromptProjection(system_message="Review this bounded correction.")
 
     result = await AG2TaskBatchRunner().run(
         _runner_request(
             agent,
             context_variables={"current_task_id": "review_a"},
             context_authority_policy=policy,
+            prompt_projection=projection,
         )
     )
 
     assert result.status is RunStatus.COMPLETED
     ask_kwargs = agent.ask_calls[0]["kwargs"]
+    assert ask_kwargs["dependencies"][TaskPromptProjection] is projection
+    assert ask_kwargs["variables"] == {"current_task_id": "review_a"}
     assert CONTEXT_AUTHORITY_WRITER_DEP not in ask_kwargs["variables"]
     writer = ask_kwargs["dependencies"][CONTEXT_AUTHORITY_WRITER_DEP]
     assert isinstance(writer, ScopedContextWriter)

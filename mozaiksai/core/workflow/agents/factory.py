@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from functools import wraps
+from functools import partial, wraps
 from typing import Any
 
 from ag2 import Agent
@@ -944,12 +944,20 @@ async def create_agents(
         except Exception as middleware_err:
             logger.debug("[AGENTS] Prompt middleware pre-load failed for '%s': %s", agent_name, middleware_err)
 
-        beta_response_schema = _prepare_response_schema_for_agent(
+        _cfg_entry = ((llm_config_dict or {}).get("config_list") or [{}])[0]
+        # Keep only schema transport settings on the worker, never its credential-bearing config.
+        prepare_response_schema = partial(
+            _prepare_response_schema_for_agent,
             workflow_name=workflow_name,
             agent_name=agent_name,
+            llm_config_dict={
+                "structured_output_mode": resolve_structured_output_mode(llm_config_dict),
+                "config_list": [{"api_type": _cfg_entry.get("api_type")}],
+            },
+        )
+        beta_response_schema = prepare_response_schema(
             agent_config=agent_config,
             structured_model_cls=structured_model_cls,
-            llm_config_dict=llm_config_dict,
         )
 
         middleware = []
@@ -958,7 +966,6 @@ async def create_agents(
         try:
             from mozaiksai.core.observability import build_ag2_telemetry_middleware
 
-            _cfg_entry = ((llm_config_dict or {}).get("config_list") or [{}])[0]
             telemetry_middleware = build_ag2_telemetry_middleware(
                 agent_name=agent_name,
                 workflow_name=workflow_name,
@@ -1080,6 +1087,9 @@ async def create_agents(
         agent._mozaiks_ag2_telemetry_enabled = telemetry_enabled
         agent._mozaiks_ag2_token_watchdog_enabled = bool(observers)
         agent._mozaiks_agent_kind = "local"
+        agent._mozaiks_prepare_response_schema = partial(
+            prepare_response_schema, agent_config={"structured_outputs_required": True},
+        )
         agent._mozaiks_context_bridge = context_bridge
         agent._mozaiks_tool_outcome = tool_outcomes.get(agent_name)
         agent._mozaiks_pending_turn_replay = agent_config.get("pending_turn_replay", "allow")

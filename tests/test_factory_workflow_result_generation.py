@@ -128,18 +128,15 @@ def test_module_worker_compiles_internal_receiver_and_retains_custom_reads():
 
 
 def test_retained_read_correction_is_bound_to_one_verified_candidate_and_scope():
-    from mozaiksai.core.workflow.generator_support.code_files import (
-        extract_code_file_map_from_payload,
-    )
     from mozaiksai.core.workflow.generator_support.module_revision import (
         RetainedAskRead,
         retained_read_repair,
         validate_retained_ask_callers,
     )
 
+    fields = {"latest": {"type": ["string", "null"]}, "total": {"type": "integer"}}
     original = {"id": "summary", "handler_method": "summarize", "permissions": [], "ask_context_safe": True,
-                "output_schema": {"type": "object", "properties": {"latest": {"type": ["string", "null"]}},
-                                  "required": ["latest"]}}
+                "output_schema": {"type": "object", "properties": fields, "required": ["latest", "total"]}}
     authored = {**original, "ask_context_safe": False}
     added = {"id": "add_entry", "emits": ["domain.entry.created"]}
     bindings = {"summary": RetainedAskRead("ui/pages/entries.yaml", original, True)}
@@ -151,24 +148,34 @@ def test_retained_read_correction_is_bound_to_one_verified_candidate_and_scope()
     error = str(failure.value)
     repair = retained_read_repair(raw, "entries", bindings, error)
     assert repair is not None
-    reply = {"mode": "module_contract_bundle", "module_contract": None, "code_files": [], "deleted_files": [],
-             "retain_ask_reads": {"candidate_sha256": repair.digest, "action_ids": ["summary"]}}
+    reply = {"candidate_sha256": repair.digest, "reads": ["summary"]}
     corrected = repair.resolve(reply)
     assert corrected["module_contract"]["module_yaml"]["actions"] == [original, added]
     assert repair.candidate == candidate
     assert "Original task brief" in repair.prompt("module.edit", "Keep today's actions", "Read rejected")
+    revised_action = {**original, "output_schema": {**original["output_schema"],
+                                                    "properties": {**fields, "extra": {"type": "string"}}}}
+    revised = repair.resolve({**reply, "reads": [revised_action]})
+    assert revised["module_contract"]["module_yaml"]["actions"] == [revised_action, added]
     for invalid in (
-        {"retain_ask_reads": {"candidate_sha256": "different", "action_ids": ["summary"]}},
-        {"retain_ask_reads": {"candidate_sha256": repair.digest, "action_ids": ["add_entry"]}},
-        {"retain_ask_reads": {"candidate_sha256": repair.digest, "action_ids": ["summary", "summary"]}},
+        {"candidate_sha256": "different"},
+        {"reads": ["add_entry"]},
+        {"reads": ["summary", revised_action]},
+        {"reads": [{**original, "emits": ["domain.entry.created"]}]},
+        {"reads": [{**original, "permissions": ["admin"]}]},
+        {"reads": [{**original, "handler_method": "add_entry"}]},
+        {"reads": [{**original, "timeout_seconds": 3600}]},
+        {"reads": [{**original, "input_schema": {"type": "object", "required": ["new_parameter"]}}]},
+        {"reads": [{**original, "output_schema": {"type": "object", "properties": {"latest": fields["latest"]},
+                                                 "required": ["latest"]}}]},
+        {"reads": [{**original, "output_schema": {**original["output_schema"], "required": ["latest"]}}]},
+        {"reads": []},
         {"code_files": [{"filename": "extra.py", "content": "change"}]},
         {"module_contract": candidate["module_contract"]},
         {"database_files": [{}]},
     ):
-        with pytest.raises(ValueError, match="offered candidate"):
+        with pytest.raises(ValueError, match="offered candidate|exactly the reads|handler or access|accepted inputs|accepted response|declined"):
             repair.resolve({**reply, **invalid})
-    with pytest.raises(ValueError, match="before rendering"):
-        extract_code_file_map_from_payload(reply)
     assert retained_read_repair(raw, "other", bindings, error) is None
     assert retained_read_repair(raw, "entries", {}, error) is None
     assert retained_read_repair(raw, "entries", bindings, error + "\nUnrelated module rejection") is None
@@ -184,7 +191,10 @@ def test_retained_read_correction_is_bound_to_one_verified_candidate_and_scope()
 
 
 def test_required_nullable_response_paths_preserve_presence_per_containing_object():
-    from mozaiksai.core.workflow.generator_support.module_revision import _required_nullable_paths
+    from mozaiksai.core.workflow.generator_support.module_revision import (
+        _required_nullable_paths,
+        _required_response_types,
+    )
 
     value = {"type": ["string", "null"]}
     schema = {"type": "object", "properties": {
@@ -197,6 +207,52 @@ def test_required_nullable_response_paths_preserve_presence_per_containing_objec
     schema["properties"]["rows[].when"] = value
     schema["required"] = ["rows[].when"]
     assert _required_nullable_paths(schema, "summary.output") == ["summary.output.rows[].when", 'summary.output["rows[].when"]']
+    assert _required_response_types({"type": "object", "required": ["untyped"]}, "output") == {
+        "output.untyped": frozenset(),
+    }
+    assert _required_response_types({
+        "type": "object", "required": ["rows"], "properties": {"rows": {"type": "array", "items": True}},
+    }, "output") == {"output.rows": frozenset(["array"])}
+
+
+def test_ordinary_retained_read_preserves_required_response_types_for_its_existing_caller():
+    from mozaiksai.core.workflow.generator_support.module_revision import (
+        RetainedAskRead,
+        validate_retained_ask_callers,
+    )
+
+    summary = {"id": "summarize_notes", "ask_context_safe": True, "permissions": [], "output_schema": {
+        "type": "object", "properties": {
+            "total_notes": {"type": "integer"}, "latest_note_at": {"type": ["string", "null"]},
+            "tags": {"type": "array", "items": {"type": "string"}},
+        }, "required": ["total_notes", "latest_note_at", "tags"],
+    }}
+    callers = {"summarize_notes": RetainedAskRead("ui/pages/notes.yaml", summary, True)}
+    properties = [
+        {"name": "total_notes", "type": "integer", "required": True},
+        {"name": "latest_note_at", "type": "string", "nullable": True, "required": True},
+        {"name": "tags", "type": "array", "items_type": "string", "required": True},
+        {"name": "new_summary_field", "type": "string", "required": False},
+    ]
+
+    def module(fields):
+        return {"module_id": "note_registry", "module_yaml": {"actions": [
+            {**summary, "output_schema": {"type": "object", "properties": fields}},
+        ]}}
+
+    validate_retained_ask_callers(module(properties), callers)
+    for fields, bad_path in (
+        (properties[1:], "summarize_notes.output.total_notes"),
+        ([{**properties[0], "required": False}, *properties[1:]], "summarize_notes.output.total_notes"),
+        ([{**properties[0], "type": "number"}, *properties[1:]], "summarize_notes.output.total_notes"),
+        ([properties[0], {**properties[1], "type": "integer"}, *properties[2:]], "summarize_notes.output.latest_note_at"),
+        ([*properties[:2], {**properties[2], "items_type": "integer"}], "summarize_notes.output.tags[]"),
+    ):
+        with pytest.raises(ValueError) as error:
+            validate_retained_ask_callers(module(fields), callers)
+        assert bad_path in str(error.value)
+    # The caller resolver excludes a separately coordinated change to the Ask binding.
+    validate_retained_ask_callers(module(properties[1:]), {})
 
 
 @pytest.mark.parametrize("source_status", ["current", "draft"])
@@ -220,6 +276,7 @@ async def test_revision_worker_reads_retained_signatures_only_from_the_selected_
     artifact = BuildRecord.model_validate({
         "id": "source", "build_family": "app_bundle", "app_id": "app", "build_key": "app_bundle",
         "version_number": 1, "lineage_root_id": "source", "lifecycle_status": source_status, "validation_status": "passed",
+        "commit_metadata": {"metadata": {"build_id": "build_original"}},
     })
     files = {path: prior, page: yaml.safe_dump({"meta": {"ask_context": [{"module": "tasks", "action": "summarize"}]}})}
     read = AsyncMock(return_value=(artifact, files))
@@ -233,7 +290,8 @@ async def test_revision_worker_reads_retained_signatures_only_from_the_selected_
     read.assert_awaited_once_with(ctx, "source")
     assert json.loads(prompt.splitlines()[-1]) == [action]
     assert "forged" not in prompt and "retired" not in prompt
-    assert callers == {"summarize": RetainedAskRead(page, action, accepted)}
+    assert "build_original" in prompt
+    assert callers == {"summarize": RetainedAskRead(page, action, accepted, "build_original")}
     assert "Keep ask_context_safe true" in prompt
     assert 'present even when their value is null: ["summarize.output.last_updated"]' in prompt
     assert "required: true, nullable: true" in prompt
@@ -245,6 +303,8 @@ async def test_revision_worker_reads_retained_signatures_only_from_the_selected_
         json.dumps({"mode": "module_contract_bundle", "module_contract": changed}), "tasks", callers, str(rejected.value),
     )
     assert (repair is not None) == accepted
+    if repair:
+        assert "build_original" in repair.prompt("edit", "Add a field", str(rejected.value))
     validate_retained_ask_callers({"module_id": "tasks", "module_yaml": {"actions": [action]}}, callers)
 
     prop = {"name": "last_updated", "type": "string", "required": False, "nullable": True}
@@ -272,11 +332,13 @@ async def test_revision_worker_reads_retained_signatures_only_from_the_selected_
     # Factory gave this inherited page a task solely to add another control.
     reviewed_page = {"name": "Tasks", "route": "/tasks", "retained_ask_context": [{"module": "tasks", "action": "summarize"}]}
     ctx["app_build_plan"] = {"pages": [reviewed_page]}
-    assert (await retained_custom_action_context(ctx, "tasks", [{"owned_paths": [page]}]))[1] == {"summarize": RetainedAskRead(page, action, accepted)}
+    assert (await retained_custom_action_context(ctx, "tasks", [{"owned_paths": [page]}]))[1] == callers
     ctx.pop("app_build_plan")
     manifest = "ui/route_manifest.json"
     files[manifest] = json.dumps({"pages": [{"meta": {"ask_context": [{"module": "tasks", "action": "summarize"}]}}]})
-    assert (await retained_custom_action_context(ctx, "tasks", [{"owned_paths": [page]}]))[1] == {"summarize": RetainedAskRead(manifest, action, accepted)}
+    assert (await retained_custom_action_context(ctx, "tasks", [{"owned_paths": [page]}]))[1] == {
+        "summarize": RetainedAskRead(manifest, action, accepted, "build_original"),
+    }
     assert await retained_custom_action_context({**ctx, "build_mode": "new"}, "tasks", []) == ("", {})
 
 

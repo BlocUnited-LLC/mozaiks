@@ -746,8 +746,6 @@ def extract_code_file_map_from_payload(
     if not isinstance(payload, dict):
         return {}
 
-    if payload.get("mode") == "module_contract_bundle" and payload.get("retain_ask_reads") is not None:
-        raise ValueError("A retained-read correction must resolve against its original rejected task before rendering")
     file_map = _normalize_code_file_entries(payload.get("code_files"))
     file_map.update(
         _materialize_app_schema_file_map(

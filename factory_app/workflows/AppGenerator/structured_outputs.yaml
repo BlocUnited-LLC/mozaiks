@@ -3692,16 +3692,19 @@ models:
         - 'null'
         description: Optional concise summary.
 
-  RetainAskReads:
+  RetainedReadChoice:
+    type: union
+    variants: [str, ModuleAction]
+  RetainedReadCorrection:
     type: model
     fields:
       candidate_sha256:
         type: str
         description: Exact digest from the current task's retained-read repair request.
-      action_ids:
+      reads:
         type: list
-        items: str
-        description: Listed existing page reads whose complete accepted declaration should be reused.
+        items: RetainedReadChoice
+        description: For each offered read, give its ID to keep the exact accepted declaration or its corrected ModuleAction when the feature changes that read. An empty list declines the correction.
   ConfigMiddlewareOutput:
     type: model
     fields:
@@ -3716,14 +3719,7 @@ models:
         variants:
         - ModuleContractBundle
         - 'null'
-        description: Required for complete module output. Null for a retained-read correction or service_foundation mode.
-      retain_ask_reads:
-        type: union
-        default: null
-        variants:
-        - RetainAskReads
-        - 'null'
-        description: Only when the current correction offers existing Ask reads. Select their accepted declarations by ID and digest. All other output lanes must be empty. Otherwise return null.
+        description: Required in module_contract_bundle mode; null for service_foundation mode.
       service_foundation_bundle:
         type: union
         variants:

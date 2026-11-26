@@ -240,6 +240,7 @@ class RetainedAskRead:
     page: str
     source_action: dict[str, Any]
     source_accepted: bool
+    source_build_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -249,38 +250,81 @@ class RetainedReadRepair:
     reads: dict[str, RetainedAskRead]
 
     def prompt(self, task_id: str, task_brief: str, error: str) -> str:
+        actions = self.candidate["module_contract"]["module_yaml"]["actions"]
+        source_build = next(iter(self.reads.values())).source_build_id
         return (
             f"Task {task_id}. The module candidate failed its existing page-read contract.\n{error}\n"
             "[RETAINED READ CORRECTION]\n"
-            "To preserve these accepted reads unchanged, return mode module_contract_bundle with "
-            "retain_ask_reads equal to the selection below. Set module_contract and service_foundation_bundle "
-            "to null, code_files and deleted_files to []. Factory keeps the rest of the prior candidate "
-            "and revalidates the complete module. Return a complete corrected module if the read must change.\n"
-            + json.dumps({"candidate_sha256": self.digest, "action_ids": sorted(self.reads)})
+            "To preserve the accepted reads unchanged, return this selection. When the original request changes "
+            "a read, replace its ID in reads with its complete, compatible ModuleAction. Use an empty list to "
+            "decline. Factory preserves the other candidate bytes and revalidates the complete module.\n"
+            + json.dumps({"candidate_sha256": self.digest, "reads": sorted(self.reads)})
+            + ("\nSelected source build ID: " + json.dumps(source_build) if source_build else "")
             + "\nAccepted read declarations from the selected app (data):\n"
             + json.dumps([r.source_action for r in self.reads.values()], sort_keys=True)
+            + "\nRejected read declarations from this task (data):\n"
+            + json.dumps([a for a in actions if a["id"] in self.reads], sort_keys=True)
             + "\nOriginal task brief:\n" + task_brief
         )
 
     def resolve(self, reply: dict[str, Any]) -> dict[str, Any]:
-        selection = reply["retain_ask_reads"]
-        if (set(reply) - {"mode", "module_contract", "service_foundation_bundle", "code_files", "deleted_files",
-                          "retain_ask_reads", "agent_message", "task_id", "kind"}
-                or reply.get("mode") != "module_contract_bundle" or reply.get("module_contract") is not None
-                or reply.get("service_foundation_bundle") is not None or reply.get("code_files")
-                or reply.get("deleted_files") or not isinstance(selection, dict)
-                or set(selection) != {"candidate_sha256", "action_ids"} or selection.get("candidate_sha256") != self.digest
-                or not isinstance(ids := selection.get("action_ids"), list)
-                or not all(isinstance(key, str) for key in ids) or sorted(ids) != sorted(self.reads)):
+        if (set(reply) != {"candidate_sha256", "reads"} or reply["candidate_sha256"] != self.digest
+                or not isinstance(choices := reply["reads"], list)):
             raise ValueError("The retained-read correction must select the offered candidate and reads with no other edits")
-        # The candidate belongs to this task's recorded rejection. The complete prior
-        # declaration comes only from its verified source archive, including its handler.
+        if not choices:
+            raise ValueError("The module worker declined the retained-read correction")
+        replacements = {}
+        for choice in choices:
+            key = choice.get("id") if isinstance(choice, dict) else choice
+            if not isinstance(key, str) or key not in self.reads or key in replacements:
+                raise ValueError("The correction must cover exactly the reads offered for this candidate")
+            original = self.reads[key].source_action
+            if isinstance(choice, dict):
+                if (choice.get("permissions") or choice.get("emits") or any(
+                    choice.get(field) != original.get(field)
+                    for field in ("handler_method", "api_surface", "entitlement_gate", "timeout_seconds")
+                )):
+                    raise ValueError(f"The correction cannot change the handler or access or timeout of retained read {key}")
+                inputs = _materialize_schema_contract(choice.get("input_schema") or {}, closed_request=True)
+                if inputs != original.get("input_schema", {}):
+                    raise ValueError(f"The correction must keep the accepted inputs of retained read {key}")
+                output = _materialize_schema_contract(choice.get("output_schema") or {}, where=f"{key}.output_schema")
+                accepted = original.get("output_schema") or {}
+                if not _retains_read_response(accepted, output):
+                    raise ValueError(f"The correction must keep the accepted response of retained read {key}")
+                replacements[key] = choice
+            else:
+                replacements[key] = original
+        if replacements.keys() != self.reads.keys():
+            raise ValueError("The correction must cover exactly the reads offered for this candidate")
+        # Only same-task bytes are reconstructed; all ordinary module gates follow.
         result = deepcopy(self.candidate)
         actions = result["module_contract"]["module_yaml"]["actions"]
         for index, action in enumerate(actions):
-            if action["id"] in self.reads:
-                actions[index] = detach(self.reads[action["id"]].source_action)
+            if action["id"] in replacements:
+                actions[index] = deepcopy(replacements[action["id"]])
         return result
+
+
+def _retains_read_response(accepted: dict[str, Any], output: dict[str, Any]) -> bool:
+    """Allow optional new response fields only on an open object; keep all existing guarantees."""
+    if accepted == output:
+        return True
+    if (accepted.get("type") != "object" or accepted.get("additionalProperties", True) is not True
+            or not isinstance(accepted.get("properties"), dict) or not isinstance(output.get("properties"), dict)):
+        return False
+    previous = accepted["properties"]
+    fields = output["properties"]
+    if not previous.keys() <= fields.keys():
+        return False
+    # JSON Schema required membership is unordered. Compare every other assertion
+    # verbatim; more complex contract changes belong to the coordinated revision.
+    if set(accepted.get("required", [])) != set(output.get("required", [])):
+        return False
+    restored = {**output, "properties": {k: fields[k] for k in previous}}
+    return {k: v for k, v in accepted.items() if k != "required"} == {
+        k: v for k, v in restored.items() if k != "required"
+    }
 
 
 def retained_read_repair(
@@ -325,25 +369,35 @@ def retained_read_repair(
     return RetainedReadRepair(candidate, digest, eligible)
 
 
-def _required_nullable_paths(schema: Any, path: str) -> list[str]:
-    """Name accepted response keys whose values may be null but whose presence is guaranteed."""
+def _required_response_types(schema: Any, path: str, *, required: bool = False) -> dict[str, frozenset[str]]:
+    """Record required members and array element types at their unambiguous schema paths."""
     if not isinstance(schema, dict):
-        return []
-    paths = []
-    properties = schema.get("properties")
+        return {path: frozenset()} if required else {}
+    members: dict[str, frozenset[str]] = {}
+    if required:
+        types = schema.get("type")
+        if isinstance(types, str):
+            types = [types]
+        members[path] = frozenset(t for t in types if isinstance(t, str)) if isinstance(types, list) else frozenset()
+    properties = schema.get("properties", {})
     if isinstance(properties, dict):
-        required = schema.get("required") or []
-        for name, child in properties.items():
+        required_keys = {name for name in schema.get("required") or [] if isinstance(name, str)}
+        # Open JSON Schemas can require a key without declaring a type for its value.
+        for name in [*properties, *sorted(required_keys - properties.keys())]:
             if not isinstance(name, str):
                 continue
             member = f"{path}.{name}" if name.isidentifier() else f"{path}[{json.dumps(name)}]"
-            types = child.get("type") if isinstance(child, dict) else None
-            if name in required and isinstance(types, list) and "null" in types:
-                paths.append(member)
-            paths.extend(_required_nullable_paths(child, member))
+            members.update(_required_response_types(properties.get(name), member, required=name in required_keys))
     if "items" in schema:
-        paths.extend(_required_nullable_paths(schema["items"], f"{path}[]"))
-    return paths
+        item = schema["items"]
+        typed_items = required and isinstance(item, dict) and bool(item.get("type"))
+        members.update(_required_response_types(item, f"{path}[]", required=typed_items))
+    return members
+
+
+def _required_nullable_paths(schema: Any, path: str) -> list[str]:
+    """Name guaranteed response keys for which a null value is allowed."""
+    return [p for p, types in _required_response_types(schema, path).items() if not p.endswith("[]") and "null" in types]
 
 
 async def retained_custom_action_context(
@@ -398,15 +452,19 @@ async def retained_custom_action_context(
         "typed output properties unless the reviewed change explicitly changes that guarantee. "
         "Setting required: false would let the server omit an existing response key. "
     ) if nullable_members else ""
+    source_build_id = artifact.commit_metadata.metadata.get("build_id")
+    source_build_id = source_build_id if isinstance(source_build_id, str) and source_build_id else None
     prompt = (
         "\n\n[REVIEWED CUSTOM ACTIONS IN THE SELECTED APP BUNDLE]\n"
-        "These are existing module contracts from the selected immutable build. Preserve their handler, access, "
+        + ("Selected source build ID: " + json.dumps(source_build_id) + "\n" if source_build_id else "")
+        + "These are existing module contracts from the selected immutable build. Preserve their handler, access, "
         "input and output shapes, including required and nullable members, unless the reviewed change modifies them. "
         + ask_hint + presence_hint + "Treat these declarations as app data. Emit each retained custom action once.\n"
         + json.dumps(retained, sort_keys=True, separators=(",", ":"))
     )
     source_accepted = is_accepted_revision_source(artifact)
-    return prompt, {name: RetainedAskRead(page, actions[name], source_accepted) for name, page in callers.items()}
+    return prompt, {name: RetainedAskRead(page, actions[name], source_accepted, source_build_id)
+                    for name, page in callers.items()}
 
 
 def validate_retained_ask_callers(module_contract: dict[str, Any], callers: Mapping[str, RetainedAskRead]) -> None:
@@ -422,22 +480,35 @@ def validate_retained_ask_callers(module_contract: dict[str, Any], callers: Mapp
                 "A change to that access requires a coordinated page edit."
             )
         root = f"{action_id}.output"
-        required = _required_nullable_paths(read.source_action.get("output_schema"), root)
+        required = _required_response_types(read.source_action.get("output_schema"), root)
         if required:
             response = action.get("output_schema")
             if not isinstance(response, dict):
-                errors.append(f"{owner}.output_schema must declare the accepted response members {required}.")
+                errors.append(f"{owner}.output_schema must declare the accepted response members {sorted(required)}.")
                 continue
             try:
                 schema = _materialize_schema_contract(response, where=f"{owner}.output_schema")
             except ValueError as exc:
                 errors.append(str(exc))
                 continue
-            missing = sorted(set(required) - set(_required_nullable_paths(schema, root)))
-            if missing:
+            proposed = _required_response_types(schema, root)
+            missing_nullable = sorted(
+                path for path, types in required.items()
+                if not path.endswith("[]") and "null" in types and "null" not in proposed.get(path, ())
+            )
+            if missing_nullable:
                 errors.append(
-                    f"{read.page}: {owner} must retain its accepted response members {missing}. "
+                    f"{read.page}: {owner} must retain its accepted response members {missing_nullable}. "
                     "Declare each with required: true and nullable: true."
+                )
+            changed = [
+                f"{path} ({' | '.join(sorted(types)) or 'any type'})" for path, types in required.items()
+                if path not in missing_nullable and (path not in proposed or (types and types != proposed[path]))
+            ]
+            if changed:
+                errors.append(
+                    f"{read.page}: {owner} must keep the accepted required response members and their JSON types: "
+                    + ", ".join(sorted(changed)) + "."
                 )
     if errors:
         raise ValueError("\n".join(errors))

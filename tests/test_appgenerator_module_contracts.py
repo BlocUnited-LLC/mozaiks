@@ -16,6 +16,26 @@ def _read(relative_path: str) -> str:
     return (_workspace() / relative_path).read_text(encoding="utf-8")
 
 
+def test_retained_read_turn_has_a_closed_provider_schema_separate_from_full_module_output():
+    from mozaiksai.core.workflow.outputs.structured import (
+        build_models_from_config,
+        get_provider_response_model,
+    )
+
+    config = yaml.safe_load(_read("factory_app/workflows/AppGenerator/structured_outputs.yaml"))["models"]
+    models = build_models_from_config(config, exact_model_ids=frozenset(config))
+    correction = models["RetainedReadCorrection"]
+    selection = {"candidate_sha256": "abc", "reads": ["summary"]}
+    assert correction.model_validate(selection).model_dump() == selection
+    assert get_provider_response_model(correction).model_validate(selection).model_dump() == selection
+    schema = get_provider_response_model(correction).model_json_schema()
+    assert set(schema["properties"]) == {"candidate_sha256", "reads"}
+    assert "module_contract" not in str(schema) and "code_files" not in str(schema)
+    with pytest.raises(ValueError):
+        correction.model_validate({**selection, "module_contract": {"module_id": "other"}})
+    assert "retain_ask_reads" not in models["ConfigMiddlewareOutput"].model_fields
+
+
 def _read_yaml(relative_path: str):
     return yaml.safe_load(_read(relative_path))
 

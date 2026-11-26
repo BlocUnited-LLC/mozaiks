@@ -3,9 +3,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from pydantic import ValidationError
+
 from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
     revision_baseline_required,
     revision_source_artifact_id,
+)
+from mozaiksai.control_plane.context_graph.assessment import (
+    MAX_GRAPH_PROMPT_BYTES,
+    DependencyGraphContext,
 )
 from mozaiksai.core.workflow.context.frozen import detach
 
@@ -97,6 +103,42 @@ def _matches_source(pack: Any, context: dict[str, Any]) -> bool:
 def _safe_text(value: Any) -> str:
     # Source names/labels are evidence, never additional prompt sections.
     return json.dumps(str(value)[:512], ensure_ascii=True)[1:-1]
+
+
+def module_read_dependencies(context: dict[str, Any], module_id: str, caller_pages: set[str]) -> dict[str, Any]:
+    """Select only source-matched graph evidence for this module's retained page reads."""
+    pack = detach(context.get("context_graph_pack"))
+    source_id = revision_source_artifact_id(context)
+    if not (source_id and isinstance(pack, dict) and pack.get("status") == "loaded"
+            and pack.get("verified") is True and _matches_source(pack, context)):
+        return {"build_record_id": source_id, "status": "unavailable"}
+
+    identity = {key: pack.get(key) for key in (
+        "app_id", "build_record_id", "build_family", "build_key", "bundle_digest", "graph_hash",
+    )}
+    try:
+        assessment = DependencyGraphContext.model_validate(pack.get("dependency_graph") or {
+            **identity, "files": [], "dependencies": [], "coverage_incomplete": True,
+        })
+    except ValidationError:
+        return {"build_record_id": source_id, "status": "unavailable"}
+    graph: dict[str, Any] = {**identity, "files": [], "dependencies": [], "coverage_incomplete": True}
+    prefix = f"modules/{module_id}/"
+    edges: list[dict[str, Any]] = []
+    files: set[str] = set()
+    for dep in assessment.dependencies:
+        endpoints = {dep.source_path, dep.target_path}
+        if caller_pages.isdisjoint(endpoints) and not any(path.startswith(prefix) for path in endpoints):
+            continue
+        edge = dep.model_dump(mode="json")
+        selected = {**graph, "files": sorted(files | endpoints), "dependencies": [*edges, edge]}
+        if len(json.dumps(selected, separators=(",", ":")).encode()) > MAX_GRAPH_PROMPT_BYTES:
+            return graph
+        edges.append(edge)
+        files.update(endpoints)
+        graph = selected
+    graph["coverage_incomplete"] = assessment.coverage_incomplete
+    return graph
 
 
 def _format_context_graph_pack(*, graph_pack: Any, agent_name: str) -> str:
