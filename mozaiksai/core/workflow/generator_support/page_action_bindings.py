@@ -78,7 +78,7 @@ def _design_controls(primitive: str, config: Any, *, child: bool = False) -> Ite
                 yield from _design_controls(section["primitive"], section.get("config"), child=True)
 
 
-def design_page_write_actions(page: dict[str, Any]) -> list[dict[str, str]]:
+def design_page_write_actions(page: dict[str, Any], *, form_actions: set[tuple[str, str]]) -> list[dict[str, str]]:
     """Project canonical write controls from partial DesignDocs section configs."""
     route = page["route"]
     pairs: set[tuple[str, str]] = set()
@@ -90,6 +90,12 @@ def design_page_write_actions(page: dict[str, Any]) -> list[dict[str, str]]:
             config = json.loads(hint)
         except ValueError:
             continue  # A prose hint supplies no canonical action reference.
+        if section.get("primitive") == "Form" and isinstance(config, dict) and config.get("submit_action") is None:
+            source = config.get("data_source")
+            if isinstance(source, dict) and set(source) == {"module_id", "action_id"}:
+                pair = source["module_id"], source["action_id"]
+                if all(isinstance(value, str) for value in pair) and pair in form_actions:
+                    pairs.add(pair)
         for action in _design_controls(section.get("primitive", ""), config):
             if action.get("action_type") not in ("submit", "delete") or action.get("data_source") is None:
                 continue

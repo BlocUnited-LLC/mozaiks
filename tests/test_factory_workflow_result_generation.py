@@ -177,6 +177,11 @@ async def test_revision_worker_reads_retained_signatures_only_from_the_selected_
         with pytest.raises(ValueError, match="tasks.yaml.*tasks/summarize"):
             validate_retained_ask_callers({"module_id": "tasks", "module_yaml": {"actions": [{**action, **disqualifying}]}}, callers)
     assert (await retained_custom_action_context(ctx, "tasks", [{"owned_paths": [page]}]))[1] == {}
+    # Factory gave this inherited page a task solely to add another control.
+    reviewed_page = {"name": "Tasks", "route": "/tasks", "retained_ask_context": [{"module": "tasks", "action": "summarize"}]}
+    ctx["app_build_plan"] = {"pages": [reviewed_page]}
+    assert (await retained_custom_action_context(ctx, "tasks", [{"owned_paths": [page]}]))[1] == {"summarize": page}
+    ctx.pop("app_build_plan")
     manifest = "ui/route_manifest.json"
     read.return_value[manifest] = json.dumps({"pages": [{"meta": {"ask_context": [{"module": "tasks", "action": "summarize"}]}}]})
     assert (await retained_custom_action_context(ctx, "tasks", [{"owned_paths": [page]}]))[1] == {"summarize": manifest}

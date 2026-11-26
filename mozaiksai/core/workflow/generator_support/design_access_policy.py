@@ -12,6 +12,7 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.data_contract_fields import canonical_write_fields
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     canonical_write_action_id,
+    canonical_write_operations,
 )
 from mozaiksai.core.workflow.generator_support.module_role_grants import (
     DesignAccessPolicy,
@@ -232,12 +233,18 @@ def resolve_reviewed_page_writes(context: Any) -> dict[str, list[dict[str, str]]
     """Explicit submit/delete identities from the bound design, independent of roles and layout."""
     _, summary, _ = _resolve_reviewed_design(context)
     experience = (summary or {}).get("experience_spec") or {}
+    form_actions = {
+        (module, canonical_write_action_id(collection["entity"], operation))
+        for module, kind, collection in iter_data_contract_collections((summary or {}).get("data_contract"))
+        if kind == "module"
+        for operation in canonical_write_operations(collection) if operation in {"create", "update"}
+    }
     required: dict[str, list[dict[str, str]]] = {}
     for page in experience.get("pages") or []:
         if page.get("ui_surface") != "declarative_page":
             continue
         route = page["route"]
-        writes = design_page_write_actions(page)
+        writes = design_page_write_actions(page, form_actions=form_actions)
         if writes:
             required[route] = writes
     return required

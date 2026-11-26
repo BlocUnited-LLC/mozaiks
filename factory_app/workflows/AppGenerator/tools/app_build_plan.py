@@ -1354,12 +1354,15 @@ def _normalize_managed_capability_adapter_task_pack_ids(
     return normalized
 
 
-def _apply_reviewed_page_writes(pages: list[dict[str, Any]], context: Any) -> None:
+def _apply_reviewed_page_writes(
+    pages: list[dict[str, Any]], context: Any, retained_asks: dict[str, list[dict[str, Any]]] | None = None,
+) -> None:
     """Bind canonical, page-callable identities to their reviewed route before dispatch."""
     by_route = resolve_reviewed_page_writes(context)
     inventory = approved_page_action_ids(context) if by_route else {}
     for page in pages:
         page.pop("required_write_actions", None)  # The plan cannot author this projection.
+        page.pop("retained_ask_context", None)
         route = page.get("route", "")
         required = by_route.get(route, [])
         if page.get("ui_surface") != "declarative_page":
@@ -1374,6 +1377,9 @@ def _apply_reviewed_page_writes(pages: list[dict[str, Any]], context: Any) -> No
                     "Revise the approved DesignDocs action reference."
                 )
         page["required_write_actions"] = required
+        path = planned_page_path(page)
+        if required and retained_asks is not None and path in retained_asks:
+            page["retained_ask_context"] = retained_asks[path]
 
 
 def _normalize_page_task_dependencies(
@@ -2191,6 +2197,7 @@ def app_build_plan(
         Any | None,
         Field(description="AG2-injected workflow context variables."),
     ] = None,
+    _retained_page_asks: dict[str, list[dict[str, Any]]] | None = None,
 ) -> str:
     if context_variables is not None and hasattr(context_variables, "set"):
         context_variables.set("app_plan_ready", False)
@@ -2325,7 +2332,7 @@ def app_build_plan(
         capability_packs=capability_packs,
         context_variables=context_variables,
     )
-    _apply_reviewed_page_writes(pages, context_variables)
+    _apply_reviewed_page_writes(pages, context_variables, _retained_page_asks)
     managed_capability_ids = frozenset(
         _pack_id_from_descriptor(p)
         for p in capability_packs

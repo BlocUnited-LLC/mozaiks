@@ -9,7 +9,7 @@ from typing import Any
 import yaml
 
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.generator_support.code_files import safe_relpath
+from mozaiksai.core.workflow.generator_support.code_files import planned_page_path, safe_relpath
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     canonical_read_actions_for_surface,
     canonical_write_actions_for_surface,
@@ -23,8 +23,12 @@ _PAGE_SCHEMA_PATH = re.compile(r"ui/pages/(?:[^/]+/page|[^/]+)\.ya?ml")
 
 def _unchanged_ask_callers(
     files: Mapping[str, str | bytes], module_id: str, eligible: set[str], tasks: list[dict[str, Any]],
+    planned_pages: list[dict[str, Any]],
 ) -> dict[str, str]:
     edited = {path for task in tasks for path in task.get("owned_paths") or []}
+    # Only Factory-added page duties carry this protected projection. The actual caller
+    # is always read from the immutable archive, including for these additive edits.
+    edited.difference_update(planned_page_path(page) for page in planned_pages if "retained_ask_context" in page)
     callers: dict[str, str] = {}
     for path, source in files.items():
         is_manifest = path == "ui/route_manifest.json"
@@ -103,7 +107,8 @@ async def retained_custom_action_context(
     custom_reads = set(surface.get("custom_reads") or [])
     eligible = {a["id"] for a in retained if a["id"] in custom_reads and not a.get("emits")
                 and a.get("ask_context_safe") is True and a.get("permissions", []) == []}
-    callers = _unchanged_ask_callers(baseline, module_id, eligible, tasks) if eligible else {}
+    plan = detach(context.get("app_build_plan")) or {}
+    callers = _unchanged_ask_callers(baseline, module_id, eligible, tasks, plan.get("pages") or []) if eligible else {}
     ask_hint = (
         f"The accepted app exposes these owner-scoped reads to page Ask context: {', '.join(sorted(eligible))}. "
         "Keep ask_context_safe true and permissions empty for a retained side-effect-free read used by a page. "

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -49,6 +49,7 @@ from factory_app.workflows.AppGenerator.tools.plan_page_data_sources import (
 from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
     ManagedCapabilityTemplateError,
 )
+from mozaiksai.core.runtime.app.page_schema import AppPageMeta
 from mozaiksai.core.runtime.app.paths import is_safe_app_path, normalize_app_path
 from mozaiksai.core.runtime.persistence.intent_loader import iter_data_contract_collections
 from mozaiksai.core.workflow.context.frozen import detach
@@ -56,6 +57,7 @@ from mozaiksai.core.workflow.dependency_graph import deterministic_topological_o
 from mozaiksai.core.workflow.generator_support.code_files import planned_page_path
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
     resolve_design_page_roles,
+    resolve_reviewed_page_writes,
     validate_page_role_preservation,
 )
 from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
@@ -65,6 +67,9 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     pack_facade_directories,
     pack_owned_output_paths,
     pinned_result_action_schemas,
+)
+from mozaiksai.core.workflow.generator_support.page_action_bindings import (
+    reachable_page_action_keys,
 )
 from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
 
@@ -654,7 +659,58 @@ def _repair_selected_pack_inventory(plan: dict[str, Any], context: Any) -> list[
     return []
 
 
-def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
+def _missing_revision_page_tasks(
+    plan: dict[str, Any], context: Any, retained_asks: dict[str, list[dict[str, Any]]] | None = None,
+) -> dict[str, list[str]]:
+    """Bind only reviewed interactions missing from the inherited page to a page worker."""
+    if not context.get("design_docs_build_artifact"):
+        return {}
+    reviewed = resolve_reviewed_page_writes(context)
+    if not reviewed:
+        return {}
+    planned = {page["route"]: page for page in plan.get("pages") or []}
+    approved = {page["route"]: page for page in _approved_page_inventory(context)}
+    files = context.get("generated_files") or {}
+    owned = {
+        path for task in plan.get("build_tasks") or [] if task.get("task_type") == "page_bundle"
+        for path in _normalized_owned_paths(task)
+    }
+    pack_paths = pack_owned_output_paths(context)
+    missing: dict[str, list[str]] = {}
+    for route, actions in reviewed.items():
+        if route not in approved:
+            raise ValueError(f"The reviewed page interaction at {route!r} requires its approved ExperienceSpec page")
+        path = planned_page_path(approved[route])
+        if path in owned:
+            continue
+        content = files.get(path)
+        if isinstance(content, Mapping):
+            content = content.get("content")
+        if content is not None and not isinstance(content, str):
+            raise ValueError(f"{path}: the inherited page requires a text source")
+        try:
+            document = yaml.safe_load(content) if content is not None else None
+        except yaml.YAMLError as exc:
+            raise ValueError(f"{path}: invalid inherited page YAML") from exc
+        reachable = reachable_page_action_keys([document], include_reads=False) if (
+            isinstance(document, dict) and document.get("route") == route
+        ) else set()
+        required = {f"{action['module_id']}/{action['action_id']}" for action in actions}
+        absent = sorted(required - reachable)
+        if not absent:
+            continue
+        if route not in planned or path in pack_paths:
+            raise ValueError(f"Reviewed writes {absent} require an app-owned planned page at {route!r} ({path})")
+        if retained_asks is not None and isinstance(document, dict) and document.get("route") == route:
+            meta = AppPageMeta.model_validate(document.get("meta") or {})
+            retained_asks[path] = [ref.model_dump(mode="json", exclude_none=True) for ref in meta.ask_context or []]
+        missing[path] = absent
+    return missing
+
+
+def _repair_coverage(
+    plan: dict[str, Any], context: Any, retained_asks: dict[str, list[dict[str, Any]]] | None = None,
+) -> list[str]:
     """Supply the coverage facts the validator already computes.
 
     With ownership repaired, a live run failed on two errors that both name
@@ -672,7 +728,23 @@ def _repair_coverage(plan: dict[str, Any], context: Any) -> list[str]:
     """
     repairs: list[str] = []
     tasks = plan.get("build_tasks") or []
-    if revision_baseline_required(context) or context.get("brownfield_build_path"):
+    if revision_baseline_required(context):
+        uncovered_pages = _missing_revision_page_tasks(plan, context, retained_asks)
+        task_ids = {str(task.get("task_id")) for task in tasks}
+        for path, actions in uncovered_pages.items():
+            task_id = _available_task_id(f"page_bundle.{Path(path).stem}", task_ids)
+            plan["build_tasks"].append({
+                "task_id": task_id, "task_type": "page_bundle", "capability_pack_id": None,
+                "surface_id": "page_bundle", "surface_kind": "ui_only", "initial_agent": _CANONICAL_INITIAL_AGENTS["page_bundle"],
+                "execution_target": "AppGenerator", "description": f"Implement the reviewed interactions on {path}.",
+                "initial_message": f"Update {path} to expose reachable controls for {', '.join(actions)}. "
+                                   "Use its source in generated_files. Preserve its sections, actions and page metadata, "
+                                   "including meta.ask_context, and bind the new controls to their module contracts.",
+                "owned_paths": [path], "depends_on": [],
+            })
+            repairs.append(f"{task_id}: assigned {path} for reviewed writes {actions}")
+        return repairs
+    if context.get("brownfield_build_path"):
         return repairs
 
     # 1. The approved page inventory is authority.
@@ -2125,7 +2197,11 @@ def validate_plan_coverage(plan: dict[str, Any], context: Any) -> None:
             "Selected packs own these paths (template outputs and facade modules), so no task may own them: "
             + "; ".join(f"{task_id} owns {paths}" for task_id, paths in sorted(pack_owned.items()))
         )
-    if revision_baseline_required(context) or context.get("brownfield_build_path"):
+    if revision_baseline_required(context):
+        if missing_writes := _missing_revision_page_tasks(plan, context):
+            raise ValueError(f"Missing page_bundle task ownership for reviewed page writes: {missing_writes}")
+        return
+    if context.get("brownfield_build_path"):
         return
 
     errors: list[str] = []
@@ -2240,6 +2316,29 @@ def _plan_validation_feedback(error: ValueError | ManagedCapabilityTemplateError
     return "\n".join([*locations, str(error)])[:6000]
 
 
+def _previous_additive_asks(previous: Any, payload: Any) -> dict[str, list[dict[str, Any]]]:
+    """Preserve server-derived Ask bindings only for an unchanged, previously approved page duty."""
+    if not isinstance(previous, dict) or not isinstance(payload, dict):
+        return {}
+    submitted_tasks = payload.get("build_tasks")
+    submitted_pages = payload.get("pages")
+    if not previous or not isinstance(submitted_tasks, list) or not isinstance(submitted_pages, list):
+        return {}
+    unchanged_paths = {
+        path for task in previous.get("build_tasks") or []
+        if task.get("task_type") == "page_bundle" and task in submitted_tasks
+        for path in task.get("owned_paths") or []
+    }
+    current_routes = {
+        planned_page_path(page): page.get("route") for page in submitted_pages if isinstance(page, dict)
+    }
+    return {
+        path: page["retained_ask_context"] for page in previous.get("pages") or []
+        if "retained_ask_context" in page and (path := planned_page_path(page)) in unchanged_paths
+        and current_routes.get(path) == page.get("route")
+    }
+
+
 @reviewed_pack_read_operation
 def review_app_build_plan(
     *,
@@ -2248,6 +2347,7 @@ def review_app_build_plan(
 ) -> dict[str, Any]:
     if context_variables is None:
         raise ValueError("Plan review requires runtime context")
+    previous = detach(context_variables.get("app_build_plan")) if context_variables.get("app_plan_ready") else {}
     _clear_plan(context_variables)
     context_variables.set("app_plan_outcome", "blocked")
     context_variables.set("app_build_failure_message", None)
@@ -2267,11 +2367,13 @@ def review_app_build_plan(
         models, _ = load_workflow_structured_outputs("AppGenerator")
         payload = detach(AppBuildPlan)
         pages = payload.get("pages") if isinstance(payload, dict) else None
+        retained_asks = _previous_additive_asks(previous, payload)
         if isinstance(pages, list):
             for page in pages:
                 if isinstance(page, dict):
                     # Cached plans carry this projection. Review binds it again from DesignDocs.
                     page.pop("required_write_actions", None)
+                    page.pop("retained_ask_context", None)
         plan = models["AppBuildPlan"].model_validate(payload).model_dump(mode="json")
         for repair in _strip_workspace_app_root(plan):
             logger.info("[AppGenerator] plan repaired: %s", repair)
@@ -2298,7 +2400,7 @@ def review_app_build_plan(
             *release_pack_facade_paths(plan, context_variables),
             *release_subscriptions_config(plan),
             *_repair_user_data_scope(plan, context_variables),
-            *_repair_coverage(plan, context_variables),
+            *_repair_coverage(plan, context_variables, retained_asks),
             *_construct_task_requirements(plan, context_variables),
             *_repair_contract_task_operations(plan, context_variables),
             *_restate_handler_split(plan, context_variables),
@@ -2312,7 +2414,7 @@ def review_app_build_plan(
         validate_plan_origins(plan, context_variables)
         validate_plan_coverage(plan, context_variables)
         with fresh_pack_reads():
-            app_build_plan(AppBuildPlan=plan, context_variables=context_variables)
+            app_build_plan(AppBuildPlan=plan, context_variables=context_variables, _retained_page_asks=retained_asks)
         cached = detach(context_variables.get("app_build_plan"))
         if not context_variables.get("app_plan_ready") or not isinstance(cached, dict):
             raise RuntimeError("Validated plan was not cached")

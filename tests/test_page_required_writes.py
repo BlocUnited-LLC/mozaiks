@@ -243,6 +243,32 @@ def test_required_writes_are_per_page_and_action_hints_do_not_imply_writes():
         _apply_planned_page_contracts(files, {"pages": pages, "build_tasks": [task]})
 
 
+@pytest.mark.parametrize("actual", [[], [{"module": "content", "action": "count", "label": "Everything"}]])
+def test_additive_page_task_preserves_accepted_ask_in_worker_and_assembly(actual):
+    from mozaiksai.core.workflow.task_batches import _normalize_owned_page_files_from_plan
+
+    page = _editor()
+    page["sections"] = [{"id": "heading", "primitive": "PageHeader", "config": {"title": "Entries"}}]
+    page["meta"] = {"ask_context": actual}
+    original = [{"module": "content", "action": "count", "params": {"period": "week"}, "label": "Weekly"}]
+    task = _task("editor")
+    plan = {"pages": [{**_plan(page), "retained_ask_context": original}], "build_tasks": [task]}
+    files = [{"filename": "ui/pages/editor.yaml", "content": yaml.safe_dump(page)}]
+    detached = {"app_build_plan": {"pages": [_plan(page)]}}
+    with pytest.raises(ValueError, match="preserve the accepted meta.ask_context"):
+        _normalize_owned_page_files_from_plan(files, task=task, base_context=detached, plan_context={"app_build_plan": plan})
+    with pytest.raises(ValueError, match="preserve the accepted meta.ask_context"):
+        _apply_planned_page_contracts(files, plan)
+    page["meta"]["ask_context"] = original
+    files[0]["content"] = yaml.safe_dump(page)
+    assert _normalize_owned_page_files_from_plan(files, task=task, base_context=detached, plan_context={"app_build_plan": plan})
+    assert _apply_planned_page_contracts(files, plan)
+    # An expressly planned coordinated page change may edit the Ask references.
+    page.pop("meta")
+    files[0]["content"] = yaml.safe_dump(page)
+    assert _apply_planned_page_contracts(files, {**plan, "pages": [_plan(page)]})
+
+
 @pytest.mark.asyncio
 async def test_detached_worker_cannot_erase_writes_from_its_parent_plan():
     page = _editor()

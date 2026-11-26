@@ -380,6 +380,9 @@ models:
           Must be null or a valid JSON object string matching the primitive's
           required fields. A declarative control's explicit submit/delete
           data_source binds its module action to this route during plan review.
+          For a create or edit Form, name its reviewed module_id and action_id
+          in submit_action.data_source so the plan can schedule that page
+          when its accepted controls do not reach the operation.
 
   UIPage:
     type: model

@@ -67,6 +67,61 @@ def _reviewed(context, pack_ids):
     return ContextVariablesBridge(reviewed_pack_fixture(context.snapshot(), pack_ids))
 
 
+@pytest.mark.parametrize(("source", "reachable", "needs_task"), [
+    ("update_report", False, True), ("update_report", True, False),
+    ("list_reports", False, False), ("save_private_result", False, False), (None, False, False),
+])
+def test_revision_schedules_only_missing_reviewed_form_write(source, reachable, needs_task):
+    from factory_app.workflows.AppGenerator.tools.repair_policy import owned_diagnostics
+
+    plan = _plan()
+    plan["build_tasks"] = [task for task in plan["build_tasks"] if task["task_type"] != "page_bundle"]
+    path = "ui/pages/reports.yaml"
+    values = _context().snapshot()
+    collection = values["data_contract"]["surfaces"][0]["collections"][0]
+    collection["lifecycle"] = {"write_mode": "module_action"}
+    section = {
+        "id": "edit-selected", "primitive": "Form", "intent": "Edit the selected report's title",
+        "config_hint": json.dumps({"data_source": {"module_id": "reports", "action_id": source}}) if source else None,
+    }
+    values["experience_spec"]["pages"][0]["sections"] = [section]
+    values.update(build_mode="revision", workflow_sequence="design_revision", revision_source_artifact_version_id="v4")
+    values = reviewed_pack_fixture(values, [])
+    values["design_docs_build_artifact"] = values.pop("design_docs_artifact")
+    ask = [{"module": "reports", "action": "summary", "label": "Current reports", "params": {"view": "current"}}]
+    baseline = {"route": "/reports", "sections": [], "meta": {"ask_context": ask}}
+    plan["pages"][0]["retained_ask_context"] = [{"module": "other", "action": "unreviewed"}]
+    if reachable:
+        baseline["sections"].append({"id": "edit", "primitive": "Form", "config": {
+            "submit_action": {"action_type": "submit", "href": "/api/modules/reports/update_report"},
+        }})
+    values["generated_files"] = {path: yaml.safe_dump(baseline)}
+    context = ContextVariablesBridge(values)
+    if needs_task:
+        with pytest.raises(ValueError, match="Missing page_bundle task ownership"):
+            validate_plan_coverage(plan, context)
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert result["outcome"] == "ready", result
+    cached = detach(context.get("app_build_plan"))
+    tasks = [task for task in cached["build_tasks"] if task["task_type"] == "page_bundle"]
+    assert len(tasks) == int(needs_task)
+    assert cached["pages"][0]["required_write_actions"] == (
+        [{"module_id": "reports", "action_id": "update_report"}] if source == "update_report" else []
+    )
+    assert cached["pages"][0].get("retained_ask_context") == (ask if needs_task else None)
+    if needs_task:
+        [task] = tasks
+        cached["pages"][0]["retained_ask_context"] = []
+        assert review_app_build_plan(AppBuildPlan=cached, context_variables=context)["outcome"] == "ready"
+        assert detach(context.get("app_build_plan"))["pages"][0]["retained_ask_context"] == ask
+        assert task["owned_paths"] == [path] and task["initial_agent"] == "AppSchemaAgent"
+        assert "meta.ask_context" in task["initial_message"]
+        assert {t["task_id"] for t in cached["build_tasks"] if t["task_type"] == "module_contract"} <= set(task["depends_on"])
+        diagnostic = owned_diagnostics(context, [{"path": path, "error": "The edit control is missing"}])[0]
+        assert diagnostic["owner_agent"] == "AppSchemaAgent" and diagnostic["task_id"] == task["task_id"]
+    validate_plan_coverage(cached, context)
+
+
 def test_capability_source_uses_canonical_finite_vocabulary():
     schema = yaml.safe_load((ROOT / "factory_app/workflows/AppGenerator/structured_outputs.yaml").read_text(encoding="utf-8"))
     field = schema["models"]["AppCapabilityPack"]["fields"]["capability_source"]

@@ -437,6 +437,13 @@ logged warning, and a `data_models` task with nothing left to author completes
 without a worker turn.
 Unique indexes on per-user and per-workspace collections compile to compound
 keys led by the owner field, so keys are unique within one owner's rows.
+On a revision with a reviewed design for the current build, Factory compares
+each page's reviewed write bindings with the controls reachable on its inherited
+page. An absent control gets a page task that owns the affected page and reads
+the module contract. These additive tasks must preserve the accepted page's Ask
+references, parameters and labels. Module validation checks the referenced
+reads against the accepted archive. A separately planned change can revise
+both the page and its read access. Already reachable controls keep their page.
 Page bindings use the full approved action inventory. Managed facade entries use
 the pack contract's full action set even when DesignDocs names a subset.
 Subscription gate targets are restricted to approved writes and custom reads;
