@@ -993,6 +993,7 @@ AppGenerator should compile these inputs in priority order:
 1. `captured_theme_config`
    - optional canonical ThemeCapture artifact
    - strongest visual source when present
+   - During an app-bundle revision, the before-chat hook seeds this agent input from the verified source archive. Assembly reads the base theme directly from that archive, including when the source has no theme. Theme revisions and explicit rebuilds continue to use their captured theme.
 
 2. `app_build_plan`
    - carries `theme_preferences`, `brand_intent`, optional `shell_preset_hint`, pages, entities, capability packs, auth, and integrations

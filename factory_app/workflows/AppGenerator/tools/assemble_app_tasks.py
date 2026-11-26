@@ -60,10 +60,12 @@ from .code_file_utils import (
 )
 from .default_runtime_configs import app_admin_bootstrap, build_app_ai_config
 from .hydrate_app_revision_context import (
-    hydrate_app_revision_context,
+    hydrate_revision_files,
     read_bound_revision_files,
+    read_revision_theme,
     revision_baseline_required,
     revision_source_artifact_id,
+    uses_revision_source_theme,
 )
 from .materialize_app_config_contracts import materialize_app_config_contracts
 from .module_entitlement_gates import apply_entitlement_gates
@@ -446,9 +448,10 @@ def _apply_app_config_contracts(
         if entry_point and entry_point not in workflow_names_from_context(context_variables):
             raise ValueError(f"config/ai.json references unavailable workflow {entry_point!r}")
         file_map[ai_path] = existing_ai or json.dumps(ai, indent=2, ensure_ascii=False) + "\n"
-    captured_theme = (
-        context_variables.get("captured_theme_config") if context_variables is not None else None
-    )
+    if baseline_files is not None and uses_revision_source_theme(context_variables):
+        captured_theme = read_revision_theme(baseline_files)
+    else:
+        captured_theme = context_variables.get("captured_theme_config") if context_variables is not None else None
     theme_path = "brand/theme_config.json"
     theme_patch = json.loads(file_map[theme_path]) if theme_path in file_map else None
     resolved_theme = resolve_app_theme_config(
@@ -511,7 +514,7 @@ async def _assemble_app_tasks(
         Field(description="AG2-injected workflow context variables."),
     ] = None,
 ) -> dict[str, Any]:
-    await hydrate_app_revision_context(context_variables)
+    await hydrate_revision_files(context_variables)
     app_id = None
     feature_outputs: list[dict[str, Any]] = []
     ui_source_owners: list[tuple[str, bool]] = []

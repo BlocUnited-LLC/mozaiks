@@ -63,6 +63,26 @@ async def revision_asset_evidence(
 
 
 async def hydrate_app_revision_context(context_variables: Any = None) -> dict[str, Any]:
+    """Seed the agent-visible theme under the before_chat lifecycle writer."""
+    return await hydrate_revision_files(context_variables, initialize_theme=True)
+
+
+def uses_revision_source_theme(context_variables: Any) -> bool:
+    return (
+        revision_baseline_required(context_variables)
+        and context_variables.get("artifact_kind") == "app_bundle"
+        and context_variables.get("workflow_sequence") not in {"theme_revision", "theme_patch"}
+    )
+
+
+def read_revision_theme(files: dict[str, Any]) -> dict[str, Any] | None:
+    theme = json.loads(files[APP_THEME_PATH]) if APP_THEME_PATH in files else None
+    if theme is not None and not isinstance(theme, dict):
+        raise ValueError("revision_baseline_theme_invalid")
+    return theme
+
+
+async def hydrate_revision_files(context_variables: Any, *, initialize_theme: bool = False) -> dict[str, Any]:
     if context_variables is None or context_variables.get("build_mode") != "revision":
         return {"status": "skipped", "reason": "not_revision"}
     # Recompute even after replay. A carried flag cannot waive source/owner or
@@ -81,13 +101,8 @@ async def hydrate_app_revision_context(context_variables: Any = None) -> dict[st
     else:
         files = await read_bound_revision_files(context_variables)
         artifact_id = revision_source_artifact_id(context_variables)
-    if context_variables.get("artifact_kind") == "app_bundle" and context_variables.get("workflow_sequence") not in {
-        "theme_revision", "theme_patch",
-    }:
-        saved_theme = json.loads(files[APP_THEME_PATH]) if APP_THEME_PATH in files else None
-        if saved_theme is not None and not isinstance(saved_theme, dict):
-            raise ValueError("revision_baseline_theme_invalid")
-        _set(context_variables, "captured_theme_config", saved_theme)
+    if initialize_theme and uses_revision_source_theme(context_variables):
+        _set(context_variables, "captured_theme_config", read_revision_theme(files))
     current = detach(context_variables.get("generated_files")) or {}
     if not isinstance(current, dict):
         raise ValueError("revision_baseline_generated_files_invalid")

@@ -668,14 +668,48 @@ async def test_revision_reads_verified_archive_and_preserves_resumed_changes(bas
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("sequence", ["app_revision", "theme_revision"])
+@pytest.mark.parametrize("sequence", ["app_revision", "theme_revision", "theme_patch", "full_rebuild", "conceptual_replan"])
 async def test_revision_uses_selected_app_theme_unless_the_sequence_recaptures_it(baseline, sequence):
     accepted = {"assets": {"logo": "selected.png"}, "colors": {"accent": {"main": "#D97706"}}}
     recaptured = {"colors": {"accent": {"main": "#2DD4BF"}}}
     _replace_archive(baseline, {"brand/theme_config.json": json.dumps(accepted)})
     baseline.context.update(artifact_kind="app_bundle", workflow_sequence=sequence, captured_theme_config=recaptured)
     await revision.hydrate_app_revision_context(baseline.context)
-    assert baseline.context["captured_theme_config"] == (recaptured if sequence == "theme_revision" else accepted)
+    assert baseline.context["captured_theme_config"] == (accepted if sequence == "app_revision" else recaptured)
+
+
+@pytest.mark.parametrize("has_theme", [True, False])
+async def test_assembly_reads_verified_theme_without_writing_lifecycle_input(baseline, has_theme):
+    from mozaiksai.core.workflow.agents.factory import (
+        ContextVariablesBridge,
+        _workflow_tool_invocation,
+    )
+    from mozaiksai.core.workflow.context.authority import (
+        ContextAuthorityError,
+        build_context_authority_policy,
+    )
+    from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
+
+    accepted = {"colors": {"accent": {"main": "#D97706"}}}
+    previous_capture = {"assets": {"logo": "unrelated.png"}}
+    if has_theme:
+        _replace_archive(baseline, {"brand/theme_config.json": json.dumps(accepted)})
+    baseline.context.update(artifact_kind="app_bundle", captured_theme_config=previous_capture)
+    definitions = yaml.safe_load((Path(__file__).resolve().parents[1] /
+        "factory_app/workflows/AppGenerator/context_variables.yaml").read_text(encoding="utf-8"))["definitions"]
+    policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=definitions)
+    context = ContextVariablesBridge(baseline.context, authority_policy=policy)
+    context._bind_run(("AppGenerator", "factory-host", "theme-revision-test"), policy)
+    with _workflow_tool_invocation(context):
+        overlay = StructuredOutputOverlay(context, {})
+        with pytest.raises(ContextAuthorityError):
+            overlay.set("captured_theme_config", accepted)
+        result = await assemble_app_tasks(context_variables=overlay)
+
+    files = {item["filename"]: item["content"] for item in result["code_files"]}
+    assert context.get("captured_theme_config") == previous_capture
+    expected = {"identity": {"name": "Contact Desk"}, **(accepted if has_theme else {})}
+    assert json.loads(files["brand/theme_config.json"]) == expected
 
 
 @pytest.mark.asyncio
