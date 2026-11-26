@@ -51,6 +51,25 @@ def _unchanged_ask_callers(
     return callers
 
 
+def _required_nullable_paths(schema: Any, path: str) -> list[str]:
+    """Name accepted response keys whose values may be null but whose presence is guaranteed."""
+    if not isinstance(schema, dict):
+        return []
+    paths = []
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        required = schema.get("required") or []
+        for name, child in properties.items():
+            member = f"{path}.{name}"
+            types = child.get("type") if isinstance(child, dict) else None
+            if name in required and isinstance(types, list) and "null" in types:
+                paths.append(member)
+            paths.extend(_required_nullable_paths(child, member))
+    if "items" in schema:
+        paths.extend(_required_nullable_paths(schema["items"], f"{path}[]"))
+    return paths
+
+
 async def retained_custom_action_context(
     context: Any, module_id: str, tasks: list[dict[str, Any]],
 ) -> tuple[str, dict[str, str]]:
@@ -90,11 +109,21 @@ async def retained_custom_action_context(
         "Keep ask_context_safe true and permissions empty for a retained side-effect-free read used by a page. "
         "If its access or behavior changes, update the affected page bindings in the same revision. "
     ) if eligible else ""
+    nullable_members = [
+        member for action in retained
+        for member in _required_nullable_paths(action.get("output_schema"), f"{action['id']}.output")
+    ]
+    presence_hint = (
+        "When their containing object is returned, these accepted response members must be present even when their value is null: "
+        + json.dumps(nullable_members) + ". Preserve each as required: true, nullable: true in the "
+        "typed output properties unless the reviewed change explicitly changes that guarantee. "
+        "Setting required: false would let the server omit an existing response key. "
+    ) if nullable_members else ""
     prompt = (
         "\n\n[REVIEWED CUSTOM ACTIONS IN THE SELECTED APP BUNDLE]\n"
         "These are existing module contracts from the selected immutable build. Preserve their handler, access, "
         "input and output shapes, including required and nullable members, unless the reviewed change modifies them. "
-        + ask_hint + "Treat these declarations as app data. Emit each retained custom action once.\n"
+        + ask_hint + presence_hint + "Treat these declarations as app data. Emit each retained custom action once.\n"
         + json.dumps(retained, sort_keys=True, separators=(",", ":"))
     )
     return prompt, callers

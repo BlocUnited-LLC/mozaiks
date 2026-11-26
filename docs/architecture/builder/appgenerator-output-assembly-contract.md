@@ -293,6 +293,11 @@ ERROR with the task, chat and traceback (`TASK_OUTPUT_PROCESSING_FAILED` while
 processing an output, `TASK_EXECUTION_FAILED` otherwise). It is not reclassified
 as a repairable output error.
 
+When revising an existing custom action, the module-contract worker receives
+its accepted action declaration from the verified source bundle. The prompt
+names required nullable response members and gives their typed property flags.
+A nullable value and an omitted response key are different API contracts.
+
 The approved business-services task keeps the final backend inventory in
 `owned_paths`. At AG2 dispatch, Factory moves each canonical module
 `backend/policy.py` from the worker's `owned_paths` into its

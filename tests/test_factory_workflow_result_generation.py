@@ -127,6 +127,19 @@ def test_module_worker_compiles_internal_receiver_and_retains_custom_reads():
         close_module_actions(output, **kwargs)
 
 
+def test_required_nullable_response_paths_preserve_presence_per_containing_object():
+    from mozaiksai.core.workflow.generator_support.module_revision import _required_nullable_paths
+
+    value = {"type": ["string", "null"]}
+    schema = {"type": "object", "properties": {
+        "optional_value": value,
+        "rows": {"type": "array", "items": {"type": "object", "properties": {
+            "when": value, "count": {"type": "integer"},
+        }, "required": ["when", "count"]}},
+    }}
+    assert _required_nullable_paths(schema, "summary.output") == ["summary.output.rows[].when"]
+
+
 async def test_revision_worker_reads_retained_signatures_only_from_the_selected_app(monkeypatch):
     from factory_app.workflows._shared import revision_app_source
     from mozaiksai.core.workflow.generator_support.module_revision import (
@@ -153,6 +166,8 @@ async def test_revision_worker_reads_retained_signatures_only_from_the_selected_
     assert "forged" not in prompt and "retired" not in prompt
     assert callers == {"summarize": page}
     assert "Keep ask_context_safe true" in prompt
+    assert 'present even when their value is null: ["summarize.output.last_updated"]' in prompt
+    assert "required: true, nullable: true" in prompt
     changed = {"module_id": "tasks", "module_yaml": {"actions": [{**action, "ask_context_safe": False}]}}
     with pytest.raises(ValueError, match="tasks.yaml.*tasks/summarize"):
         validate_retained_ask_callers(changed, callers)
