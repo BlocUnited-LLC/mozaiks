@@ -1851,7 +1851,8 @@ def _merge_split_tasks(plan: dict[str, Any], context: Any) -> list[str]:
     across page tasks). Tasks of different types sharing a file are a real
     conflict, and a group is left to the later checks when it repeats a task_id
     or uses one found elsewhere in the plan, has a blank id, or would close a
-    dependency cycle.
+    dependency cycle. The canonical persistence unit also consolidates separate
+    paths and repeated IDs when every occurrence belongs to that same unit.
     """
     pack_paths = pack_owned_output_paths(context)
     facades = pack_facade_directories(context)
@@ -1869,7 +1870,11 @@ def _merge_split_tasks(plan: dict[str, Any], context: Any) -> list[str]:
         if task.get("task_type") == "page_bundle":
             continue
         unit = (task.get("task_type"), task.get("capability_pack_id"), task.get("surface_id"), task.get("surface_kind"))
-        for path in _normalized_owned_paths(task):
+        paths = _normalized_owned_paths(task)
+        if unit == ("persistence_contract", None, "data_contract", "module"):
+            # The app-wide data contract and its migrations have one owner.
+            paths.append("")
+        for path in paths:
             if path in _SHARED_OWNED_PATHS or path == SUBSCRIPTIONS_CONFIG_PATH or _pack_owns(path, pack_paths, facades):
                 continue
             owner = first_owner.setdefault((*unit, path), index)
@@ -1888,13 +1893,20 @@ def _merge_split_tasks(plan: dict[str, Any], context: Any) -> list[str]:
         if len(members) < 2:
             continue
         ids = [all_ids[index] for index in members]
-        # A blank or repeated id is an identity question for identity repair and its rejection.
-        if not all(ids) or len(set(ids)) < len(ids) or any(all_ids.count(task_id) > 1 for task_id in ids):
+        keeper = tasks[members[0]]
+        canonical_persistence = (
+            keeper.get("task_type") == "persistence_contract"
+            and keeper.get("surface_id") == "data_contract"
+            and keeper.get("surface_kind") == "module"
+            and keeper.get("capability_pack_id") is None
+        )
+        if not all(ids) or (not canonical_persistence and len(set(ids)) != len(ids)):
+            continue
+        if any(all_ids.count(task_id) != ids.count(task_id) for task_id in set(ids)):
             continue
         keeper_id, absorbed_ids = ids[0], set(ids[1:])
         if _merge_closes_cycle(tasks, keeper_id, absorbed_ids, renamed):
             continue
-        keeper = tasks[members[0]]
         for other in (tasks[index] for index in members[1:]):
             _absorb_task(keeper, other)
         renamed.update(dict.fromkeys(absorbed_ids, keeper_id))
