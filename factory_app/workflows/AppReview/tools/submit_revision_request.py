@@ -71,6 +71,9 @@ async def submit_revision_request(
     user_text = await AG2PersistenceManager().latest_workflow_user_input(
         chat_id=chat_id, app_id=ctx.get("app_id") or "", user_id=ctx.get("user_id") or "",
     )
+    # Another tool invocation may have claimed this review during the read.
+    if ctx.get("revision_submitted"):
+        return {"success": True, "status": "already_submitted"}
     if user_text != request_text:
         return {"success": False, "status": "awaiting_owner_request"}
     refinement_payload = build_refinement_request_payload(ctx, request_text)

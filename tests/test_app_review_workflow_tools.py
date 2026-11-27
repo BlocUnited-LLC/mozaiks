@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 from types import SimpleNamespace
 from typing import Any
@@ -197,6 +198,29 @@ async def test_submit_revision_request_records_and_emits_refinement_payload(
             "chat_review_1",
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_submissions_emit_one_revision(monkeypatch) -> None:
+    submit_module = importlib.import_module("factory_app.workflows.AppReview.tools.submit_revision_request")
+    from mozaiksai.core.transport.simple_transport import SimpleTransport
+
+    text = "Use teal for the timer."
+    both_reading = asyncio.Barrier(2)
+
+    async def owner_input(self, **scope):
+        await both_reading.wait()
+        return text
+
+    transport = AsyncMock()
+    monkeypatch.setattr(submit_module.AG2PersistenceManager, "latest_workflow_user_input", owner_input)
+    monkeypatch.setattr(SimpleTransport, "get_instance", AsyncMock(return_value=transport))
+    context = _review_context()
+    results = await asyncio.gather(*(
+        submit_module.submit_revision_request(text, context_variables=context) for _ in range(2)
+    ))
+    assert sorted(result.get("status", result.get("action")) for result in results) == ["already_submitted", "revise"]
+    transport.send_event_to_ui.assert_awaited_once()
 
 
 @pytest.mark.asyncio
