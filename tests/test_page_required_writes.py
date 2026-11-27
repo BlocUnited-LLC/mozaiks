@@ -13,6 +13,7 @@ from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import (
 from mozaiksai.core.workflow.generator_support import design_access_policy
 from mozaiksai.core.workflow.generator_support.page_action_bindings import (
     planned_page_writes,
+    reachable_page_action_keys,
     validate_required_page_writes,
 )
 from mozaiksai.core.workflow.task_batches import execute_task_batches_for_trigger
@@ -345,3 +346,36 @@ async def test_detached_worker_cannot_erase_writes_from_its_parent_plan():
         )
     assert context["app_task_batch_status"] == "failed"
     assert "editor" not in context["app_task_batch_results"]
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("binding", ["{form.title}", "update-{ values.title }"])
+def test_modal_footer_cannot_submit_values_from_a_form(nested, binding):
+    page = _editor()
+    modal = page["sections"][1]
+    modal["config"]["children"] = modal["config"]["children"] if nested else []
+    modal["config"]["actions"] = [{**_write("update_entry"), "payload": {"title": binding}}]
+    assert "content/update_entry" not in reachable_page_action_keys([page])
+    with pytest.raises(ValueError, match="uses form values outside a Form submit_action"):
+        _validate(page, _plan(page, "update_entry"))
+
+
+def test_form_submit_can_use_its_values_and_footer_can_confirm_selected_record():
+    page = _editor()
+    modal = page["sections"][1]
+    form = modal["config"]["children"][0]
+    form["config"]["initial_values_key"] = "selected_row"
+    form["config"]["submit_action"] = {**_write("update_entry"), "payload": {
+        "entry_id": "{selected_row.entry_id}", "title": "{form.title}",
+    }}
+    modal["config"]["actions"] = [{**_write("archive_entry", "delete"), "payload": {
+        "entry_id": "{selected_row.entry_id}", "confirm": True,
+    }}]
+    _validate(page, _plan(page, "update_entry", "archive_entry"))
+
+
+def test_even_a_separate_valid_form_cannot_rescue_a_broken_footer_binding():
+    page = _editor()
+    modal = page["sections"][1]
+    modal["config"]["actions"] = [{**_write("create_entry"), "payload": {"title": "{form.title}"}}]
+    with pytest.raises(ValueError, match="uses form values outside a Form submit_action"):
+        _validate(page, _plan(page, "create_entry"))

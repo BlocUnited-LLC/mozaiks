@@ -148,21 +148,35 @@ def _action_payload(action: dict[str, Any]) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _payload_references(value: Any) -> Iterator[list[str]]:
+    """Token paths resolved recursively by the renderer's interpolateValue."""
+    if isinstance(value, str):
+        for token in re.findall(r"\{([^}]+)\}", value):
+            yield [part for part in token.strip().split(".") if part]
+    elif isinstance(value, (dict, list)):
+        for child in value.values() if isinstance(value, dict) else value:
+            yield from _payload_references(child)
+
+
+def _unbound_form_values(section: dict[str, Any], field: str, action: dict[str, Any]) -> bool:
+    # A Form supplies its values only on submit. Adjacent buttons and even the
+    # enclosing modal's footer receive the selected rows but no form state.
+    return not (section.get("primitive") == "Form" and field == "submit_action") and any(
+        len(parts) > 1 and parts[0] in {"form", "values"} for parts in _payload_references(_action_payload(action))
+    )
+
+
 def _payload_selection(payload: dict[str, Any]) -> int:
     """Minimum selected row count required by the action's indexed payload references."""
     needed = 0
-    for value in payload.values():
-        if not isinstance(value, str):
-            continue
-        for token in re.findall(r"\{([^}]+)\}", value):
-            parts = [part for part in token.strip().split(".") if part]
-            if parts and parts[0] in {"row", "selected_row"}:
-                needed = max(needed, 1)
-            if len(parts) > 1 and parts[0] == "selected_rows" and parts[1].isdecimal():
-                index = parts[1]
-                if len(index) > 10 or not index.isascii() or (len(index) > 1 and index.startswith("0")):
-                    return _MAX_ARRAY_LENGTH + 1
-                needed = max(needed, int(index) + 1)
+    for parts in _payload_references(payload):
+        if parts and parts[0] in {"row", "selected_row"}:
+            needed = max(needed, 1)
+        if len(parts) > 1 and parts[0] == "selected_rows" and parts[1].isdecimal():
+            index = parts[1]
+            if len(index) > 10 or not index.isascii() or (len(index) > 1 and index.startswith("0")):
+                return _MAX_ARRAY_LENGTH + 1
+            needed = max(needed, int(index) + 1)
     return needed
 
 
@@ -244,8 +258,9 @@ def reachable_page_action_keys(
                     if selection is None:
                         continue
                     payload = _action_payload(action)
-                    if action.get("action_type") in {"submit", "delete"} and selection >= _payload_selection(payload):
-                        add(action.get("href"))
+                    if action.get("action_type") in {"submit", "delete"}:
+                        if not _unbound_form_values(section, action_field, action) and selection >= _payload_selection(payload):
+                            add(action.get("href"))
                     elif action.get("action_type") == "event" and action.get("event_type") == "ui.modal.open":
                         modal = payload.get("modal_id")
                         if isinstance(modal, str):
@@ -290,6 +305,13 @@ def validate_required_page_writes(
     endpoints = {f"/api/modules/{key}" for key in expected}
     for section, modals, _ in _sections(document.get("sections") if isinstance(document, dict) else None):
         config = section["config"]
+        for field, control in _actions(config):
+            if (control.get("action_type") in {"submit", "delete"} and control.get("href") in endpoints
+                    and _unbound_form_values(section, field, control)):
+                raise ValueError(
+                    f"{path}: {section.get('id')!r} {field} uses form values outside a Form submit_action. "
+                    "Bind the write to the editable Form's submit_action; a modal footer has no form values."
+                )
         if section.get("primitive") != "Form" or config.get("initial_values_key") != "selected_row":
             continue
         action = config.get("submit_action") or {}

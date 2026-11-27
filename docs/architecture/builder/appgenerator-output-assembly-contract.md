@@ -1071,6 +1071,12 @@ edges. It can select the compiled files, correct existing display text that
 the new behavior makes inaccurate, or author the page using its ordinary task.
 The final files still pass the page schema, row-binding and ownership checks.
 Changes to copy require the offered section ID, field and exact original text.
+When a failed prerequisite prevents the page worker's first turn, partial
+assembly carries the verified source page unchanged. The worker can then
+compare that same source after the prerequisite recovers. A required write
+that reads form values must run from the form's submit action. The renderer
+gives modal footer buttons access to the selected record, while the form owns
+its input values.
 
 Generated-module capability plans declare `user_data_scope`, matching the
 runtime module field. True requires a planned `backend/account_data_handler.py`
