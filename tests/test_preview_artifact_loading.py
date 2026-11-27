@@ -142,6 +142,12 @@ async def test_preview_mounts_pinned_workflow_and_platform_resolves_trigger(stud
     assert [(row["workflow_id"], row["event_type"]) for row in routes] == [("Suggest", "domain.item.created")]
 
 
+def test_pinned_workflow_cannot_occupy_workspace_registry(pinned_workflow):
+    workflow, _ = pinned_workflow
+    with pytest.raises(ValueError, match="reserved"):
+        artifact_bundle.add_preview_workflow_files({}, workflow, {"workflows": [{"workflow_name": "extended_orchestration"}]})
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("damage", [
     "missing", "wrong_record", "owner", "app", "registry", "digest", "unlisted_root", "missing_root", "conflict",

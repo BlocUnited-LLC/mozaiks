@@ -53,8 +53,9 @@ def add_preview_workflow_files(
     from factory_app.workflows._shared.workflow_integration import read_verified_workflow_archive
 
     names = [validate_canonical_bundle_name(item["workflow_name"]) for item in metadata["workflows"]]
-    if len({name.casefold() for name in names}) != len(names):
-        raise ValueError("Pinned workflow catalog contains duplicate roots")
+    distinct = {name.casefold() for name in names}
+    if "extended_orchestration" in distinct or len(distinct) != len(names):
+        raise ValueError("Pinned workflow catalog contains a reserved or duplicate root")
     roots = {name: f"workflows/{name}/" for name in names}
     mounted, diagnostics = _unpack_bundle(read_verified_workflow_archive(record), roots=roots, include_binary=True)
     if diagnostics or any(f"{prefix}orchestrator.yaml" not in mounted for prefix in roots.values()):
