@@ -40,6 +40,7 @@ def build_context_graph_prompt_pack(
         "stale_status": catalog.get("stale_status"),
         "graph_hash": catalog.get("graph_hash"),
         "build_record_id": catalog.get("build_record_id"),
+        **({"source_build_id": catalog["source_build_id"]} if catalog.get("verified") and catalog.get("source_build_id") else {}),
         "build_family": catalog.get("build_family"),
         "build_key": catalog.get("build_key"),
         "bundle_digest": catalog.get("bundle_digest"),

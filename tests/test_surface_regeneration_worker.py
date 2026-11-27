@@ -468,7 +468,7 @@ async def test_execute_plan_success_two_surfaces(graph_available):
     for call, surface in zip(worker._agent_runner.calls, plan.surfaces, strict=True):
         assert _prompt_payload(call)["affected_paths"] == surface.affected_paths
         if graph_available:
-            assert json.loads(call["user_prompt"].splitlines()[-1]) == graph.model_dump(mode="json")
+            assert json.loads(call["user_prompt"].splitlines()[-1]) == graph.model_dump(mode="json", exclude_none=True)
         else:
             assert "saved-source" not in call["user_prompt"]
 

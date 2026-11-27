@@ -10,6 +10,7 @@ from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context impor
     revision_source_artifact_id,
 )
 from mozaiksai.control_plane.context_graph.assessment import (
+    GRAPH_SOURCE_FIELDS,
     MAX_GRAPH_PROMPT_BYTES,
     DependencyGraphContext,
 )
@@ -94,8 +95,7 @@ def _matches_source(pack: Any, context: dict[str, Any]) -> bool:
     if advisory is not None:
         if context.get("workflow_name") not in {"AppGenerator", "AgentGenerator"}:
             return False
-        identity = ("app_id", "build_record_id", "build_family", "build_key", "bundle_digest", "graph_hash")
-        if not isinstance(advisory, dict) or any(advisory.get(key) != pack.get(key) for key in identity):
+        if not isinstance(advisory, dict) or any(advisory.get(key) != pack.get(key) for key in GRAPH_SOURCE_FIELDS):
             return False
     return True
 
@@ -113,9 +113,7 @@ def module_read_dependencies(context: dict[str, Any], module_id: str, caller_pag
             and pack.get("verified") is True and _matches_source(pack, context)):
         return {"build_record_id": source_id, "status": "unavailable"}
 
-    identity = {key: pack.get(key) for key in (
-        "app_id", "build_record_id", "build_family", "build_key", "bundle_digest", "graph_hash",
-    )}
+    identity = {key: pack[key] for key in GRAPH_SOURCE_FIELDS if key in pack}
     try:
         assessment = DependencyGraphContext.model_validate(pack.get("dependency_graph") or {
             **identity, "files": [], "dependencies": [], "coverage_incomplete": True,
@@ -161,6 +159,7 @@ def _format_context_graph_pack(*, graph_pack: Any, agent_name: str) -> str:
             f"Source: {_safe_text(source)}" if source else "",
             f"Graph: {_safe_text(graph_id)}" if graph_id else "",
             f"Build record: {_safe_text(graph_pack['build_record_id'])}" if graph_pack.get("build_record_id") else "",
+            f"Source build: {_safe_text(graph_pack['source_build_id'])}" if graph_pack.get("source_build_id") else "",
             f"Bundle digest: {_safe_text(graph_pack['bundle_digest'])}" if graph_pack.get("bundle_digest") else "",
             f"Stale status: {_safe_text(stale_status)}" if stale_status else "",
         ]

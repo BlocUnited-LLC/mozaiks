@@ -312,6 +312,9 @@ async def test_factory_build_and_repeated_refinements_use_exact_graph_prompts(cy
         graphs = [call["payload"]["refinement_context"]["dependency_graph"] if kind == "scope"
                   else call["payload"]["dependency_graph"] for call in calls]
         assert [graph["build_record_id"] for graph in graphs] == [original.id, child_b.id]
+        assert [graph["source_build_id"] for graph in graphs] == [
+            record.commit_metadata.metadata["build_id"] for record in (original, child_b)
+        ]
         if kind == "scope":
             for call, record in zip(calls, (original, child_b), strict=True):
                 for tool in ("get_context_graph_catalog", "search_app_source_context"):
@@ -338,6 +341,10 @@ async def test_factory_build_and_repeated_refinements_use_exact_graph_prompts(cy
         for graph, record in zip(graphs, (original, child_b), strict=True):
             assert graph["bundle_digest"] == f"sha256:{resolve_canonical_bundle_entry(record).sha256}"
             assert graph["recommended_paths"] == [TARGET]
+    sources = {record.id: record.commit_metadata.metadata["build_id"] for record in (original, child_b)}
+    specialist_inputs = [call["payload"]["evidence"] for call in backend.calls if call["kind"] == "graph"]
+    assert {graph["build_record_id"] for graph in specialist_inputs} == set(sources)
+    assert all(graph["source_build_id"] == sources[graph["build_record_id"]] for graph in specialist_inputs)
     prompts = "\n".join(call["system"] + call["user"] for call in backend.calls)
     for forbidden in (SECRET, "CURRENT_ONLY", "FOREIGN_ONLY", "MUTABLE_ONLY"):
         assert forbidden not in prompts
@@ -417,6 +424,7 @@ async def test_workflow_hook_consumes_exact_registered_build_and_real_specialist
     loaded = await loader.load_context_graph_context(context)
     assert loaded["present"]
     evidence = context.get("context_graph_pack")["dependency_graph"]
+    assert evidence["source_build_id"] == original.commit_metadata.metadata["build_id"]
     assert evidence["build_record_id"] == original.id
     assert evidence["bundle_digest"] == f"sha256:{resolve_canonical_bundle_entry(original).sha256}"
     graph_call, = backend.calls
@@ -578,3 +586,28 @@ async def test_graph_refinement_cycle_passes_real_pinned_docker_validation(cycle
     assert (LIVE_TARGET, LIVE_OLD) in dependencies[0]
     assert (LIVE_TARGET, LIVE_OLD) not in dependencies[1]
     assert (LIVE_TARGET, LIVE_NEW) in dependencies[1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy", [None, "x" * 129])
+async def test_legacy_record_retains_graph_without_a_producing_build_id(cycle, tmp_path, legacy):
+    store, backend, harness, _ = cycle
+    record, baseline = await register_build(tmp_path, store)
+    metadata = record.commit_metadata.metadata
+    if legacy is None:
+        del metadata["build_id"]
+    else:
+        metadata["build_id"] = legacy
+    result = await refine(harness, record, baseline)
+    assert result.status == "planned", result.error
+    for call in backend.calls:
+        if call["kind"] == "graph":
+            graph = call["payload"]["evidence"]
+        elif call["kind"] == "coding":
+            graph = call["payload"]["dependency_graph"]
+        else:
+            continue
+        assert "source_build_id" not in graph
+        assert graph["build_record_id"] == record.id
+        assert graph["bundle_digest"] == f"sha256:{resolve_canonical_bundle_entry(record).sha256}"
+        assert graph["dependencies"]

@@ -7,6 +7,8 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from pydantic import TypeAdapter, ValidationError
+
 from mozaiksai.core.app_context.scan_policy import (
     default_context_graph_scan_policy,
     is_excluded_source_directory_path,
@@ -21,6 +23,7 @@ from mozaiksai.core.artifacts.content_store import (
 )
 from mozaiksai.core.artifacts.models import resolve_canonical_bundle_entry
 from mozaiksai.core.artifacts.store import ArtifactStore
+from mozaiksai.core.session.build_binding import BuildIdentity
 
 _LEGACY_MAX_FILE_BYTES = 80_000
 _IMPORT_EXTENSIONS = (
@@ -150,6 +153,12 @@ async def load_artifact_workspace(
             "workspace_dir": workspace_dir,
         }
 
+    source_build_id = None
+    if bundle_digest is not None and metadata.get("build_id") is not None:
+        try:
+            source_build_id = TypeAdapter(BuildIdentity).validate_python(metadata["build_id"])
+        except ValidationError:
+            pass  # Historical records may lack a canonical producing build ID.
     return {
         "present": True,
         "artifact": artifact,
@@ -164,6 +173,7 @@ async def load_artifact_workspace(
         "provenance": {
             "app_id": artifact.app_id,
             "build_record_id": artifact.id,
+            **({"source_build_id": source_build_id} if source_build_id is not None else {}),
             "build_family": artifact.build_family,
             "build_key": artifact.build_key,
             "bundle_digest": bundle_digest,
