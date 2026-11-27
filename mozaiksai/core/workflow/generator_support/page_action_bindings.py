@@ -162,7 +162,7 @@ def _unbound_form_values(section: dict[str, Any], field: str, action: dict[str, 
     # A Form supplies its values only on submit. Adjacent buttons and even the
     # enclosing modal's footer receive the selected rows but no form state.
     return not (section.get("primitive") == "Form" and field == "submit_action") and any(
-        len(parts) > 1 and parts[0] in {"form", "values"} for parts in _payload_references(_action_payload(action))
+        parts and parts[0] in {"form", "values"} for parts in _payload_references(_action_payload(action))
     )
 
 

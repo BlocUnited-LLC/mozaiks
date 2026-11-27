@@ -348,7 +348,7 @@ async def test_detached_worker_cannot_erase_writes_from_its_parent_plan():
     assert "editor" not in context["app_task_batch_results"]
 
 @pytest.mark.parametrize("nested", [False, True])
-@pytest.mark.parametrize("binding", ["{form.title}", "update-{ values.title }"])
+@pytest.mark.parametrize("binding", ["{form.title}", "update-{ values.title }", "{form}", "{values}"])
 def test_modal_footer_cannot_submit_values_from_a_form(nested, binding):
     page = _editor()
     modal = page["sections"][1]
