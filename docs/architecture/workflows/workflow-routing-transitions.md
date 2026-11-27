@@ -133,17 +133,27 @@ records that produced it. The original app stays bound to the change request.
 A workflow export citing a different version of those inputs cannot start an
 app-stage retry.
 
-AppGenerator retains its declared InterviewAgent entry and revision prompt.
-Its existing first `before_chat` hook verifies the committed baseline archive
+AppGenerator's first `before_chat` hook verifies the committed baseline archive
 and hydrates `generated_files`; it does not read a mutable workspace fallback.
 Lifecycle hook errors are logged, and assembly repeats the verification and
 rejects missing, changed, retired, or unsupported content. Archive integrity
 is verified by that loader, not by the trigger's record-scope checks.
 
-Each retry gets a fresh chat with default execution state. Saved intent IDs and
-baseline/journey provenance survive a subsequent retry, while generated output,
-validation, counters, messages, and the failed source session are not copied or
-reset. An idle same-build chat does not itself supersede the current binding.
+An AppGenerator stage retry can reuse a technical plan that Factory admitted
+earlier in the same retry chain. Studio identifies the source from the failed
+sessions it created for the same owner, app, build, change and journey. Factory
+reloads the accepted app and reviewed workflow inputs, reviews the original
+planner response again, and compares the resulting plan and task assignments
+with the recorded admission. The reviewed workflow artifact remains the source
+of permission for its private result action. Ordinary retries without a
+qualifying technical plan use the workflow's declared planning entry.
+
+A verified plan starts the declared task batch in the replacement chat. Each
+worker runs fresh under the existing dependency and file-ownership rules.
+Assembly, validation and owner acceptance still apply to the resulting draft.
+Prior worker outputs, execution counters and acceptance receipts stay in the
+run that produced them. An idle chat in the same build preserves the current
+binding.
 
 ## Contract
 
