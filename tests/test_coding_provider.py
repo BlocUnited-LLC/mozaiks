@@ -151,7 +151,7 @@ def test_coding_prompt_presents_unicode_and_preserves_source_escapes():
     prompt = StructuredOutputCodingProvider._build_user_prompt(request=request, control_plane_context={})
     assert "café · 星" in prompt
     payload, _ = json.JSONDecoder().raw_decode(prompt.split("payload_json:\n", 1)[1])
-    assert payload["input_files"] == request.files
+    assert payload["input_files"] == {_SCOPED_PATH: ["1|" + source]}
 
 
 def test_coding_prompt_excludes_runtime_state_and_keeps_edit_inputs():
@@ -171,7 +171,7 @@ def test_coding_prompt_excludes_runtime_state_and_keeps_edit_inputs():
     assert payload["request"] == request.raw_user_request
     assert payload["build_record_id"] == request.build_record_id
     assert payload["file_paths"] == [_SCOPED_PATH]
-    assert payload["input_files"] == request.files
+    assert payload["input_files"] == {_SCOPED_PATH: ["1|" + request.files[_SCOPED_PATH]]}
     assert payload["refinement_context"] == evidence
     assert payload["validation_strategy"] == "docker"
     assert payload["start_preview_requested"] is True
@@ -563,6 +563,54 @@ def _anchored_response(path, replacements, *, owned_paths=None):
 
 
 @pytest.mark.asyncio
+async def test_numbered_source_round_trips_and_targets_only_the_selected_form():
+    path = "ui/pages/records.yaml"
+    source = (
+        "create:\r\n  label: Save\r\n\r\nedit:\n  label: Save\n  other: \\n|Save\r"
+        "  submit: Save"
+    )
+    request = _request(files={path: source})
+    prompt = StructuredOutputCodingProvider._build_user_prompt(request=request, control_plane_context={})
+    payload, _ = json.JSONDecoder().raw_decode(prompt.split("payload_json:\n", 1)[1])
+    assert payload["input_files"] == {path: [
+        "1|create:\r\n", "2|  label: Save\r\n", "3|\r\n", "4|edit:\n", "5|  label: Save\n",
+        "6|  other: \\n|Save\r", "7|  submit: Save",
+    ]}
+    assert "".join(line.split("|", 1)[1] for line in payload["input_files"][path]) == source
+    wire = _anchored_response(path, [])
+    wire["updated_files"][0]["replacements"] = [
+        {"line_number": number, "old_text": "Save", "new_text": "Save changes"} for number in (7, 5)
+    ] + [{"line_number": 6, "old_text": r"\n", "new_text": r"\t"}]
+    result = await _provider(wire).execute(request)
+    assert result.status == "completed", result.error
+    assert result.changed_files[0].content == (
+        "create:\r\n  label: Save\r\n\r\nedit:\n  label: Save changes\n  other: \\t|Save\r"
+        "  submit: Save changes"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("edits", "reason"), [
+    ([{"line_number": 1, "old_text": "Save", "new_text": "Next"}], "exactly once"),
+    ([{"line_number": 2, "old_text": "create", "new_text": "X"}], "exactly once"),
+    ([{"line_number": 3, "old_text": "Edit", "new_text": "X"}], "outside"),
+    ([{"line_number": 0, "old_text": "Edit", "new_text": "X"}], "greater than or equal"),
+    ([{"line_number": "2", "old_text": "Edit", "new_text": "X"}], "valid integer"),
+    ([{"line_number": 2, "old_text": "Edit\n", "new_text": "X"}], "line endings"),
+    ([{"line_number": 2, "old_text": "Edit", "new_text": "X\r\nY"}], "line endings"),
+    ([{"line_number": 2, "old_text": "Edit", "new_text": "Update"},
+      {"old_text": "\nEdit: ", "new_text": "\nModify: "}], "overlap"),
+    ([{"line_number": 2, "old_text": "Save", "new_text": "Save"}], "no change"),
+])
+async def test_bad_line_replacements_reject_the_complete_proposal(edits, reason):
+    wire = _anchored_response(_SCOPED_PATH, [])
+    wire["updated_files"][0]["replacements"] = edits
+    result = await _provider(wire).execute(_request(files={_SCOPED_PATH: "create Save Save\r\nEdit: Save\n"}))
+    assert result.status == "failed" and not result.changed_files
+    assert reason in result.error
+
+
+@pytest.mark.asyncio
 async def test_anchored_edits_preserve_unselected_text_and_use_original_offsets():
     path = "ui/pages/records.yaml"
     old = "# Crème\r\ncreate: Save\r\nedit: Save\r\ncancel: Cancel\r\n"
@@ -642,6 +690,13 @@ def test_structured_provider_wire_preserves_public_plan_fields_and_closed_file_o
     entries = [wire["$defs"][item["$ref"].rsplit("/", 1)[1]] for item in opts]
     assert {tuple(item["required"]) for item in entries} == {("path", "replacements"), ("path", "content")}
     assert all(item["additionalProperties"] is False for item in entries)
+    anchor_schema = next(item for item in entries if "replacements" in item["properties"])
+    edits = anchor_schema["properties"]["replacements"]["items"]["anyOf"]
+    edit_options = [wire["$defs"][item["$ref"].rsplit("/", 1)[1]] for item in edits]
+    assert {frozenset(item["required"]) for item in edit_options} == {
+        frozenset({"line_number", "old_text", "new_text"}), frozenset({"old_text", "new_text"}),
+    }
+    assert all(item["additionalProperties"] is False for item in edit_options)
     assert set(public["$defs"]["FileUpdate"]["properties"]) == {"path", "content"}
 
 

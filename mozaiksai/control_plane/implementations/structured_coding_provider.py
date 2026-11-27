@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from io import StringIO
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -37,18 +38,37 @@ class _TextReplacement(BaseModel):
     new_text: str = Field(description="Literal replacement text; use an empty string to remove the matched text.")
 
 
+class _LineReplacement(_TextReplacement):
+    line_number: int = Field(ge=1, strict=True, description="Original 1-based source line containing the literal.")
+    old_text: str = Field(min_length=1, description="Exact literal occurring once within this source line, without its line ending.")
+
+
 class _AnchoredFileUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     path: str
-    replacements: list[_TextReplacement] = Field(min_length=1)
+    replacements: list[_LineReplacement | _TextReplacement] = Field(min_length=1)
 
     def apply(self, original: str) -> str:
+        line_bounds = []
+        offset = 0
+        for line in StringIO(original, newline=""):
+            line_bounds.append((offset, offset + len(line.rstrip("\r\n"))))
+            offset += len(line)
         spans = []
         for edit in self.replacements:
-            start = original.find(edit.old_text)
-            if start < 0 or original.find(edit.old_text, start + 1) >= 0:
-                raise ValueError(f"{self.path}: old_text must match exactly once in the original scoped file")
+            left, right = 0, len(original)
+            location = "the original scoped file"
+            if isinstance(edit, _LineReplacement):
+                location = f"original line {edit.line_number}"
+                if edit.line_number > len(line_bounds):
+                    raise ValueError(f"{self.path}: {location} is outside the scoped file")
+                if any(char in value for value in (edit.old_text, edit.new_text) for char in "\r\n"):
+                    raise ValueError(f"{self.path}: a line replacement cannot contain line endings")
+                left, right = line_bounds[edit.line_number - 1]
+            start = original.find(edit.old_text, left, right)
+            if start < 0 or original.find(edit.old_text, start + 1, right) >= 0:
+                raise ValueError(f"{self.path}: old_text must match exactly once in {location}")
             if edit.old_text == edit.new_text:
                 raise ValueError(f"{self.path}: replacement makes no change")
             spans.append((start, start + len(edit.old_text), edit.new_text))
@@ -271,7 +291,10 @@ class StructuredOutputCodingProvider:
             "source_surface": request.source_surface,
             "request": request.raw_user_request,
             "file_paths": sorted(request.files.keys()),
-            "input_files": request.files,
+            "input_files": {
+                path: [f"{number}|{line}" for number, line in enumerate(StringIO(source, newline=""), start=1)]
+                for path, source in request.files.items()
+            },
             "validation_strategy": request.validation_strategy,
             "start_preview_requested": bool(request.start_preview),
             "refinement_context": control_plane_context,
@@ -282,15 +305,17 @@ class StructuredOutputCodingProvider:
             "Plan a scoped coding refinement for this Mozaiks artifact request.",
             "Validation execution is owned by the operator and runtime. Your strategy and command fields are advisory; they cannot choose host execution or skip required checks.",
             "Return JSON only.",
+            "Each input_files entry lists the original source lines as N|text. Remove only the number and first |, then concatenate the entries to reconstruct the file including its original line endings.",
             "payload_json:",
             json.dumps(payload, indent=2, sort_keys=True, default=str, ensure_ascii=False),
             "",
-            "Use exact, non-overlapping replacements against the original input_files. Include enough unchanged context in old_text to identify exactly one occurrence.",
+            "For an edit within one line, use its supplied line_number and a short old_text literal occurring once on that line. Omit the N| prefix and line ending from old_text and new_text. Choose the intended control using its surrounding source.",
+            "For a change spanning lines, omit line_number and copy globally unique old_text. All replacements refer independently to the original file and may not overlap.",
             "A file entry may instead contain path and full content when the selected harness requires complete files.",
             "JSON shape for anchored edits:",
             (
                 '{"summary":"...","owned_paths":["..."],'
-                '"updated_files":[{"path":"relative/path","replacements":[{"old_text":"...","new_text":"..."}]}],'
+                '"updated_files":[{"path":"relative/path","replacements":[{"line_number":1,"old_text":"...","new_text":"..."}]}],'
                 '"validation_strategy":"e2b|docker|skip",'
                 '"validation_commands":["..."],"start_preview":false,'
                 '"needs_human_review":false,"rationale":"..."}'

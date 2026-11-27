@@ -43,6 +43,8 @@ from uuid import uuid4
 
 import pytest
 
+from tests.helpers.coding_prompt import assert_numbered_file_inputs
+
 ROOT = Path(__file__).resolve().parents[1]
 PAGE = "ui/pages/custom/board.jsx"
 REQUEST = "On mobile, open task details in a bottom panel. Preserve the desktop workspace, routes, brand, and underlying task behavior."
@@ -508,7 +510,8 @@ async def _refine_backend(*, case_root, live, client, studio, store, registry, b
         confirmed, entry = await step("confirmation", confirm, baseline.id)
         assert confirmed.status_code == 200 and confirmed.json()["coding_worker"]["status"] == "validated", confirmed.json()
         coder = json.JSONDecoder().raw_decode(_user_prompt_at(providers["coder"], 0).split("payload_json:\n", 1)[1])[0]
-        assert coder["file_paths"] == [HANDLER] and coder["input_files"] == {HANDLER: files[HANDLER]}
+        assert coder["file_paths"] == [HANDLER]
+        assert_numbered_file_inputs(coder["input_files"], {HANDLER: files[HANDLER]})
         confirmed_child, confirmed_files = await handler_child(
             entry, parent=baseline, parent_files=files, content=confirmed_content, scope_origin="confirmed",
         )
@@ -536,7 +539,8 @@ async def _refine_backend(*, case_root, live, client, studio, store, registry, b
         result = response.json()
         assert result["execution_mode"] == "coding_worker" and result["coding_worker"]["status"] == "validated", result["coding_worker"]
         coder = json.JSONDecoder().raw_decode(_user_prompt_at(providers["coder"], 2).split("payload_json:\n", 1)[1])[0]
-        assert coder["file_paths"] == [HANDLER] and coder["input_files"] == {HANDLER: confirmed_files[HANDLER]}
+        assert coder["file_paths"] == [HANDLER]
+        assert_numbered_file_inputs(coder["input_files"], {HANDLER: confirmed_files[HANDLER]})
         child, child_files = await handler_child(
             entry, parent=confirmed_child, parent_files=confirmed_files, content=retry_content, scope_origin="explicit",
         )

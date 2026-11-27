@@ -659,7 +659,8 @@ Current first-party coding worker path:
   validates the merged staged artifact workspace, and can persist a child artifact
   version for the refined bundle
 - for localized changes, the first-party structured coding prompt asks for
-  exact replacements within the verified editable files. The provider
+  exact replacements within the verified editable files. A one-line value
+  can be addressed by source line number and its expected old text. The provider
   materializes the complete candidate from the original source. Existing
   custom prompts can still supply complete files to the same validation path.
 - persisted child artifact versions enter Studio review as `draft`

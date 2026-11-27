@@ -36,6 +36,7 @@ from mozaiksai.core.runtime.app.auth_contract import (
     validate_app_auth_contract,
 )
 from mozaiksai.core.runtime.app.paths import APP_AUTH_CONFIG_PATH
+from tests.helpers.coding_prompt import assert_numbered_file_inputs
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -213,6 +214,6 @@ async def test_coding_provider_receives_auth_contract_from_real_selected_file_to
         APP_AUTH_CONFIG_PATH: AppAuthContract.model_json_schema()
     }
     assert "selected_file_contracts" in call["system_prompt"]
-    assert payload["input_files"] == {APP_AUTH_CONFIG_PATH: contents}
+    assert_numbered_file_inputs(payload["input_files"], {APP_AUTH_CONFIG_PATH: contents})
     assert result.owned_paths == [APP_AUTH_CONFIG_PATH]
     assert result.changed_files[0].content == contents

@@ -45,6 +45,7 @@ from mozaiksai.core.artifacts.models import (
 )
 from mozaiksai.core.session.build_binding import RunBuildBinding
 from mozaiksai.core.usage.context import AuxiliaryUsageContext
+from tests.helpers.coding_prompt import assert_numbered_file_inputs
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = "ui/pages/Home.tsx"
@@ -327,7 +328,7 @@ async def test_factory_build_and_repeated_refinements_use_exact_graph_prompts(cy
             for call, record, source in zip(calls, (original, child_b), (SOURCE_A, SOURCE_B), strict=True):
                 payload = call["payload"]
                 context = payload["refinement_context"]
-                assert payload["input_files"] == {TARGET: source}
+                assert_numbered_file_inputs(payload["input_files"], {TARGET: source})
                 assert context["get_revision_context"]["current_build_record"]["build_record_id"] == record.id
                 assert "tracked_build_records" not in context["get_revision_context"]
                 assert "semantic_annotation_request" not in context["get_context_graph_scope"]

@@ -344,19 +344,23 @@ content: |
   Rules:
   - Stay scoped to the provided file paths.
   - For local changes, return a path and replacements in each updated_files entry.
-    Copy old_text from the input with enough context to match once and put the
-    changed text in new_text. Address the original file in each replacement.
+    For a single-line value, use its line_number and the old_text and new_text
+    on that line. Address the original file in each replacement.
   - Only edit files that appear in the provided explicit file inputs.
   - Use refinement_context, especially Context Graph scope, to understand nearby files and symbols.
   - Prefer the smallest safe validation strategy.
   - Return JSON only. Do not include markdown fences.
 ```
 
-The structured coding provider checks each replacement against the original
-scoped file. Missing, repeated, or overlapping matches reject the proposal.
-Unchanged regions retain their original source text. A custom coding prompt
-can also request a complete file using the existing `path` and `content`
-fields. Both forms undergo the same candidate validation and owner review.
+The private model prompt shows the scoped source once. Each entry in
+`input_files[path]` starts with its 1-based line number and a vertical bar.
+Removing that prefix and joining the entries reproduces the original file,
+including line endings. A line replacement checks the old text within that
+specific line and preserves everything outside the matched value. A multi-line
+replacement checks the exact text across the original file. Missing, repeated,
+or overlapping matches reject the proposal. A custom coding prompt can also
+request a complete file using the existing `path` and `content` fields.
+All candidates undergo the same validation and owner review.
 
 ---
 
