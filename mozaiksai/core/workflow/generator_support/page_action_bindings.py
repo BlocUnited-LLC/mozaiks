@@ -168,11 +168,13 @@ def _payload_selection(payload: dict[str, Any]) -> int:
 
 def _control_selection(
     section: dict[str, Any], field: str, action: dict[str, Any], *, has_data: bool, inherited: int,
+    require_selected_row_prefill: bool,
 ) -> int | None:
     """Maximum selectable row count. None means the control cannot fire."""
     primitive, config = section.get("primitive"), section["config"]
     if primitive == "Form" and field == "submit_action":
-        if config.get("disabled") or (config.get("initial_values_key") == "selected_row" and not inherited):
+        needs_row = require_selected_row_prefill and config.get("initial_values_key") == "selected_row"
+        if config.get("disabled") or (needs_row and not inherited):
             return None
     if primitive == "PricingCatalog":
         rows = config.get("plans" if field == "plan_action" else "add_ons")
@@ -203,8 +205,10 @@ def _control_selection(
     return inherited
 
 
-def reachable_page_action_keys(pages: list[Any], *, include_reads: bool = True) -> set[str]:
-    """Collect reachable submit/delete controls and optionally section read bindings."""
+def reachable_page_action_keys(
+    pages: list[Any], *, include_reads: bool = True, require_selected_row_prefill: bool = False,
+) -> set[str]:
+    """Collect reachable controls; reviewed edits can also require a row to prefill the form."""
     keys: set[str] = set()
 
     def add(endpoint: Any) -> None:
@@ -233,7 +237,10 @@ def reachable_page_action_keys(pages: list[Any], *, include_reads: bool = True) 
                 if include_reads:
                     add(config.get("api_endpoint"))
                 for action_field, action in _actions(config):
-                    selection = _control_selection(section, action_field, action, has_data=has_data, inherited=inherited)
+                    selection = _control_selection(
+                        section, action_field, action, has_data=has_data, inherited=inherited,
+                        require_selected_row_prefill=require_selected_row_prefill,
+                    )
                     if selection is None:
                         continue
                     payload = _action_payload(action)
@@ -299,7 +306,7 @@ def validate_required_page_writes(
                     f"{path}: form {section.get('id')!r} submits the literal text {value!r}. "
                     f"Use {{{value}}} to send the selected record's field value."
                 )
-    missing = expected - reachable_page_action_keys([document], include_reads=False)
+    missing = expected - reachable_page_action_keys([document], include_reads=False, require_selected_row_prefill=True)
     if missing:
         raise ValueError(
             f"{path}: route {route!r} is missing reachable write controls for {', '.join(sorted(missing))}. "

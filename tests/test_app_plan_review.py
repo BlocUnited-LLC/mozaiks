@@ -126,6 +126,25 @@ def test_revision_schedules_only_missing_reviewed_form_write(source, reachable, 
     validate_plan_coverage(cached, context)
 
 
+def test_reviewed_prefilled_edit_requires_page_work_when_only_an_empty_table_can_open_it():
+    plan, context, path, _ = _revision_with_form("update_report", reachable=True)
+    baseline = yaml.safe_load(context.get("generated_files")[path])
+    form, = baseline["sections"]
+    form["config"]["initial_values_key"] = "selected_row"
+    opener = {"action_type": "event", "event_type": "ui.modal.open", "payload": {"modal_id": "edit"}}
+    baseline["sections"] = [
+        {"id": "reports", "primitive": "ResourceTable", "config": {
+            "api_endpoint": "/api/modules/reports/list_reports", "empty": {"action": opener},
+        }},
+        {"id": "edit", "primitive": "Modal", "config": {"children": [{**form, "id": "form"}]}},
+    ]
+    context.set("generated_files", {path: yaml.safe_dump(baseline)})
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert result["outcome"] == "ready", result
+    tasks = detach(context.get("app_build_plan"))["build_tasks"]
+    assert [task["owned_paths"] for task in tasks if task["task_type"] == "page_bundle"] == [[path]]
+
+
 def test_capability_source_uses_canonical_finite_vocabulary():
     schema = yaml.safe_load((ROOT / "factory_app/workflows/AppGenerator/structured_outputs.yaml").read_text(encoding="utf-8"))
     field = schema["models"]["AppCapabilityPack"]["fields"]["capability_source"]

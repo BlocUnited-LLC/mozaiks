@@ -696,7 +696,7 @@ def _missing_revision_page_tasks(
             document = yaml.safe_load(content) if content is not None else None
         except yaml.YAMLError as exc:
             raise ValueError(f"{path}: invalid inherited page YAML") from exc
-        reachable = reachable_page_action_keys([document], include_reads=False) if (
+        reachable = reachable_page_action_keys([document], include_reads=False, require_selected_row_prefill=True) if (
             isinstance(document, dict) and document.get("route") == route
         ) else set()
         required = {f"{action['module_id']}/{action['action_id']}" for action in actions}

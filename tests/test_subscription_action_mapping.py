@@ -123,7 +123,6 @@ async def test_inventory_excludes_canonical_reads_facades_and_unapproved_workflo
 
 @pytest.fixture
 def reviewed_write_design(monkeypatch):
-    from factory_app.workflows._shared import subscription_contract_context
     from mozaiksai.core.workflow.generator_support.design_access_policy import (
         access_policy_sha256,
         explicit_module_writes,
@@ -150,7 +149,8 @@ def reviewed_write_design(monkeypatch):
     record = summary_record("design_docs", summary, app="task-tracker")
     data["design_docs_artifact_version_id"] = record.id
     store = SimpleNamespace(get_build_record=AsyncMock(return_value=record))
-    monkeypatch.setattr(subscription_contract_context, "get_artifact_store", lambda: store)
+    # Collected hooks and later workflow imports may hold different module instances.
+    monkeypatch.setattr("mozaiksai.core.artifacts.store.get_build_record_store", lambda: store)
     return data, record, store
 
 
