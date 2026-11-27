@@ -2127,7 +2127,7 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
 @pytest.mark.anyio
 @pytest.mark.parametrize(("entry", "batch_fails"), [
     ("planner", False), ("planner", True), ("interview", False), ("interview", True),
-    ("admitted", False), ("admitted", True), ("missing_proof", False), ("changed_rows", False),
+    ("admitted", False), ("admitted", True), ("missing_proof", False), ("changed_rows", False), ("changed_plan", False),
 ])
 async def test_run_workflow_orchestration_executes_batches_at_the_declared_trigger(
     monkeypatch: pytest.MonkeyPatch,
@@ -2167,9 +2167,10 @@ async def test_run_workflow_orchestration_executes_batches_at_the_declared_trigg
             user_id: str,
         ) -> dict[str, Any]:
             assert workflow_name == "TaskBatchAlignmentSmoke"
-            return {
-                "retry_plan_source": {"chat_id": "previous", "dispatch_sha256": task_batches_module.task_evidence_digest([task])}
-            } if reuse else {}
+            return {"retry_plan_source": {
+                "chat_id": "previous", "dispatch_sha256": task_batches_module.task_evidence_digest([task]),
+                "plan_sha256": task_batches_module.task_evidence_digest({"title": "original"}),
+            }} if reuse else {}
 
         async def persist_context_variables(
             self,
@@ -2336,15 +2337,20 @@ async def test_run_workflow_orchestration_executes_batches_at_the_declared_trigg
         batches = task_batches_module.load_task_batches_config("TaskBatchAlignmentSmoke")
         batches.batches[0].source.kind = "context_variable"
         batches.batches[0].source.path = "admitted_tasks"
+        batches.batches[0].recovery = task_batches_module.TaskBatchRecovery(
+            trigger_agent="RecoveryAgent", request_key="repair", outcome_key="outcome", status_key="repair_status",
+            input_keys=["admitted_plan"],
+        )
         monkeypatch.setattr(task_batches_module, "load_task_batches_config", lambda _: batches)
 
         async def readmit(*, context_variables):
             context_variables.set("admitted_tasks", [dict(task, task_prompt="changed")] if entry == "changed_rows" else [task])
+            context_variables.set("admitted_plan", {"title": "changed" if entry == "changed_plan" else "original"})
             if entry == "missing_proof":
                 context_variables.set("_mozaiks_admitted_task_batch_start", {"trigger_agent": "PlannerAgent"})
                 return
             task_batches_module.admit_task_batch_start(
-                context_variables, workflow_name="TaskBatchAlignmentSmoke", trigger_agent="PlannerAgent",
+                context_variables, workflow_name="TaskBatchAlignmentSmoke", trigger_agent="PlannerAgent", plan_context_key="admitted_plan",
             )
 
         monkeypatch.setattr("mozaiksai.core.workflow.execution.lifecycle.get_lifecycle_manager", lambda _: SimpleNamespace(
@@ -2371,7 +2377,7 @@ async def test_run_workflow_orchestration_executes_batches_at_the_declared_trigg
     if reuse:
         assert not planner_agent.context_seen
         assert all(message["agent_name"] != "InterviewAgent" for message in persistence.assistant_messages)
-    if entry == "changed_rows":
+    if entry in {"changed_rows", "changed_plan"}:
         assert result["failed"] and not worker_agent.context_seen and not synthesis_agent.context_seen
         assert not persistence.completed
         return

@@ -896,7 +896,7 @@ async def run_workflow_orchestration(
         )
         from .task_batches import take_task_batch_start
 
-        admitted_trigger = None if resume_existing_only else take_task_batch_start(
+        admitted_start = None if resume_existing_only else take_task_batch_start(
             context, workflow_name=workflow_name, required=persisted_extra_ctx.get("retry_plan_source") is not None,
         )
 
@@ -1106,8 +1106,12 @@ async def run_workflow_orchestration(
                     or primary.source.kind != "context_variable"
                     or not isinstance(rows, list) or not rows
                     or not isinstance(source, Mapping) or task_evidence_digest(rows) != source.get("dispatch_sha256")
+                    or admitted_start is None or primary.recovery is None
+                    or admitted_start.plan_context_key not in primary.recovery.input_keys
+                    or not isinstance(plan := batch_context.get(admitted_start.plan_context_key), Mapping)
+                    or task_evidence_digest(plan) != source.get("plan_sha256")
                 ):
-                    raise ValueError("admitted batch requires the exact verified dispatch rows on the AG2 channel")
+                    raise ValueError("admitted batch requires the exact verified plan and dispatch rows on the AG2 channel")
             try:
                 await execute_task_batches_for_trigger(
                     workflow_name=workflow_name,
@@ -1174,8 +1178,8 @@ async def run_workflow_orchestration(
             context_variables=ctx_dict,
             agent_output_handler=_before_agent_packet,
             admitted_batch=AdmittedBatchDispatch(
-                admitted_trigger, partial(_run_agent_batches, admitted_trigger, body=None, admitted=True),
-            ) if admitted_trigger is not None else None,
+                admitted_start.trigger_agent, partial(_run_agent_batches, admitted_start.trigger_agent, body=None, admitted=True),
+            ) if admitted_start is not None else None,
             idle_timeout_seconds=idle_timeout_seconds,
             structured_registry=structured_registry,
             max_turns=max_turns,

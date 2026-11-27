@@ -103,21 +103,22 @@ _AUTHORED_FILE_LANES = ("code_files", "python_files", "database_files", "model_f
 class _AdmittedTaskBatchStart:
     workflow_name: str
     trigger_agent: str
+    plan_context_key: str
 
 
-def admit_task_batch_start(context_variables: Any, *, workflow_name: str, trigger_agent: str) -> None:
+def admit_task_batch_start(context_variables: Any, *, workflow_name: str, trigger_agent: str, plan_context_key: str) -> None:
     """Attach a trusted lifecycle decision to this run, outside serialized context."""
-    context_variables._mozaiks_admitted_task_batch_start = _AdmittedTaskBatchStart(workflow_name, trigger_agent)
+    context_variables._mozaiks_admitted_task_batch_start = _AdmittedTaskBatchStart(workflow_name, trigger_agent, plan_context_key)
 
 
-def take_task_batch_start(context_variables: Any, *, workflow_name: str, required: bool) -> str | None:
+def take_task_batch_start(context_variables: Any, *, workflow_name: str, required: bool) -> _AdmittedTaskBatchStart | None:
     start = getattr(context_variables, "_mozaiks_admitted_task_batch_start", None)
     if start is None and not required:
         return None
     if not required or not isinstance(start, _AdmittedTaskBatchStart) or start.workflow_name != workflow_name:
         raise ValueError("native task batch start requires re-admission in the current workflow")
     del context_variables._mozaiks_admitted_task_batch_start
-    return start.trigger_agent
+    return start
 
 
 class TaskBatchSource(BaseModel):
