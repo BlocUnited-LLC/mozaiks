@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -96,6 +97,27 @@ logger = logging.getLogger(__name__)
 # Worker file lanes. Typed fields (module_contract, pages, ...) render YAML and
 # JSON, never Python, so these lanes hold every model-authored .py file.
 _AUTHORED_FILE_LANES = ("code_files", "python_files", "database_files", "model_files", "service_foundation_bundle")
+
+
+@dataclass(frozen=True, slots=True)
+class _AdmittedTaskBatchStart:
+    workflow_name: str
+    trigger_agent: str
+
+
+def admit_task_batch_start(context_variables: Any, *, workflow_name: str, trigger_agent: str) -> None:
+    """Attach a trusted lifecycle decision to this run, outside serialized context."""
+    context_variables._mozaiks_admitted_task_batch_start = _AdmittedTaskBatchStart(workflow_name, trigger_agent)
+
+
+def take_task_batch_start(context_variables: Any, *, workflow_name: str, required: bool) -> str | None:
+    start = getattr(context_variables, "_mozaiks_admitted_task_batch_start", None)
+    if start is None and not required:
+        return None
+    if not required or not isinstance(start, _AdmittedTaskBatchStart) or start.workflow_name != workflow_name:
+        raise ValueError("native task batch start requires re-admission in the current workflow")
+    del context_variables._mozaiks_admitted_task_batch_start
+    return start.trigger_agent
 
 
 class TaskBatchSource(BaseModel):

@@ -38,7 +38,10 @@ from ag2.network import (
 )
 from ag2.network.client.handlers import default_handler
 
-from mozaiksai.core.adapters.ag2_transition_conditions import BootstrapInitialDispatch
+from mozaiksai.core.adapters.ag2_transition_conditions import (
+    BootstrapBatchTransition,
+    BootstrapInitialDispatch,
+)
 from mozaiksai.core.adapters.ag2_workflow_view import WorkflowHistoryAdapter
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.context.authority import (
@@ -355,6 +358,14 @@ def _require_current_build_context(
             raise ContextAuthorityError(error)
 
 
+@dataclass(frozen=True, slots=True)
+class AdmittedBatchDispatch:
+    """A server-verified batch start on a new parent network channel."""
+
+    trigger_agent: str
+    execute: Callable[[str], Awaitable[None]]
+
+
 @dataclass(slots=True)
 class AG2NetworkRunnerRequest:
     """Already-loaded workflow execution inputs for the AG2 Network runner."""
@@ -372,6 +383,7 @@ class AG2NetworkRunnerRequest:
     idle_timeout_seconds: float = DEFAULT_IDLE_TIMEOUT_SECONDS
     agent_text_context_deriver: Callable[[str, str], Mapping[str, Any]] | None = None
     agent_output_handler: Callable[[str, Any], Awaitable[None]] | None = None
+    admitted_batch: AdmittedBatchDispatch | None = None
     context_authority_policy: ContextAuthorityPolicy | None = None
     # ---------------------------------------------------------------------------
     # AG2 KnowledgeStore injection seam
@@ -638,6 +650,7 @@ class AG2NetworkRunner:
                     agent_id_by_name=agent_id_by_name,
                     max_turns=request.max_turns,
                     context_authority_policy=request.context_authority_policy,
+                    batch_trigger=request.admitted_batch.trigger_agent if request.admitted_batch else None,
                 )
                 channel = await initiator.open(
                     type="workflow",
@@ -646,17 +659,14 @@ class AG2NetworkRunner:
                         "graph": graph.to_dict(),
                         "context_vars": _json_safe_dict(request.context_variables),
                     },
-                    labels={"workflow_name": request.workflow_name},
+                    labels={
+                        "workflow_name": request.workflow_name,
+                        **({"admitted_batch": request.admitted_batch.trigger_agent} if request.admitted_batch else {}),
+                    },
                 )
             else:
                 channel = existing_channel
             channel_id = channel.channel_id
-            if existing_channel is None:
-                await initiator.send(
-                    channel.channel_id,
-                    request.initial_message or ".",
-                    audience=None,
-                )
             def _agent_names() -> dict[str, str]:
                 return {
                     initiator.agent_id: "user",
@@ -720,7 +730,24 @@ class AG2NetworkRunner:
                     error=error,
                 )
 
-            if existing_channel is not None:
+            if existing_channel is None:
+                if request.admitted_batch is not None:
+                    try:
+                        await self._start_admitted_batch(
+                            request, initiator, channel_id, getattr(hub.adapter_state(channel_id), "context_vars", {}),
+                        )
+                    except Exception as exc:
+                        logger.exception("Admitted task batch failed on channel %s", channel_id)
+                        await initiator.close_channel(channel_id, reason="workflow_failed")
+                        return await _snapshot_result(status=RunStatus.FAILED, error=str(exc))
+                await initiator.send(channel_id, request.initial_message or ".", audience=None)
+            else:
+                if (existing_channel.labels or {}).get("admitted_batch") and not any(
+                    entry.event_type in {EV_TEXT, EV_PACKET} for entry in await hub.read_wal(channel.channel_id)
+                ):
+                    # A process stopped before the first native dispatch. Some workers
+                    # may already have run; only a newly admitted stage may restart them.
+                    return await _snapshot_result(status=RunStatus.FAILED, error="interrupted_admitted_task_batch")
                 if request.rebind_model and getattr(hub.adapter_state(channel_id), "expected_next_speaker", None) not in {"user", initiator.agent_id}:
                     return await _snapshot_result(status=RunStatus.FAILED, error="ag2_model_rebind_requires_user_turn")
                 try:
@@ -953,7 +980,42 @@ class AG2NetworkRunner:
                 await _close_owned_ag2_http_clients(owned_http_clients)
 
     @staticmethod
+    async def _start_admitted_batch(
+        request: AG2NetworkRunnerRequest, initiator: Any, channel_id: str, channel_context: Mapping[str, Any],
+    ) -> None:
+        from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+
+        batch = request.admitted_batch
+        assert batch is not None
+        bridge = getattr(request.agents[batch.trigger_agent], "_mozaiks_context_bridge", None)
+        if not isinstance(bridge, ContextVariablesBridge):
+            raise ValueError("admitted batch requires its run-bound context bridge")
+        identity = (request.workflow_name, request.app_id, request.chat_id)
+        bridge._hydrate_channel_context(channel_context, policy=request.context_authority_policy, run_identity=identity)
+
+        async def checkpoint() -> None:
+            updates = bridge.consume_authorized_context_updates(policy=request.context_authority_policy, run_identity=identity)
+            if updates.get("set") or updates.get("delete"):
+                await initiator.send_envelope(Envelope(
+                    channel_id=channel_id, sender_id=initiator.agent_id, audience=[],
+                    event_type=EV_CONTEXT_SET, event_data=_json_safe_dict(updates),
+                ))
+
+        token = _context_checkpoint.set(checkpoint)
+        try:
+            await batch.execute(channel_id)
+        finally:
+            try:
+                await checkpoint()
+            finally:
+                _context_checkpoint.reset(token)
+
+    @staticmethod
     def _validate_request(request: AG2NetworkRunnerRequest, initial_agent_name: str) -> str | None:
+        if request.admitted_batch and (
+            request.resume_existing_only or request.admitted_batch.trigger_agent not in request.agents
+        ):
+            return "admitted task batch requires a registered trigger in a new run"
         if request.rebind_model and not request.resume_existing_only:
             return "a model change requires an existing-channel resume"
         if request.persisted_replay_context and not request.resume_existing_only:
@@ -980,6 +1042,7 @@ class AG2NetworkRunner:
         agent_id_by_name: Mapping[str, str],
         max_turns: int | None,
         context_authority_policy: ContextAuthorityPolicy | None,
+        batch_trigger: str | None = None,
     ) -> TransitionGraph:
         graph = compile_transition_rules_to_graph(
             transition_rules,
@@ -990,18 +1053,32 @@ class AG2NetworkRunner:
         )
         initiator_id = agent_id_by_name[_INITIATOR_NAME]
         initial_agent_id = agent_id_by_name[initial_agent_name]
+        bootstrap = [Transition(
+            when=BootstrapInitialDispatch(source_agent_id=initiator_id),
+            then=AgentTarget(initial_agent_id), priority=-1,
+        )]
+        if batch_trigger is not None:
+            rules = [dict(rule, source_agent="user") for rule in transition_rules if rule.get("source_agent") == batch_trigger]
+            if not rules:
+                raise ValueError(f"admitted batch trigger {batch_trigger!r} has no declared continuation")
+            continuation = compile_transition_rules_to_graph(
+                rules, initial_agent_name="user", agent_id_by_name=agent_id_by_name,
+                context_authority_policy=context_authority_policy,
+            )
+            edges = continuation.to_dict()["transitions"]
+            bootstrap = [
+                Transition(
+                    when=BootstrapBatchTransition(initiator_id, edge["when"]), then=transition.then,
+                    priority=transition.priority - 2 * len(edges) - 2,
+                )
+                for edge, transition in zip(edges, continuation.transitions, strict=True)
+            ]
+            bootstrap.append(Transition(
+                when=BootstrapInitialDispatch(initiator_id), then=continuation.default_target, priority=-1,
+            ))
         return TransitionGraph(
             initial_speaker=initiator_id,
-            transitions=[
-                Transition(
-                    when=BootstrapInitialDispatch(
-                        source_agent_id=initiator_id,
-                    ),
-                    then=AgentTarget(initial_agent_id),
-                    priority=-1,
-                ),
-                *graph.transitions,
-            ],
+            transitions=[*bootstrap, *graph.transitions],
             default_target=graph.default_target,
             max_turns=None if graph.max_turns is None else graph.max_turns + 1,
         )
