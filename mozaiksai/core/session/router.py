@@ -1576,13 +1576,14 @@ async def get_session_router_for_chat(
     reference = BuildTargetReference(source_chat_id=chat_id)
     router = session_router or get_session_router()
     coll = await router._persistence._coll()
+    routing_fields = SERVER_OWNED_SESSION_FIELDS - {"workflow_result_grant", "journey_parent_chat_id", "retry_plan_source"}
     doc = await coll.find_one(
         {"_id": reference.source_chat_id, "user_id": user_id, **build_app_scope_filter(app_id)},
-        {"workflow_name": 1, **{key: 1 for key in SERVER_OWNED_SESSION_FIELDS}},
+        {"workflow_name": 1, **{key: 1 for key in routing_fields}},
     )
     if not isinstance(doc, dict):
         raise ValueError("Workflow session is not available")
-    fields = {key: doc[key] for key in SERVER_OWNED_SESSION_FIELDS if key in doc}
+    fields = {key: doc[key] for key in routing_fields if key in doc}
     await get_platform_hooks().call_chat_session_fields(
         app_id=app_id, user_id=user_id, workflow_name=doc["workflow_name"],
         chat_id=chat_id, phase="resume", session_fields=fields,

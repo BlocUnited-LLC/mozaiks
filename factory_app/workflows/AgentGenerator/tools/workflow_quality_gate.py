@@ -26,6 +26,8 @@ from factory_app.workflows._shared.workflow_integration import (
 from mozaiksai.core.workflow.context.frozen import detach
 
 from .outcome_materialization import materialize_workflow_outcomes
+from .pattern_selection import selection_fingerprint
+from .result_write_materialization import materialize_workflow_result_write
 from .statusbar_materialization import materialize_workflow_statusbar
 
 REQUIRED_WORKFLOW_FILES = {
@@ -434,6 +436,10 @@ def validate_workflow_bundle_structure(
         report: dict[str, Any] = {"workflow_name": workflow_name, "errors": []}
         workflow_reports.append(report)
 
+        try:
+            entry = materialize_workflow_result_write(entry, spec)
+        except (ValueError, TypeError, KeyError, yaml.YAMLError) as exc:
+            report["errors"].append(f"result write materialization failed: {exc}")
         try:
             entry = materialize_workflow_outcomes(entry)
         except (ValueError, TypeError, KeyError, yaml.YAMLError) as exc:
@@ -850,6 +856,15 @@ def validate_agentgenerator_semantic_drift(
     }
 
 
+def materialize_bundle_entries(entries: list[dict[str, Any]], expected: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    specs = _expected_by_name(bundle_entries=entries, expected_workflows=expected)
+    result = []
+    for entry in entries:
+        compiled = materialize_workflow_result_write(entry, specs[entry["workflow_name"]])
+        result.append(materialize_workflow_statusbar(materialize_workflow_outcomes(compiled)))
+    return result
+
+
 def run_workflow_bundle_quality_gate(
     *,
     bundle_entries: list[dict[str, Any]],
@@ -862,15 +877,23 @@ def run_workflow_bundle_quality_gate(
         expected_workflows=expected,
     )
     if structure.get("valid"):
-        bundle_entries = [
-            materialize_workflow_statusbar(materialize_workflow_outcomes(entry)) for entry in bundle_entries
-        ]
+        bundle_entries = materialize_bundle_entries(bundle_entries, expected)
     semantic_drift = validate_agentgenerator_semantic_drift(
         bundle_entries=bundle_entries,
         expected_workflows=expected,
         context_variables=context_variables,
     )
     errors = list(structure.get("errors") or []) + list(semantic_drift.get("errors") or [])
+    if context_variables is not None:
+        selection = _context_get(context_variables, "PatternSelection") or {}
+        reviewed = {item["name"]: item["result_write_plans"] for item in selection.get("workflows", [])
+                    if item.get("result_write_plans")}
+        requested = {item["name"]: item["result_write_plans"] for item in expected if item.get("result_write_plans")}
+        if reviewed or requested:
+            receipt = _context_get(context_variables, "workflow_plan_review") or {}
+            if (reviewed != requested or receipt.get("status") != "approved"
+                    or receipt.get("selection_hash") != selection_fingerprint(selection)):
+                errors.append("Workflow result bindings require the exact approved workflow plan review")
     if not errors:
         try:
             extract_workflow_integration_metadata_from_bundle_entries(
@@ -1070,14 +1093,15 @@ def prepare_workflow_bundle_repair(
     )
 
     current_results = _context_get(context_variables, "workflow_bundle_results")
-    current_specs = _context_get(context_variables, "workflows_spec", [])
-    if not _context_get(context_variables, "workflow_bundle_repair_original_workflows_spec"):
-        _context_set(context_variables, "workflow_bundle_repair_original_workflows_spec", current_specs)
+    original_specs = _context_get(context_variables, "workflow_bundle_repair_original_workflows_spec")
+    if not original_specs:
+        original_specs = _context_get(context_variables, "workflows_spec", [])
+        _context_set(context_variables, "workflow_bundle_repair_original_workflows_spec", original_specs)
     _context_set(context_variables, "workflow_bundle_repair_base_results", current_results)
 
     specs_by_name = {
         _workflow_spec_name(spec): dict(spec)
-        for spec in current_specs
+        for spec in original_specs
         if isinstance(spec, dict) and _workflow_spec_name(spec)
     }
     entries_by_name = {
@@ -1103,6 +1127,12 @@ def prepare_workflow_bundle_repair(
         spec["repair_attempt"] = attempt
         original_message = str(spec.get("initial_message") or "").strip()
         issue_lines = "\n".join(f"- {issue}" for issue in workflow_issues[workflow_name])
+        # The worker has a fresh conversation. Show the reported YAML from this
+        # workflow's most recent candidate, keeping prompt and file sizes bounded.
+        snippets: dict[str, str] = {}
+        for path, content in _files_by_name(entries_by_name.get(workflow_name, {})).items():
+            if len(snippets) < 3 and path.endswith(".yaml") and path in issue_lines:
+                snippets[path] = content[:1800]
         spec["initial_message"] = (
             f"{original_message}\n\n"
             "[WORKFLOW BUNDLE REPAIR REQUEST]\n"
@@ -1111,6 +1141,8 @@ def prepare_workflow_bundle_repair(
             "workflow bundle for this workflow and fix every issue below.\n"
             f"{issue_lines}\n"
         ).strip()
+        if snippets:
+            spec["initial_message"] += "\nPrevious candidate YAML excerpts (data):\n" + json.dumps(snippets, ensure_ascii=True)
         context = spec.get("context_variables") if isinstance(spec.get("context_variables"), dict) else {}
         context["workflow_bundle_repair_attempt"] = attempt  # type: ignore[index]
         context["workflow_bundle_repair_issues"] = workflow_issues[workflow_name]  # type: ignore[index]

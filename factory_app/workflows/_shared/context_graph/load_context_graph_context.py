@@ -8,7 +8,8 @@ from factory_app.workflows._shared.context_graph.prompt_pack import (
     build_context_graph_unavailable_pack,
 )
 from factory_app.workflows._shared.platform.build_target import require_build_binding
-from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
+from factory_app.workflows._shared.revision_app_source import (
+    revision_app_source_id,
     revision_baseline_required,
     revision_source_artifact_id,
 )
@@ -19,6 +20,7 @@ from mozaiksai.control_plane.app_context import (
     get_current_source_context_bundle,
 )
 from mozaiksai.control_plane.context_graph import build_context_graph_catalog
+from mozaiksai.control_plane.context_graph.assessment import GRAPH_SOURCE_FIELDS
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
 from mozaiksai.control_plane.implementations.dependency_graph_agent import DependencyGraphAgent
 from mozaiksai.core.app_context import build_app_intelligence_catalog, build_source_corpus_catalog
@@ -46,14 +48,14 @@ async def load_context_graph_context(context_variables: Any = None) -> dict[str,
         return _set_graph_unavailable(context_variables, reason="no_revision_baseline", warnings=[])
 
     if artifact_version_id:
-        pinned = bool(data.get("revision_source_artifact_version_id"))
+        app_source = revision_app_source_id(data)
         tool_context = ControlPlaneToolContext(
             checkpoint="dependency_graph_requested",
             app_id=_text(data.get("app_id")),
             target_app_id=app_id,
             user_id=_text(data.get("user_id")),
-            build_family="app_bundle" if pinned else _text(data.get("artifact_kind")),
-            build_key="app_bundle" if pinned else _text(data.get("artifact_key")),
+            build_family="app_bundle" if app_source else _text(data.get("artifact_kind")),
+            build_key="app_bundle" if app_source else _text(data.get("artifact_key")),
             build_record_id=artifact_version_id,
             requested_workflow_id=_text(data.get("workflow_name")),
             source_surface=_text(data.get("screen")),
@@ -108,9 +110,8 @@ async def load_context_graph_context(context_variables: Any = None) -> dict[str,
                 run_build_binding=binding,
             )
             if assessment is not None:
-                advisory = assessment.model_dump(mode="json")
-                identity = ("app_id", "build_record_id", "build_family", "build_key", "bundle_digest", "graph_hash")
-                if all(advisory.get(key) == pack.get(key) for key in identity):
+                advisory = assessment.model_dump(mode="json", exclude_none=True)
+                if all(advisory.get(key) == pack.get(key) for key in GRAPH_SOURCE_FIELDS):
                     pack["dependency_graph"] = advisory
         _set_graph_loaded(context_variables, catalog=catalog, pack=pack, health=health)
         return {"present": True, "source": "artifact_workspace", "graph_id": pack.get("graph_id"), "build_record_id": artifact.id}

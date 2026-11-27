@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -26,6 +27,10 @@ def inject_workflow_integration_contract(agent, messages: list[dict[str, Any]]) 
         )
         return
     workflows = metadata["workflows"] if metadata else []
+    if agent.name == "ServiceAgent":
+        workflows = [workflow for workflow in workflows if workflow.get("result_write_plans")]
+        if not workflows and SECTION_HEADER not in agent.system_message:
+            return
     if not workflows:
         if metadata is not None or SECTION_HEADER in agent.system_message:
             update_agent_section(agent, SECTION_HEADER, "No generated workflows are bound to this build.")
@@ -43,6 +48,22 @@ def inject_workflow_integration_contract(agent, messages: list[dict[str, Any]]) 
             block = f"module.yaml workflow target: {name}\n" + _build_config_middleware_block(capability_id, events)
         else:
             block = _build_generic_block(name, capability_id, startup_mode)
+        for plan in workflow.get("result_write_plans", []):
+            write = plan["result_write"]
+            block += (
+                f"\nApproved result for {plan['event_type']} → {capability_id}, owning module {plan['module_id']}:"
+                f"\n  target.result_write: {json.dumps(write, sort_keys=True)}"
+                f"\n  Input schema compiled from the workflow result agent: {json.dumps(workflow['result_output_schema'], sort_keys=True)}"
+                f"\n  {write['source_action']} inserts into private per-user collection {write['collection']},"
+                f" then emits the event. Its payload_schema requires string {write['record_key']} from that insert."
+                f"\n  Factory compiles the internal {write['action']} receiver from that exact result schema. "
+                f"Omit its action declaration and keep record identity outside its inputs: {', '.join(write['fields'])}. "
+                "Factory wires its reviewed capability and event reaction. Keep other declared capabilities and reactions."
+                "\n  Declare the record key and result fields in the collection. The thin action handler delegates"
+                " to its module service, which returns await ctx.commit_workflow_result with only those result"
+                " fields. The host binds the originating record and owner. Include the module, data contract,"
+                " event, reaction, service, and any requested page changes in the build plan."
+            )
         blocks.append(block)
     update_agent_section(agent, SECTION_HEADER, "\n\n".join(blocks))
 

@@ -40,6 +40,59 @@ enforces plan grants (#770). AgentGenerator rejects a saved contract that still
 selects a workflow pricing feature and asks for SubscriptionContractDesigner to
 rerun. Named event triggers carry an explicit capability ID regardless of pricing.
 
+### Automatic results on a triggering private record
+
+An event workflow that saves a result on a newly created private record declares
+`result_write_plans` in its `WorkflowInPack` specification. Workflow plan review
+shows the source module action, event, collection, record key, receiving action,
+local agent, and allowed output fields. The review hash covers those values.
+The builder gives the specified agent a flat structured-output model with exactly
+the required result fields. The worker brief identifies the receiving module action
+and the host-supplied record key. The agent reads the module event's declared
+input fields from the host-seeded `event_payload` object exposed to it through
+`context_variables.yaml` with `transition_router` as its writer. Factory materializes
+that input and its exposure to the reviewed result agent. A BackendOnly workflow
+with an empty trigger list takes its events from the approved write plan.
+The roster in `agents.yaml` contains the agent's prompt and structured-output
+requirement. Each repair receives the original task, the current validation
+findings and bounded excerpts from the YAML files named in those findings.
+The agent's prompt
+requests only the approved result fields. The bundle omits worker-authored save tools and
+outcome plans for that agent. Other agents keep their declared tools and outcomes.
+Factory adds its workflow-local automatic tool and
+pins the result plan and the result agent's compiled output schema in the workflow
+bundle's integration metadata. AppGenerator compiles each receiving module's internal
+action from the hydrated workflow artifact. The module worker retains the design's
+custom reads and writes. Under the owning module task, Factory wires the pinned
+workflow capability and event reaction after the source action and event are declared.
+On a feature revision, Factory compares the approved result binding and public
+writes with the selected app version before dispatch. If an app-owned module
+needs a receiver or a new public write, its plan assigns the missing contract and
+implementation work to the module workers. The page worker receives the module
+contract as a direct dependency so it can bind controls to those public actions.
+When Factory can compile a module edit from the accepted source and approved
+fields, the module worker sees how the proposed actions, event declarations and
+reactions compare with the accepted version. The offer includes the complete
+request, the file dependencies and the module companions the build would carry
+forward. For example, the worker can inspect both the fields a person may edit
+and the fields a list action returns. The worker can select the proposal by
+digest or author the module. Both paths run the same file, ownership and
+schema checks.
+Page bindings and pricing use the public design inventory. App validation compares the closed receiver input
+with this schema, including nested properties, array items and enum values, and
+checks the result against the private collection's declared field types.
+
+Every successful path goes through the result agent. Factory uses the agent's
+declared continuation after an applied write or an identical replay. A rejected
+write, unavailable receiver, or storage error ends the workflow as failed.
+
+AppGenerator uses that same plan to compile the matching capability reaction
+and the internal module action's handler and service. Assembly checks both
+against the declared event, actions, and private data collection. During
+execution the host supplies the triggering record, checks the result against
+the receiver input schema, and dispatches the internal action. The generated
+service calls `ctx.commit_workflow_result(values)` with the validated fields.
+
 ### Apps Without AI Workflows
 
 An explicit `workflows: []`, `is_multi_workflow: false`, and non-empty

@@ -177,7 +177,8 @@ def test_initial_app_bundle_is_parentless_with_upstream_artifacts(monkeypatch, t
     assert metadata["target_app_id"] == "app_123"
 
 
-def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("sequence", ["app_revision", "full_rebuild"])
+def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatch, tmp_path: Path, sequence) -> None:
     from factory_app.workflows._shared.pack_selection import available_pack_rows
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         verified_selected_pack_sources,
@@ -190,21 +191,14 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     fake_artifact_store = _FakeArtifactStore()
     artifacts_mod = importlib.import_module("mozaiksai.core.artifacts")
     monkeypatch.setattr(artifacts_mod, "get_artifact_store", lambda: fake_artifact_store)
-    monkeypatch.setattr(
-        artifacts_mod,
-        "resolve_latest_artifact_version_refs",
-        lambda **kwargs: asyncio.sleep(0, result={
-            "concept": "av_concept_1",
-            "design_docs": "av_design_docs_1",
-            "theme_capture": "av_theme_capture_1",
-        }),
-    )
 
     zip_path = tmp_path / "GeneratedApp.zip"
     zip_path.write_bytes(b"fake bundle bytes")
     context = _Context(
         {
-            "artifact_version_id": "av_parent_1",
+            "artifact_version_id": "av_new_workflow" if sequence == "full_rebuild" else "av_parent_1",
+            "refinement_request_meta": {"build_family": "app_bundle", "build_record_id": "av_parent_1"},
+            "workflow_sequence": sequence,
             "build_mode": "revision",
             "run_build_binding": {
                 "phase": "refinement", "build_registry_id": "appreg_1",
@@ -217,12 +211,16 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
             "app_bundle_acceptance_status": "passed",
             "app_bundle_acceptance_result": {
                 "status": "passed",
+                "workflow_integration": {"passed": True, "metadata": {"source_artifact_version_id": "av_new_workflow"}},
                 "resolved_capability_packs": identities,
                 "validation_evidence": {"completed": ["bundle_scan"], "failed": []},
             },
             "app_bundle_validation_evidence": {"completed": ["bundle_scan"], "failed": []},
         }, reviewed_pack_ids=["operator_readiness"],
     )
+    input_versions = {"design_docs": "av_design_docs_1", "theme_capture": "av_theme_capture_1"}
+    monkeypatch.setattr("factory_app.workflows._shared.export_inputs.export_input_versions",
+                        AsyncMock(return_value=input_versions))
 
     artifact_version = asyncio.run(
         generate_and_download_module._register_app_bundle_artifact_version(
@@ -241,9 +239,8 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     assert fake_artifact_store.calls[0]["build_key"] == "app_bundle"
     assert fake_artifact_store.calls[0]["parent_build_record_id"] == "av_parent_1"
     assert fake_artifact_store.calls[0]["canonical_inputs_version"] == {
-        "concept": "av_concept_1",
-        "design_docs": "av_design_docs_1",
-        "theme_capture": "av_theme_capture_1",
+        **input_versions,
+        "workflow_bundle": "av_new_workflow",
     }
     assert fake_artifact_store.calls[0]["lifecycle_status"].value == "draft"
     assert fake_artifact_store.calls[0]["validation_status"].value == "passed"
@@ -418,6 +415,22 @@ def test_a_first_build_is_saved_as_a_draft_without_acceptance_evidence(monkeypat
     (call,) = [call for call in fake_artifact_store.calls if call["build_family"] == "app_bundle"]
     assert call["parent_build_record_id"] is None and call["lifecycle_status"].value == "draft"
     assert "acceptance" not in call["commit_metadata"]["metadata"]
+
+
+@pytest.mark.asyncio
+async def test_rebuild_with_missing_original_app_record_cannot_register_a_parentless_draft(tmp_path):
+    store = _FakeArtifactStore()
+    context = _Context({
+        "build_mode": "revision", "workflow_sequence": "full_rebuild", "artifact_version_id": "av_workflow",
+        "refinement_request_meta": {"build_family": "app_bundle"},
+    })
+    with pytest.raises(ValueError, match="revision_baseline_binding_missing"):
+        await generate_and_download_module._register_app_bundle_artifact_version(
+            app_id="app_123", user_id="user_123", workflow_name="AppGenerator", chat_id="chat_123",
+            bundle_name="GeneratedApp", zip_path=tmp_path / "GeneratedApp.zip",
+            context_variables=context, artifact_store=store,
+        )
+    assert store.calls == []
 
 
 def test_generate_and_download_blocks_failed_acceptance_before_writing(monkeypatch) -> None:

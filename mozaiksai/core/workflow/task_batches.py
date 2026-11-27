@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -42,8 +43,10 @@ from .generator_support.code_files import (
 from .generator_support.module_account_data import materialize_task_module_account_handlers
 from .generator_support.module_action_inventory import (
     all_module_actions,
+    approved_manifest_action_ids,
     approved_workflow_surface_ids,
     pack_owned_output_paths,
+    pinned_result_action_schemas,
     scoped_module_implementation_sources,
     ungated_module_actions,
 )
@@ -53,10 +56,15 @@ from .generator_support.module_entitlement_gates import (
     compile_module_entitlement_gates,
     resolve_subscription_contract,
 )
-from .generator_support.module_policy import materialize_task_module_policies
+from .generator_support.module_policy import materialize_task_module_policies, policy_module_id
 from .generator_support.module_read_actions import materialize_module_read_implementations
 from .generator_support.module_revision import (
+    RetainedAskRead,
+    retained_custom_action_context,
+    retained_read_repair,
+    retained_workflow_page_prompt,
     scoped_service_revision_paths,
+    validate_retained_ask_callers,
     validate_scoped_service_repositories,
 )
 from .generator_support.module_smoke_fixtures import pack_smoke_fixture_task_output
@@ -89,6 +97,35 @@ logger = logging.getLogger(__name__)
 # Worker file lanes. Typed fields (module_contract, pages, ...) render YAML and
 # JSON, never Python, so these lanes hold every model-authored .py file.
 _AUTHORED_FILE_LANES = ("code_files", "python_files", "database_files", "model_files", "service_foundation_bundle")
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewedTaskFiles:
+    """Local selection receipt. An ordinary model response cannot construct one."""
+    payload: dict[str, Any]
+    edited_files: dict[str, str] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _AdmittedTaskBatchStart:
+    workflow_name: str
+    trigger_agent: str
+    plan_context_key: str
+
+
+def admit_task_batch_start(context_variables: Any, *, workflow_name: str, trigger_agent: str, plan_context_key: str) -> None:
+    """Attach a trusted lifecycle decision to this run, outside serialized context."""
+    context_variables._mozaiks_admitted_task_batch_start = _AdmittedTaskBatchStart(workflow_name, trigger_agent, plan_context_key)
+
+
+def take_task_batch_start(context_variables: Any, *, workflow_name: str, required: bool) -> _AdmittedTaskBatchStart | None:
+    start = getattr(context_variables, "_mozaiks_admitted_task_batch_start", None)
+    if start is None and not required:
+        return None
+    if not required or not isinstance(start, _AdmittedTaskBatchStart) or start.workflow_name != workflow_name:
+        raise ValueError("native task batch start requires re-admission in the current workflow")
+    del context_variables._mozaiks_admitted_task_batch_start
+    return start
 
 
 class TaskBatchSource(BaseModel):
@@ -1132,7 +1169,30 @@ async def _run_one_task(
         user_id=user_id,
         context_authority_policy=context_authority_policy,
     )
+    if workflow_name == "AppGenerator" and task.get("task_type") == "business_services":
+        # Admission uses the complete plan below. Only the worker sees the narrower authoring scope.
+        paths = _normalize_owned_paths(task.get("owned_paths"))
+        rendered = [path for path in paths if policy_module_id(path)]
+        if rendered:
+            authored = [path for path in paths if path not in rendered]
+            task_context["owned_paths"] = authored
+            for key in ("current_task", "current_build_task"):
+                # AppBuildPlan dispatch rows also embed the pre-projection task.
+                task_context[key].pop("current_build_task", None)
+                task_context[key].update(owned_paths=authored.copy(), factory_rendered_paths=rendered.copy())
+            prompt += (
+                "\nReturn source only for current_task.owned_paths. Factory implements current_task.factory_rendered_paths "
+                "and checks their acceptance criteria after your response."
+            )
     scoped_prompt = _build_scoped_worker_prompt(prompt, task_context)
+    if workflow_name == "AppGenerator" and task.get("task_type") == "page_bundle":
+        scoped_prompt += await retained_workflow_page_prompt(base_context, _normalize_owned_paths(task.get("owned_paths")))
+    retained_ask_callers: dict[str, RetainedAskRead] = {}
+    if workflow_name == "AppGenerator" and task.get("task_type") == "module_contract":
+        retained_prompt, retained_ask_callers = await retained_custom_action_context(
+            base_context, str(task.get("capability_pack_id") or ""), all_task_items,
+        )
+        scoped_prompt += retained_prompt
 
     if fresh_agents_per_task:
         if agents_factory is None:
@@ -1165,6 +1225,76 @@ async def _run_one_task(
     if getattr(agent, "_mozaiks_tool_outcome", None) is not None:
         raise ValueError(f"task agent {agent_name!r} declares a network-only tool outcome; use the task-batch failure policy")
     code_owned_output = _code_owned_task_output(task, task_context, workflow_name=workflow_name)
+    source_candidate = None
+    source_offer = None
+    run_source_choice = None
+    offered_files: dict[str, str] | None = None
+    if (not prior_failure and code_owned_output is None and workflow_name == "AppGenerator"
+            and task.get("task_type") == "module_contract"):
+        from factory_app.workflows.AppGenerator.tools.reviewed_module_choice import (
+            reviewed_module_choice_prompt,
+            run_reviewed_module_choice,
+        )
+        from factory_app.workflows.AppGenerator.tools.reviewed_result_module_task import (
+            reviewed_result_module_task_output,
+        )
+
+        source = await reviewed_result_module_task_output(
+            task, base_context, retained_ask_callers=retained_ask_callers,
+        )
+        if source is not None:
+            source_candidate = source.candidate
+            try:
+                preview, _, subscription_contract, result_schemas = _close_task_module_actions(
+                    copy.deepcopy(source_candidate), workflow_name=workflow_name, task=task,
+                    base_context=base_context, task_context=task_context, retained_ask_callers=retained_ask_callers,
+                )
+                offered_files = extract_code_file_map_from_payload(preview, build_timestamp=base_context.get("build_timestamp"))
+                offered_files = _apply_task_entitlement_gates(
+                    offered_files, task_context=task_context, base_context=base_context,
+                    subscription_contract=subscription_contract, result_schemas=result_schemas,
+                )
+                evidence = source.compiled_evidence(str(task["capability_pack_id"]), offered_files)
+            except ValueError:
+                # A partially compilable source is not an offer. Its ordinary module worker still owns the task.
+                logger.info("Module source requires ordinary authoring: task=%s", task["task_id"])
+            else:
+                source_offer = reviewed_module_choice_prompt(
+                    base_context, task, source_candidate, retained_ask_callers, compiled_evidence=evidence,
+                )
+                run_source_choice = run_reviewed_module_choice
+    elif (not prior_failure and code_owned_output is None and workflow_name == "AppGenerator"
+          and task.get("task_type") == "page_bundle"):
+        from functools import partial
+
+        from factory_app.workflows.AppGenerator.tools.reviewed_module_choice import (
+            run_reviewed_file_choice,
+        )
+        from factory_app.workflows.AppGenerator.tools.reviewed_page_choice import (
+            REVIEWED_PAGE_SYSTEM_PROMPT,
+            reviewed_page_choice_prompt,
+        )
+        from factory_app.workflows.AppGenerator.tools.reviewed_result_page_task import (
+            apply_reviewed_page_copy,
+            reviewed_result_page_task_output,
+        )
+
+        page_source = await reviewed_result_page_task_output(task, base_context, task_context)
+        if page_source is not None:
+            source_candidate = page_source.candidate
+            try:
+                normalized = _normalize_owned_page_files_from_plan(
+                    source_candidate["code_files"], task=task, base_context=task_context, plan_context=base_context,
+                    reject_api_endpoints=False,
+                )
+            except ValueError:
+                logger.info("Page source requires ordinary authoring: task=%s", task["task_id"])
+            else:
+                offered_files = {entry["filename"]: entry["content"] for entry in normalized}
+                source_offer = reviewed_page_choice_prompt(base_context, task, page_source, offered_files)
+                run_source_choice = partial(run_reviewed_file_choice, model_name="ReviewedPageChoice",
+                                            prompt_projection=REVIEWED_PAGE_SYSTEM_PROMPT, author_decision="author_page",
+                                            edit_files=partial(apply_reviewed_page_copy, page_source, offered_files))
     pack_paths = pack_owned_output_paths(base_context)
 
     async with semaphore:
@@ -1179,7 +1309,27 @@ async def _run_one_task(
         stop_at = min(attempts, spent + 1) if prior_failure else attempts
         for _attempt in range(spent, stop_at):
             attempt_prompt = scoped_prompt
-            if last_error:
+            read_repair = retained_read_repair(
+                rejected_output, str(task.get("capability_pack_id") or ""), retained_ask_callers, last_error,
+            )
+            response_model = None
+            prompt_projection = None
+            if last_error and read_repair:
+                from factory_app.workflows.AppGenerator.tools.retained_read_prompt import (
+                    RETAINED_READ_SYSTEM_PROMPT,
+                    retained_read_evidence,
+                )
+
+                from .outputs.structured import load_workflow_structured_outputs
+
+                models, _ = load_workflow_structured_outputs(workflow_name)
+                response_model = models["RetainedReadCorrection"]
+                prompt_projection = RETAINED_READ_SYSTEM_PROMPT
+                attempt_prompt = read_repair.prompt(str(task["task_id"]), prompt, last_error)
+                attempt_prompt += retained_read_evidence(
+                    base_context, str(task.get("capability_pack_id") or ""), {read.page for read in read_repair.reads.values()},
+                )
+            elif last_error:
                 attempt_prompt += _validation_feedback(last_error, rejected_output)
             if before_attempt:
                 await before_attempt(str(task["task_id"]), _attempt + 1)
@@ -1195,24 +1345,33 @@ async def _run_one_task(
                     task_id=str(task["task_id"]), lifecycle_status="code_owned",
                 )
             else:
-                runner_result = await AG2TaskBatchRunner().run(
-                    AG2TaskBatchRunnerRequest(
-                        workflow_name=workflow_name,
-                        batch_id=batch.id,
-                        task_id=str(task["task_id"]),
-                        chat_id=chat_id,
-                        app_id=app_id,
-                        agent_name=agent_name,
-                        agent=agent,
-                        prompt=attempt_prompt,
-                        context_variables=task_context,
-                        structured_registry=_structured_registry_for_agent(workflow_name, agent_name),
-                        context_authority_policy=context_authority_policy,
-                        timeout_seconds=batch.execution.timeout_seconds,
-                    )
+                request = AG2TaskBatchRunnerRequest(
+                    workflow_name=workflow_name,
+                    batch_id=batch.id,
+                    task_id=str(task["task_id"]),
+                    chat_id=chat_id,
+                    app_id=app_id,
+                    agent_name=agent_name,
+                    agent=agent,
+                    prompt=attempt_prompt,
+                    context_variables=task_context,
+                    structured_registry=_structured_registry_for_agent(workflow_name, agent_name),
+                    response_model=response_model,
+                    prompt_projection=prompt_projection,
+                    context_authority_policy=context_authority_policy,
+                    timeout_seconds=batch.execution.timeout_seconds,
                 )
+                if source_offer is not None and source_candidate is not None and run_source_choice and not last_error:
+                    runner_result = await run_source_choice(request, source_candidate, source_offer)
+                else:
+                    runner_result = await AG2TaskBatchRunner().run(request)
             if runner_result.status is not RunStatus.COMPLETED:
                 last_error = runner_result.error or runner_result.status.value
+                if runner_result.close_reason == "file_choice_failed":
+                    raise _TaskRejected(TaskBatchFailure(
+                        task_id=str(task["task_id"]), worker_agent=agent_name, failure_kind="execution_failed",
+                        error=last_error, attempts=_attempt + 1,
+                    ))
                 rejected_output = None
                 continue
             candidate_json: str | None = None
@@ -1221,12 +1380,24 @@ async def _run_one_task(
             # the attempt's ownership errors instead of spending a round each.
             rendered_failures: list[str] = []
             try:
-                output = _normalize_agent_reply(runner_result.output)
+                selection = runner_result.output
+                used_offer = isinstance(selection, ReviewedTaskFiles)
+                if used_offer:
+                    if source_offer is None or last_error:
+                        raise ValueError("Compiled files require a current worker offer")
+                    if selection.edited_files is not None:
+                        offered_files = selection.edited_files
+                    selection = selection.payload
+                output = _normalize_agent_reply(selection)
                 if not isinstance(output, dict):
                     output = {"agent_message": str(output)}
                 # AG2 task attempts have independent streams; preserve the candidate for repair.
                 candidate_json = json.dumps(output, separators=(",", ":"), default=str)
                 _reject_task_output_identity_drift(task, output)
+                if read_repair is not None:
+                    output = read_repair.resolve(output)
+                    candidate_json = json.dumps(output, separators=(",", ":"), default=str)
+                    _reject_task_output_identity_drift(task, output)
                 # Selected packs write their declared outputs from templates; a
                 # worker's copy of one is never validated or assembled.
                 output, discarded = discard_pack_owned_outputs(output, pack_paths)
@@ -1236,23 +1407,10 @@ async def _run_one_task(
                         task.get("task_id"), agent_name, discarded,
                     )
                 authored_python = _authored_python_files(output)
-                approved_access_policy = resolve_design_access_policy(base_context)
-                if approved_access_policy and approved_access_policy["grants"]:
-                    for key in ("data_contract", "design_surface_map"):
-                        if detach(task_context.get(key)) != detach(base_context.get(key)):
-                            raise ValueError(f"Task context cannot replace {key} beneath approved role grants")
-                authored_access_policy = resolve_authored_module_access_policy(base_context)
-                subscription_contract = resolve_subscription_contract(task_context)
-                companion_files = dict(base_context.get("generated_files") or {})
-                for dependency in (task_context.get("dependency_task_outputs") or {}).values():
-                    companion_files.update(extract_code_file_map_from_payload(dependency))
-                output = cast(dict[str, Any], close_module_actions(
-                    output, app_build_plan=base_context.get("app_build_plan"),
-                    data_contract=task_context.get("data_contract"),
-                    design_surface_map=task_context.get("design_surface_map"),
-                    access_policy=authored_access_policy,
-                    subscription_contract=subscription_contract, companion_files=companion_files,
-                ))
+                output, authored_access_policy, subscription_contract, result_schemas = _close_task_module_actions(
+                    output, workflow_name=workflow_name, task=task, base_context=base_context,
+                    task_context=task_context, retained_ask_callers=retained_ask_callers,
+                )
                 canonical_code_files = extract_code_file_entries_from_payload(
                     output, build_timestamp=base_context.get("build_timestamp"),
                 )
@@ -1270,9 +1428,12 @@ async def _run_one_task(
                 # A page task's binding, identity and schema errors are raised
                 # together below, so its one bounded correction sees them all.
                 page_failures: list[str] = []
-                canonical_file_map = compile_authored_page_files(
-                    canonical_file_map, payload=output, context=task_context, failures=page_failures,
-                )
+                # The selected page compilation already contains resolved action endpoints.
+                # All page files still undergo final endpoint, identity and row-binding validation below.
+                if not (used_offer and task.get("task_type") == "page_bundle"):
+                    canonical_file_map = compile_authored_page_files(
+                        canonical_file_map, payload=output, context=task_context, failures=page_failures,
+                    )
                 if page_failures and str(task.get("task_type") or "").strip() != "page_bundle":
                     raise ValueError("\n".join(page_failures))
                 policies = materialize_task_module_policies(
@@ -1321,17 +1482,9 @@ async def _run_one_task(
                         access_policy=authored_access_policy,
                         design_surface_map=task_context.get("design_surface_map"),
                     ))
-                canonical_file_map = compile_module_entitlement_gates(
-                    canonical_file_map,
-                    gates_by_module=approved_subscription_gates(
-                        subscription_contract,
-                        approved_actions=all_module_actions(task_context),
-                        ungated_actions=ungated_module_actions(task_context),
-                        approved_workflows=approved_workflow_surface_ids(task_context),
-                    ),
-                    approved_actions=all_module_actions(task_context),
-                    ungated_actions=ungated_module_actions(task_context),
-                    existing_files=task_context.get("generated_files") or {},
+                canonical_file_map = _apply_task_entitlement_gates(
+                    canonical_file_map, task_context=task_context, base_context=base_context,
+                    subscription_contract=subscription_contract, result_schemas=result_schemas,
                 )
                 module_contract = output.get("module_contract")
                 if isinstance(module_contract, dict) and isinstance(module_contract.get("module_yaml"), dict):
@@ -1373,6 +1526,8 @@ async def _run_one_task(
                 if ownership_failures:
                     raise ValueError("\n".join(ownership_failures))
                 _validate_exclusive_task_paths(task, output, all_task_items)
+                if used_offer and {entry["filename"]: entry["content"] for entry in output["code_files"]} != offered_files:
+                    raise ValueError("The admitted files differ from the worker's verified compilation offer")
             except ValueError as exc:
                 message = str(exc)
                 deferred_failures = [failure for failure in rendered_failures if failure not in message]
@@ -1431,6 +1586,60 @@ async def _run_one_task(
         },
     )
     return output
+
+
+def _apply_task_entitlement_gates(
+    files: dict[str, str], *, task_context: dict[str, Any], base_context: dict[str, Any],
+    subscription_contract: dict[str, Any] | None, result_schemas: dict[str, Any],
+) -> dict[str, str]:
+    inventory_context = base_context if result_schemas else task_context
+    design_actions = all_module_actions(inventory_context)
+    ungated_actions = ungated_module_actions(inventory_context)
+    return compile_module_entitlement_gates(
+        files,
+        gates_by_module=approved_subscription_gates(
+            subscription_contract, approved_actions=design_actions, ungated_actions=ungated_actions,
+            approved_workflows=approved_workflow_surface_ids(inventory_context),
+        ),
+        approved_actions=design_actions,
+        manifest_actions=approved_manifest_action_ids(base_context, design_actions) if result_schemas else None,
+        ungated_actions=ungated_actions, existing_files=task_context.get("generated_files") or {},
+    )
+
+
+def _close_task_module_actions(
+    output: dict[str, Any], *, workflow_name: str, task: dict[str, Any],
+    base_context: dict[str, Any], task_context: dict[str, Any], retained_ask_callers: Mapping[str, RetainedAskRead],
+) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None, dict[str, Any]]:
+    """Close public, retained and result actions identically for a preview and a submitted task."""
+    approved_access_policy = resolve_design_access_policy(base_context)
+    if approved_access_policy and approved_access_policy["grants"]:
+        for key in ("data_contract", "design_surface_map"):
+            if detach(task_context.get(key)) != detach(base_context.get(key)):
+                raise ValueError(f"Task context cannot replace {key} beneath approved role grants")
+    authored_access_policy = resolve_authored_module_access_policy(base_context)
+    subscription_contract = resolve_subscription_contract(task_context)
+    companion_files = dict(base_context.get("generated_files") or {})
+    for dependency in (task_context.get("dependency_task_outputs") or {}).values():
+        companion_files.update(extract_code_file_map_from_payload(dependency))
+    result_schemas = pinned_result_action_schemas(base_context) if workflow_name == "AppGenerator" else {}
+    output = cast(dict[str, Any], close_module_actions(
+        output, app_build_plan=base_context.get("app_build_plan"),
+        data_contract=task_context.get("data_contract"),
+        design_surface_map=task_context.get("design_surface_map"),
+        access_policy=authored_access_policy,
+        subscription_contract=subscription_contract, companion_files=companion_files,
+        result_action_schemas=result_schemas,
+    ))
+    if retained_ask_callers:
+        validate_retained_ask_callers(output.get("module_contract") or {}, retained_ask_callers)
+    if result_schemas:
+        from factory_app.workflows.AppGenerator.tools.workflow_result_writes import (
+            compile_result_task_bindings,
+        )
+
+        compile_result_task_bindings(output, task, base_context)
+    return output, authored_access_policy, subscription_contract, result_schemas
 
 
 def _authored_python_files(output: dict[str, Any]) -> dict[str, str]:

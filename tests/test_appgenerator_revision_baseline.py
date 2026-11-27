@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, call
 import pytest
 import yaml
 
+from factory_app.workflows._shared import revision_app_source
 from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
 from factory_app.workflows._shared.platform.genesis_import import GenesisImportError
 from factory_app.workflows.AppGenerator.tools import (
@@ -19,7 +20,10 @@ from factory_app.workflows.AppGenerator.tools import (
     generate_and_download,
 )
 from factory_app.workflows.AppGenerator.tools import hydrate_app_revision_context as revision
-from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import (
+    _verified_revision_source,
+    assemble_app_tasks,
+)
 from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
 from factory_app.workflows.AppGenerator.tools.code_file_utils import save_generated_code
 from factory_app.workflows.AppGenerator.tools.generate_and_download import (
@@ -41,6 +45,164 @@ from mozaiksai.core.workflow.task_batches import (
 )
 
 
+@pytest.mark.parametrize("role", ["DesignDocsAgent", "DesignPackSelectionAgent"])
+async def test_design_prompt_projects_the_original_accepted_actions_after_an_upstream_export(baseline, role):
+    from factory_app.workflows._shared.pack_selection import pin_pack_choices
+    from factory_app.workflows.DesignDocs.tools.hook_accepted_module_actions import (
+        inject_accepted_module_actions,
+    )
+    from mozaiksai.core.workflow.execution.middleware import load_prompt_middleware_entries
+
+    assert any(entry["agent"] == role and entry["function"] == "inject_accepted_module_actions"
+               for entry in load_prompt_middleware_entries("DesignDocs", base_path="factory_app/workflows"))
+
+    class Capture:
+        name = role
+        system_message = "Design this app."
+
+        def update_system_message(self, message):
+            self.system_message = message
+
+    manifest = {
+        "schema_version": "mozaiks.module.v1", "module": {"id": "records", "handler": "backend.handler:RecordsHandler"},
+        "actions": [{
+            "id": "create_record", "handler_method": "create_record", "description": "A private source description.",
+            "input_schema": {"type": "object", "properties": {"body": {"type": "string"}, "label": {"type": "string"}},
+                             "required": ["body"]},
+            "output_schema": {"type": "object", "properties": {"record_id": {"type": "string"}, "summary": {"type": "string"}}},
+        }],
+    }
+    _replace_archive(baseline, {"modules/records/module.yaml": yaml.safe_dump(manifest), "data/contract.json": "[]"})
+    baseline.artifact.lifecycle_status = "current"
+    baseline.artifact.validation_status = "passed"
+    [accepted_pack] = pin_pack_choices(baseline.context, ["files"])
+    baseline.artifact.commit_metadata.metadata["app_bundle_acceptance"] = {
+        "resolved_capability_packs": [{**accepted_pack, "source": "local_component"}],
+    }
+    agent = Capture()
+    agent.context_variables = {**baseline.context, "workflow_sequence": "full_rebuild", "artifact_version_id": "upstream-export",
+                               "refinement_request_meta": {"build_family": "app_bundle", "build_record_id": baseline.artifact.id}}
+    await inject_accepted_module_actions(agent, [])
+    assert "Accepted app record artifact_1" in agent.system_message
+    assert f"sha256:{baseline.artifact.files_manifest[0].sha256}" in agent.system_message
+    rows = [json.loads(line) for line in agent.system_message.splitlines() if line.startswith("{")]
+    if role == "DesignPackSelectionAgent":
+        pack, module = rows
+        assert pack == accepted_pack
+        assert module == {"module": "records", "actions": ["create_record"]}
+        assert "source_path" not in agent.system_message
+        baseline.artifact.commit_metadata.metadata["app_bundle_acceptance"]["resolved_capability_packs"] = [{"digest": "invalid"}]
+        await inject_accepted_module_actions(agent, [])
+        assert "could not be verified" in agent.system_message and "create_record" not in agent.system_message
+        baseline.artifact.commit_metadata.metadata["app_bundle_acceptance"]["resolved_capability_packs"] = []
+    else:
+        [row] = [entry for entry in rows if "action" in entry]
+        assert {"schema_page_inventory": "unavailable"} in rows
+        assert {"collection_inventory": "unavailable"} in rows
+        assert row["module"] == "records" and row["action"] == "create_record"
+        assert row["input"] == {"type": "object", "fields": {"body": "string", "label": "string"}, "required": ["body"]}
+        assert set(row["output"]["fields"]) == {"record_id", "summary"}
+    assert "private source description" not in agent.system_message and "ORIGINAL" not in agent.system_message
+    digest = baseline.artifact.files_manifest[0].sha256
+    for failure in ("wrong_owner", "bad_archive", "unaccepted"):
+        agent.system_message = "Design this app."
+        agent.context_variables["user_id"] = "other" if failure == "wrong_owner" else "owner"
+        baseline.artifact.validation_status = "failed" if failure == "unaccepted" else "passed"
+        baseline.artifact.files_manifest[0].sha256 = "0" * 64 if failure == "bad_archive" else digest
+        await inject_accepted_module_actions(agent, [])
+        assert "could not be verified" in agent.system_message and "create_record" not in agent.system_message
+    agent.system_message = "Design this app."
+    agent.context_variables = {"build_mode": "genesis"}
+    await inject_accepted_module_actions(agent, [])
+    assert agent.system_message == "Design this app."
+
+
+@pytest.mark.parametrize("closed", [True, False])
+async def test_revision_design_reads_accepted_collections_routes_and_client_inputs(scoped_module_revision, closed):
+    from factory_app.workflows.DesignDocs.tools.hook_accepted_module_actions import (
+        inject_accepted_module_actions,
+    )
+
+    baseline = scoped_module_revision.baseline
+    baseline.artifact.lifecycle_status = "current"
+    baseline.artifact.validation_status = "passed"
+    manifest = yaml.safe_load(baseline.files["modules/records/module.yaml"])
+    create = manifest["actions"][0]
+    create["description"] = "OMIT_PRIVATE_VALUE"
+    create["input_schema"] = {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}
+    if closed:
+        create["input_schema"]["additionalProperties"] = False
+    manifest["actions"].append({**create, "id": "update_record", "handler_method": "update_record", "api_surface": "internal"})
+    data = json.loads(baseline.files["data/contract.json"])
+    collection = data["surfaces"][0]["collections"][0]
+    collection["fields"].extend([
+        {"name": "created_at", "type": "datetime", "required": True},
+        {"name": "suggestion", "type": "string", "required": False, "default": "OMIT_PRIVATE_VALUE"},
+    ])
+    page = yaml.safe_load(baseline.files["ui/pages/records.yaml"])
+    page["roles"] = ["editor"]
+    page["meta"] = {"requiresAuth": True, "requiresRole": "editor",
+                    "routeAuth": {"module": "records", "action": "can_view", "params": {"key": "OMIT_PRIVATE_VALUE"}}}
+    auth = yaml.safe_load((Path(__file__).parents[1] / "factory_app/app/config/auth.yaml").read_text(encoding="utf-8"))
+    auth["authorization"] = {"roles": [{"id": "editor", "permissions": ["records.read"]}]}
+    auth["routes"]["post_login_default"] = "/records?filter=OMIT_PRIVATE_VALUE"
+    _replace_archive(baseline, {
+        "modules/records/module.yaml": yaml.safe_dump(manifest), "config/auth.yaml": yaml.safe_dump(auth),
+        "data/contract.json": json.dumps(data), "ui/pages/records.yaml": yaml.safe_dump(page),
+    })
+    context = {**baseline.context, "refinement_request_meta": {"build_family": "app_bundle", "build_record_id": baseline.artifact.id}}
+    agent = SimpleNamespace(name="DesignDocsAgent", context_variables=context, system_message="")
+    agent.update_system_message = lambda message: setattr(agent, "system_message", message)
+    await inject_accepted_module_actions(agent, [])
+    assert "OMIT_PRIVATE_VALUE" not in agent.system_message
+    rows = [json.loads(line) for line in agent.system_message.splitlines() if line.startswith("{")]
+    [row] = [r for r in rows if "collection" in r]
+    assert (row["module"], row["collection"], row["entity"], row["scope"], row["tenancy"],
+            row["owner_field"], row["record_id_field"]) == ("records", "records", "Record", "app", "per_user", "user_id", "id")
+    assert row["fields"] == [{"name": f["name"], "type": f["type"], "required": f["required"], "nullable": False}
+                             for f in collection["fields"]]
+    assert row["http_write_actions"] == [
+        {"operation": "create", "action": "create_record", "closed_client_fields": ["title"] if closed else None}]
+    assert {r["action"] for r in rows if "action" in r} == {"create_record", "update_record"}
+    [access] = [r for r in rows if "auth_required" in r]
+    assert access["auth_required"] and access["roles"] == auth["authorization"]["roles"]
+    assert access["auth_routes"]["post_login_default"] == "/records"
+    assert {"schema_page": "records", "route": "/records", "roles": ["editor"], "requires_auth": True,
+            "requires_role": "editor", "route_auth": {"module": "records", "action": "can_view"}} in rows
+
+
+async def test_pack_selector_cannot_relabel_an_accepted_generated_module_after_install(baseline, tmp_path, monkeypatch):
+    from factory_app.workflows.AppGenerator.tools.community_component_lifecycle import (
+        install_verified_local_pack,
+    )
+    from factory_app.workflows.DesignDocs.tools.hook_accepted_module_actions import (
+        inject_accepted_module_actions,
+    )
+
+    baseline.artifact.lifecycle_status = "current"
+    baseline.artifact.validation_status = "passed"
+    metadata = baseline.artifact.commit_metadata.metadata
+    metadata["capability_packs"] = [{"capability_pack_id": "greetings", "capability_source": "generated_module"}]
+    metadata["app_bundle_acceptance"] = {"resolved_capability_packs": []}
+    context = {**baseline.context, "build_context_root": str(tmp_path),
+               "refinement_request_meta": {"build_family": "app_bundle", "build_record_id": baseline.artifact.id}}
+    agent = SimpleNamespace(name="DesignPackSelectionAgent", context_variables=context, system_message="")
+    agent.update_system_message = lambda message: setattr(agent, "system_message", message)
+    monkeypatch.setenv("MOZAIKS_BUILD_CONTEXT_PATH", str(tmp_path))
+    await inject_accepted_module_actions(agent, [])
+    before = agent.system_message
+    assert "Verified reusable packs: 0" in before
+
+    install_verified_local_pack(pack_source_path=Path(__file__).parent / "fixtures/community_packs/greetings",
+                                build_context_root=tmp_path)
+    await inject_accepted_module_actions(agent, [])
+    assert agent.system_message == before
+
+    del metadata["app_bundle_acceptance"]
+    await inject_accepted_module_actions(agent, [])
+    assert "no recorded pack inventory" in agent.system_message and '"pack_id"' not in agent.system_message
+
+
 def _replace_archive(baseline, additions):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
@@ -49,6 +211,73 @@ def _replace_archive(baseline, additions):
     raw = buffer.getvalue()
     baseline.content.get_bundle.return_value = raw
     baseline.artifact.files_manifest[0].sha256 = hashlib.sha256(raw).hexdigest()
+
+
+async def test_existing_compute_field_cannot_silently_become_a_canonical_input(scoped_module_revision):
+    from factory_app.workflows.DesignDocs.tools.hook_accepted_module_actions import (
+        validate_implicit_revision_writes,
+    )
+
+    baseline = scoped_module_revision.baseline
+    context = {**baseline.context, "refinement_request_meta": {"build_family": "app_bundle", "build_record_id": baseline.artifact.id}}
+    baseline.artifact.lifecycle_status = "current"
+    baseline.artifact.validation_status = "passed"
+    path = "modules/records/module.yaml"
+    manifest = yaml.safe_load(baseline.files[path])
+    action = manifest["actions"][0]
+    action.update(description="Create a record", input_schema={
+        "type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"], "additionalProperties": False,
+    })
+    _replace_archive(baseline, {path: yaml.safe_dump(manifest)})
+    proposal = json.loads(baseline.files["data/contract.json"])
+    collection = proposal["surfaces"][0]["collections"][0]
+    collection["fields"].append({"name": "summary", "type": "string", "required": False})
+    with pytest.raises(ValueError, match=r"create_record.*Set lifecycle.module_writes explicitly"):
+        await validate_implicit_revision_writes(context, proposal, set())
+    collection["lifecycle"]["module_writes"] = [{"operation": "create", "fields": ["title"]}]
+    await validate_implicit_revision_writes(context, proposal, set())
+
+
+async def test_implicit_revision_preserves_the_full_accepted_write_schema(scoped_module_revision):
+    from factory_app.workflows.DesignDocs.tools.hook_accepted_module_actions import (
+        validate_implicit_revision_writes,
+    )
+
+    baseline = scoped_module_revision.baseline
+    baseline.artifact.lifecycle_status = "current"
+    baseline.artifact.validation_status = "passed"
+    context = {**baseline.context, "refinement_request_meta": {"build_family": "app_bundle", "build_record_id": baseline.artifact.id}}
+    proposal = json.loads(baseline.files["data/contract.json"])
+    title = next(f for f in proposal["surfaces"][0]["collections"][0]["fields"] if f["name"] == "title")
+    title["enum"] = ["public", "private"]
+    path = "modules/records/module.yaml"
+    manifest = yaml.safe_load(baseline.files[path])
+    title_schema = {"type": "string", "enum": ["private", "public"]}
+    key_schema = {"type": "string"}
+    signatures = [
+        ("create_record", {"title": title_schema}, ["title"]),
+        ("update_record", {"title": title_schema, "id": key_schema}, ["id"]),
+        ("delete_record", {"id": key_schema}, ["id"]),
+    ]
+    manifest["actions"] = [{
+        "id": name, "description": name, "handler_method": name, "permissions": [], "emits": [],
+        "input_schema": {"type": "object", "properties": props, "required": required, "additionalProperties": False},
+    } for name, props, required in signatures]
+    _replace_archive(baseline, {path: yaml.safe_dump(manifest)})
+    await validate_implicit_revision_writes(context, proposal, set())
+
+    del title["enum"]
+    with pytest.raises(ValueError, match="create_record.*Set lifecycle.module_writes explicitly"):
+        await validate_implicit_revision_writes(context, proposal, set())
+    title["enum"] = ["public", "private"]
+    title["required"] = False
+    with pytest.raises(ValueError, match="create_record.*Set lifecycle.module_writes explicitly"):
+        await validate_implicit_revision_writes(context, proposal, set())
+    title["required"] = True
+    manifest["actions"][0]["input_schema"]["additionalProperties"] = True
+    _replace_archive(baseline, {path: yaml.safe_dump(manifest)})
+    with pytest.raises(ValueError, match="create_record.*Set lifecycle.module_writes explicitly"):
+        await validate_implicit_revision_writes(context, proposal, set())
 
 
 @pytest.fixture
@@ -81,8 +310,7 @@ def baseline(monkeypatch):
         }},
     )
     store = SimpleNamespace(get_build_record=AsyncMock(return_value=artifact))
-    monkeypatch.setattr(revision, "get_artifact_store", lambda: store)
-    monkeypatch.setattr("mozaiksai.core.artifacts.get_artifact_store", lambda: store)
+    monkeypatch.setattr("mozaiksai.core.artifacts.store.get_build_record_store", lambda: store)
     monkeypatch.setattr(content_store, "get_artifact_content_store", lambda: content)
     context = {
         "app_id": "factory-host", "user_id": "owner", "build_mode": "revision",
@@ -440,14 +668,48 @@ async def test_revision_reads_verified_archive_and_preserves_resumed_changes(bas
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("sequence", ["app_revision", "theme_revision"])
+@pytest.mark.parametrize("sequence", ["app_revision", "theme_revision", "theme_patch", "full_rebuild", "conceptual_replan"])
 async def test_revision_uses_selected_app_theme_unless_the_sequence_recaptures_it(baseline, sequence):
     accepted = {"assets": {"logo": "selected.png"}, "colors": {"accent": {"main": "#D97706"}}}
     recaptured = {"colors": {"accent": {"main": "#2DD4BF"}}}
     _replace_archive(baseline, {"brand/theme_config.json": json.dumps(accepted)})
     baseline.context.update(artifact_kind="app_bundle", workflow_sequence=sequence, captured_theme_config=recaptured)
     await revision.hydrate_app_revision_context(baseline.context)
-    assert baseline.context["captured_theme_config"] == (recaptured if sequence == "theme_revision" else accepted)
+    assert baseline.context["captured_theme_config"] == (accepted if sequence == "app_revision" else recaptured)
+
+
+@pytest.mark.parametrize("has_theme", [True, False])
+async def test_assembly_reads_verified_theme_without_writing_lifecycle_input(baseline, has_theme):
+    from mozaiksai.core.workflow.agents.factory import (
+        ContextVariablesBridge,
+        _workflow_tool_invocation,
+    )
+    from mozaiksai.core.workflow.context.authority import (
+        ContextAuthorityError,
+        build_context_authority_policy,
+    )
+    from mozaiksai.core.workflow.context.structured_output_overlay import StructuredOutputOverlay
+
+    accepted = {"colors": {"accent": {"main": "#D97706"}}}
+    previous_capture = {"assets": {"logo": "unrelated.png"}}
+    if has_theme:
+        _replace_archive(baseline, {"brand/theme_config.json": json.dumps(accepted)})
+    baseline.context.update(artifact_kind="app_bundle", captured_theme_config=previous_capture)
+    definitions = yaml.safe_load((Path(__file__).resolve().parents[1] /
+        "factory_app/workflows/AppGenerator/context_variables.yaml").read_text(encoding="utf-8"))["definitions"]
+    policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=definitions)
+    context = ContextVariablesBridge(baseline.context, authority_policy=policy)
+    context._bind_run(("AppGenerator", "factory-host", "theme-revision-test"), policy)
+    with _workflow_tool_invocation(context):
+        overlay = StructuredOutputOverlay(context, {})
+        with pytest.raises(ContextAuthorityError):
+            overlay.set("captured_theme_config", accepted)
+        result = await assemble_app_tasks(context_variables=overlay)
+
+    files = {item["filename"]: item["content"] for item in result["code_files"]}
+    assert context.get("captured_theme_config") == previous_capture
+    expected = {"identity": {"name": "Contact Desk"}, **(accepted if has_theme else {})}
+    assert json.loads(files["brand/theme_config.json"]) == expected
 
 
 @pytest.mark.asyncio
@@ -482,6 +744,8 @@ async def test_scoped_assembly_hydrates_verified_archive_and_preserves_baseline(
 ])
 async def test_bad_revision_baseline_fails_without_mutating_generated_files(baseline, fault):
     context = baseline.context
+    context.update(app_plan_ready=True, app_task_batch_items=[{"task_id": "cached"}],
+                   app_build_plan={"auth_mode": "public_self_signup"}, app_task_batch_status="planned")
     if fault == "missing_id":
         context["artifact_version_id"] = None
     elif fault == "missing_artifact":
@@ -503,13 +767,15 @@ async def test_bad_revision_baseline_fails_without_mutating_generated_files(base
     with pytest.raises(ValueError):
         await revision.hydrate_app_revision_context(context)
     assert "generated_files" not in context
+    assert not context["app_plan_ready"] and not context["app_task_batch_items"]
+    assert context["app_build_plan"] is None and context["app_task_batch_status"] == "planned"
 
 
 @pytest.mark.asyncio
 async def test_imported_genesis_requires_owner_receipt_before_revision_hydration(baseline, monkeypatch):
     baseline.artifact.commit_metadata.metadata["bundle_mode"] = "brownfield_genesis_import"
     check = AsyncMock(side_effect=GenesisImportError("no accepted review receipt"))
-    monkeypatch.setattr(revision, "require_accepted_genesis_baseline", check)
+    monkeypatch.setattr(revision_app_source, "require_accepted_genesis_baseline", check)
     with pytest.raises(GenesisImportError, match="no accepted review receipt"):
         await revision.hydrate_app_revision_context(baseline.context)
     check.assert_awaited_once_with(
@@ -539,6 +805,44 @@ def test_explicit_rebuild_retains_revision_parent_selection(baseline, sequence, 
     assert revision.revision_source_artifact_id(baseline.context) == (
         "pinned_app" if pinned else "original_app"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sequence", ["full_rebuild", "conceptual_replan"])
+async def test_cross_stage_rebuild_reads_original_app_archive_and_keeps_new_workflow(baseline, sequence):
+    context = {
+        **baseline.context, "workflow_sequence": sequence, "artifact_kind": "app_bundle",
+        "artifact_version_id": "new_workflow", "workflow_bundle_artifact_version_id": "new_workflow",
+        "refinement_request_meta": {"build_family": "app_bundle", "build_record_id": baseline.artifact.id},
+    }
+    workflow = baseline.artifact.model_copy(update={
+        "id": "new_workflow", "build_family": "workflow_bundle", "build_key": "new_workflow",
+    })
+    records = {baseline.artifact.id: baseline.artifact, workflow.id: workflow}
+    baseline.store.get_build_record.side_effect = lambda **params: records[params["build_record_id"]]
+
+    assert (await revision.hydrate_app_revision_context(context))["reason"] == "explicit_rebuild"
+    assert await _verified_revision_source({}, context) == baseline.files
+    baseline.store.get_build_record.assert_awaited_once_with(
+        app_id="customer-app", build_record_id=baseline.artifact.id,
+    )
+    assert context["workflow_bundle_artifact_version_id"] == workflow.id
+    assert context["artifact_version_id"] == workflow.id
+    assert context["run_build_binding"]["build_id"] == "new-build"
+    assert "generated_files" not in context
+    context["artifact_version_id"] = "new_app_draft"
+    assert revision.revision_source_artifact_id(context) == baseline.artifact.id
+
+
+@pytest.mark.asyncio
+async def test_rebuild_with_incomplete_original_app_request_cannot_use_workflow_as_parent(baseline):
+    baseline.context.update(
+        workflow_sequence="full_rebuild", artifact_version_id="new_workflow",
+        refinement_request_meta={"build_family": "app_bundle"},
+    )
+    with pytest.raises(ValueError, match="revision_baseline_binding_missing"):
+        await revision.read_bound_revision_files(baseline.context)
+    baseline.store.get_build_record.assert_not_awaited()
 
 
 def _upstream_design_revision(baseline, *, bundles):
@@ -633,6 +937,55 @@ async def test_design_revision_current_bundle_retains_lifecycle_acceptance(basel
     assert (await revision.hydrate_app_revision_context(baseline.context))["status"] == "hydrated"
 
 
+@pytest.mark.parametrize("fault", [None, "missing", "retired", "other_workflow"])
+async def test_cold_workflow_feature_resolves_source_then_exact_workflow_before_plan(baseline, monkeypatch, fault):
+    from mozaiksai.core.workflow.execution import lifecycle
+
+    _upstream_design_revision(baseline, bundles=[baseline.artifact])
+    ctx = baseline.context
+    ctx.update(artifact_kind="app_bundle", artifact_version_id="new-workflow",
+               refinement_request_meta={"build_family": "app_bundle", "build_record_id": baseline.artifact.id},
+               upstream_workflow_bundle_artifact_version_id="other-workflow" if fault == "other_workflow" else "new-workflow",
+               app_plan_ready=True, app_build_plan={"pages": []}, app_task_batch_items=[{"task_id": "cached"}])
+    metadata = {"bundle_name": "Reports", "workflows": [{"workflow_name": "ReviewReport",
+                "capability_id": "review-report", "startup_mode": "BackendOnly", "trigger_events": []}]}
+    workflow = BuildRecord.model_validate({
+        "id": "new-workflow", "app_id": baseline.artifact.app_id, "build_family": "workflow_bundle",
+        "build_key": "Reports", "version_number": 1, "lineage_root_id": "new-workflow",
+        "lifecycle_status": "archived" if fault == "retired" else "draft",
+        "source_chat_id": "workflow-chat", "source_workflow": "AgentGenerator",
+        "commit_metadata": {"author_user_id": "owner", "source_chat_id": "workflow-chat", "source_workflow": "AgentGenerator",
+                            "metadata": {**ctx["run_build_binding"], "workflow_integration_metadata": metadata}},
+    })
+    records = {baseline.artifact.id: baseline.artifact, workflow.id: None if fault == "missing" else workflow}
+    baseline.store.get_build_record.side_effect = lambda **kw: records[kw["build_record_id"]]
+    assert not ctx.get("workflow_integration_metadata") and not ctx.get("revision_source_artifact_version_id")
+    observed = []
+    project = revision.retained_workflow_page_bindings
+
+    def observe(context, files):
+        observed.append((context["revision_source_artifact_version_id"], context["workflow_bundle_artifact_version_id"]))
+        assert files == baseline.files
+        return project(context, files)
+
+    monkeypatch.setattr(revision, "retained_workflow_page_bindings", observe)
+    monkeypatch.setattr(lifecycle, "resolve_workflow_path", lambda _: Path(__file__).parents[1] / "factory_app/workflows/AppGenerator")
+    manager = lifecycle.LifecycleToolManager("AppGenerator")
+    manager.load_lifecycle_tools()
+    hooks = [h.function for h in manager.tools[lifecycle.LifecycleTrigger.BEFORE_CHAT]]
+    assert hooks.index("hydrate_app_build_inputs") < hooks.index("hydrate_app_build_plan_context")
+    [inputs] = [h for h in manager.tools[lifecycle.LifecycleTrigger.BEFORE_CHAT] if h.function == "hydrate_app_build_inputs"]
+    if fault:
+        with pytest.raises(ValueError):
+            await inputs.callable(context_variables=ctx)
+        assert not ctx["app_plan_ready"] and ctx["app_task_batch_items"] == [] and not observed
+    else:
+        await inputs.callable(context_variables=ctx)
+        assert observed == [(baseline.artifact.id, workflow.id)]
+        assert ctx["workflow_integration_metadata"]["source_artifact_version_id"] == workflow.id
+    baseline.content.get_bundle.assert_awaited_once_with("immutable-archive")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("accepted", [False, True])
 async def test_design_revision_imported_stale_bundle_uses_canonical_receipt(baseline, monkeypatch, accepted):
@@ -640,7 +993,7 @@ async def test_design_revision_imported_stale_bundle_uses_canonical_receipt(base
     baseline.artifact.commit_metadata.metadata.pop("acceptance")
     baseline.artifact.commit_metadata.metadata["bundle_mode"] = "brownfield_genesis_import"
     check = AsyncMock(side_effect=None if accepted else GenesisImportError("missing receipt"))
-    monkeypatch.setattr(revision, "require_accepted_genesis_baseline", check)
+    monkeypatch.setattr(revision_app_source, "require_accepted_genesis_baseline", check)
     if accepted:
         assert (await revision.hydrate_app_revision_context(baseline.context))["status"] == "hydrated"
     else:
@@ -772,6 +1125,81 @@ async def test_design_revision_actual_assembly_selects_only_implementation_basel
     assert context.get("artifact_version_id") == "design_1"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sequence", ["app_revision", "design_revision"])
+@pytest.mark.parametrize("old_timestamp", ["absent", "optional", "required"])
+async def test_revision_hydrates_only_previously_unrequired_read_timestamps(scoped_module_revision, sequence, old_timestamp):
+    from copy import deepcopy
+
+    source = scoped_module_revision.baseline
+    stored = json.loads(source.files["data/contract.json"])
+    current = deepcopy(stored)
+    timestamp = {"name": "updated_at", "type": "datetime", "required": True}
+    current["surfaces"][0]["collections"][0]["fields"].append(timestamp)
+    if old_timestamp != "absent":
+        stored["surfaces"][0]["collections"][0]["fields"].append(timestamp)
+    stored["surfaces"][0]["collections"].append({"name": "older_partial_metadata"})
+    record = {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}
+    if old_timestamp != "absent":
+        record["properties"]["updated_at"] = {}
+    if old_timestamp == "required":
+        record["required"].append("updated_at")
+    get = {"id": "get_records", "handler_method": "get_records",
+           "output_schema": {"type": "object", "properties": {"item": record}}}
+    listing = {"id": "list_records", "handler_method": "list_records", "output_schema": {"type": "object", "properties": {
+        "items": {"type": "array", "items": {**deepcopy(record), "required": ["id", "updated_at"]}}}}}
+    path = "modules/records/module.yaml"
+    manifest = yaml.safe_dump({"module": {"id": "records"}, "actions": [get, listing]})
+    _replace_archive(source, {path: manifest, "data/contract.json": json.dumps(stored)})
+    if sequence == "design_revision":
+        _upstream_design_revision(source, bundles=[source.artifact])
+    else:
+        source.artifact.validation_status = "passed"
+        source.artifact.commit_metadata.metadata["acceptance"] = build_acceptance_evidence(
+            source.artifact, accepted_by="owner", accepted_at="2026-11-07T12:00:00Z", transition="studio_accept")
+    context = {**source.context, "data_contract": current, "generated_files": {path: "actions: []"}}
+    await revision.hydrate_app_revision_context(context)
+    expected = {} if old_timestamp == "required" else {"records": ["get_records"]}
+    assert context["legacy_optional_updated_at_reads"] == expected
+    assert context["revision_source_artifact_version_id"] == source.artifact.id
+    assert context["generated_files"][path] == "actions: []"
+    if sequence == "app_revision":
+        source.artifact.commit_metadata.metadata.pop("acceptance")
+        await revision.hydrate_app_revision_context(context)
+        assert context["legacy_optional_updated_at_reads"] == {}
+
+
+def test_old_read_timestamp_projection_requires_matching_record_and_action(scoped_module_revision):
+    from copy import deepcopy
+
+    from mozaiksai.core.workflow.generator_support.module_revision import (
+        legacy_optional_updated_at_reads,
+    )
+
+    base = scoped_module_revision.baseline
+    stored = json.loads(base.files["data/contract.json"])
+    current = deepcopy(stored)
+    collection = current["surfaces"][0]["collections"][0]
+    collection["fields"].append({"name": "updated_at", "type": "datetime", "required": True})
+    path = "modules/records/module.yaml"
+    record = {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}
+    good = {"id": "list_records", "handler_method": "list_records", "output_schema": {"type": "object",
+            "properties": {"items": {"type": "array", "items": record}}}}
+    compound = {**deepcopy(good), "output_schema": {**deepcopy(good["output_schema"]), "allOf": [{"required": ["updated_at"]}]}}
+    for candidate in ({**good, "id": "custom"}, {**good, "handler_method": "custom"}, compound, {},
+                      {**good, "output_schema": {"type": "object", "properties": {"items": True}}},
+                      {**good, "output_schema": {"type": "object", "properties": {"items": {"items": record}}}}):
+        files = {**base.files, path: yaml.safe_dump({"module": {"id": "records"}, "actions": [candidate]})}
+        assert legacy_optional_updated_at_reads(files, current) == {}
+    files = {**base.files, path: yaml.safe_dump({"module": {"id": "records"}, "actions": [good]})}
+    assert legacy_optional_updated_at_reads(files, current) == {"records": ["list_records"]}
+    collection["fields"].append({"name": "record_id", "type": "string", "required": True})
+    assert legacy_optional_updated_at_reads(files, current) == {}
+    collection["fields"].pop()
+    collection["entity"] = "Different"
+    assert legacy_optional_updated_at_reads(files, current) == {}
+
+
 def test_first_generation_state_has_closed_authority_and_reaches_generation_agents():
     from mozaiksai.core.workflow.context.authority import (
         ContextAuthorityError,
@@ -780,13 +1208,14 @@ def test_first_generation_state_has_closed_authority_and_reaches_generation_agen
 
     config = yaml.safe_load((Path(__file__).resolve().parents[1] / "factory_app/workflows/AppGenerator/context_variables.yaml").read_text(encoding="utf-8"))
     policy = build_context_authority_policy(workflow_name="AppGenerator", definitions=config["definitions"])
-    for key in ("revision_first_generation", "revision_source_artifact_version_id"):
+    for key in ("revision_first_generation", "revision_source_artifact_version_id", "legacy_optional_updated_at_reads"):
         for writer in ("caller_input", "transition_router", "structured_output", "context_bridge", "agent_text"):
             with pytest.raises(ContextAuthorityError):
                 policy.require_can_write(key, writer_id=writer)
         for writer in ("lifecycle_tool", "deterministic_tool"):
             policy.require_can_write(key, writer_id=writer)
     assert config["definitions"]["revision_first_generation"]["source"]["default"] is False
+    assert config["definitions"]["legacy_optional_updated_at_reads"]["model_visible"] is False
     for agent in ("InterviewAgent", "AppPlanAgent", "DatabaseAgent"):
         assert {"revision_first_generation", "workflow_sequence"} <= set(config["agents"][agent]["variables"])
 
@@ -817,6 +1246,41 @@ async def test_baseline_loader_uses_declared_lifecycle_context_authority(baselin
     assert revision.revision_source_artifact_id(context) == ("artifact_1" if has_bundle else None)
 
 
+@pytest.mark.parametrize(("fault", "expected"), [
+    ("none", True), ("auth_scope", False), ("missing_scope", False), ("public_source", False),
+    ("registration_enabled", False), ("prior_mode_drift", False), ("unbound", False),
+])
+async def test_feature_auth_projection_uses_verified_compilation_and_retained_files(baseline, monkeypatch, fault, expected):
+    document = yaml.safe_load((Path(__file__).resolve().parents[1] / "factory_app/app/config/auth.yaml").read_text())
+    document.update(mode="brokered_oidc", signup_enabled=fault == "registration_enabled", authorization={"roles": []})
+    _replace_archive(baseline, {
+        "app.json": json.dumps({"appId": "customer-app", "authRequired": fault != "public_source"}),
+        "config/auth.yaml": yaml.safe_dump(document),
+    })
+    _upstream_design_revision(baseline, bundles=[baseline.artifact])
+    baseline.artifact.commit_metadata.metadata["compilation_inputs"] = {"version": 1 if fault == "unbound" else 2}
+    prior_mode = "public_self_signup" if fault == "prior_mode_drift" else "brokered_oidc"
+    resolver = AsyncMock(return_value=SimpleNamespace(context_for=lambda app_id: {
+        "app_build_plan": {"auth_strategy": "basic-login", "auth_mode": prior_mode, "roles": []},
+    }))
+    monkeypatch.setattr(revision, "resolve_app_compilation_inputs", resolver)
+    paths = {"auth_scope": ["config/auth.yaml"], "missing_scope": []}.get(fault, ["modules/records/module.yaml"])
+    baseline.context.update(revision_scope="feature", impact_set={"affected_bundle_paths": paths},
+                            generated_files={"config/auth.yaml": "untrusted: true"})
+    await revision.hydrate_app_revision_context(baseline.context)
+    assert baseline.context["retained_feature_login"] == ({
+        "source_artifact_version_id": baseline.artifact.id, "auth_strategy": "basic-login", "auth_mode": "brokered_oidc",
+    } if expected else {})
+    if expected:
+        resolver.assert_awaited_once_with(app_id="customer-app", build_record_id=baseline.artifact.id,
+                                         owner_user_id="owner", build_registry_id="registry_1")
+        # Assembly also re-verifies the source before using a previously hydrated plan.
+        baseline.context["retained_feature_login"] = {"auth_mode": "public_self_signup"}
+        await revision.hydrate_revision_files(baseline.context)
+        assert baseline.context["retained_feature_login"]["auth_mode"] == "brokered_oidc"
+        assert resolver.await_count == 2
+
+
 def test_launch_context_cannot_inject_first_generation_or_baseline_selection(monkeypatch):
     from mozaiksai.core.session.launcher import validate_context_for_workflow
     from mozaiksai.core.workflow.context.authority import ContextAuthorityError
@@ -825,7 +1289,8 @@ def test_launch_context_cannot_inject_first_generation_or_baseline_selection(mon
     config = yaml.safe_load((Path(__file__).resolve().parents[1] / "factory_app/workflows/AppGenerator/context_variables.yaml").read_text(encoding="utf-8"))
     monkeypatch.setattr(workflow_manager, "get_config", lambda name: {"context_variables": config})
     for writer in ("caller_input", "transition_router"):
-        for seed in ({"revision_first_generation": True}, {"revision_source_artifact_version_id": "foreign"}):
+        for seed in ({"revision_first_generation": True}, {"revision_source_artifact_version_id": "foreign"},
+                     {"retained_feature_login": {"auth_strategy": "basic-login"}}):
             with pytest.raises(ContextAuthorityError):
                 validate_context_for_workflow("AppGenerator", seed, writer_id=writer)
 
@@ -865,8 +1330,11 @@ async def test_router_seed_survives_upstream_result_id_changes_before_first_gene
 @pytest.mark.asyncio
 @pytest.mark.parametrize("has_bundle", [False, True])
 async def test_design_revision_registration_uses_app_lineage_not_design_parent(baseline, monkeypatch, tmp_path, has_bundle):
+    from tests.factory_export_fixture import draft_inputs
+
     _upstream_design_revision(baseline, bundles=[baseline.artifact] if has_bundle else [])
-    context = create_context_container(initial=baseline.context)
+    records, inputs = draft_inputs(app="customer-app", build="new-build")
+    context = create_context_container(initial={**inputs, **baseline.context})
     await revision.hydrate_app_revision_context(context)
     context.set("app_bundle_acceptance_status", "passed")
     raw = baseline.content.get_bundle.return_value
@@ -884,17 +1352,16 @@ async def test_design_revision_registration_uses_app_lineage_not_design_parent(b
             files_manifest=kwargs["files_manifest"], commit_metadata=kwargs["commit_metadata"],
         )
 
-    artifacts = importlib.import_module("mozaiksai.core.artifacts")
-    monkeypatch.setattr(artifacts, "resolve_latest_artifact_version_refs", AsyncMock(return_value={"design_docs": "new-approved-design"}))
     monkeypatch.setattr(content_store, "get_artifact_content_store", lambda: SimpleNamespace(backend_name="local"))
     monkeypatch.setattr(generate_and_download, "_register_greenfield_app_context_for_bundle", AsyncMock())
     await generate_and_download._register_app_bundle_artifact_version(
         app_id="customer-app", user_id="owner", workflow_name="AppGenerator", chat_id="new-chat",
         bundle_name="bundle", zip_path=archive, context_variables=context,
-        artifact_store=SimpleNamespace(create_build_record=create_record),
+        artifact_store=SimpleNamespace(create_build_record=create_record, list_build_records=AsyncMock(return_value=[]),
+                                       get_build_record=AsyncMock(side_effect=lambda *, app_id, build_record_id: records[build_record_id])),
     )
     assert recorded[0]["parent_build_record_id"] == ("artifact_1" if has_bundle else None)
-    assert recorded[0]["canonical_inputs_version"] == {"design_docs": "new-approved-design"}
+    assert recorded[0]["canonical_inputs_version"] == {"design_docs": "draft-design_docs", "subscription_contract": "draft-subscription_contract"}
     assert recorded[0]["commit_metadata"]["metadata"]["build_id"] == "new-build"
     assert recorded[0]["commit_metadata"]["metadata"]["phase"] == "refinement"
 

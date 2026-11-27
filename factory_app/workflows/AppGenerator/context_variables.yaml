@@ -1,4 +1,12 @@
 definitions:
+  design_docs_artifact_version_id:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [transition_router]
+    persisted: true
+    model_visible: false
+    description: Exact DesignDocs summary saved for this build and relayed to its downstream workflows.
+    source: {type: state, default: null}
   app_bundle_acceptance_status:
     type: string
     authority_class: closed_writer_quality_state
@@ -119,6 +127,11 @@ definitions:
     source:
       type: state
       default: false
+  retry_plan_source:
+    type: object
+    model_visible: false
+    description: Server-owned reference to the admitted plan and dispatch selected for this retry.
+    source: {type: runtime, required: false}
   run_build_binding:
     type: object
     description: Server-verified target and build lineage. Execution app_id remains the host identity.
@@ -235,6 +248,46 @@ definitions:
     source:
       type: state
       default: null
+  retained_feature_login:
+    type: object
+    description: Prior sign-in policy verified against the accepted compilation and auth manifest for a scoped feature revision.
+    authority_class: closed_writer_quality_state
+    writer_ids: [lifecycle_tool, deterministic_tool]
+    model_visible: false
+    persisted: true
+    source:
+      type: state
+      default: {}
+  revision_result_module_coverage:
+    type: object
+    description: Required module work derived from the accepted source and the reviewed result workflow.
+    authority_class: closed_writer_quality_state
+    writer_ids: [lifecycle_tool, deterministic_tool]
+    model_visible: false
+    persisted: true
+    source:
+      type: state
+      default: null
+  retained_workflow_page_bindings:
+    type: object
+    description: Accepted page controls and Ask references retained for an indirectly affected workflow feature.
+    authority_class: closed_writer_quality_state
+    writer_ids: [lifecycle_tool, deterministic_tool]
+    model_visible: false
+    persisted: true
+    source:
+      type: state
+      default: {}
+  legacy_optional_updated_at_reads:
+    type: object
+    description: Existing canonical record reads on the verified revision source that permit a missing updated_at.
+    authority_class: closed_writer_quality_state
+    writer_ids: [lifecycle_tool, deterministic_tool]
+    model_visible: false
+    persisted: true
+    source:
+      type: state
+      default: {}
   revision_first_generation:
     type: boolean
     description: >
@@ -823,8 +876,9 @@ definitions:
       default: null
   subscription_contract_artifact_version_id:
     type: string
-    authority_class: tool_only_information
-    writer_ids: [lifecycle_tool, transition_router]
+    authority_class: closed_writer_routing_state
+    writer_ids: [transition_router]
+    persisted: true
     model_visible: false
     description: Exact saved subscription input carried from its owning workflow; never reconstructed from candidate files.
     source: {type: state, default: null}
@@ -948,6 +1002,8 @@ definitions:
       default: []
   workflow_integration_metadata:
     type: object
+    authority_class: closed_writer_quality_state
+    writer_ids: [lifecycle_tool]
     description: >
       Canonical normalized AgentGenerator-to-AppGenerator handoff metadata for the
       latest workflow_bundle artifact. Contains contract_version, bundle_name,
@@ -997,6 +1053,8 @@ definitions:
       default: null
   workflow_bundle_artifact_version_id:
     type: string
+    authority_class: closed_writer_quality_state
+    writer_ids: [lifecycle_tool]
     description: >
       Source artifact version id for the workflow_bundle artifact that hydrated
       workflow_integration_metadata. Null when AppGenerator is running without an

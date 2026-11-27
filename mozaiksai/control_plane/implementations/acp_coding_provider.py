@@ -172,7 +172,7 @@ def build_provider_prompt(
     graph_context = (
         [
             "Dependency evidence from the verified build (advisory only):",
-            request.dependency_graph.model_dump_json(),
+            request.dependency_graph.model_dump_json(exclude_none=True),
             "",
         ]
         if request.dependency_graph is not None else []

@@ -16,6 +16,7 @@ from mozaiksai.core.workflow.generator_support.page_action_bindings import (
     planned_page_writes,
     validate_required_page_writes,
 )
+from mozaiksai.core.workflow.generator_support.page_plan_utils import validate_planned_page
 from mozaiksai.core.workflow.task_batches import (
     optional_task_output_paths,
     task_evidence_digest,
@@ -279,7 +280,10 @@ def planned_artifact_diagnostics(context: Any, files: dict[str, str]) -> list[di
             add("PLANNED_ARTIFACT_MISSING", path, owners.get(path), "required planned page is missing")
         elif path in files and page.get("route") in required_writes:
             try:
-                validate_required_page_writes(files[path], page["route"], required_writes, path)
+                retained_ask = "retained_ask_context" in page
+                if retained_ask:
+                    validate_planned_page(files[path], page, path)
+                validate_required_page_writes(files[path], page["route"], required_writes, path, identity_validated=retained_ask)
             except ValueError as exc:
                 add("PLANNED_PAGE_WRITE_UNSATISFIED", path, owners.get(path), error=str(exc))
     for module in plan.get("modules") or []:

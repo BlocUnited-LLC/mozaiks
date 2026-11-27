@@ -7,8 +7,10 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from mozaiksai.core.app_context.models import GraphEdgeType
+from mozaiksai.core.session.build_binding import BuildIdentity
 
 MAX_GRAPH_PROMPT_BYTES = 16_384
+GRAPH_SOURCE_FIELDS = ("app_id", "build_record_id", "source_build_id", "build_family", "build_key", "bundle_digest", "graph_hash")
 GraphPath = Annotated[str, StringConstraints(min_length=1, max_length=384)]
 Identity = Annotated[str, StringConstraints(min_length=1, max_length=256)]
 Digest = Annotated[str, StringConstraints(pattern=r"^sha256:[a-f0-9]{64}$")]
@@ -34,6 +36,7 @@ class DependencyGraphContext(BaseModel):
 
     app_id: Identity
     build_record_id: Identity
+    source_build_id: BuildIdentity | None = None
     build_family: Identity
     build_key: Identity
     bundle_digest: Digest

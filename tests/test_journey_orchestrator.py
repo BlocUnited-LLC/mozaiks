@@ -118,7 +118,9 @@ class _FakePersistenceManager:
     async def _coll(self):
         return self._coll_ref
 
-    async def create_chat_session(self, chat_id, app_id, workflow_name, user_id, extra_fields=None):  # noqa: ANN001
+    async def create_chat_session(
+        self, chat_id, app_id, workflow_name, user_id, extra_fields=None, *, journey_parent_chat_id=None,
+    ):  # noqa: ANN001
         self._created += 1
         doc = {
             "_id": chat_id,
@@ -130,6 +132,8 @@ class _FakePersistenceManager:
         }
         if isinstance(extra_fields, dict):
             doc.update(extra_fields)
+        if journey_parent_chat_id is not None:
+            doc["journey_parent_chat_id"] = journey_parent_chat_id
         self._coll_ref._docs[chat_id] = doc
 
     async def persist_server_owned_session_fields(self, *, chat_id, fields=None, **_):  # noqa: ANN001, ANN003
@@ -667,6 +671,7 @@ async def test_new_build_creates_its_own_child_instead_of_a_prior_builds_complet
     assert [call["chat_id"] for call in result.activated] == [result.switched_to]
     created = result.persistence._coll_ref._docs[result.switched_to]
     assert created["run_build_binding"] == _CURRENT_BINDING
+    assert created["journey_parent_chat_id"] == "chat_source"
     assert created["journey_instance_id"] == "journey_run_1"
     assert created["journey_position"] == 1
     assert [call["source_chat_id"] for call in result.binding_requests] == ["chat_source"]
@@ -702,6 +707,7 @@ async def test_in_progress_child_of_the_same_build_is_reused(monkeypatch):
 
     assert result.errors == []
     assert result.switched_to == "theme_in_progress"
+    assert "journey_parent_chat_id" not in result.persistence._coll_ref._docs[result.switched_to]
     assert [call["chat_id"] for call in result.activated] == ["theme_in_progress"]
     assert result.binding_requests == []
     assert len(result.theme_chats) == 2

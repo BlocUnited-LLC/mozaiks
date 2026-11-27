@@ -20,6 +20,7 @@ from ag2.events.task_events import (
 from ag2.network.policies import CHANNEL_STATE_DEP
 from ag2.stream import MemoryStream
 from ag2.task import Task, TaskSpec
+from pydantic import BaseModel
 
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.context.authority import (
@@ -28,6 +29,7 @@ from mozaiksai.core.workflow.context.authority import (
     ContextAuthorityPolicy,
     ScopedContextWriter,
 )
+from mozaiksai.core.workflow.execution.middleware import TaskPromptProjection
 from mozaiksai.core.workflow.outputs.runtime_validation import (
     reply_body_to_data,
     validate_agent_structured_output,
@@ -50,6 +52,8 @@ class AG2TaskBatchRunnerRequest:
     structured_registry: dict[str, Any] = field(default_factory=dict)
     context_authority_policy: ContextAuthorityPolicy | None = None
     timeout_seconds: int | None = None
+    response_model: type[BaseModel] | None = None
+    prompt_projection: TaskPromptProjection | None = None
 
 
 @dataclass(slots=True)
@@ -86,6 +90,8 @@ class AG2TaskBatchRunner:
                 context_vars=dict(request.context_variables),
             )
         }
+        if request.prompt_projection is not None:
+            dependencies[TaskPromptProjection] = request.prompt_projection
         if request.context_authority_policy is not None:
             dependencies[CONTEXT_AUTHORITY_WRITER_DEP] = ScopedContextWriter(
                 policy=request.context_authority_policy,
@@ -102,12 +108,21 @@ class AG2TaskBatchRunner:
         try:
             async with ag2_task as active_task:
                 try:
+                    ask_options: dict[str, Any] = {}
+                    registry = request.structured_registry
+                    if request.response_model is not None:
+                        prepare = getattr(request.agent, "_mozaiks_prepare_response_schema", None)
+                        if not callable(prepare):
+                            raise ValueError("This task worker cannot prepare a per-call response schema")
+                        ask_options["response_schema"] = prepare(structured_model_cls=request.response_model)
+                        registry = {request.agent_name: request.response_model}
                     reply = await asyncio.wait_for(
                         request.agent.ask(
                             request.prompt,
                             stream=stream,
                             variables=dict(request.context_variables),
                             dependencies=dependencies,
+                            **ask_options,
                         ),
                         timeout=float(request.timeout_seconds or 120),
                     )
@@ -158,7 +173,7 @@ class AG2TaskBatchRunner:
                 validation = validate_agent_structured_output(
                     agent_name=request.agent_name,
                     reply=reply,
-                    structured_registry=request.structured_registry,
+                    structured_registry=registry,
                 )
                 if validation is not None:
                     if not validation.validation_passed or validation.structured_data is None:

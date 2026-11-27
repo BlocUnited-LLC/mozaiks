@@ -136,7 +136,8 @@ models:
         type: str
         description: Document field path to index.
       order:
-        type: int
+        type: literal
+        values: [1, -1]
         description: Sort order, 1 for ascending or -1 for descending.
 
   DataContractIndex:
@@ -182,6 +183,18 @@ models:
         - ui_only
         description: Surface kind that owns the collection.
 
+  DataContractModuleWrite:
+    type: model
+    fields:
+      operation:
+        type: literal
+        values: [create, update, delete]
+        description: Canonical module operation enabled on this collection.
+      fields:
+        type: list
+        items: str
+        description: Business fields a person can set. The runtime supplies the record selector for update and delete. Keep record keys, ownership, managed timestamps and workflow results out of this list. Use an empty list for delete.
+
   DataContractLifecycle:
     type: model
     fields:
@@ -192,6 +205,10 @@ models:
         - workflow_write
         - platform_sync
         description: Primary mechanism allowed to write durable records.
+      module_writes:
+        type: optional_list
+        items: DataContractModuleWrite
+        description: For module_action collections, declare each enabled client operation once. For example, if a person can create and edit a description and a background workflow computes a summary, create and update each list only description. The workflow saves its summary through an internal action. An empty list disables canonical writes. Omit to retain default create, update and delete. Preserve the accepted app's public inputs during refinement.
       migration_policy:
         type: literal
         values:
@@ -363,6 +380,9 @@ models:
           Must be null or a valid JSON object string matching the primitive's
           required fields. A declarative control's explicit submit/delete
           data_source binds its module action to this route during plan review.
+          For a create or edit Form, name its reviewed module_id and action_id
+          in submit_action.data_source so the plan can schedule that page
+          when its accepted controls do not reach the operation.
 
   UIPage:
     type: model
@@ -465,8 +485,8 @@ models:
           Do not singularize collection reads or invent a custom alias for them.
           Granting either canonical read requires both across roles; custom read
           grants imply no canonical read grants. Any granted authored collection with
-          module_action writes still requires all three canonical write grants
-          across roles, counted across grant rows rather than per row. For
+          module_action writes requires a grant for each enabled canonical write
+          across roles, counted across grant rows rather than per row. Omitted module_writes enables all three. For
           example, when the approved concept has submitter and approver roles,
           submitter may receive create_<entity> while approver receives
           update_<entity> and delete_<entity> for the same collection. Use this

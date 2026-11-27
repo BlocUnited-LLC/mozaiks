@@ -658,6 +658,11 @@ Current first-party coding worker path:
 - when it executes successfully, the worker returns concrete `updated_files`,
   validates the merged staged artifact workspace, and can persist a child artifact
   version for the refined bundle
+- for localized changes, the first-party structured coding prompt asks for
+  exact replacements within the verified editable files. A one-line value
+  can be addressed by source line number and its expected old text. The provider
+  materializes the complete candidate from the original source. Existing
+  custom prompts can still supply complete files to the same validation path.
 - persisted child artifact versions enter Studio review as `draft`
 - app candidates pass both the existing explicit-file acceptance gate and the
   operator-selected app build validator. Source-index checks and parent evidence
@@ -706,6 +711,8 @@ Current first-party harness decision layer:
   - a follow-up trigger with `harness_action.action_id=apply_proposed_scope`
     can continue into the coding worker without forcing the user to manually
     reselect files
+  - confirmation uses the model selection stored with the proposal when the
+    client omits it. An explicit change of model requires a new proposal.
 - current first-party `decision_type` values are:
   - `workflow_reentry`
   - `core_restart`

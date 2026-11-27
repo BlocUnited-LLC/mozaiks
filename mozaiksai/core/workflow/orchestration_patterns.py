@@ -27,6 +27,7 @@ from logs.runtime_artifacts import get_agent_outputs_dir
 from mozaiksai.core.adapters.ag2_network_runner import (
     CHANNEL_TERMINAL_ERROR,
     DEFAULT_IDLE_TIMEOUT_SECONDS,
+    AdmittedBatchDispatch,
     AG2NetworkRunner,
     AG2NetworkRunnerRequest,
 )
@@ -523,6 +524,7 @@ async def _run_ag2_network_phase(
     resume_context_updates: Mapping[str, Any] | None = None,
     persisted_replay_context: Mapping[str, Any] | None = None,
     agent_output_handler: Callable | None = None,
+    admitted_batch: AdmittedBatchDispatch | None = None,
     idle_timeout_seconds: float = DEFAULT_IDLE_TIMEOUT_SECONDS,
     failure_message_key: str | None = None,
 ) -> Any:
@@ -540,6 +542,7 @@ async def _run_ag2_network_phase(
             max_turns=max_turns,
             agent_text_context_deriver=agent_text_context_deriver,
             agent_output_handler=agent_output_handler,
+            admitted_batch=admitted_batch,
             idle_timeout_seconds=idle_timeout_seconds,
             knowledge_store=knowledge_store,
             context_authority_policy=context_authority_policy,
@@ -891,6 +894,11 @@ async def run_workflow_orchestration(
             ctx_dict,
             policy=getattr(context, "_mozaiks_context_authority_policy", None),
         )
+        from .task_batches import take_task_batch_start
+
+        admitted_start = None if resume_existing_only else take_task_batch_start(
+            context, workflow_name=workflow_name, required=persisted_extra_ctx.get("retry_plan_source") is not None,
+        )
 
         _conv_logger.info(
             "[%s] PRE_AGENT_CONTEXT_READY keys=%s key_count=%s",
@@ -1056,25 +1064,15 @@ async def run_workflow_orchestration(
             else DEFAULT_IDLE_TIMEOUT_SECONDS
         )
 
-        async def _before_agent_packet(agent_name: str, packet: Any) -> None:
-            await _dispatch_agent_packet_output(
-                agent_name=agent_name,
-                packet=packet,
-                workflow_name=workflow_name,
-                chat_id=chat_id,
-                app_id=app_id,
-                user_id=user_id,
-                context_bridge=context_bridge,
-                structured_registry=structured_registry,
-                auto_tool_agents=auto_tool_agents,
-                wf_logger=wf_logger,
-            )
+        async def _run_agent_batches(agent_name: str, channel_id: str, body: Any, *, admitted: bool = False) -> None:
             matching_batches = [
                 batch for batch in task_batches_config.batches
                 if batch.trigger_agent == agent_name
                 or (batch.recovery and batch.recovery.trigger_agent == agent_name)
             ] if task_batches_config is not None else []
             if not matching_batches:
+                if admitted:
+                    raise ValueError("admitted batch trigger is missing")
                 return
 
             from .agents.factory import _workflow_tool_invocation
@@ -1096,13 +1094,24 @@ async def run_workflow_orchestration(
                         context_bridge.set(key, value)
                 await checkpoint_agent_context()
 
-            body = (getattr(packet, "event_data", {}) or {}).get("body")
-            if isinstance(body, str):
-                try:
-                    body = json.loads(normalize_json_candidate_text(body))
-                except json.JSONDecodeError:
-                    body = None
             batch_context = context_bridge.snapshot()
+            if admitted:
+                from .task_batches import resolve_path_value, task_evidence_digest
+
+                source = persisted_extra_ctx["retry_plan_source"]
+                primary = matching_batches[0]
+                rows = resolve_path_value(batch_context, primary.source.path)
+                if (
+                    len(matching_batches) != 1 or primary.trigger_agent != agent_name
+                    or primary.source.kind != "context_variable"
+                    or not isinstance(rows, list) or not rows
+                    or not isinstance(source, Mapping) or task_evidence_digest(rows) != source.get("dispatch_sha256")
+                    or admitted_start is None or primary.recovery is None
+                    or admitted_start.plan_context_key not in primary.recovery.input_keys
+                    or not isinstance(plan := batch_context.get(admitted_start.plan_context_key), Mapping)
+                    or task_evidence_digest(plan) != source.get("plan_sha256")
+                ):
+                    raise ValueError("admitted batch requires the exact verified plan and dispatch rows on the AG2 channel")
             try:
                 await execute_task_batches_for_trigger(
                     workflow_name=workflow_name,
@@ -1120,7 +1129,7 @@ async def run_workflow_orchestration(
                     agents_factory=agents_factory,
                     context_authority_policy=context_authority_policy,
                     checkpoint=_checkpoint_batch,
-                    parent_channel_id=str(getattr(packet, "channel_id", "") or ""),
+                    parent_channel_id=channel_id,
                 )
             finally:
                 # Only the declared batch results may enter the parent workflow.
@@ -1129,6 +1138,27 @@ async def run_workflow_orchestration(
                         for key in _batch_written_keys(batch):
                             if key in batch_context:
                                 context_bridge.set(key, batch_context[key])
+
+        async def _before_agent_packet(agent_name: str, packet: Any) -> None:
+            await _dispatch_agent_packet_output(
+                agent_name=agent_name,
+                packet=packet,
+                workflow_name=workflow_name,
+                chat_id=chat_id,
+                app_id=app_id,
+                user_id=user_id,
+                context_bridge=context_bridge,
+                structured_registry=structured_registry,
+                auto_tool_agents=auto_tool_agents,
+                wf_logger=wf_logger,
+            )
+            body = (getattr(packet, "event_data", {}) or {}).get("body")
+            if isinstance(body, str):
+                try:
+                    body = json.loads(normalize_json_candidate_text(body))
+                except json.JSONDecodeError:
+                    body = None
+            await _run_agent_batches(agent_name, str(getattr(packet, "channel_id", "") or ""), body)
 
         # AG2 owns the declared graph, including user pauses and later batch triggers.
         agent_text_context_deriver = (
@@ -1147,6 +1177,9 @@ async def run_workflow_orchestration(
             initial_message=network_trigger,
             context_variables=ctx_dict,
             agent_output_handler=_before_agent_packet,
+            admitted_batch=AdmittedBatchDispatch(
+                admitted_start.trigger_agent, partial(_run_agent_batches, admitted_start.trigger_agent, body=None, admitted=True),
+            ) if admitted_start is not None else None,
             idle_timeout_seconds=idle_timeout_seconds,
             structured_registry=structured_registry,
             max_turns=max_turns,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -13,6 +14,8 @@ from factory_app.workflows._shared.context_graph.hook_context_graph import (
     _format_context_graph_pack,
     inject_context_graph_context,
 )
+from factory_app.workflows._shared.context_graph.prompt_pack import build_context_graph_prompt_pack
+from factory_app.workflows.AppGenerator.tools.retained_read_prompt import retained_read_evidence
 from mozaiksai.control_plane.context_graph.assessment import DependencyGraphContext
 from mozaiksai.core.app_context.indexer import index_file_map
 from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
@@ -24,6 +27,50 @@ from mozaiksai.core.workflow.context.authority import (
 
 BINDING = {"build_registry_id": "registry", "target_app_id": "customer", "build_id": "build", "phase": "refinement"}
 DIGEST = "sha256:" + "a" * 64
+
+
+@pytest.mark.parametrize("source", ["verified_artifact_bundle", "content_digest:local"])
+def test_retained_read_correction_includes_only_the_selected_sources_module_and_caller_edges(source):
+    src, dst = "modules/records/backend/handler.py", "modules/records/backend/service.py"
+    notes, other = "ui/pages/notes.yaml", "modules/other/backend/repo.py"
+    edges = [
+        {"source_path": src, "target_path": dst, "kind": "imports"},
+        {"source_path": notes, "target_path": other, "kind": "calls"},
+        {"source_path": other, "target_path": "other/standalone.py", "kind": "imports"},
+    ]
+    identity = {"app_id": "customer", "build_record_id": "baseline", "build_family": "app_bundle",
+                "build_key": "app_bundle", "bundle_digest": DIGEST, "graph_hash": DIGEST}
+    pack = build_context_graph_prompt_pack(catalog={**identity, "verified": True}, source=source)
+    pack["dependency_graph"] = {
+        **identity, "files": [src, dst, notes, other], "dependencies": edges, "coverage_incomplete": False,
+        "recommended_paths": ["secret-catalog.yaml"],
+    }
+    context = _context(context_graph_pack=pack, generated_files={"private.yaml": "UNRELATED SOURCE"}).snapshot()
+    message = retained_read_evidence(context, "records", {notes})
+    data = json.loads(message.splitlines()[-1])
+    assert data["refinement_request"] == "change list tasks"
+    graph = data["dependency_graph"]
+    assert graph["build_record_id"] == "baseline"
+    assert graph["bundle_digest"] == graph["graph_hash"] == DIGEST
+    assert graph["dependencies"] == edges[:2]
+    assert graph["files"] == sorted([src, dst, notes, other])
+    assert all(value not in message for value in ["UNRELATED SOURCE", "secret-catalog.yaml", "other/standalone.py"])
+
+    context["context_graph_pack"]["dependency_graph"]["build_record_id"] = "foreign"
+    context["refinement_request"] = "z" * 5100
+    data = json.loads(retained_read_evidence(context, "records", {notes}).splitlines()[-1])
+    assert data["dependency_graph"] == {"build_record_id": "baseline", "status": "unavailable"}
+    assert data["request_truncated"] and len(data["refinement_request"]) == 4000
+
+
+def test_retained_read_correction_omits_unverified_workspace_graph():
+    pack = build_context_graph_prompt_pack(
+        catalog={"build_record_id": "baseline", "graph_hash": DIGEST, "bundle_digest": DIGEST, "verified": False},
+        source="workspace_dir",
+    )
+    context = _context(context_graph_pack=pack).snapshot()
+    data = json.loads(retained_read_evidence(context, "records", set()).splitlines()[-1])
+    assert data["dependency_graph"] == {"build_record_id": "baseline", "status": "unavailable"}
 
 
 def _context(**overrides):
@@ -63,7 +110,16 @@ def forbid_current(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_workflow_loads_pinned_snapshot_and_server_specialist_with_execution_usage(monkeypatch, forbid_current):
+@pytest.mark.parametrize("source_context", [
+    {},
+    {
+        "artifact_version_id": "generated-workflow", "artifact_kind": "app_bundle", "artifact_key": "app_bundle",
+        "revision_source_artifact_version_id": None, "workflow_sequence": "full_rebuild",
+        "refinement_request_meta": {"build_family": "app_bundle", "build_record_id": "baseline"},
+        "workflow_bundle_artifact_version_id": "generated-workflow",
+    },
+], ids=["pinned-design-revision", "app-rebuild-after-workflow-export"])
+async def test_workflow_loads_pinned_snapshot_and_server_specialist_with_execution_usage(monkeypatch, forbid_current, source_context):
     snapshot = _snapshot()
     source = AsyncMock(return_value=snapshot)
     monkeypatch.setattr(loader, "load_context_graph_for_tool", source)
@@ -74,7 +130,7 @@ async def test_workflow_loads_pinned_snapshot_and_server_specialist_with_executi
     )
     analyze = AsyncMock(return_value=assessment)
     monkeypatch.setattr(loader, "DependencyGraphAgent", lambda: SimpleNamespace(analyze=analyze))
-    context = _context(dependency_graph={"recommended_paths": ["caller-injection.py"]})
+    context = _context(dependency_graph={"recommended_paths": ["caller-injection.py"]}, **source_context)
 
     await loader.load_context_graph_context(context)
 
@@ -94,6 +150,8 @@ async def test_workflow_loads_pinned_snapshot_and_server_specialist_with_executi
     assert "Specialist assessment (advisory JSON)" in agent.system_message
     assert "modules/tasks/backend/service.py" in agent.system_message
     assert "caller-injection.py" not in agent.system_message
+    assert "generated-workflow" not in agent.system_message
+    assert len(agent.system_message.encode("utf-8")) <= MAX_CONTEXT_GRAPH_PROMPT_BYTES
 
 
 @pytest.mark.asyncio

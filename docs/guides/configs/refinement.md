@@ -184,9 +184,21 @@ the target app, build record, bundle digest, and graph hash. Scope and coding
 agents receive this evidence as advice. The harness still enforces edit scope.
 
 Generator revision middleware renders the assessment through the existing
-graph prompt pack when a verified app bundle is available. A new app without
+graph prompt pack when a verified app bundle is available. When a request
+starts from an app, AgentGenerator and AppGenerator keep using that app's
+build record after DesignDocs or AgentGenerator exports a new artifact.
+AppGenerator uses the selected app archive as its implementation baseline
+and records the revised workflow separately. A new app without
 a source build has no dependency assessment. An unavailable or invalid
 requested build has no fallback to current app evidence.
+
+## Reviewing workflow revisions
+
+When DesignDocs asks the owner to review permissions, the card also lists
+workflow surfaces, the events modules emit, and the triggers each surface
+declares. For a workflow revision that declares no workflow surfaces, the
+card says so and the owner can request changes before the design is saved.
+AgentGenerator presents the executable workflow plan in its own review.
 
 ## AppGenerator backend revisions
 

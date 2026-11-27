@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import zipfile
 from copy import deepcopy
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import yaml
@@ -15,13 +17,13 @@ from fastapi import HTTPException
 from factory_app.app.modules.app_registry.backend.repo import AppRegistryRepo
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
 from factory_app.workflows._shared.platform import build_target
-from factory_app.workflows.AppGenerator.tools import hydrate_app_revision_context as revision
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
 from mozaiksai.core.artifacts.models import BuildRecord, ChangeRequestDoc
 from mozaiksai.core.auth import UserPrincipal
 from mozaiksai.core.runtime.composition.platform_hooks import PlatformHookRegistry
 from mozaiksai.core.session import launcher
-from mozaiksai.core.session.model import TriggerInput
+from mozaiksai.core.session.model import RevisionEntry, SessionState, TriggerInput
+from mozaiksai.core.session.persistence import SessionStateStore
 from mozaiksai.core.session.router import SessionRouter
 from mozaiksai.core.workflow.context.adapter import create_context_container
 from mozaiksai.core.workflow.context.authority import (
@@ -133,6 +135,426 @@ async def launch(retry, **changes):
         "trigger_source": "manual", "source_chat_id": "failed", "retry_failed": True, **changes,
     })
     return await studio.trigger_workflow(body, retry.principal)
+
+
+@pytest.fixture
+async def downstream(retry, monkeypatch):
+    """A failed stage following two completed, artifact-producing stages."""
+    coll = retry.pm._default
+    create_session = retry.pm.create_chat_session
+
+    async def create_with_parent(*args, journey_parent_chat_id=None, **kwargs):
+        if kwargs["chat_id"] in coll._docs:
+            assert coll._docs[kwargs["chat_id"]]["journey_parent_chat_id"] == journey_parent_chat_id
+            return
+        await create_session(*args, **kwargs)
+        if journey_parent_chat_id is not None:
+            coll._docs[kwargs["chat_id"]]["journey_parent_chat_id"] = journey_parent_chat_id
+
+    monkeypatch.setattr(retry.pm, "create_chat_session", create_with_parent)
+    journey = "design_revision"
+    state_store = SessionStateStore(retry.pm)
+    state = SessionState(session_id=state_store.session_id_for_scope("host", "owner", "target"), app_id="host",
+                         user_id="owner", target_app_id="target", journey_instance_id="journey", journey_key=journey,
+                         journey_total_steps=5, current_chat_id="design", current_workflow_id="DesignDocs",
+                         active_change_request_id="change", active_revision_id="revision")
+    await state_store.upsert(state)
+    state_coll = await state_store._coll()
+    update_state = state_coll.update_one
+
+    async def conditional_state_update(query, update, upsert=False):
+        if not upsert and not any(state_coll._matches(row, query) for row in state_coll._docs.values()):
+            return
+        await update_state(query, update, upsert=upsert)
+
+    monkeypatch.setattr(state_coll, "update_one", conditional_state_update)
+    binding = {**BINDING, "refinement_model": "openai"}
+    retry.change.refinement_request.refinement_model = "openai"
+    retry.change.router_decision.update(workflow_id="DesignDocs", workflow_sequence=journey)
+    retry.change.impact_set.workflow_sequence = journey
+    now = datetime.now(UTC)
+    shared = {"run_build_binding": binding, "journey_instance_id": "journey", "journey_key": journey,
+              "journey_total_steps": 5, "session_router_session_id": state.session_id, "artifact_version_id": "baseline"}
+    root_meta = {**retry.source["trigger_meta"], "journey_id": journey, "workflow_sequence": journey,
+                 "requested_workflow_id": "DesignDocs", "resolved_workflow_id": "DesignDocs", "rerouted_by_dependency": False}
+    design = {**retry.source, **shared, "_id": "design", "workflow_name": "DesignDocs", "status": 1, "journey_position": 0,
+              "trigger_meta": root_meta, "created_at": now, "completed_at": now + timedelta(seconds=1)}
+    subscription = {**design, "_id": "subscription", "workflow_name": "SubscriptionContractDesigner",
+                    "created_at": now + timedelta(seconds=2), "completed_at": now + timedelta(seconds=3),
+                    "journey_position": 1, "trigger_meta": {"trigger_source": "run_complete"},
+                    "subscription_contract": {"plans": []}}
+    retry.source.update(**shared, workflow_name="AgentGenerator", journey_position=2,
+                        trigger_meta={"trigger_source": "run_complete"}, created_at=now + timedelta(seconds=4),
+                        workflow_plan_review={"status": "approved"}, workflow_result_grant={"foreign": True})
+    coll._docs.update(design=design, subscription=subscription, earlier={**design, "_id": "earlier", "status": 2})
+    def find(query):
+        matches = [dict(x) for x in coll._docs.values() if coll._matches(x, query)]
+        return SimpleNamespace(limit=lambda n: SimpleNamespace(to_list=AsyncMock(return_value=matches[:n])))
+
+    monkeypatch.setattr(coll, "find", find, raising=False)
+    outputs = {}
+    for pred, family in ((design, "design_docs"), (subscription, "subscription_contract")):
+        summary = deepcopy(pred.get(family, {}))
+        raw = json.dumps(summary, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        outputs[pred["_id"]] = [BuildRecord(
+            _id=f"{family}_v1", app_id="target", build_family=family, build_key=family, version_number=1,
+            lineage_root_id=family, source_chat_id=pred["_id"], source_workflow=pred["workflow_name"],
+            canonical_inputs_version={"design_docs": "design_docs_v1"} if family == "subscription_contract" else {},
+            validation_status="skipped", created_at=pred["completed_at"],
+            files_manifest=[{"path": f"{family}.json", "content_type": "application/json",
+                             "size_bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}],
+            commit_metadata={"author_user_id": "owner", "source_chat_id": pred["_id"], "source_workflow": pred["workflow_name"],
+                             "metadata": {"summary_payload": summary, "summary_format": "json"}},
+        )]
+    retry.store.list_build_records = AsyncMock(side_effect=lambda **args: outputs.get(args["source_chat_id"], []))
+    design_check = AsyncMock()
+    monkeypatch.setattr("factory_app.workflows.DesignDocs.tools.save_design_doc.verify_design_projections", design_check, raising=False)
+    current = retry.record["current_build_run"]
+    current.update(active_chat_id="failed", active_workflow_id="AgentGenerator", workflow_sequence=journey,
+                   phase="refinement", status="needs_revision")
+    retry.record.update(active_chat_id="failed", active_workflow_id="AgentGenerator", lifecycle_state="needs_revision")
+
+    async def cas(**args):
+        assert args["expected_build_id"] == current["build_id"]
+        if (args["expected_active_chat_id"] != retry.record["active_chat_id"]
+                or args["expected_lifecycle_state"] != retry.record["lifecycle_state"]):
+            return {"success": False}
+        retry.record.update(active_chat_id=args["active_chat_id"], lifecycle_state=args["status"])
+        current.update(active_chat_id=args["active_chat_id"], status=args["status"])
+        return {"success": True}
+
+    monkeypatch.setattr(retry.service, "update_build_status", AsyncMock(side_effect=cas))
+    retry.outputs = outputs
+    retry.design_check = design_check
+    retry.state = state_coll._docs[state.session_id]
+    return retry
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("parent_edges", [False, True])
+async def test_downstream_retry_reviews_fresh_plan_from_verified_build(downstream, parent_edges):
+    r = downstream
+    if parent_edges:
+        r.source["journey_parent_chat_id"] = "subscription"
+        r.pm._default._docs["subscription"]["journey_parent_chat_id"] = "design"
+    result = await launch(r, workflow_id="AgentGenerator")
+    fresh = r.pm._default._docs[result["chat_id"]]
+    assert r.record["active_chat_id"] == result["chat_id"]
+    assert fresh["run_build_binding"] == r.source["run_build_binding"]
+    assert fresh["artifact_version_id"] == "baseline" and fresh["change_request_id"] == "change"
+    assert fresh["journey_position"] == 2 and fresh["journey_instance_id"] == "journey"
+    assert fresh["trigger_meta"]["retry_of_chat_id"] == "failed"
+    assert fresh["journey_parent_chat_id"] == "subscription"
+    assert fresh["subscription_contract"] == {"plans": []}
+    r.design_check.assert_awaited_once_with(r.outputs["design"][0], user_id="owner", build_id="repair_build")
+    assert not {"workflow_plan_review", "workflow_result_grant", "generated_files"} & fresh.keys()
+    again = await launch(r, workflow_id="AgentGenerator")
+    assert again == result
+
+
+@pytest.mark.parametrize("interruption", ["claimed", "inserted", "cursor_bound", "published"])
+async def test_same_request_finishes_an_interrupted_downstream_publication(downstream, monkeypatch, interruption):
+    r = downstream
+
+    class ProcessStopped(BaseException):
+        pass
+
+    async def stop(*args, **kwargs):
+        raise ProcessStopped()
+
+    with monkeypatch.context() as stopped:
+        if interruption == "claimed":
+            stopped.setattr(studio, "prepare_routed_workflow_launch", stop)
+        elif interruption == "inserted":
+            stopped.setattr(r.pm, "persist_server_owned_session_fields", stop)
+        elif interruption == "cursor_bound":
+            stopped.setattr(SessionRouter, "_persist_chat_journey_metadata", stop)
+        else:
+            publish = studio.launch_prepared_workflow
+
+            async def stop_after_publish(*args, **kwargs):
+                await publish(*args, **kwargs)
+                raise ProcessStopped()
+
+            stopped.setattr(studio, "launch_prepared_workflow", stop_after_publish)
+        with pytest.raises(ProcessStopped):
+            await launch(r, workflow_id="AgentGenerator")
+    chat = r.record["active_chat_id"]
+    docs = r.pm._default._docs
+    assert r.record["lifecycle_state"] == "building" and chat != "failed"
+    if interruption == "claimed":
+        assert chat not in docs
+    else:
+        assert docs[chat]["journey_parent_chat_id"] == "subscription"
+    if interruption == "published":
+        monkeypatch.setattr(studio, "prepare_routed_workflow_launch", AsyncMock(side_effect=AssertionError("published chat rerouted")))
+    first, second = await asyncio.gather(*(launch(r, workflow_id="AgentGenerator") for _ in range(2)))
+    assert first == second and first["chat_id"] == chat
+    assert [d["_id"] for d in docs.values() if d.get("trigger_meta", {}).get("retry_of_chat_id") == "failed"] == [chat]
+    assert docs[chat]["run_build_binding"] == r.source["run_build_binding"]
+    assert docs[chat]["journey_parent_chat_id"] == "subscription" and docs[chat]["journey_position"] == 2
+
+
+@pytest.mark.parametrize("fault", [None, "app_source", "workflow_pin", "input_version", "review",
+                                   "catalog_differs", "archive", "wrong_build"])
+async def test_app_stage_retry_requires_its_reviewed_export_and_distinct_app_source(downstream, tmp_path, fault):
+    from factory_app.workflows.AgentGenerator.tools.pattern_selection import selection_fingerprint
+
+    r = downstream
+    selection = {"workflows": [{"name": "RecordAssistant"}]}
+    review = {"status": "approved", "review_id": "owner-review", "selection_hash": selection_fingerprint(selection)}
+    parent = {**deepcopy(r.source), "_id": "generator", "status": 1, "journey_parent_chat_id": "subscription",
+              "completed_at": r.source["created_at"] + timedelta(seconds=1), "artifact_version_id": "workflow-v2",
+              "workflow_plan_review": review, "PatternSelection": selection, "workflow_review_outcome": "approved",
+              "workflow_bundle_export_outcome": "ready", "workflow_bundle_validation_status": "passed"}
+    r.pm._default._docs[parent["_id"]] = parent
+    r.source.update(workflow_name="AppGenerator", journey_position=3, journey_parent_chat_id="generator",
+                    created_at=parent["completed_at"] + timedelta(seconds=1), artifact_version_id="workflow-v2",
+                    revision_source_artifact_version_id="baseline", workflow_bundle_artifact_version_id="workflow-v2",
+                    refinement_request_meta={"build_record_id": "baseline", "build_family": "app_bundle"})
+    r.record["current_build_run"]["active_workflow_id"] = r.record["active_workflow_id"] = "AppGenerator"
+    archive = tmp_path / "RecordAssistant.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("RecordAssistant/orchestrator.yaml", "workflow_name: RecordAssistant\n")
+    raw = archive.read_bytes()
+    record = BuildRecord(
+        _id="workflow-v2", app_id="target", build_family="workflow_bundle", build_key="RecordAssistant", version_number=2,
+        lineage_root_id="workflow-v1", source_chat_id="generator", source_workflow="AgentGenerator", created_at=parent["completed_at"],
+        canonical_inputs_version={"design_docs": "design_docs_v1", "subscription_contract": "subscription_contract_v1"},
+        files_manifest=[{"path": "RecordAssistant/RecordAssistant.zip", "content_type": "application/zip",
+                         "size_bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}],
+        commit_metadata={"author_user_id": "owner", "source_chat_id": "generator", "source_workflow": "AgentGenerator",
+                         "metadata": {**parent["run_build_binding"], "artifact_path": str(archive), "workflow_plan_review": deepcopy(review),
+                                      "workflow_integration_metadata": {"workflows": [{"workflow_name": "RecordAssistant",
+                                                                                     "capability_id": "record-assistant"}]}}},
+    )
+    r.outputs["generator"] = [record]
+    if fault == "app_source":
+        r.source["refinement_request_meta"]["build_record_id"] = "other-app-version"
+    elif fault == "workflow_pin":
+        r.source["artifact_version_id"] = "other-workflow"
+    elif fault == "input_version":
+        record.canonical_inputs_version["design_docs"] = "unrelated-current-design"
+    elif fault == "review":
+        parent["PatternSelection"] = {"workflows": [{"name": "Other"}]}
+    elif fault == "catalog_differs":
+        record.commit_metadata.metadata["workflow_integration_metadata"]["workflows"][0]["workflow_name"] = "Other"
+    elif fault == "archive":
+        archive.write_bytes(b"changed")
+    elif fault == "wrong_build":
+        record.commit_metadata.metadata["build_id"] = "other-build"
+    if fault:
+        with pytest.raises(HTTPException) as exc:
+            await launch(r, workflow_id="AppGenerator")
+        assert exc.value.status_code == 400
+        r.service.update_build_status.assert_not_called()
+        return
+    result = await launch(r, workflow_id="AppGenerator")
+    fresh = r.pm._default._docs[result["chat_id"]]
+    assert fresh["journey_parent_chat_id"] == parent["_id"]
+    assert fresh["artifact_version_id"] == record.id
+    assert fresh["refinement_request_meta"]["build_record_id"] == fresh["trigger_meta"]["build_record_id"] == "baseline"
+    assert fresh["subscription_contract_artifact_version_id"] == "subscription_contract_v1"
+    assert fresh["design_docs_artifact_version_id"] == "design_docs_v1"
+    assert "workflow_result_grant" not in fresh and "generated_files" not in fresh
+    assert await launch(r, workflow_id="AppGenerator") == result
+    # An old, published destination was not issued plan reuse. An upgrade must
+    # return the same chat even if its source would now offer an admitted plan.
+    marker = studio.RetryPlanSource(chat_id="older", plan_sha256="a" * 64, dispatch_sha256="b" * 64)
+    with patch.object(studio, "_select_retry_plan", AsyncMock(return_value=marker)):
+        assert await launch(r, workflow_id="AppGenerator") == result
+    assert "retry_plan_source" not in fresh
+
+
+async def test_inserted_retry_remains_recoverable_after_a_transient_binding_error(downstream, monkeypatch):
+    r = downstream
+    with monkeypatch.context() as unavailable:
+        unavailable.setattr(r.pm, "persist_server_owned_session_fields", AsyncMock(side_effect=OSError("write interrupted")))
+        with pytest.raises(OSError, match="write interrupted"):
+            await launch(r, workflow_id="AgentGenerator")
+    chat = r.record["active_chat_id"]
+    assert r.record["lifecycle_state"] == "building" and chat in r.pm._default._docs
+    result = await launch(r, workflow_id="AgentGenerator")
+    assert result["chat_id"] == chat and r.pm._default._docs[chat]["run_build_binding"] == r.source["run_build_binding"]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("user_id", "another"), ("app_id", "other"), ("journey_parent_chat_id", "other"),
+    ("run_build_binding", {**BINDING, "refinement_model": "gemini"}), ("workflow_run_model", "gemini"),
+    ("workflow_model", "gemini"), ("workflow_result_grant", {"unexpected": True}),
+    ("status", 1), ("status", 2), ("change_request_id", "other"), ("journey_instance_id", "other"),
+])
+async def test_recovery_refuses_to_adopt_a_different_or_terminal_session(downstream, field, value):
+    r = downstream
+    result = await launch(r, workflow_id="AgentGenerator")
+    child = r.pm._default._docs[result["chat_id"]]
+    child[field] = value
+    before = deepcopy(child)
+    r.service.update_build_status.reset_mock()
+    with pytest.raises(HTTPException, match="does not match this stage") as error:
+        await launch(r, workflow_id="AgentGenerator")
+    assert error.value.status_code == 409
+    assert child == before
+    r.service.update_build_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["parent_edge", "missing", "duplicate", "later", "other_provider", "root_scope",
+                                    "stage_position", "stage_journey", "output_owner", "output_missing", "output_payload",
+                                    "subscription_old_design", "subscription_missing_design",
+                                    "request_model", "input_stage", "registration", "revision", "unrelated_manual"])
+async def test_downstream_retry_rejects_unproven_stage_before_publication(downstream, fault):
+    r = downstream
+    docs = r.pm._default._docs
+    parent = docs["subscription"]
+    if fault == "parent_edge":
+        r.source["journey_parent_chat_id"] = "other_parent"
+    elif fault == "missing":
+        parent["status"] = 2
+    elif fault == "duplicate":
+        docs["duplicate"] = {**parent, "_id": "duplicate"}
+    elif fault == "later":
+        parent["completed_at"] = r.source["created_at"] + timedelta(seconds=1)
+    elif fault == "other_provider":
+        parent["run_build_binding"] = {**BINDING, "refinement_model": "gemini"}
+    elif fault == "root_scope":
+        docs["design"]["trigger_meta"]["build_record_id"] = "other"
+    elif fault == "stage_position":
+        r.source["journey_position"] = 1
+    elif fault == "stage_journey":
+        r.source["journey_instance_id"] = "another"
+    elif fault == "output_owner":
+        r.outputs["subscription"][0].commit_metadata.author_user_id = "another"
+    elif fault == "output_missing":
+        r.outputs["design"] = []
+    elif fault == "output_payload":
+        parent["subscription_contract"] = {"plans": ["unapproved"]}
+    elif fault == "subscription_old_design":
+        r.outputs["subscription"][0].canonical_inputs_version["design_docs"] = "original-design"
+    elif fault == "subscription_missing_design":
+        r.outputs["subscription"][0].canonical_inputs_version.clear()
+    elif fault == "request_model":
+        r.change.refinement_request.refinement_model = "gemini"
+    elif fault == "input_stage":
+        r.change.router_decision["workflow_id"] = "AppGenerator"
+    elif fault == "registration":
+        r.record["current_build_run"]["active_chat_id"] = "other"
+    elif fault == "revision":
+        parent["revision_id"] = "another"
+    elif fault == "unrelated_manual":
+        r.source["trigger_meta"] = {"trigger_source": "manual", "retry_of_chat_id": "another"}
+    before = deepcopy(docs)
+    with pytest.raises(HTTPException) as error:
+        await launch(r, workflow_id="AgentGenerator")
+    assert error.value.status_code == 400
+    assert docs == before
+    r.service.update_build_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", [None, "other_revision", "other_change", "other_stage", "ambiguous_terminal",
+                                    "cancelled", "stale_plan", "missing_parent", "new_decision", "superseded_baseline"])
+async def test_retry_after_real_failure_cleanup_requires_the_last_reviewed_export(downstream, fault):
+    from factory_app.workflows.AgentGenerator.tools.pattern_selection import selection_fingerprint
+
+    r = downstream
+    router = studio.get_session_router().for_target("target")
+    store = SessionStateStore(r.pm)
+    state = await store.load(app_id="host", user_id="owner", target_app_id="target")
+    state.current_chat_id = "failed"
+    state.current_workflow_id = "AgentGenerator"
+    state.journey_position = 2
+    state.artifact_version_refs = {"app_bundle": "baseline"}
+    state.revision_history = [RevisionEntry(revision_id="revision", change_request_id="change", scope="patch",
+                                            origin_workflow="DesignDocs", target_workflow="DesignDocs")]
+    await store.upsert(state)
+    await router.fail_active_revision(app_id="host", user_id="owner", workflow_id="AgentGenerator")
+    selection = {"workflows": [{"name": "TitleAssistant"}]}
+    r.source.update(
+        journey_parent_chat_id="subscription", workflow_review_outcome="approved", PatternSelection=selection,
+        workflow_plan_review={"status": "approved", "selection_hash": selection_fingerprint(selection)},
+        workflow_bundle_validation_status="failed", workflow_bundle_validation_errors=["invalid generated bundle"],
+        workflow_bundle_export_outcome="blocked", workflow_bundle_repair_result={
+            "status": "blocked", "reason": "workflow_bundle_repair_attempts_exhausted", "repairable": False,
+            "attempt": 2, "max_attempts": 2},
+    )
+    row = (await store._coll())._docs[state.session_id]
+    assert row["sequence_status"] == "stale" and row["active_revision_id"] is None
+    if fault == "other_revision":
+        row["revision_history"][-1]["revision_id"] = "another"
+    elif fault == "other_change":
+        row["revision_history"][-1]["change_request_id"] = "another"
+    elif fault == "other_stage":
+        row["current_chat_id"] = "another"
+    elif fault == "ambiguous_terminal":
+        r.source["workflow_bundle_repair_result"] = {}
+    elif fault == "cancelled":
+        r.source["workflow_review_outcome"] = "cancelled"
+    elif fault == "stale_plan":
+        r.source["PatternSelection"] = {"workflows": ["changed"]}
+    elif fault == "missing_parent":
+        del r.source["journey_parent_chat_id"]
+    elif fault == "new_decision":
+        row["pending_transition_id"] = "new-transition"
+    elif fault == "superseded_baseline":
+        row["artifact_version_refs"]["app_bundle"] = "new-baseline"
+    if fault is not None:
+        with pytest.raises(HTTPException, match="does not belong to the active refinement"):
+            await launch(r, workflow_id="AgentGenerator")
+        r.service.update_build_status.assert_not_called()
+        return
+    result = await launch(r, workflow_id="AgentGenerator")
+    fresh = r.pm._default._docs[result["chat_id"]]
+    assert fresh["journey_parent_chat_id"] == "subscription" and fresh["revision_id"] == "revision"
+    assert not {"workflow_plan_review", "PatternSelection", "workflow_bundle_repair_result"} & fresh.keys()
+    snapshot = await router.get_session_snapshot(app_id="host", user_id="owner")
+    assert snapshot["active_revision_id"] == "revision" and snapshot["active_change_request_id"] == "change"
+
+
+@pytest.mark.asyncio
+async def test_downstream_retry_lost_claim_publishes_no_chat(downstream, monkeypatch):
+    r = downstream
+    monkeypatch.setattr(r.service, "update_build_status", AsyncMock(return_value={"success": False}))
+    prepare = AsyncMock(side_effect=AssertionError("A losing retry cannot touch the router cursor"))
+    monkeypatch.setattr(studio, "prepare_routed_workflow_launch", prepare)
+    before = set(r.pm._default._docs)
+    with pytest.raises(HTTPException) as error:
+        await launch(r, workflow_id="AgentGenerator")
+    assert error.value.status_code == 409
+    assert set(r.pm._default._docs) == before
+    prepare.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_downstream_retry_failed_launch_releases_only_its_own_claim(downstream, monkeypatch):
+    r = downstream
+    monkeypatch.setattr(studio, "prepare_routed_workflow_launch", AsyncMock(side_effect=ValueError("route changed")))
+    with pytest.raises(HTTPException, match="route changed"):
+        await launch(r, workflow_id="AgentGenerator")
+    acquire, restore = (c.kwargs for c in r.service.update_build_status.await_args_list)
+    assert acquire["active_chat_id"] == restore["expected_active_chat_id"]
+    assert restore["active_chat_id"] == r.record["active_chat_id"] == "failed"
+    assert r.record["lifecycle_state"] == "needs_revision"
+    assert r.state["current_chat_id"] == "design"
+    assert acquire["active_chat_id"] not in r.pm._default._docs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("moved", [False, True])
+async def test_downstream_retry_restores_only_partially_published_cursor(downstream, monkeypatch, moved):
+    r = downstream
+    async def fail_after_bind(prepared, **_):
+        coll = await SessionStateStore(r.pm)._coll()
+        state = coll._docs[r.state["_id"]]
+        state.update(current_chat_id="newer" if moved else prepared.chat_id, current_workflow_id="AgentGenerator")
+        raise ValueError("session publication failed")
+
+    monkeypatch.setattr(studio, "launch_prepared_workflow", fail_after_bind)
+    monkeypatch.setattr(r.pm, "mark_chat_failed", AsyncMock(), raising=False)
+    with pytest.raises(HTTPException, match="session publication failed"):
+        await launch(r, workflow_id="AgentGenerator")
+    restored = await studio.get_session_router().for_target("target").get_session_snapshot(app_id="host", user_id="owner")
+    assert restored["current_chat_id"] == ("newer" if moved else "failed")
 
 
 @pytest.mark.asyncio
@@ -351,16 +773,16 @@ async def test_retry_seed_runs_canonical_before_chat_baseline_loader(retry, monk
     seed = create_context_container(fresh, authority_policy=policy, writer_id=TRANSITION_ROUTER_WRITER)
     seed.set("artifact_version_id", artifact_id)
     context = create_context_container(seed.snapshot(), authority_policy=policy)
-    monkeypatch.setattr(revision, "get_artifact_store", lambda: retry.store)
+    # Both the reloaded lifecycle hook and assembly use the runtime's build-record store.
+    monkeypatch.setattr("mozaiksai.core.artifacts.store.get_build_record_store", lambda: retry.store)
     monkeypatch.setattr(lifecycle, "resolve_workflow_path", lambda _: ROOT / "factory_app/workflows/AppGenerator")
     manager = lifecycle.get_lifecycle_manager("AppGenerator")
     baseline_hooks = [
         hook for hook in manager.tools[lifecycle.LifecycleTrigger.BEFORE_CHAT]
-        if hook.function == "hydrate_app_revision_context" and hook.file == "hydrate_app_revision_context.py"
+        if hook.function == "hydrate_app_build_inputs" and hook.file == "hydrate_workflow_integration_context.py"
     ]
     assert len(baseline_hooks) == 1
     baseline_hook = baseline_hooks[0]
-    monkeypatch.setitem(baseline_hook.callable.__globals__, "get_artifact_store", lambda: retry.store)
     # Other lifecycle hooks have unrelated stores; execute the real baseline hook only.
     manager.tools[lifecycle.LifecycleTrigger.BEFORE_CHAT] = [baseline_hook]
     monkeypatch.setattr(manager, "_emit_lifecycle_event", AsyncMock())

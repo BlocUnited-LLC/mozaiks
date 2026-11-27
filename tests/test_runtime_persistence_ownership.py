@@ -169,7 +169,7 @@ async def test_aggregate_only_counts_principals_initial_rows():
     assert raw.calls[0][1] == [{"$match": {
         "app_id": "app-a", "created_by": "user-a",
         "$nor": [{"app_id": {"$type": "array"}}, {"created_by": {"$type": "array"}}],
-    }}, *pipeline]
+    }}, {"$unset": "_mz_workflow_result"}, *pipeline]
     assert len(pipeline) == 1
 
 

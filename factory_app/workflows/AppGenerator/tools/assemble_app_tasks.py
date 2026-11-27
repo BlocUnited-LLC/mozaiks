@@ -60,10 +60,12 @@ from .code_file_utils import (
 )
 from .default_runtime_configs import app_admin_bootstrap, build_app_ai_config
 from .hydrate_app_revision_context import (
-    hydrate_app_revision_context,
+    hydrate_revision_files,
     read_bound_revision_files,
+    read_revision_theme,
     revision_baseline_required,
     revision_source_artifact_id,
+    uses_revision_source_theme,
 )
 from .materialize_app_config_contracts import materialize_app_config_contracts
 from .module_entitlement_gates import apply_entitlement_gates
@@ -123,6 +125,22 @@ def _failed_batch_task_ids(task_results: Any) -> set[str]:
     return failed
 
 
+def _unstarted_blocked_page(task: dict[str, Any], results: dict[str, Any]) -> bool:
+    """An unopened page task has no worker output to normalize in partial assembly."""
+    task_id = task.get("task_id")
+    failure = (results.get("_failed") or {}).get(task_id)
+    if not isinstance(failure, dict) or task_id in results:
+        return False
+    history = ((results.get("_meta") or {}).get("failure_history") or {}).get(task_id)
+    return (
+        failure.get("task_id") == task_id and bool(failure.get("blocked_by"))
+        and set(failure["blocked_by"]) <= set(task.get("depends_on") or [])
+        and isinstance(history, list) and bool(history) and history[-1] == failure
+        and all(f.get("failure_kind") == "dependency_blocked" and f.get("attempts") == 0
+                and f.get("rejected_output") is None for f in history)
+    )
+
+
 def _apply_planned_page_contracts(
     code_files: list[dict[str, Any]],
     app_build_plan: Any,
@@ -130,6 +148,7 @@ def _apply_planned_page_contracts(
     context_variables: Any = None,
     pack_outputs: dict[str, PackOwnedOutput] | None = None,
     verified_pack_routes: list[dict[str, Any]] | None = None,
+    revision_baseline: dict[str, str] | None = None,
 ) -> list[dict[str, str]]:
     if not isinstance(app_build_plan, dict):
         return [{"filename": str(f["filename"]), "content": str(f["content"])} for f in code_files]
@@ -153,6 +172,7 @@ def _apply_planned_page_contracts(
     data_contract = detach(context_variables.get("data_contract")) if context_variables is not None else None
     surface_map = detach(context_variables.get("design_surface_map")) if context_variables is not None else None
     failed_tasks = failed_task_ids or set()
+    results = detach(context_variables.get("app_task_batch_results")) if failed_tasks and context_variables is not None else {}
     pack_outputs = pack_outputs or {}
     for task in tasks:
         if str(task.get("task_type") or "").strip() != "page_bundle":
@@ -200,6 +220,11 @@ def _apply_planned_page_contracts(
                     f"{path}: missing planned page during assembly{owner}; "
                     "the task reported no failure, so the page was expected to exist"
                 )
+            if (task_id in failed_tasks and revision_baseline is not None and path in revision_baseline
+                    and file_map[path] == revision_baseline[path] and _unstarted_blocked_page(task, results or {})):
+                # Recovery will give this page's worker its original source.
+                # Speculative controls here would look like an authored overlay.
+                continue
             try:
                 file_map[path] = normalize_planned_page_content(
                     file_map[path], path=path, modules=modules, workflow_names=workflows,
@@ -446,9 +471,10 @@ def _apply_app_config_contracts(
         if entry_point and entry_point not in workflow_names_from_context(context_variables):
             raise ValueError(f"config/ai.json references unavailable workflow {entry_point!r}")
         file_map[ai_path] = existing_ai or json.dumps(ai, indent=2, ensure_ascii=False) + "\n"
-    captured_theme = (
-        context_variables.get("captured_theme_config") if context_variables is not None else None
-    )
+    if baseline_files is not None and uses_revision_source_theme(context_variables):
+        captured_theme = read_revision_theme(baseline_files)
+    else:
+        captured_theme = context_variables.get("captured_theme_config") if context_variables is not None else None
     theme_path = "brand/theme_config.json"
     theme_patch = json.loads(file_map[theme_path]) if theme_path in file_map else None
     resolved_theme = resolve_app_theme_config(
@@ -511,7 +537,7 @@ async def _assemble_app_tasks(
         Field(description="AG2-injected workflow context variables."),
     ] = None,
 ) -> dict[str, Any]:
-    await hydrate_app_revision_context(context_variables)
+    await hydrate_revision_files(context_variables)
     app_id = None
     feature_outputs: list[dict[str, Any]] = []
     ui_source_owners: list[tuple[str, bool]] = []
@@ -710,6 +736,7 @@ async def _assemble_app_tasks(
         ),
         pack_outputs=pack_outputs,
         verified_pack_routes=verified_pack_routes,
+        revision_baseline=verified_source if revision_baseline_required(context_variables) else None,
     )
     revision_paths = scoped_service_revision_paths(context_variables, verified_source or {})
     if not revision_paths:

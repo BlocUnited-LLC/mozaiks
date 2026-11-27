@@ -53,7 +53,7 @@ def _schema(properties: list[dict[str, Any]]) -> dict[str, Any]:
     return {"type": "object", "properties": properties, "description": None, "items_type": None}
 
 
-def _record_response_schema(collection: dict[str, Any]) -> dict[str, Any]:
+def _record_response_schema(collection: dict[str, Any], *, legacy_optional_updated_at: bool) -> dict[str, Any]:
     """Declare exactly the fields projected by the canonical read service."""
     properties: dict[str, Any] = {}
     required: list[str] = []
@@ -68,7 +68,8 @@ def _record_response_schema(collection: dict[str, Any]) -> dict[str, Any]:
         if field.get("enum"):
             declaration["enum"] = [*field["enum"], *([None] if field.get("nullable") else [])]
         properties[name] = declaration
-        if field.get("required"):
+        legacy_timestamp = legacy_optional_updated_at and name == "updated_at" and kind in DATE_FIELD_TYPES
+        if field.get("required") and not legacy_timestamp:
             required.append(name)
     if "_id" in {record_id_field(collection, list(properties)), read_lookup_field(collection)}:
         properties["_id"] = {"type": "string"}
@@ -80,11 +81,11 @@ def _record_response_schema(collection: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _read_action(collection: dict[str, Any], operation: str) -> dict[str, Any]:
+def _read_action(collection: dict[str, Any], operation: str, legacy_timestamp_reads: set[str]) -> dict[str, Any]:
     collection_name = collection["name"]
     action_id = canonical_read_action_id(collection_name, operation)
     is_list = operation == "list"
-    record = _record_response_schema(collection)
+    record = _record_response_schema(collection, legacy_optional_updated_at=action_id in legacy_timestamp_reads)
     return {
         "id": action_id,
         "description": (
@@ -249,9 +250,10 @@ def _close_manifest(
             diagnostics.append(unapproved)
         diagnostics.append("Canonical reads remain free of paid gates; declare paid behavior as a separate custom read.")
         raise ValueError(" ".join(diagnostics))
+    legacy_timestamp_reads = set((plan.get("legacy_optional_updated_at_reads") or {}).get(module_id, []))
     for collection in collections:
         for operation in ("get", "list"):
-            action = _read_action(collection, operation)
+            action = _read_action(collection, operation, legacy_timestamp_reads)
             prior = existing.get(action["id"])
             if _uses_authored_read(collection, prior, protected_writes=protected):
                 continue

@@ -25,6 +25,13 @@ from mozaiksai.control_plane.contracts import (
     ContractSurfaceUpdate,
     SurfacePlanExecutionResult,
 )
+from mozaiksai.control_plane.implementations.refinement_router import (
+    ChangeClass,
+    ChangeIntent,
+    ImpactSet,
+    RefinementRequest,
+    RefinementRoutingDecision,
+)
 from mozaiksai.control_plane.implementations.surface_regeneration_worker import (
     SurfaceRegenerationWorker,
 )
@@ -56,21 +63,14 @@ def _make_surface(
     )
 
 
-def _make_routing_decision(change_class: str = "feature") -> Any:
-    from unittest.mock import MagicMock
-
-    from mozaiksai.control_plane.implementations.refinement_router import ChangeClass
-
-    intent = MagicMock()
-    intent.change_class = ChangeClass(change_class)
-    intent.rationale = "add export"
-    intent.confidence = 0.9
-
-    rd = MagicMock()
-    rd.change_intent = intent
-    rd.workflow_id = "AppGenerator"
-    rd.workflow_sequence = "app_revision"
-    return rd
+def _make_routing_decision(change_class: str = "feature") -> RefinementRoutingDecision:
+    return RefinementRoutingDecision(
+        workflow_id="AppGenerator",
+        workflow_sequence="app_revision",
+        refinement_request=_make_refinement_request(),
+        change_intent=ChangeIntent(change_class=ChangeClass(change_class), rationale="add export", confidence=0.9),
+        impact_set=ImpactSet(workflow_sequence="app_revision"),
+    )
 
 
 def _make_refinement_request(
@@ -78,9 +78,7 @@ def _make_refinement_request(
     user_id: str = "user-1",
     raw_user_request: str = "add export controls to projects",
     artifact_kind: str = "app_bundle",
-) -> Any:
-    from mozaiksai.control_plane.implementations.refinement_router import RefinementRequest
-
+) -> RefinementRequest:
     return RefinementRequest(
         app_id=app_id,
         user_id=user_id,
@@ -470,7 +468,7 @@ async def test_execute_plan_success_two_surfaces(graph_available):
     for call, surface in zip(worker._agent_runner.calls, plan.surfaces, strict=True):
         assert _prompt_payload(call)["affected_paths"] == surface.affected_paths
         if graph_available:
-            assert json.loads(call["user_prompt"].splitlines()[-1]) == graph.model_dump(mode="json")
+            assert json.loads(call["user_prompt"].splitlines()[-1]) == graph.model_dump(mode="json", exclude_none=True)
         else:
             assert "saved-source" not in call["user_prompt"]
 
@@ -830,7 +828,7 @@ async def test_execute_plan_admits_saved_schema_custom_and_workflow_sources(surf
 @pytest.mark.parametrize("case", [
     "excluded_scope", "empty_scope", "wrong_artifact", "wrong_plane", "wrong_target_kind",
     "missing_source", "empty_source", "missing_registry", "ambiguous_registration",
-    "later_invalid_surface", "write_registry", "patch_class", "workflow_fallback",
+    "later_invalid_surface", "write_registry", "patch_class", "workflow_revision", "workflow_fallback",
 ])
 async def test_execute_plan_rejects_invalid_whole_plan_before_config_or_model(case):
     path = "ui/pages/custom/focus.jsx"
@@ -877,6 +875,8 @@ async def test_execute_plan_rejects_invalid_whole_plan_before_config_or_model(ca
         surface.affected_paths.append("ui/index.js")
     elif case == "patch_class":
         routing = _make_routing_decision("patch")
+    elif case == "workflow_revision":
+        routing.change_intent.requires_workflow_revision = True
     elif case == "workflow_fallback":
         plan.fallback_to_workflow = True
     baseline = dict(workspace)

@@ -37,6 +37,12 @@ _INJECTED = {
     "workflow_run_id": "wfrun_attacker",
     "run_build_binding": {"build_id": "stolen", "forged": True},
     "build_terminal_receipt": {"kind": "success", "forged": True},
+    "workflow_result_grant": {"untrusted": True},
+    "workflow_result_grant.subject": {"untrusted": True},
+    "journey_parent_chat_id": "untrusted_chat",
+    "journey_parent_chat_id.suffix": "untrusted_chat",
+    "retry_plan_source": {"chat_id": "untrusted"},
+    "retry_plan_source.chat_id": "untrusted",
 }
 
 
@@ -459,4 +465,72 @@ def test_reserved_key_set_is_exactly_the_server_authority_fields() -> None:
         "build_terminal_receipt",
         "run_build_binding",
         "workflow_run_id",
+        "workflow_run_model",
+        "workflow_result_grant",
+        "journey_parent_chat_id",
+        "retry_plan_source",
     }
+
+
+@pytest.mark.asyncio
+async def test_journey_parent_is_bound_at_creation_and_excluded_from_workflow_context() -> None:
+    client = AsyncIOMotorClient(_MONGO_URI)
+    database_name = f"mozaiks_boundary_test_{uuid4().hex}"
+    try:
+        pm = _pm(client, database_name)
+        scope = {"app_id": _APP_ID, "user_id": "owner", "workflow_name": _WORKFLOW, "chat_id": "child"}
+        await pm.create_chat_session(**scope, journey_parent_chat_id="parent")
+        await pm.create_chat_session(**scope, journey_parent_chat_id="parent")
+        with pytest.raises(ValueError, match="Cannot replace"):
+            await pm.create_chat_session(**scope, journey_parent_chat_id="other")
+        with pytest.raises(ValueError, match="only be bound"):
+            await pm.persist_server_owned_session_fields(**scope, fields={"journey_parent_chat_id": "other"})
+        coll = await pm._coll()
+        assert (await coll.find_one({"_id": "child"}))["journey_parent_chat_id"] == "parent"
+        assert "journey_parent_chat_id" not in await pm.fetch_chat_session_extra_context(**scope)
+    finally:
+        await client.drop_database(database_name)
+        client.close()
+
+
+@pytest.mark.asyncio
+async def test_retry_plan_is_bound_at_creation_and_only_projected_as_runtime_input() -> None:
+    from mozaiksai.core.session.build_binding import RetryPlanSource
+
+    client = AsyncIOMotorClient(_MONGO_URI)
+    database_name = f"mozaiks_boundary_test_{uuid4().hex}"
+    try:
+        pm = _pm(client, database_name)
+        scope = {"app_id": _APP_ID, "user_id": "owner", "workflow_name": _WORKFLOW, "chat_id": "retry"}
+        source = RetryPlanSource(chat_id="failed", plan_sha256="a" * 64, dispatch_sha256="b" * 64)
+        await pm.create_chat_session(**scope, journey_parent_chat_id="workflow", retry_plan_source=source)
+        await pm.create_chat_session(**scope, journey_parent_chat_id="workflow", retry_plan_source=source)
+        other = source.model_copy(update={"plan_sha256": "c" * 64})
+        with pytest.raises(ValueError, match="Cannot replace"):
+            await pm.create_chat_session(**scope, journey_parent_chat_id="workflow", retry_plan_source=other)
+        with pytest.raises(ValueError, match="only be bound"):
+            await pm.persist_server_owned_session_fields(**scope, fields={"retry_plan_source": other.model_dump()})
+        assert (await pm.fetch_chat_session_extra_context(**scope))["retry_plan_source"] == source.model_dump()
+    finally:
+        await client.drop_database(database_name)
+        client.close()
+
+
+@pytest.mark.asyncio
+async def test_manual_review_and_handoff_metadata_do_not_authorize_a_result() -> None:
+    client = AsyncIOMotorClient(_MONGO_URI)
+    database_name = f"mozaiks_boundary_test_{uuid4().hex}"
+    try:
+        pm = _pm(client, database_name)
+        for source in ("manual", "transition", "module_event"):
+            chat_id = f"{source}_{uuid4().hex}"
+            await pm.create_chat_session(
+                chat_id, app_id=_APP_ID, user_id="user-1", workflow_name=_WORKFLOW,
+                extra_fields={"trigger_meta": {"trigger_source": source, "workflow_result_grant": {"untrusted": True}},
+                              "source_event": {"id": "evt-1", "type": "domain.tasks.created"}},
+            )
+            with pytest.raises(PermissionError, match="No workflow result"):
+                await pm.read_workflow_result_grant(app_id=_APP_ID, chat_id=chat_id, user_id="user-1", workflow=_WORKFLOW)
+    finally:
+        await client.drop_database(database_name)
+        client.close()

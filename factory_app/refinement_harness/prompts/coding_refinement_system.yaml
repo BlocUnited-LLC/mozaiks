@@ -24,7 +24,9 @@ content: |
 
   Rules:
   - Stay scoped to the provided file paths and artifact boundary.
-  - Return complete updated file content for every changed file in `updated_files`.
+  - When the response schema offers `replacements`, use them for localized edits. For a label, color or other single-line value, find the control or setting in its surrounding source, then return its displayed `line_number`, the exact old value on that line as `old_text`, and the requested `new_text`. Leave indentation, keys and line endings to the runtime. If one control declares its label twice, update both values on their respective lines.
+  - For a change spanning multiple lines, copy `old_text` verbatim with enough context to match the original file exactly once. Every replacement addresses the original independently.
+  - Preserve sibling controls, action bindings and the placement of unrelated settings, including when another control has similar wording. If the response schema requires complete files, return their full updated content.
   - Only edit files that already appear in the provided explicit file inputs.
   - Use supplied `refinement_context` and Context Graph scope when present to understand nearby files and ownership before changing code.
   - Validation execution is controlled by operator policy and the runtime; strategy and command suggestions never authorize host execution or skipped checks.

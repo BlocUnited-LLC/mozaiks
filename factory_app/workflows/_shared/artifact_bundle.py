@@ -10,7 +10,7 @@ from typing import Any, Literal, overload
 
 from mozaiksai.control_plane.contracts import safe_artifact_relpath
 from mozaiksai.core.artifacts.content_store import read_verified_artifact_bundle
-from mozaiksai.core.artifacts.models import BuildRecord
+from mozaiksai.core.artifacts.models import BuildRecord, validate_canonical_bundle_name
 from mozaiksai.core.runtime.app.paths import APP_BINARY_ASSET_SUFFIXES
 
 APP_BUNDLE_MAX_FILE_BYTES = 8_000_000
@@ -39,9 +39,44 @@ async def read_artifact_bundle(
 async def read_artifact_bundle(
     artifact: BuildRecord, *, include_binary: bool = False, retain_svg_text: bool = False,
 ) -> tuple[dict[str, str], list[dict[str, Any]]] | tuple[dict[str, str | bytes], list[dict[str, Any]]]:
-    metadata = artifact.commit_metadata.metadata
     raw = await read_verified_artifact_bundle(artifact, max_bytes=APP_BUNDLE_MAX_TOTAL_BYTES)
-    prefix = f"{metadata['bundle_name']}/"
+    return _unpack_bundle(
+        raw, roots={artifact.commit_metadata.metadata["bundle_name"]: ""},
+        include_binary=include_binary, retain_svg_text=retain_svg_text,
+    )
+
+
+def add_preview_workflow_files(
+    files: dict[str, str | bytes], record: BuildRecord, metadata: dict[str, Any],
+) -> None:
+    """Mount the exact registered pack at the standalone workspace's workflow root."""
+    from factory_app.workflows._shared.workflow_integration import read_verified_workflow_archive
+
+    names = [validate_canonical_bundle_name(item["workflow_name"]) for item in metadata["workflows"]]
+    distinct = {name.casefold() for name in names}
+    if "extended_orchestration" in distinct or len(distinct) != len(names):
+        raise ValueError("Pinned workflow catalog contains a reserved or duplicate root")
+    roots = {name: f"workflows/{name}/" for name in names}
+    mounted, diagnostics = _unpack_bundle(read_verified_workflow_archive(record), roots=roots, include_binary=True)
+    if diagnostics or any(f"{prefix}orchestrator.yaml" not in mounted for prefix in roots.values()):
+        raise ValueError("Pinned workflow archive does not contain its declared workspace files")
+    # A self-contained app may already contain the exact same workflow. Never
+    # overlay individual files from different versions of the same workflow.
+    mounted_roots = {prefix.casefold() for prefix in roots.values()}
+    for path, content in files.items():
+        parts = path.casefold().split("/", 2)
+        if path.casefold() == "workflows" or (len(parts) >= 2 and f"{parts[0]}/{parts[1]}/" in mounted_roots and mounted.get(path) != content):
+            raise ValueError("App workspace conflicts with a pinned workflow file")
+    composed = files | mounted
+    if (len(composed) > APP_BUNDLE_MAX_FILES or
+            sum(len(item.encode("utf-8")) if isinstance(item, str) else len(item) for item in composed.values()) > APP_BUNDLE_MAX_TOTAL_BYTES):
+        raise ValueError("Composed preview exceeds bundle limits")
+    files.update(mounted)
+
+
+def _unpack_bundle(
+    raw: bytes, *, roots: dict[str, str], include_binary: bool, retain_svg_text: bool = False,
+) -> tuple[dict[str, str | bytes], list[dict[str, Any]]]:
     files: dict[str, str | bytes] = {}
     diagnostics: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -52,17 +87,16 @@ async def read_artifact_bundle(
             if path is None:
                 diagnostics.append({"path": info.filename, "code": "unsafe_path", "blocking": True})
                 continue
+            root, separator, member = path.partition("/")
             reason = None
             if stat.S_ISLNK(info.external_attr >> 16):
                 reason = "symlink"
-            elif not path.startswith(prefix):
-                if info.is_dir() and path == metadata["bundle_name"]:
-                    continue
+            elif root not in roots or (not separator and not info.is_dir()):
                 reason = "outside_bundle_root"
             elif info.is_dir():
                 continue
             else:
-                path = path[len(prefix):]
+                path = roots[root] + member
                 if path.casefold() in seen:
                     reason = "duplicate_path"
                 elif len(seen) >= APP_BUNDLE_MAX_FILES:

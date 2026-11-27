@@ -874,6 +874,16 @@ def validate_planned_page(content: str, planned: dict[str, Any], path: str) -> N
         if not isinstance(document, dict):
             raise ValueError("page must be a YAML object")
         page = validate_page_schema(document, expected_name=expected_name)
+        if "retained_ask_context" in planned:
+            refs = page.meta.ask_context if page.meta else []
+            current = [ref.model_dump(mode="json", exclude_none=True) for ref in refs or []]
+            expected = planned["retained_ask_context"]
+            if planned.get("partial_ask_context"):
+                targets = {(ref["module"], ref["action"]) for ref in expected}
+                current = [ref for ref in current if (ref["module"], ref["action"]) in targets]
+            if current != expected:
+                raise ValueError(f"Adding the reviewed controls must preserve the accepted meta.ask_context "
+                                 f"on route {planned['route']!r}, including its parameters and labels.")
         if page.route != planned["route"]:
             raise ValueError(f"route must preserve approved {planned['route']!r}")
     except PageSchemaValidationError as error:

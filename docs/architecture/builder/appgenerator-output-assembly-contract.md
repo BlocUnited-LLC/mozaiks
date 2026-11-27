@@ -64,6 +64,15 @@ Upstream dependencies remain in `canonical_inputs_version`, separate
 from the app's version lineage. A carried `revision_source_artifact_version_id`
 also cannot turn a non-revision build into an app revision.
 
+For a full rebuild or conceptual replan requested against an app bundle, the
+original request's `build_record_id` identifies the implementation parent until
+the baseline loader pins one explicitly. Intermediate exports may advance
+`artifact_version_id`. Assembly reads workspace-owned files from the verified
+parent archive, while the newly generated workflow bundle remains a separate
+input to the child app. The dependency graph loader and each agent's prompt
+hook check this same implementation parent before attaching bounded graph
+evidence. A workflow export cannot replace the app as the graph source.
+
 This selection rule does not repair previously persisted lineage. Existing
 records and their acceptance evidence remain unchanged.
 
@@ -97,6 +106,14 @@ ID as implementation. Missing, foreign, failed, draft, retired or unreadable
 records fail closed; they never authorize first generation or fallback to an
 older bundle. Direct app-bundle revisions retain their existing selected-source
 rules. Neither path changes routing, schema approval or runtime permissions.
+
+For a feature revision confined to modules, data and schema pages, AppGenerator
+can retain the accepted sign-in settings for privately owned data. It checks
+the original compiled plan against the app manifest and validated auth contract
+under the same owner and build registry. This applies to signed-in apps with
+registration disabled and no named roles when the reviewed design also has no
+role grants. A conflicting registration or role request goes back to plan
+review. A revision scoped to authentication follows the regular auth plan.
 
 Registration and export normally finish in the same tool invocation. If the
 process stops after publishing the first draft bundle but before export finishes,
@@ -284,12 +301,18 @@ ERROR with the task, chat and traceback (`TASK_OUTPUT_PROCESSING_FAILED` while
 processing an output, `TASK_EXECUTION_FAILED` otherwise). It is not reclassified
 as a repairable output error.
 
-ServiceAgent's declared `python_stubs` and task `owned_paths` describe the final
-backend inventory, including code-rendered artifacts. Its prompt identifies
-task-owned `policy.py` paths as renderer-owned: omit them from `python_files`
-and `code_files`, including comment-only placeholders, while retaining the
-planned paths. Existing admission still rejects authored policy source; no
-source is silently dropped and persistence remains the enforcement owner.
+When revising an existing custom action, the module-contract worker receives
+its accepted action declaration from the verified source bundle. The prompt
+names required nullable response members and gives their typed property flags.
+A nullable value and an omitted response key are different API contracts.
+
+The approved business-services task keeps the final backend inventory in
+`owned_paths`. At AG2 dispatch, Factory moves each canonical module
+`backend/policy.py` from the worker's `owned_paths` into its
+`factory_rendered_paths`. The same split reaches the system context and
+the task message. Factory renders the policy from the data contract and
+checks the completed output against the full approved inventory.
+Admission rejects a worker-authored policy that differs from the renderer.
 
 `config/subscriptions.yaml` is never model work either. Assembly writes it
 from the approved subscription contract (`materialize_app_config_contracts`,
@@ -609,6 +632,10 @@ Missing evidence, stale inputs, and uncertain interrupted attempts remain blocke
 See [ADR 0011](../../adr/0011-factory-bounded-task-recovery.md).
 
 AppPlanAgent clears stale plan/task state before validating a replacement.
+For a feature revision that preserves a verified login policy, its first model
+request includes the accepted sign-in strategy, mode and empty role list.
+The file-contract prompt names the reviewed result module's schema and migration
+owners and identifies the business-services owner of per-user account handlers.
 Completed or partial batches advance to assembly; successfully assembled partial
 batches go directly to validation for completeness diagnostics. A materializer
 or assembly contract failure stops the pipeline and records its exception type
@@ -984,6 +1011,7 @@ AppGenerator should compile these inputs in priority order:
 1. `captured_theme_config`
    - optional canonical ThemeCapture artifact
    - strongest visual source when present
+   - During an app-bundle revision, the before-chat hook seeds this agent input from the verified source archive. Assembly reads the base theme directly from that archive, including when the source has no theme. Theme revisions and explicit rebuilds continue to use their captured theme.
 
 2. `app_build_plan`
    - carries `theme_preferences`, `brand_intent`, optional `shell_preset_hint`, pages, entities, capability packs, auth, and integrations
@@ -1032,6 +1060,24 @@ It does **not** emit shell content such as header actions, profile menu items, n
 assembly validate those schemas without replacing their sections, forms, or
 bindings with planner hints. Invalid schemas receive bounded task feedback.
 Missing worker pages fail instead of being synthesized from incomplete hints.
+
+During a feature revision, a reviewed collection page can retain its accepted
+layout and Create action while adding a result column and a selected-record
+editor. Factory checks the accepted artifact, the new public action schemas,
+the approved workflow result and the page task before offering this compilation
+to AppSchemaAgent. The worker receives the owner's request, exact old and
+proposed files, their build identities, related tasks and source-matched graph
+edges. It can select the compiled files, correct existing display text that
+the new behavior makes inaccurate, or author the page using its ordinary task.
+The final files still pass the page schema, row-binding and ownership checks.
+Changes to copy require the offered section ID, field and exact original text.
+When a failed prerequisite prevents the page worker's first turn, partial
+assembly carries the verified source page unchanged. The worker can then
+compare that same source after the prerequisite recovers. A required write
+that reads form values must run from the form's submit action. The renderer
+gives modal footer buttons access to the selected record, while the form owns
+its input values.
+
 Generated-module capability plans declare `user_data_scope`, matching the
 runtime module field. True requires a planned `backend/account_data_handler.py`
 and its module stub; bundle validation rejects scope drift or a missing handler.
@@ -1501,6 +1547,11 @@ export-blocking. AppGenerator must wire each generated workflow through:
   starts the workflow
 - `modules/{module}/contracts/reactions.yaml` routing each trigger event to the
   AgentGenerator workflow capability id
+
+Generated module reactions match the declared event type. A conditional
+workflow needs a reviewed event emitted when the condition holds. Factory
+accepts older empty reaction filter lists as unconditional and rejects
+populated filters because the event router does not evaluate them.
 
 The gate also blocks semantic drift: trigger-event `capability_id` values must
 match the workflow capability id from AgentGenerator metadata, generated app

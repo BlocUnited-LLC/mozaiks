@@ -16,6 +16,7 @@ import zipfile
 from pathlib import Path
 from typing import Annotated, Any
 
+from factory_app.workflows._shared.export_inputs import export_input_versions
 from factory_app.workflows._shared.platform.build_target import require_build_binding
 from factory_app.workflows._shared.workflow_integration import (
     apply_workflow_integration_context,
@@ -33,6 +34,8 @@ from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
 
 from .export_agent_workflow import export_agent_workflow_to_github
 from .workflow_quality_gate import (
+    expected_workflows_from_context,
+    materialize_bundle_entries,
     prepare_workflow_bundle_repair,
     run_workflow_bundle_quality_gate,
 )
@@ -167,7 +170,6 @@ async def _register_workflow_bundle_artifact_version(
             ArtifactLifecycleStatus,
             ArtifactValidationStatus,
             get_artifact_store,
-            resolve_latest_artifact_version_refs,
         )
     except Exception as exc:
         raise RuntimeError(f"Artifact store dependencies unavailable: {exc}") from exc
@@ -193,10 +195,8 @@ async def _register_workflow_bundle_artifact_version(
             pass
 
     artifact_store = artifact_store or get_artifact_store()
-    canonical_inputs_version = await resolve_latest_artifact_version_refs(
-        app_id=str(app_id),
-        artifact_kinds=("design_docs", "subscription_contract"),
-        artifact_store=artifact_store,
+    canonical_inputs_version = await export_input_versions(
+        context_variables, workflow=workflow_name, app_id=str(app_id), user_id=user_id, artifact_store=artifact_store,
     )
     artifact_version = await artifact_store.create_build_record(
         app_id=str(app_id),
@@ -453,12 +453,7 @@ async def generate_and_download(
             "workflow_bundle_repair": repair_result,
             "validation_errors": quality_gate.get("errors") or [],
         }
-    from .outcome_materialization import materialize_workflow_outcomes
-    from .statusbar_materialization import materialize_workflow_statusbar
-
-    bundle_entries = [
-        materialize_workflow_statusbar(materialize_workflow_outcomes(entry)) for entry in bundle_entries
-    ]
+    bundle_entries = materialize_bundle_entries(bundle_entries, expected_workflows_from_context(context_variables))
     if context_variables is not None and hasattr(context_variables, "set"):
         by_name = {entry["workflow_name"]: entry for entry in bundle_entries}
         context_variables.set("workflow_bundle_results", {

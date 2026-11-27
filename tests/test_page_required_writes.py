@@ -13,6 +13,7 @@ from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import (
 from mozaiksai.core.workflow.generator_support import design_access_policy
 from mozaiksai.core.workflow.generator_support.page_action_bindings import (
     planned_page_writes,
+    reachable_page_action_keys,
     validate_required_page_writes,
 )
 from mozaiksai.core.workflow.task_batches import execute_task_batches_for_trigger
@@ -58,6 +59,60 @@ def _validate(page, planned):
 def test_required_controls_accept_submit_in_an_openable_modal_and_delete_on_a_selectable_table():
     page = _editor()
     _validate(page, _plan(page, "create_entry", "archive_entry"))
+
+
+def test_reviewed_edit_receives_the_selected_record_and_submits_its_actual_id():
+    page = _editor()
+    table, modal = page["sections"]
+    form = modal["config"]["children"][0]
+    submit = {**_write("update_entry"), "payload": {"entry_id": "selected_row.entry_id", "title": "{form.title}"}}
+    form["config"].update(initial_values_key="selected_row", submit_action=submit)
+    plan = _plan(page, "update_entry")
+    with pytest.raises(ValueError, match=r"literal text.*Use \{selected_row.entry_id\}"):
+        _validate(page, plan)
+    submit["payload"]["entry_id"] = "{selected_row.entry_id}"
+    _validate(page, plan)
+    table["config"]["actions"] = []
+    page["sections"] = [table, form]
+    with pytest.raises(ValueError, match="modal opened by an action on the selectable table"):
+        _validate(page, plan)
+
+
+def test_reviewed_form_rejects_a_bare_selected_row_path_even_when_the_action_renames_it():
+    page = _editor()
+    form = page["sections"][1]["config"]["children"][0]["config"]
+    payload = {"record_id": "selected_row.entry.id", "title": "{form.title}",
+               "description": "Use selected_row.entry.id here."}
+    form.update(initial_values_key="selected_row", submit_action={**_write("update_entry"), "payload": payload})
+    plan = _plan(page, "update_entry")
+    with pytest.raises(ValueError, match=r"literal text.*Use \{selected_row\.entry\.id\}"):
+        _validate(page, plan)
+    payload["record_id"] = "{selected_row.entry.id}"
+    _validate(page, plan)
+    # A create form may intentionally submit this text as a literal.
+    form.pop("initial_values_key")
+    form["submit_action"] = {**_write("create_entry"), "payload": {"record_id": "selected_row.entry.id", "title": "{form.title}"}}
+    _validate(page, _plan(page, "create_entry"))
+
+
+def test_form_bound_edit_needs_an_opener_that_can_supply_its_initial_row():
+    page = _editor()
+    table, modal = page["sections"]
+    form = modal["config"]["children"][0]["config"]
+    form["fields"].append({"name": "entry_id", "type": "text", "label": "Entry ID"})
+    form.update(initial_values_key="selected_row", submit_action={
+        **_write("update_entry"), "payload": {"record_id": "{form.entry_id}", "title": "{form.title}"},
+    })
+    plan = _plan(page, "update_entry")
+    _validate(page, plan)
+    header = {"id": "header", "primitive": "PageHeader", "config": {
+        "title": "Entries", "actions": [table["config"]["actions"][1]],
+    }}
+    page["sections"] = [header, modal]
+    with pytest.raises(ValueError, match="missing reachable write controls for content/update_entry"):
+        _validate(page, plan)
+    page["sections"].append(table)
+    _validate(page, plan)
 
 
 @pytest.mark.parametrize("reference", ["{selected_row.entry_id}", "archived-{ row.entry_id }", "{selected_rows.0.entry_id}"])
@@ -243,6 +298,32 @@ def test_required_writes_are_per_page_and_action_hints_do_not_imply_writes():
         _apply_planned_page_contracts(files, {"pages": pages, "build_tasks": [task]})
 
 
+@pytest.mark.parametrize("actual", [[], [{"module": "content", "action": "count", "label": "Everything"}]])
+def test_additive_page_task_preserves_accepted_ask_in_worker_and_assembly(actual):
+    from mozaiksai.core.workflow.task_batches import _normalize_owned_page_files_from_plan
+
+    page = _editor()
+    page["sections"] = [{"id": "heading", "primitive": "PageHeader", "config": {"title": "Entries"}}]
+    page["meta"] = {"ask_context": actual}
+    original = [{"module": "content", "action": "count", "params": {"period": "week"}, "label": "Weekly"}]
+    task = _task("editor")
+    plan = {"pages": [{**_plan(page), "retained_ask_context": original}], "build_tasks": [task]}
+    files = [{"filename": "ui/pages/editor.yaml", "content": yaml.safe_dump(page)}]
+    detached = {"app_build_plan": {"pages": [_plan(page)]}}
+    with pytest.raises(ValueError, match="preserve the accepted meta.ask_context"):
+        _normalize_owned_page_files_from_plan(files, task=task, base_context=detached, plan_context={"app_build_plan": plan})
+    with pytest.raises(ValueError, match="preserve the accepted meta.ask_context"):
+        _apply_planned_page_contracts(files, plan)
+    page["meta"]["ask_context"] = original
+    files[0]["content"] = yaml.safe_dump(page)
+    assert _normalize_owned_page_files_from_plan(files, task=task, base_context=detached, plan_context={"app_build_plan": plan})
+    assert _apply_planned_page_contracts(files, plan)
+    # An expressly planned coordinated page change may edit the Ask references.
+    page.pop("meta")
+    files[0]["content"] = yaml.safe_dump(page)
+    assert _apply_planned_page_contracts(files, {**plan, "pages": [_plan(page)]})
+
+
 @pytest.mark.asyncio
 async def test_detached_worker_cannot_erase_writes_from_its_parent_plan():
     page = _editor()
@@ -265,3 +346,36 @@ async def test_detached_worker_cannot_erase_writes_from_its_parent_plan():
         )
     assert context["app_task_batch_status"] == "failed"
     assert "editor" not in context["app_task_batch_results"]
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("binding", ["{form.title}", "update-{ values.title }", "{form}", "{values}"])
+def test_modal_footer_cannot_submit_values_from_a_form(nested, binding):
+    page = _editor()
+    modal = page["sections"][1]
+    modal["config"]["children"] = modal["config"]["children"] if nested else []
+    modal["config"]["actions"] = [{**_write("update_entry"), "payload": {"title": binding}}]
+    assert "content/update_entry" not in reachable_page_action_keys([page])
+    with pytest.raises(ValueError, match="uses form values outside a Form submit_action"):
+        _validate(page, _plan(page, "update_entry"))
+
+
+def test_form_submit_can_use_its_values_and_footer_can_confirm_selected_record():
+    page = _editor()
+    modal = page["sections"][1]
+    form = modal["config"]["children"][0]
+    form["config"]["initial_values_key"] = "selected_row"
+    form["config"]["submit_action"] = {**_write("update_entry"), "payload": {
+        "entry_id": "{selected_row.entry_id}", "title": "{form.title}",
+    }}
+    modal["config"]["actions"] = [{**_write("archive_entry", "delete"), "payload": {
+        "entry_id": "{selected_row.entry_id}", "confirm": True,
+    }}]
+    _validate(page, _plan(page, "update_entry", "archive_entry"))
+
+
+def test_even_a_separate_valid_form_cannot_rescue_a_broken_footer_binding():
+    page = _editor()
+    modal = page["sections"][1]
+    modal["config"]["actions"] = [{**_write("create_entry"), "payload": {"title": "{form.title}"}}]
+    with pytest.raises(ValueError, match="uses form values outside a Form submit_action"):
+        _validate(page, _plan(page, "create_entry"))

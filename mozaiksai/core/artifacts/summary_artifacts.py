@@ -56,6 +56,19 @@ def extract_summary_payload(artifact: ArtifactVersionDoc | BuildRecord | Mapping
     return None
 
 
+def verified_summary_payload(record: BuildRecord) -> dict[str, Any]:
+    """Read a structured summary only when its bytes match the recorded manifest."""
+    payload = extract_summary_payload(record)
+    if not isinstance(payload, dict) or len(record.files_manifest) != 1:
+        raise ValueError("Build record is missing its structured summary or manifest")
+    entry = record.files_manifest[0]
+    data = _summary_bytes(payload)
+    if (entry.path != f"{record.build_key}.json" or entry.size_bytes != len(data)
+            or entry.sha256 != hashlib.sha256(data).hexdigest()):
+        raise ValueError("Stored summary does not match the build record manifest")
+    return payload
+
+
 async def resolve_latest_artifact_version_refs(
     *,
     app_id: str,
@@ -330,6 +343,7 @@ async def persist_summary_build_record(
 
 __all__ = [
     "extract_summary_payload",
+    "verified_summary_payload",
     "persist_summary_artifact",
     "resolve_latest_artifact_version_refs",
     "persist_summary_build_record",

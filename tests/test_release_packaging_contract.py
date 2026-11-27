@@ -4,12 +4,25 @@ import json
 import subprocess
 import sys
 import tarfile
+import tomllib
 import zipfile
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_workspace_parser_install_paths_exclude_the_crashing_tree_sitter_release() -> None:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
+    for declarations in (project["project"]["dependencies"], requirements):
+        dependencies = (Requirement(line) for line in declarations if line.startswith("tree-sitter"))
+        parser, = (dependency for dependency in dependencies if dependency.name == "tree-sitter")
+        assert "0.25.2" in parser.specifier
+        assert "0.26.0" not in parser.specifier
+        assert "0.27.0" in parser.specifier
 
 
 def test_setup_maps_chat_ui_to_importable_package_bundle() -> None:

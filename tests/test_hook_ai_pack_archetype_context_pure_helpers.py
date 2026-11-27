@@ -35,7 +35,7 @@ Covers:
     - analysis surface does NOT include task_batches_required
 
   _build_callback_body:
-    - always includes backend_request instruction
+    - includes the scoped automatic result instruction
     - non-empty result for any non-empty ai_surfaces list
     - returns string
 """
@@ -223,9 +223,10 @@ class TestBuildPatternBody:
         result = _build_pattern_body([_review_surface()])
         assert "record_review_result" in result
 
-    def test_callback_endpoint_format(self):
+    def test_result_owner_and_plan_are_projected(self):
         result = _build_pattern_body([_review_surface()])
-        assert "/api/modules/proposals/record_review_result" in result
+        assert "proposals/record_review_result" in result
+        assert "result_write_plans" in result
 
     def test_extraction_includes_task_batches(self):
         surface = {
@@ -255,9 +256,10 @@ class TestBuildPatternBody:
 # ---------------------------------------------------------------------------
 
 class TestBuildCallbackBody:
-    def test_includes_backend_request_instruction(self):
+    def test_includes_scoped_result_instruction(self):
         result = _build_callback_body([_review_surface()])
-        assert "backend_request" in result
+        assert "result_write_plans" in result
+        assert "backend_request" not in result
 
     def test_non_empty_for_any_surfaces(self):
         result = _build_callback_body([_review_surface()])

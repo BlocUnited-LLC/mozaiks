@@ -3,9 +3,16 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from pydantic import ValidationError
+
 from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
     revision_baseline_required,
     revision_source_artifact_id,
+)
+from mozaiksai.control_plane.context_graph.assessment import (
+    GRAPH_SOURCE_FIELDS,
+    MAX_GRAPH_PROMPT_BYTES,
+    DependencyGraphContext,
 )
 from mozaiksai.core.workflow.context.frozen import detach
 
@@ -54,7 +61,7 @@ def _context_data(context_variables: Any) -> dict[str, Any]:
         for key in (
             "context_graph_pack", "run_build_binding", "artifact_version_id",
             "revision_source_artifact_version_id", "revision_first_generation",
-            "build_mode", "workflow_sequence", "artifact_kind",
+            "build_mode", "workflow_sequence", "artifact_kind", "refinement_request_meta",
             "workflow_name",
         ):
             try:
@@ -62,8 +69,8 @@ def _context_data(context_variables: Any) -> dict[str, Any]:
             except Exception:
                 value = None
             if value is not None:
-                # Live containers freeze reads; the formatter type-tests a dict.
-                out[key] = detach(value)
+                # Only the formatter needs a detached pack. Source selection reads frozen metadata.
+                out[key] = detach(value) if key == "context_graph_pack" else value
         return out
     return {}
 
@@ -88,8 +95,7 @@ def _matches_source(pack: Any, context: dict[str, Any]) -> bool:
     if advisory is not None:
         if context.get("workflow_name") not in {"AppGenerator", "AgentGenerator"}:
             return False
-        identity = ("app_id", "build_record_id", "build_family", "build_key", "bundle_digest", "graph_hash")
-        if not isinstance(advisory, dict) or any(advisory.get(key) != pack.get(key) for key in identity):
+        if not isinstance(advisory, dict) or any(advisory.get(key) != pack.get(key) for key in GRAPH_SOURCE_FIELDS):
             return False
     return True
 
@@ -97,6 +103,40 @@ def _matches_source(pack: Any, context: dict[str, Any]) -> bool:
 def _safe_text(value: Any) -> str:
     # Source names/labels are evidence, never additional prompt sections.
     return json.dumps(str(value)[:512], ensure_ascii=True)[1:-1]
+
+
+def module_read_dependencies(context: dict[str, Any], module_id: str, caller_pages: set[str]) -> dict[str, Any]:
+    """Select only source-matched graph evidence for this module's retained page reads."""
+    pack = detach(context.get("context_graph_pack"))
+    source_id = revision_source_artifact_id(context)
+    if not (source_id and isinstance(pack, dict) and pack.get("status") == "loaded"
+            and pack.get("verified") is True and _matches_source(pack, context)):
+        return {"build_record_id": source_id, "status": "unavailable"}
+
+    identity = {key: pack[key] for key in GRAPH_SOURCE_FIELDS if key in pack}
+    try:
+        assessment = DependencyGraphContext.model_validate(pack.get("dependency_graph") or {
+            **identity, "files": [], "dependencies": [], "coverage_incomplete": True,
+        })
+    except ValidationError:
+        return {"build_record_id": source_id, "status": "unavailable"}
+    graph: dict[str, Any] = {**identity, "files": [], "dependencies": [], "coverage_incomplete": True}
+    prefix = f"modules/{module_id}/"
+    edges: list[dict[str, Any]] = []
+    files: set[str] = set()
+    for dep in assessment.dependencies:
+        endpoints = {dep.source_path, dep.target_path}
+        if caller_pages.isdisjoint(endpoints) and not any(path.startswith(prefix) for path in endpoints):
+            continue
+        edge = dep.model_dump(mode="json")
+        selected = {**graph, "files": sorted(files | endpoints), "dependencies": [*edges, edge]}
+        if len(json.dumps(selected, separators=(",", ":")).encode()) > MAX_GRAPH_PROMPT_BYTES:
+            return graph
+        edges.append(edge)
+        files.update(endpoints)
+        graph = selected
+    graph["coverage_incomplete"] = assessment.coverage_incomplete
+    return graph
 
 
 def _format_context_graph_pack(*, graph_pack: Any, agent_name: str) -> str:
@@ -119,6 +159,7 @@ def _format_context_graph_pack(*, graph_pack: Any, agent_name: str) -> str:
             f"Source: {_safe_text(source)}" if source else "",
             f"Graph: {_safe_text(graph_id)}" if graph_id else "",
             f"Build record: {_safe_text(graph_pack['build_record_id'])}" if graph_pack.get("build_record_id") else "",
+            f"Source build: {_safe_text(graph_pack['source_build_id'])}" if graph_pack.get("source_build_id") else "",
             f"Bundle digest: {_safe_text(graph_pack['bundle_digest'])}" if graph_pack.get("bundle_digest") else "",
             f"Stale status: {_safe_text(stale_status)}" if stale_status else "",
         ]
