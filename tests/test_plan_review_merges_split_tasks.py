@@ -278,3 +278,52 @@ def test_references_with_stray_whitespace_follow_the_keeper():
     assert set(by_id) == {"svc_a", "pages", "client"}
     assert by_id["pages"]["depends_on"] == ["svc_a"]
     assert by_id["client"]["integration_needs"][0]["required_by"] == {"kind": "task", "id": "svc_a"}
+
+@pytest.mark.parametrize("other_id", ["task_persistence_contract", "migration"])
+def test_canonical_persistence_merge_preserves_task_references(other_id):
+    keeper_id = "task_persistence_contract"
+    scope = {"surface_id": "data_contract", "capability_pack_id": None}
+    contract = _task(keeper_id, "persistence_contract", ["data/contract.json"], **scope)
+    migration = _task(other_id, "persistence_contract", ["data/migrations/001.json"], **scope)
+    dependent = _task("dependent", "page_bundle", [], depends_on=[keeper_id, other_id])
+    plan = {"build_tasks": [contract, migration, dependent],
+            "generation_order": [keeper_id, other_id, "dependent"]}
+
+    assert app_plan_review._merge_split_tasks(plan, {})
+    assert plan["build_tasks"] == [contract, dependent]
+    assert contract["owned_paths"] == ["data/contract.json", "data/migrations/001.json"]
+    assert dependent["depends_on"] == [keeper_id]
+    assert plan["generation_order"] == [keeper_id, "dependent"]
+
+
+def test_canonical_persistence_merge_does_not_absorb_mixed_kind_collision():
+    task_id = "task_persistence_contract"
+    scope = {"surface_id": "data_contract", "capability_pack_id": None}
+    plan = {"build_tasks": [
+        _task(task_id, "persistence_contract", ["data/contract.json"], **scope),
+        _task(task_id, "persistence_contract", ["data/migrations/001.json"], **scope),
+        _task(task_id, "page_bundle", []),
+    ]}
+    original = deepcopy(plan)
+
+    assert app_plan_review._merge_split_tasks(plan, {}) == []
+    assert plan == original
+    with pytest.raises(ValueError, match="Cannot qualify duplicate task_id"):
+        app_plan_review._repair_task_identities(plan, {})
+
+@pytest.mark.parametrize("surface,extra,release", [
+    ("declarative_page", [], True),
+    ("declarative_page", ["modules/unknown/backend/handler.py"], False),
+    ("custom_react_page", [], False),
+])
+def test_page_label_releases_only_stock_shell_claims(surface, extra, release):
+    page = {"route": "/welcome", "page_id": "welcome", "ui_surface": surface}
+    context = {"experience_spec": {"pages": [page]}}
+    authored = app_plan_review._required_page_paths({"pages": [page]})
+    paths = list(dict.fromkeys([*authored, "ui/index.js", "ui/route_manifest.json", *extra]))
+    task = _task("welcome", "page_bundle", paths, surface_id="page_bundle",
+                 surface_kind="ui_only", capability_pack_id=None)
+
+    app_plan_review._label_page_tasks({"build_tasks": [task]}, context)
+
+    assert task["owned_paths"] == (authored if release else paths)

@@ -1801,7 +1801,21 @@ def _label_page_tasks(plan: dict[str, Any], context: Any) -> list[str]:
     approved = _approved_surface_ids(context)
     ui_only = _approved_ui_only_surfaces(context)
     repairs: list[str] = []
+    approved_pages = _approved_page_inventory(context)
+    shell_paths = {"ui/index.js", "ui/route_manifest.json"}
+    declarative_only = approved_pages and all(
+        page.get("ui_surface") == "declarative_page" for page in approved_pages
+    )
     for task in plan.get("build_tasks") or []:
+        if declarative_only and task.get("task_type") == "page_bundle":
+            paths = task.get("owned_paths") or []
+            retained = [
+                path for path in paths
+                if not is_safe_app_path(path) or normalize_app_path(path).lower() not in shell_paths
+            ]
+            if retained and retained != paths and _owns_only_approved_pages({**task, "owned_paths": retained}, context):
+                task["owned_paths"] = retained
+                repairs.append(f"{task.get('task_id')}: released shell files supplied by pack composition or auth")
         surface_id, surface_kind = str(task.get("surface_id") or ""), task.get("surface_kind")
         if (
             surface_id in ui_only
@@ -1851,7 +1865,8 @@ def _merge_split_tasks(plan: dict[str, Any], context: Any) -> list[str]:
     across page tasks). Tasks of different types sharing a file are a real
     conflict, and a group is left to the later checks when it repeats a task_id
     or uses one found elsewhere in the plan, has a blank id, or would close a
-    dependency cycle.
+    dependency cycle. The canonical persistence unit also consolidates separate
+    paths and repeated IDs when every occurrence belongs to that same unit.
     """
     pack_paths = pack_owned_output_paths(context)
     facades = pack_facade_directories(context)
@@ -1869,7 +1884,11 @@ def _merge_split_tasks(plan: dict[str, Any], context: Any) -> list[str]:
         if task.get("task_type") == "page_bundle":
             continue
         unit = (task.get("task_type"), task.get("capability_pack_id"), task.get("surface_id"), task.get("surface_kind"))
-        for path in _normalized_owned_paths(task):
+        paths = _normalized_owned_paths(task)
+        if unit == ("persistence_contract", None, "data_contract", "module"):
+            # The app-wide data contract and its migrations have one owner.
+            paths.append("")
+        for path in paths:
             if path in _SHARED_OWNED_PATHS or path == SUBSCRIPTIONS_CONFIG_PATH or _pack_owns(path, pack_paths, facades):
                 continue
             owner = first_owner.setdefault((*unit, path), index)
@@ -1888,13 +1907,20 @@ def _merge_split_tasks(plan: dict[str, Any], context: Any) -> list[str]:
         if len(members) < 2:
             continue
         ids = [all_ids[index] for index in members]
-        # A blank or repeated id is an identity question for identity repair and its rejection.
-        if not all(ids) or len(set(ids)) < len(ids) or any(all_ids.count(task_id) > 1 for task_id in ids):
+        keeper = tasks[members[0]]
+        canonical_persistence = (
+            keeper.get("task_type") == "persistence_contract"
+            and keeper.get("surface_id") == "data_contract"
+            and keeper.get("surface_kind") == "module"
+            and keeper.get("capability_pack_id") is None
+        )
+        if not all(ids) or (not canonical_persistence and len(set(ids)) != len(ids)):
+            continue
+        if any(all_ids.count(task_id) != ids.count(task_id) for task_id in set(ids)):
             continue
         keeper_id, absorbed_ids = ids[0], set(ids[1:])
         if _merge_closes_cycle(tasks, keeper_id, absorbed_ids, renamed):
             continue
-        keeper = tasks[members[0]]
         for other in (tasks[index] for index in members[1:]):
             _absorb_task(keeper, other)
         renamed.update(dict.fromkeys(absorbed_ids, keeper_id))
