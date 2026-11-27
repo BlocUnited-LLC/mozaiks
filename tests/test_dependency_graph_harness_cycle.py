@@ -589,15 +589,15 @@ async def test_graph_refinement_cycle_passes_real_pinned_docker_validation(cycle
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("legacy", [None, "x" * 129])
-async def test_legacy_record_retains_graph_without_a_producing_build_id(cycle, tmp_path, legacy):
+@pytest.mark.parametrize("stored_build_id", [None, "x" * 129])
+async def test_record_retains_graph_without_a_valid_producing_build_id(cycle, tmp_path, stored_build_id):
     store, backend, harness, _ = cycle
     record, baseline = await register_build(tmp_path, store)
     metadata = record.commit_metadata.metadata
-    if legacy is None:
+    if stored_build_id is None:
         del metadata["build_id"]
     else:
-        metadata["build_id"] = legacy
+        metadata["build_id"] = stored_build_id
     result = await refine(harness, record, baseline)
     assert result.status == "planned", result.error
     for call in backend.calls:
