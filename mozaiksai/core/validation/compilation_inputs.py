@@ -243,6 +243,35 @@ class ApprovedAppCompilation:
         }).model_dump(mode="json")
 
 
+async def resolve_pinned_workflow_bundle(
+    app_record: BuildRecord, *, app_id: str, owner_user_id: str, build_registry_id: str, artifact_store: Any,
+) -> tuple[BuildRecord, dict[str, Any]] | None:
+    """Resolve the selected app's immutable workflow input within its owner's build."""
+    from factory_app.workflows._shared.workflow_integration import (
+        workflow_integration_metadata_from_artifact,
+    )
+
+    workflow_ref = app_record.canonical_inputs_version.get("workflow_bundle")
+    if workflow_ref is None:
+        return None
+    app_binding = _record_binding(app_record)
+    if (not owner_user_id or app_record.app_id != app_id or app_record.build_family != "app_bundle"
+            or app_record.commit_metadata.author_user_id != owner_user_id or app_binding.target_app_id != app_id
+            or app_binding.build_registry_id != build_registry_id):
+        raise ValueError("Workflow input belongs to a different app or owner")
+    workflow = await artifact_store.get_build_record(app_id=app_id, build_record_id=workflow_ref)
+    if (workflow is None or workflow.id != workflow_ref or workflow.app_id != app_id
+            or workflow.commit_metadata.author_user_id != owner_user_id):
+        raise ValueError(f"Approved workflow bundle {workflow_ref!r} is missing or out of scope")
+    workflow_binding = _record_binding(workflow)
+    if workflow_binding.target_app_id != app_id or workflow_binding.build_registry_id != build_registry_id:
+        raise ValueError(f"Approved workflow bundle {workflow_ref!r} is outside the owned build")
+    metadata = await asyncio.to_thread(workflow_integration_metadata_from_artifact, workflow)
+    if metadata is None:
+        raise ValueError(f"Approved workflow bundle {workflow_ref!r} has no verifiable integration metadata")
+    return workflow, metadata
+
+
 async def resolve_app_compilation_inputs(
     *, app_id: str, build_record_id: str, owner_user_id: str, build_registry_id: str,
     artifact_store: Any = None,
@@ -254,9 +283,6 @@ async def resolve_app_compilation_inputs(
     Unverifiable reviewed sources are invalid compilation inputs.
     """
     from factory_app.workflows._shared.artifact_bundle import APP_BUNDLE_MAX_TOTAL_BYTES
-    from factory_app.workflows._shared.workflow_integration import (
-        workflow_integration_metadata_from_artifact,
-    )
     from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
         ManagedCapabilityTemplateError,
     )
@@ -325,18 +351,12 @@ async def resolve_app_compilation_inputs(
     else:
         raise ValueError("Approved compilation bundle or parent is missing")
 
-    if workflow_ref is not None:
-        workflow = await store.get_build_record(app_id=app_id, build_record_id=workflow_ref)
-        if (workflow is None or workflow.id != workflow_ref or workflow.app_id != app_id
-            or workflow.commit_metadata.author_user_id != owner_user_id):
-            raise ValueError(f"Approved workflow bundle {workflow_ref!r} is missing or out of scope")
-        workflow_binding = _record_binding(workflow)
-        if workflow_binding.target_app_id != app_id or workflow_binding.build_registry_id != build_registry_id:
-            raise ValueError(f"Approved workflow bundle {workflow_ref!r} is outside the owned build")
-        metadata = await asyncio.to_thread(workflow_integration_metadata_from_artifact, workflow)
-        if metadata is None:
-            raise ValueError(f"Approved workflow bundle {workflow_ref!r} has no verifiable integration metadata")
-        context["artifact_version_refs"] = {"workflow_bundle": workflow_ref}
+    pinned = await resolve_pinned_workflow_bundle(
+        selected, app_id=app_id, owner_user_id=owner_user_id, build_registry_id=build_registry_id, artifact_store=store,
+    )
+    if pinned is not None:
+        workflow, metadata = pinned
+        context["artifact_version_refs"] = {"workflow_bundle": workflow.id}
         context["workflow_integration_metadata"] = metadata
     await read_verified_artifact_bundle(selected, max_bytes=APP_BUNDLE_MAX_TOTAL_BYTES)
     return ApprovedAppCompilation(key=_RESOLVER_KEY, context=context, binding=first, record=selected)

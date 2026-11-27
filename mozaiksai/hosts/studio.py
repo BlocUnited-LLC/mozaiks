@@ -35,6 +35,7 @@ from factory_app.app.modules.app_registry.backend.service import AppRegistryServ
 from factory_app.workflows._shared.artifact_bundle import (
     APP_BUNDLE_MAX_FILE_BYTES,
     APP_BUNDLE_MAX_TOTAL_BYTES,
+    add_preview_workflow_files,
     read_artifact_bundle,
 )
 from factory_app.workflows._shared.platform.genesis_import import (
@@ -5403,19 +5404,27 @@ async def _resolve_preview_build(principal: UserPrincipal, build_registry_id: st
 async def _resolve_preview_artifact(
     principal: UserPrincipal, artifact_version_id: str, build_registry_id: str,
 ) -> tuple[str, dict[str, str | bytes]]:
-    target_app_id = await _resolve_preview_build(principal, build_registry_id)
-    version = await get_artifact_store().get_build_record(app_id=target_app_id, build_record_id=artifact_version_id)
-    if version is None:
+    from mozaiksai.core.validation.compilation_inputs import resolve_pinned_workflow_bundle
+
+    target_app_id, owner_user_id = await _resolve_studio_artifact_scope(principal, build_registry_id=build_registry_id)
+    store = get_artifact_store()
+    version = await store.get_build_record(app_id=target_app_id, build_record_id=artifact_version_id)
+    if version is None or version.id != artifact_version_id or version.app_id != target_app_id:
         raise HTTPException(status_code=404, detail="Artifact not found")
     if version.build_family != "app_bundle":
         raise HTTPException(status_code=422, detail="Preview requires an app bundle")
     _artifact_build_binding(version, build_registry_id=build_registry_id, target_app_id=target_app_id)
     try:
         files, diagnostics = await read_artifact_bundle(version, include_binary=True)
-    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        if any(item.get("blocking") for item in diagnostics):
+            raise HTTPException(status_code=422, detail="Artifact contains unsafe or oversized preview files")
+        pinned = await resolve_pinned_workflow_bundle(
+            version, app_id=target_app_id, owner_user_id=owner_user_id, build_registry_id=build_registry_id, artifact_store=store,
+        )
+        if pinned is not None:
+            await to_thread(add_preview_workflow_files, files, *pinned)
+    except (OSError, ValueError, ContentNotFoundError, zipfile.BadZipFile) as exc:
         raise HTTPException(status_code=422, detail="Artifact archive is unavailable or failed integrity validation") from exc
-    if any(item.get("blocking") for item in diagnostics):
-        raise HTTPException(status_code=422, detail="Artifact contains unsafe or oversized preview files")
     return target_app_id, files
 
 
