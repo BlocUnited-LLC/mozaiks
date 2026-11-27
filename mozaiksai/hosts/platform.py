@@ -89,6 +89,7 @@ from mozaiksai.core.session.launcher import (
     validate_context_for_workflow,
 )
 from mozaiksai.core.transport.ui_tools import project_ui_tool_response_state
+from mozaiksai.core.workflow.context.authority import CALLER_INPUT_WRITER, ContextAuthorityError
 from mozaiksai.core.workflow.paths import candidate_app_workflows_roots
 from mozaiksai.hosts import runtime as runtime_app
 from mozaiksai.hosts.source_path_policy import authorize_http_workflow_source_paths
@@ -2194,6 +2195,22 @@ async def _invoke_workflow_capability(
         str(tenant.get("workspace_id") or source_event.get("workspace_id") or "").strip() or None
     )
     user_id = str(actor.get("id") or source_event.get("user_id") or "system")
+    result_grant = None
+    if (subscription.get("target") or {}).get("result_write") is not None:
+        from mozaiksai.core.runtime.composition.workflow_result import issue_workflow_result_grant
+        from mozaiksai.core.runtime.composition.workflow_trigger_guard import (
+            workflow_trigger_event_identity,
+            workflow_trigger_invocation_id,
+        )
+
+        try:
+            result_grant = issue_workflow_result_grant(
+                app_id=app_id, user_id=user_id, workflow=workflow_id, capability_id=capability_id,
+                invocation_id=workflow_trigger_invocation_id(workflow_trigger_event_identity(source_event), capability_id),
+                chat_id=str(uuid4()), source_event=source_event, subscription=subscription,
+            )
+        except (PermissionError, TypeError, ValueError, KeyError):
+            return {"status": "rejected", "success": False, "error_code": "WORKFLOW_RESULT_SOURCE_UNVERIFIED"}
     if trigger_guard is None:
         trigger_guard = WorkflowTriggerGuard(
             claim_store=None,
@@ -2266,6 +2283,8 @@ async def _invoke_workflow_capability(
             )
         return result
 
+    if result_grant is not None and result_grant.invocation_id != decision.invocation_id:
+        return {"status": "rejected", "success": False, "error_code": "WORKFLOW_RESULT_INVOCATION_MISMATCH"}
     context_seed = _build_workflow_trigger_context(
         capability_id=capability_id,
         source_event=source_event,
@@ -2293,6 +2312,7 @@ async def _invoke_workflow_capability(
             context_variables=context_variables,
             trigger_meta=trigger_meta,
             session_router=None,
+            **({"workflow_result_grant": result_grant, "chat_id": result_grant.chat_id} if result_grant is not None else {}),
         )
     )
 
@@ -2487,7 +2507,10 @@ async def start_chat(
     force_new = str(data.get("force_new", "false")).lower() in {"1", "true", "yes", "on"}
     requested_context = data.get("context_variables") if isinstance(data.get("context_variables"), dict) else {}
     authorize_http_workflow_source_paths(requested_context, principal=principal)
-    context_variables = validate_context_for_workflow(workflow_name, requested_context)
+    try:
+        context_variables = validate_context_for_workflow(workflow_name, requested_context, writer_id=CALLER_INPUT_WRITER)
+    except ContextAuthorityError as exc:
+        raise HTTPException(status_code=400, detail={"code": "CONTEXT_AUTHORITY_REJECTED"}) from exc
     trigger_meta = data.get("trigger_meta") if isinstance(data.get("trigger_meta"), dict) else {}
 
     # Factory build sessions use their existing registry-bound model.

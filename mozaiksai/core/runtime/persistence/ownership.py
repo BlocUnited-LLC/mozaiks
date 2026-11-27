@@ -14,6 +14,7 @@ from .intent_loader import (
     validate_collection_ownership,
 )
 from .naming import collection_name_for
+from .workflow_result import _MARKER
 
 
 @dataclass(frozen=True)
@@ -142,6 +143,7 @@ def owned_update(
     """Make ownership immutable and stamp every possible upsert insertion."""
     if not isinstance(update, Mapping) or not update:
         raise PersistenceScopeError("Owned updates require Mongo update operators")
+    update = _plain_copy(update)
     result: dict[str, Any] = {}
     for operator, changes in update.items():
         if operator not in _UPDATE_OPERATORS or not isinstance(changes, Mapping):
@@ -152,6 +154,9 @@ def owned_update(
             # mutate their children; rename destinations require the same check.
             protected = str(field).split(".", 1)[0] in scope
             target_protected = operator == "$rename" and str(value).split(".", 1)[0] in scope
+            if (str(field).split(".", 1)[0] == _MARKER
+                    or (operator == "$rename" and str(value).split(".", 1)[0] == _MARKER)):
+                raise PersistenceScopeError("Workflow result metadata is runtime-owned")
             if protected:
                 if operator not in {"$set", "$setOnInsert"} or field not in scope or value != scope[field]:
                     raise PersistenceScopeError(f"Updates cannot change ownership field {field!r}")

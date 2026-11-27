@@ -1,4 +1,5 @@
 import json
+import shutil
 from argparse import Namespace
 
 import pytest
@@ -8,6 +9,7 @@ from mozaiks_cli.commands import add as add_command
 from mozaiks_cli.commands import init_command
 from mozaiks_cli.main import create_parser
 from mozaiksai.core.runtime.app.loader import AppLoader
+from mozaiksai.resources import resolve_factory_app_root
 
 
 def _load_json(path):
@@ -20,6 +22,21 @@ def test_init_parser_leaves_name_unset_when_omitted() -> None:
     assert args.name is None
     assert args.directory is None
     assert args.starter is False
+
+
+def test_init_with_custom_factory_without_billing_offering(monkeypatch, tmp_path) -> None:
+    source = resolve_factory_app_root()
+    custom = tmp_path / "custom-factory"
+    for directory in ("app/config", "app/brand"):
+        shutil.copytree(source / directory, custom / directory)
+    monkeypatch.setenv("MOZAIKS_FACTORY_APP_PATH", str(custom))
+
+    project = tmp_path / "project"
+    result = init_command.create_scaffold(target_dir=project, preset="chat", app_name="Custom Factory")
+
+    assert result == project
+    assert _load_json(project / "app/app.json")["appName"] == "Custom Factory"
+    assert not (project / "build_context").exists()
 
 
 def test_add_parser_accepts_modules_feature() -> None:

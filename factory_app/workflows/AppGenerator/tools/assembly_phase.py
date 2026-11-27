@@ -19,6 +19,9 @@ from typing import Any
 import yaml
 
 from factory_app.workflows._shared.pack_selection import reviewed_pack_read_operation
+from factory_app.workflows._shared.workflow_integration import (
+    workflow_integration_metadata_from_context,
+)
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     admitted_module_file_map,
     extract_code_file_entries_from_payload,
@@ -31,6 +34,7 @@ from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templat
     verified_pack_template_inventory,
     verified_template_module_ids,
 )
+from factory_app.workflows.AppGenerator.tools.workflow_result_writes import workflow_result_files
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
     compile_data_contract,
@@ -44,7 +48,10 @@ from mozaiksai.core.workflow.generator_support.design_access_policy import (
 from mozaiksai.core.workflow.generator_support.module_account_data import (
     materialize_module_account_handlers,
 )
-from mozaiksai.core.workflow.generator_support.module_action_inventory import pack_owned_outputs
+from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    pack_owned_outputs,
+    pinned_result_action_schemas,
+)
 from mozaiksai.core.workflow.generator_support.module_policy import materialize_module_policies
 from mozaiksai.core.workflow.generator_support.module_read_actions import (
     materialize_module_read_implementations,
@@ -325,6 +332,7 @@ def _merge_code_files(
         declared_auth_scopes=admitted_scopes,
         access_policy=resolve_authored_module_access_policy(context_variables),
         pack_owned_manifest_paths=pack_manifests,
+        result_action_schemas=pinned_result_action_schemas(context_variables),
     ))
     synthesis_files.update(materialize_module_policies(synthesis_files, data_contract))
     synthesis_files.update(materialize_module_schemas(synthesis_files, app_build_plan=app_build_plan, data_contract=data_contract))
@@ -463,6 +471,17 @@ async def assemble_features(
         carried_contracts=carried_contracts,
         revision_baseline=revision_baseline,
     )
+    file_map = {file["filename"]: file["content"] for file in merged_files}
+    result_changes = workflow_result_files(file_map, workflow_integration_metadata_from_context(context_variables))
+    if result_changes:
+        scoped = scoped_service_revision_paths(context_variables, revision_baseline or {})
+        protected = result_changes.keys() & pack_owned_outputs(context_variables)
+        if scoped:
+            protected |= result_changes.keys() - scoped
+        if protected:
+            raise ValueError(f"Workflow result requires owned build paths: {sorted(protected)}")
+        file_map.update(result_changes)
+        merged_files = [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
     logger.info(
         "Assembled %d feature outputs into %d files",
         len(feature_outputs or []),

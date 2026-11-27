@@ -166,7 +166,14 @@ models:
       primary_actions:
         type: optional_list
         items: str
-        description: CRUD or workflow actions supported by the page.
+        description: >-
+          Actions a person can perform from this page. Match the controls in the
+          approved experience to the public module or workflow action IDs. On a
+          revision, include new interactions alongside the retained actions.
+          Creating a record and editing a selected record need distinct bindings
+          when both are in scope. Carry the selected record key, editable fields,
+          and corresponding actions into the page task's acceptance criteria.
+          Background-only result actions have no user control.
       ui_layout:
         type: union
         variants:
@@ -2452,6 +2459,8 @@ models:
           meta.ask_context to ground ask-mode answers. The runtime dispatches
           these with an EMPTY permission grant, so the action must also declare
           permissions: [] and must scope its own reads to the requesting user.
+          When refining a read used by an existing page's meta.ask_context,
+          preserve its reviewed eligibility or revise the page and action together.
           This is independent of api_surface and never widens HTTP exposure; do
           not set it on any action that writes, emits events, or returns another
           user's data.
@@ -2629,6 +2638,27 @@ models:
         items: ModuleEvent
         description: Events this module is allowed to publish.
 
+  ModuleReactionResultWrite:
+    type: model
+    description: One host-scoped result action for the private record inserted by a declared source action.
+    fields:
+      source_action:
+        type: str
+        description: Action on this module that inserts the record and emits the triggering event.
+      action:
+        type: str
+        description: Internal action on the same module that commits the validated result.
+      collection:
+        type: str
+        description: Declared per-user collection that owns the triggering record.
+      record_key:
+        type: str
+        description: Stable string key of the inserted record; required in the event payload schema.
+      fields:
+        type: list
+        items: str
+        description: Exact writable result fields declared in the collection, output model and closed receiver input.
+
   ModuleReactionTarget:
     type: model
     fields:
@@ -2651,6 +2681,13 @@ models:
         - str
         - 'null'
         description: Capability id to invoke when kind=capability.
+      result_write:
+        type: union
+        variants:
+        - ModuleReactionResultWrite
+        - 'null'
+        default: null
+        description: Copy the exact event-specific result write from the pinned workflow integration contract only on the owning capability target.
       notification_id:
         type: union
         variants:
@@ -2670,10 +2707,6 @@ models:
       target:
         type: ModuleReactionTarget
         description: Handler, capability, or notification target.
-      filters:
-        type: optional_list
-        items: str
-        description: Optional declarative filter expressions based on event envelope/payload.
       idempotency_key:
         type: str
         description: Template used to prevent duplicate reaction execution.
@@ -3659,6 +3692,50 @@ models:
         - 'null'
         description: Optional concise summary.
 
+  RetainedReadChoice:
+    type: union
+    variants: [str, ModuleAction]
+  RetainedReadCorrection:
+    type: model
+    fields:
+      candidate_sha256:
+        type: str
+        description: Exact digest from the current task's retained-read repair request.
+      reads:
+        type: list
+        items: RetainedReadChoice
+        description: For each offered read, give its ID to keep the exact accepted declaration or its corrected ModuleAction when the feature changes that read. An empty list declines the correction.
+  ReviewedModuleChoice:
+    type: model
+    fields:
+      candidate_sha256:
+        type: str
+        description: Exact digest of the source-backed module candidate offered for this task.
+      decision:
+        type: literal
+        values: [use_compiled, author_module]
+        description: Select the offered compilation when it fulfills the original request in this module, or author the module through its ordinary task.
+  ReviewedPageCopyEdit:
+    type: model
+    fields:
+      section_id: {type: str, description: Stable ID from the offered list.}
+      field: {type: literal, values: [subtitle, description]}
+      expected: {type: str, description: Exact current text.}
+      replacement: {type: str, description: New plain display text for this field.}
+  ReviewedPageChoice:
+    type: model
+    fields:
+      candidate_sha256:
+        type: str
+        description: Exact digest of the accepted and proposed page evidence shown to this worker.
+      decision:
+        type: literal
+        values: [use_compiled, edit_copy, author_page]
+        description: Select the exact proposed files, correct stale display text, or author the page through the ordinary task.
+      copy_edits:
+        type: optional_list
+        items: ReviewedPageCopyEdit
+        description: Supply only for edit_copy. Copy the ID, field and expected text exactly from the offer.
   ConfigMiddlewareOutput:
     type: model
     fields:

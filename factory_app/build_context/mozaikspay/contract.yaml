@@ -391,10 +391,7 @@ provider_lifecycle_boundary:
             - plan_id: pro
               label: Pro
               price:
-                amount: 29        # dollars
+                amount_cents: 2900
                 currency: usd
-                interval: month   # month | year
-              billing:
-                lookup_key: my_app_pro_monthly   # optional stable provider mapping key
-                allow_promotion_codes: true
-              capabilities: [...]
+                interval: month
+              capabilities: []

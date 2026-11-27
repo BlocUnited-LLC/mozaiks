@@ -227,6 +227,12 @@ These identities do not change the management shell's branding.
 The canonical supervisor runs the existing platform host, shared web shell,
 and a private MongoDB in the sandbox. App files mount under `app/`, workflows
 remain beside `app/`, and deployment support files stay at workspace root.
+When the selected app record pins a workflow bundle, Studio verifies that
+exact record against the same app, owner and build registry. Studio checks the
+archive digest and mounts the declared workflows under `workflows/<name>/`.
+Missing, conflicting, or out-of-scope files block allocation. An app without a
+separate workflow bundle uses its own archive. Stop and reopen an existing
+preview to load this composition into a fresh workspace.
 The preview URL is returned only after backend, frontend, and the frontend's
 shell-config proxy pass health and target-identity checks. Status checks clear
 the URL after failure or expiry. A health check is not functional acceptance:

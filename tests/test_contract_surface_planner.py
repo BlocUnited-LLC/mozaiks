@@ -350,6 +350,16 @@ def _plan(**changes) -> ContractSurfacePlan:
     return ContractSurfacePlan.model_validate(payload)
 
 
+def test_app_only_surface_plan_cannot_admit_a_workflow_revision():
+    decision = _planner_routing_decision()
+    decision.change_intent.requires_workflow_revision = True
+    with pytest.raises(ValueError, match="requires both workflow and app generation"):
+        validate_contract_surface_plan(
+            plan=_plan(), refinement_request=_planner_request(), routing_decision=decision,
+            workspace_files=_saved_bundle(), allowed_paths=None,
+        )
+
+
 def _admit(plan=None, *, files=None, allowed_paths=None):
     validate_contract_surface_plan(
         plan=plan or _plan(), refinement_request=_planner_request(), routing_decision=_planner_routing_decision(),

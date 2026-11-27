@@ -19,6 +19,7 @@ import { useNavigation } from '../providers/NavigationProvider.jsx'
 import { useChatUI } from '../context/ChatUIContext.jsx'
 import { getUserRoles, isShellItemVisible } from '../navigation/shellActions.js'
 import { groupItemsIntoSections, resolveSectionLabel } from '../navigation/navSections.js'
+import { activeWorkspacePath, withAppSections } from './appSections.js'
 
 // Every icon hint a Studio route declares has an entry here; an unknown hint
 // falls back to the dashboard icon, which made unrelated menu items look alike.
@@ -79,19 +80,19 @@ function resolveShellMonogram(label) {
   return first || 'S'
 }
 
-function buildNavGroupsFromPages(pages, appId = null, roles = []) {
-  const group = appId ? 'app-studio' : 'workspace-studio'
+function buildNavGroupsFromPages(pages, appId, roles, group = appId ? 'app-studio' : 'workspace-studio') {
   const items = (Array.isArray(pages) ? pages : [])
     .filter((page) => page && page.meta?.appShell)
     .filter((page) => isShellItemVisible(page, roles))
     .filter((page) => resolvePageNavigation(page).group === group)
-    .filter((page) => resolvePageNavigation(page).include !== false)
+    .filter((page) => resolvePageNavigation(page).include !== false && resolvePageNavigation(page).visible !== false)
     .map((page) => {
       const navigation = resolvePageNavigation(page)
       const path = buildPathForPage(page.path, appId)
       if (!path) return null
       return {
         id: navigation.id || page.id || page.component || routeIdFromPath(page.path),
+        component: page.component,
         label: navigation.label || page.label || 'Studio',
         path,
         icon: resolveIcon(navigation.icon),
@@ -106,6 +107,21 @@ function buildNavGroupsFromPages(pages, appId = null, roles = []) {
     ))
 
   return groupItemsIntoSections(items)
+}
+
+function useWorkspaceNavigation(appId) {
+  const { pages } = useNavigation()
+  const { user } = useChatUI()
+  return useMemo(() => {
+    const roles = getUserRoles(user)
+    const groups = buildNavGroupsFromPages(pages, appId, roles)
+    if (appId) return { groups, sections: [] }
+    return withAppSections(groups, buildNavGroupsFromPages(pages, null, roles, 'app-studio'))
+  }, [pages, appId, user])
+}
+
+export function useWorkspaceAppSections() {
+  return useWorkspaceNavigation(null).sections
 }
 
 function MenuGlyph() {
@@ -127,20 +143,16 @@ function CloseGlyph() {
   )
 }
 
-function itemHref(item) {
-  return item.path
-}
-
-function isItemActive(item, location) {
+function isItemActive(item, activePath) {
   if (item.exact) {
-    return location.pathname === item.path
+    return activePath === item.path
   }
-  return location.pathname === item.path || location.pathname.startsWith(`${item.path}/`)
+  return activePath === item.path || activePath.startsWith(`${item.path}/`)
 }
 
-function getActiveNavItem(navGroups, location) {
+function getActiveNavItem(navGroups, activePath) {
   for (const group of navGroups) {
-    const item = group.items.find((candidate) => isItemActive(candidate, location))
+    const item = group.items.find((candidate) => isItemActive(candidate, activePath))
     if (item) {
       return { group, item }
     }
@@ -152,12 +164,12 @@ function getActiveNavItem(navGroups, location) {
 function WorkspaceSidebar({
   appId = null,
   navGroups,
+  activePath,
   onNavigate = null,
   surface = 'sidebar',
   shellLabel = 'Studio',
   shellSubtext = 'Manage your apps',
 }) {
-  const location = useLocation()
   const navigationLabel = appId ? ['App', 'Studio'].join(' ') + ' navigation' : 'Workspace navigation'
   const surfaceClass =
     surface === 'sheet'
@@ -192,7 +204,11 @@ function WorkspaceSidebar({
 
       <nav aria-label={navigationLabel} className="space-y-5">
         {navGroups.map((group) => (
-          <div key={group.label || 'workspace'}>
+          <div
+            key={group.id || group.label || 'workspace'}
+            role={group.label ? 'group' : undefined}
+            aria-label={group.label || undefined}
+          >
             {group.label ? (
               <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground/72">
                 {group.label}
@@ -201,11 +217,11 @@ function WorkspaceSidebar({
             <div className="space-y-1">
               {group.items.map((item) => {
                 const Icon = item.icon
-                const active = isItemActive(item, location)
+                const active = isItemActive(item, activePath)
                 return (
                   <Link
                     key={item.path}
-                    to={itemHref(item)}
+                    to={item.path}
                     aria-current={active ? 'page' : undefined}
                     onClick={onNavigate || undefined}
                     className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
@@ -262,24 +278,24 @@ function WorkspaceMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio', shellLa
 export function WorkspaceLayout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
-  const { pages, appName, surface } = useNavigation()
-  const { user } = useChatUI()
-  const userRoles = useMemo(() => getUserRoles(user), [user])
+  const { appName, surface } = useNavigation()
   const appId = resolveAppId(location.pathname)
   const shellLabel = surface === 'studio' && !appId ? 'Studio' : resolveShellLabel(appName, appId)
   const shellSubtext = resolveShellSubtext(appId)
-  const navGroups = useMemo(() => buildNavGroupsFromPages(pages, appId, userRoles), [pages, appId, userRoles])
-  const activeNav = useMemo(() => getActiveNavItem(navGroups, location), [navGroups, location])
+  const { groups: navGroups, sections } = useWorkspaceNavigation(appId)
+  const activePath = activeWorkspacePath(location, sections)
+  const activeNav = getActiveNavItem(navGroups, activePath)
   const activeLabel = activeNav.item?.label || activeNav.group?.label || 'Studio'
 
   return (
     <div className="min-h-full flex-1 bg-background">
       <div className="mx-auto flex w-full max-w-[96rem] gap-6 px-4 py-7 md:px-6 lg:px-8">
         <div className="hidden w-72 shrink-0 lg:block">
-          <div className="sticky top-24">
+          <div className="sticky top-24 max-h-[calc(100dvh-7rem)] overflow-y-auto">
             <WorkspaceSidebar
               appId={appId}
               navGroups={navGroups}
+              activePath={activePath}
               shellLabel={shellLabel}
               shellSubtext={shellSubtext}
             />
@@ -325,6 +341,7 @@ export function WorkspaceLayout({ children }) {
               <WorkspaceSidebar
                 appId={appId}
                 navGroups={navGroups}
+                activePath={activePath}
                 onNavigate={() => setMobileOpen(false)}
                 surface="sheet"
                 shellLabel={shellLabel}

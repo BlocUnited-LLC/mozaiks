@@ -311,9 +311,25 @@ only collection is the right one. Runtime metadata indexes the declared entity;
 repository code resolves that entry's collection `name` before calling
 `ctx.persistence.collection(module_id, collection_name)`.
 
+DesignDocs can restrict a module-owned collection with `lifecycle.module_writes`.
+Each entry enables one canonical operation and names the business fields that
+clients can supply. The list is part of the reviewed data contract. Factory
+projects the same declaration into the action inventory, request schemas and
+generated handlers. During refinement, the accepted app's action schemas are
+the baseline for deciding whether the proposed design widens a write.
+The record key selects a row for an update and is added to the generated action
+schema. A workflow that saves a computed field uses its reviewed internal
+result action. The public update entry lists only the fields a person can edit.
+When a journey supplies a design ID, SubscriptionContractDesigner resolves that record
+and checks its owner, build, manifest and reviewed fields before offering
+pricing features or saving the contract. Its prompt receives the eligible
+action identifiers. The saved design stays in the artifact store.
+See the [collection lifecycle example](../app/data-contracts.md#surfaces).
+
 Design surfaces declare `custom_reads` beside `owned_mutations` for actions such
 as dashboard summaries. Code supplies canonical entity list/get reads and, for
-every collection whose `lifecycle.write_mode` is `module_action`, the canonical
+every collection whose `lifecycle.write_mode` is `module_action` and whose
+`lifecycle.module_writes` is absent or null, the canonical
 `create_<entity>`, `update_<entity>` and `delete_<entity>` writes. Their ids
 derive from the declared `entity`, so DesignDocs may list them in
 `owned_mutations` or omit them; custom mutations and custom reads remain declared
@@ -324,6 +340,12 @@ be a user-entered natural key, which is never overwritten with a generated id.
 Canonical get resolves `search_by`, then a declared `id`, then Mongo `_id`.
 List/get responses retain Mongo `_id` as a string when it supplies either the
 generated record identity or the get lookup, alongside the declared fields.
+When a revision introduces a managed `updated_at` timestamp, Factory checks the
+accepted get and list response contracts for that collection. A read that
+previously allowed the timestamp to be absent continues to allow existing
+records without it. Creation and updates record the actual timestamp. A read
+that already required the timestamp keeps that guarantee. Fresh apps follow
+the required fields in their reviewed collection contract.
 Runtime smoke uses the stored lookup value for both the owner's successful get
 and another user's denied get, while updates/deletes use the generated record id.
 Create stamps declared `created_at`/`updated_at` fields; update and delete
@@ -421,6 +443,26 @@ logged warning, and a `data_models` task with nothing left to author completes
 without a worker turn.
 Unique indexes on per-user and per-workspace collections compile to compound
 keys led by the owner field, so keys are unique within one owner's rows.
+On a revision with a reviewed design for the current build, Factory compares
+each page's reviewed write bindings with the controls reachable on its inherited
+page. An absent control gets a page task that owns the affected page and reads
+the module contract. These additive tasks must preserve the accepted page's Ask
+references, parameters and labels. Module validation checks the referenced
+reads against the accepted archive. A separately planned change can revise
+both the page and its read access. Already reachable controls keep their page.
+If a retained plan loses its dispatch rows, Factory checks the accepted archive
+again. A plan with ambiguous page ownership goes back through plan review.
+For an indirect page edit in a workflow feature revision, Factory also retains
+the existing control that triggers the reviewed workflow when its owning module
+and action remain in DesignDocs. On a fresh or resumed chat, AppGenerator
+verifies the source app, resolves its workflow inputs, and derives these
+bindings before restoring executable plan rows. The page worker receives its owned page from
+the accepted archive. Eligible Ask reads still declared by that page's owning
+module retain their parameters and labels. On pages shared by several modules,
+this check applies only to the eligible reads. Each other reference is still
+validated against the assembled app. These rules apply whether the
+affected path is exact or a pattern. A page-only revision, or a revised design
+that removes the page's ownership of the workflow trigger, keeps its own scope.
 Page bindings use the full approved action inventory. Managed facade entries use
 the pack contract's full action set even when DesignDocs names a subset.
 Subscription gate targets are restricted to approved writes and custom reads;
@@ -562,11 +604,14 @@ Default rule:
 
 ## Safe Migration Categories
 
+The runtime executes `ensure_collection` and `ensure_index`. Adding an
+optional field to an existing collection only changes `data/contract.json`.
+Stored documents can omit the field. A required backfill needs its own
+reviewed implementation.
+
 Safe to auto-apply:
 
 - create collection
-- add nullable field
-- add field with deterministic backfill/default
 - add non-conflicting index
 
 Needs explicit review:

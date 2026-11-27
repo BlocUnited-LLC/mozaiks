@@ -76,6 +76,25 @@ def test_a_different_failure_is_still_repairable() -> None:
     assert result["no_progress"] is False
 
 
+def test_repair_worker_receives_only_current_findings_and_relevant_candidate_yaml() -> None:
+    spec = {"name": "alpha", "initial_message": "Generate the approved workflow."}
+    context = _Context({"workflows_spec": [spec]})
+    files = [{"filename": "agents.yaml", "content": "bad actor key"},
+             {"filename": "orchestrator.yaml", "content": "bad startup mode"},
+             {"filename": "tools/save.py", "content": "unrelated code"}]
+    entries = [{"workflow_name": "alpha", "files": files}]
+    for name, issue in [("orchestrator.yaml", "startup_mode"), ("agents.yaml", "variables")]:
+        result = prepare_workflow_bundle_repair(
+            quality_gate=_gate(f"{name}: invalid {issue}"), bundle_entries=entries, context_variables=context,
+        )
+        assert result["status"] == "needs_revision"
+    prompt = context.get("workflows_spec")[0]["initial_message"]
+    assert prompt.count("[WORKFLOW BUNDLE REPAIR REQUEST]") == 1
+    assert "Generate the approved workflow." in prompt and "bad actor key" in prompt
+    assert "bad startup mode" not in prompt and "unrelated code" not in prompt
+    assert "invalid startup_mode" not in prompt
+
+
 def test_the_attempt_budget_still_blocks_when_progress_keeps_happening() -> None:
     context = _Context()
     for index in range(3):

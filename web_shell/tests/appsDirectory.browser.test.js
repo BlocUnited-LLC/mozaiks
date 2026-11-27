@@ -34,7 +34,9 @@ async function fixture(t) {
           {...(state.paged?{searchValue:state.search,activeFilter:state.filter,
             onSearchChange:search=>setState(value=>({...value,search})),
             onFilterChange:filter=>setState(value=>({...value,filter}))}:{})}
-          navigationForApp={app=>({primaryAction:{kind:'overview',href:'/apps/'+app.build_registry_id+'/overview'},dashboardHref:'/apps/'+app.build_registry_id+'/overview'})}/>;
+          deleteApp={state.allowDelete ? ()=>{throw new Error('Unexpected deletion')} : undefined}
+          navigationForApp={state.stock ? undefined : app=>({primaryAction:{kind:'overview',href:'/apps/'+app.build_registry_id+'/overview'},
+            dashboardHref:Object.hasOwn(app,'managementUrl') ? app.managementUrl : '/apps/'+app.build_registry_id+'/overview'})}/>;
       }
       createRoot(document.getElementById('root')).render(<BrowserRouter><Fixture/></BrowserRouter>);
     `, resolveDir: shell, loader: 'jsx' },
@@ -52,12 +54,14 @@ async function fixture(t) {
       builder.onResolve({ filter: /^(?:@mozaiks\/chat-ui\/workspace)$|(?:studioApi|useWorkspaceApps|useWorkflowStart)\.js$/ }, args => ({ path: args.path, namespace: 'host-boundary' }));
       builder.onLoad({ filter: /.*/, namespace: 'host-boundary' }, args => ({
         contents: args.path.endsWith('studioApi.js')
-          ? 'export const studioFetch=async()=>({app:{portals:[]}});'
+          ? `export const studioFetch=async()=>new Response(JSON.stringify({app:{scope:'app',default_portal:'overview',
+                portals:[{id:'overview',route:window.testDashboardRoute || '/apps/:appId/overview'}]}}));`
           : args.path.endsWith('useWorkspaceApps.js')
             ? 'export const useWorkspaceApps=()=>({apps:[]});'
             : args.path.endsWith('useWorkflowStart.js')
               ? 'export const useWorkflowStart=()=>({startWorkflow:async()=>null,starting:false,error:null});'
-              : 'export const WorkspaceLayout=({children})=>children;',
+              : `export const WorkspaceLayout=({children})=>children;
+                 export const useWorkspaceAppSections=()=>[{key:'integrations',label:'Integrations',route:'/apps/:appId/integrations'}];`,
       }));
     } }],
   });
@@ -140,6 +144,71 @@ test('AppsDirectory keeps local filtering when a complete portfolio is supplied'
   await search.fill('First');
   await page.getByText('First app', { exact: true }).filter({ visible: true }).waitFor();
   assert.equal(await page.getByRole('navigation', { name: 'Apps pagination' }).count(), 0);
+});
+
+test('section chooser uses hosted management links and keeps search, pagination and keyboard navigation', async t => {
+  const page = await fixture(t);
+  await page.goto(new URL('/apps?section=integrations', page.url()).href);
+  await page.evaluate(() => window.updateDirectory({ allowDelete: true }));
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(page.getByRole('heading', { name: 'Integrations', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Open Integrations for First app' })).toHaveAttribute('href', '/apps/first/integrations');
+    assert.equal(await page.getByRole('button', { name: /Delete app|Continue Build/ }).count(), 0);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  }
+  const search = page.getByRole('searchbox', { name: 'Search app names and descriptions...' });
+  await search.fill('server search');
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  const link = page.getByRole('link', { name: 'Open Integrations for Second app' });
+  await expect(link).toHaveAttribute('href', '/apps/second/integrations');
+  await link.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/apps\/second\/integrations$/);
+  await page.goBack();
+  await expect(page.getByRole('link', { name: 'Back to My Apps' })).toHaveAttribute('href', '/apps');
+});
+
+test('section chooser handles stock IDs, invalid host links, unavailable sections and directory states', async t => {
+  const page = await fixture(t);
+  await page.goto(new URL('/apps?section=integrations', page.url()).href);
+  await page.evaluate(() => window.updateDirectory({ stock: true, paged: false, allowDelete: true }));
+  await expect(page.getByRole('link', { name: 'Open Integrations for First app' })).toHaveAttribute('href', '/apps/app-first/integrations');
+  await page.evaluate(() => window.updateDirectory({ stock: false, apps: [
+    { name: 'Missing hosted ID', app_id: 'factory-1' },
+    { name: 'Absent link', app_id: 'factory-2', managementUrl: null },
+    { name: 'Foreign origin', app_id: 'factory-3', managementUrl: 'https://example.org/apps/other/overview' },
+    { name: 'Invalid segment', app_id: 'factory-4', managementUrl: '/apps/foo%2Fbar/overview' },
+    { name: 'Different local route', app_id: 'factory-5', managementUrl: '/apps/other/profile' },
+  ] }));
+  await expect(page.getByText('Section unavailable for this app')).toHaveCount(5);
+  assert.equal(await page.getByRole('link', { name: /^Open Integrations for/ }).count(), 0);
+  await page.evaluate(() => window.updateDirectory({ loading: true }));
+  await expect(page.getByText('Loading your apps…')).toBeVisible();
+  await page.evaluate(() => window.updateDirectory({ loading: false, error: 'Temporary directory failure' }));
+  await expect(page.getByText('Could not load apps')).toBeVisible();
+  await page.evaluate(() => window.updateDirectory({ error: null, apps: [] }));
+  await expect(page.getByText('No apps yet')).toBeVisible();
+  for (const query of ['section=operations', 'section=integrations&section=operations']) {
+    await page.goto(new URL('/apps?' + query, page.url()).href);
+    await expect(page.getByText('Studio section unavailable')).toBeVisible();
+    assert.equal(await page.getByRole('link', { name: /^Open .* for/ }).count(), 0);
+  }
+  await page.getByRole('link', { name: 'Back to My Apps' }).click();
+  await expect(page.getByRole('heading', { name: 'My Apps', exact: true })).toBeVisible();
+});
+
+test('section chooser resolves nested management routes and opaque dashboard IDs', async t => {
+  const page = await fixture(t);
+  await page.addInitScript(() => { window.testDashboardRoute = '/apps/:appId/manage/overview'; });
+  await page.goto(new URL('/apps?section=integrations', page.url()).href);
+  await page.evaluate(() => window.updateDirectory({ apps: [
+    { name: 'Imported app', app_id: 'factory-target', managementUrl: '/apps/old.app%2Bwest%20team/manage/overview' },
+    { name: 'Wrong default', app_id: 'other-target', managementUrl: '/apps/other/overview' },
+  ] }));
+  await expect(page.getByRole('link', { name: 'Open Integrations for Imported app' }))
+    .toHaveAttribute('href', '/apps/old.app%2Bwest%20team/integrations');
+  await expect(page.getByText('Section unavailable for this app')).toHaveCount(1);
 });
 
 test('AppsDirectory shows the approved name without changing draft identity or navigation', async t => {

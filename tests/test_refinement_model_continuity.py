@@ -200,7 +200,6 @@ async def test_direct_studio_factory_start_preserves_the_run_binding(monkeypatch
     monkeypatch.setattr(platform, "_validate_user_id_against_principal", lambda *_args, **_kwargs: "owner")
     monkeypatch.setattr(platform, "_resolve_requested_workflow_name", lambda workflow: workflow)
     monkeypatch.setattr(platform, "authorize_http_workflow_source_paths", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(platform, "validate_context_for_workflow", lambda _workflow, context: context)
     monkeypatch.setattr(platform, "get_platform_hooks", lambda: hooks)
     monkeypatch.setattr(platform.runtime_app, "_chat_coll", AsyncMock(return_value=collection))
     monkeypatch.setattr(platform.persistence_manager, "get_or_assign_cache_seed", AsyncMock(return_value=1))

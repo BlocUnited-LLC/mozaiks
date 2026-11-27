@@ -38,6 +38,9 @@ prompt_middleware:
 - agent: ConfigMiddlewareAgent
   filename: hook_workflow_integration_contract.py
   function: inject_workflow_integration_contract
+- agent: ServiceAgent
+  filename: hook_workflow_integration_contract.py
+  function: inject_workflow_integration_contract
 - agent: AppPlanAgent
   filename: hook_domain_catalog_context.py
   function: inject_domain_catalog_context

@@ -15,7 +15,7 @@ Covers:
     - empty context → []
     - app_build_plan with known pack_type → detected
     - app_build_plan with non-AI pack → not detected
-    - concept_blueprint with AI hint → detected
+    - concept_blueprint with AI hint → no selected archetype
     - concept_blueprint with unknown hint → not detected
     - pack present in both plan and blueprint → deduplicated
     - non-dict pack items in capability_packs → skipped
@@ -108,7 +108,7 @@ class TestDetectAiPacks:
             }
         }
         result = _detect_ai_packs(ctx)
-        assert "ai_analysis_pack" in result
+        assert result == []
 
     def test_unknown_hint_not_detected(self):
         ctx = {
@@ -155,8 +155,8 @@ class TestDetectAiPacks:
 
     def test_extraction_pack_detected(self):
         ctx = {
-            "concept_blueprint": {
-                "capability_pack_hints": ["ai_extraction_pack"]
+            "app_build_plan": {
+                "capability_packs": [{"pack_type": "ai_extraction_pack"}]
             }
         }
         result = _detect_ai_packs(ctx)

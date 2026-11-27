@@ -396,7 +396,6 @@ _CORE_CAPABILITIES = (
     "notifications.email.send",
     "notifications.preferences.read",
     "notifications.preferences.write",
-    "notifications.push.send",
     "onboarding.tour.dismiss",
     "onboarding.tour.progress.read",
     "onboarding.tour.show",

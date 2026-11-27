@@ -50,11 +50,7 @@ class TokenWalletUsageIngestClient:
         if config is None or not config.effective_token_wallets:
             return
 
-        wallets = [
-            wallet for wallet in config.effective_token_wallets
-            if wallet.auto_debit_usage
-            and (not config.products or wallet.usage_meter_id == "ai_tokens")
-        ]
+        wallets = config.llm_usage_wallets
         if not wallets:
             return
 
@@ -65,9 +61,9 @@ class TokenWalletUsageIngestClient:
         if not app_id:
             return
 
+        ledger = self._ledger or get_token_wallet_ledger()
         try:
             entitlements = ConfiguredEntitlementAdapter(config=config)
-            ledger = self._ledger or get_token_wallet_ledger()
             if config.products:
                 wallet_plans = await resolve_v2_wallet_plans(
                     config=config,
@@ -107,14 +103,21 @@ class TokenWalletUsageIngestClient:
                     user_id=user_id,
                     tenant_id=tenant_id,
                 )
-            for wallet in wallets:
-                if wallet.scope == "user" and not user_id:
-                    continue
-                if wallet.scope == "tenant" and not tenant_id:
-                    continue
+        except Exception as exc:
+            logger.warning("token allowance sync failed; usage is still charged: %s", exc)
+
+        for wallet in wallets:
+            if wallet.scope == "user" and not user_id:
+                continue
+            if wallet.scope == "tenant" and not tenant_id:
+                continue
+            try:
                 await ledger.record_usage_debit(payload, wallet=wallet)
-        except Exception as exc:  # pragma: no cover - usage spending must not break runs
-            logger.debug("token wallet usage ingest skipped: %s", exc)
+            except Exception as exc:  # usage spending must not break runs
+                logger.error(
+                    "token usage was not charged: app_id=%s wallet_id=%s event_id=%s: %s",
+                    app_id, wallet.wallet_id, payload.get("event_id"), exc,
+                )
 
 
 _global_usage_ingest: TokenWalletUsageIngestClient | None = None

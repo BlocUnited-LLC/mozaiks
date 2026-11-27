@@ -33,6 +33,7 @@ import copy
 import json
 import logging
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 import yaml
@@ -61,6 +62,73 @@ def _plan_task() -> dict:
     return next(
         task for task in FIXTURE["context"]["app_build_plan"]["build_tasks"] if task["task_id"] == TASK_ID
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["use_compiled", "author_module", "wrong_digest", "provider_failed"])
+async def test_verified_module_choice_uses_regular_file_admission(monkeypatch, decision):
+    from factory_app.workflows.AppGenerator.tools import (
+        reviewed_module_choice,
+        reviewed_result_module_task,
+    )
+
+    task = copy.deepcopy(_plan_task())
+    context = copy.deepcopy(FIXTURE["context"])
+    candidate = copy.deepcopy(FIXTURE["rejected_output"])
+    verified = AsyncMock(return_value=reviewed_result_module_task.VerifiedResultModuleSource(candidate, "source-build", "source", [], [], []))
+    digest = "a" * 64
+    offer = (digest, "Choose the source-based contract or author the module.")
+    evidence = {}
+
+    def capture_offer(*args, compiled_evidence):
+        evidence.update(compiled_evidence)
+        return offer
+
+    monkeypatch.setattr(reviewed_module_choice, "reviewed_module_choice_prompt", capture_offer)
+
+    async def reply(request):
+        if request.response_model is None:
+            assert decision == "author_module"
+            assert "TASK BATCH CONTEXT" in request.prompt
+            return AG2TaskBatchRunnerResult(status=RunStatus.COMPLETED, output={**candidate, "agent_message": "Authored"})
+        assert request.agent_name == "ConfigMiddlewareAgent"
+        assert request.response_model.__name__ == "ReviewedModuleChoice" and request.prompt == offer[1]
+        if decision == "provider_failed":
+            return AG2TaskBatchRunnerResult(status=RunStatus.FAILED, error="Provider unavailable")
+        return AG2TaskBatchRunnerResult(status=RunStatus.COMPLETED, output={
+            "candidate_sha256": "b" * 64 if decision == "wrong_digest" else digest,
+            "decision": "use_compiled" if decision == "wrong_digest" else decision,
+        })
+
+    worker = AsyncMock(side_effect=reply)
+    monkeypatch.setattr(reviewed_result_module_task, "reviewed_result_module_task_output", verified)
+    monkeypatch.setattr(task_batches.AG2TaskBatchRunner, "run", worker)
+    run = task_batches._run_one_task(
+        workflow_name="AppGenerator", batch=_batch(), task=task,
+        all_task_items=context["app_build_plan"]["build_tasks"], base_context=context,
+        completed_task_outputs={}, current_batch_outputs={}, agents={"ConfigMiddlewareAgent": object()},
+        chat_id="verified-revision", app_id="app", user_id="owner", semaphore=asyncio.Semaphore(1),
+        fresh_agents_per_task=False, agents_factory=None, context_authority_policy=None,
+    )
+    if decision in {"wrong_digest", "provider_failed"}:
+        with pytest.raises(task_batches._TaskRejected):
+            await run
+        assert worker.await_count == 1
+        return
+    result = await run
+    verified.assert_awaited_once_with(task, context, retained_ask_callers={})
+    assert worker.await_count == (2 if decision == "author_module" else 1)
+    assert result["_task_id"] == task["task_id"]
+    assert {entry["filename"] for entry in result["code_files"]} == {MANIFEST, EVENTS}
+    assert result["module_contract"]["reactions_yaml"] is None
+    if decision == "use_compiled":
+        import hashlib
+
+        emitted = {entry["filename"]: entry["content"] for entry in result["code_files"]}
+        assert evidence["compiled_files"] == {p: yaml.safe_load(text) for p, text in emitted.items()}
+        assert evidence["compiled_file_sha256"] == {p: hashlib.sha256(text.encode()).hexdigest() for p, text in emitted.items()}
+    if decision == "author_module":
+        assert result["agent_message"] == "Authored"
 
 
 def _batch():

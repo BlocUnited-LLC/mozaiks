@@ -22,9 +22,15 @@ Verifies that:
 from __future__ import annotations
 
 from pathlib import Path
+from shutil import copytree
 from typing import Any
 
+import pytest
 import yaml
+from jsonschema import validate
+
+from mozaiksai.core.runtime.app.module_loader import ModuleLoader
+from mozaiksai.core.runtime.app.subscriptions_loader import PlanDef
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 BUILD_CONTEXT = WORKSPACE / "factory_app" / "build_context"
@@ -270,6 +276,48 @@ def test_billing_portal_list_plans_is_public_catalog() -> None:
     list_plans = next(a for a in module_yaml["actions"] if a["id"] == "list_plans")
     assert list_plans.get("api_surface") == "public_readonly"
     assert not list_plans.get("permissions")
+
+
+@pytest.mark.asyncio
+async def test_list_plans_publishes_only_the_display_label_for_valid_prices(tmp_path, monkeypatch):
+    prices = {
+        "member": {"amount_cents": 1800, "display": "$18 per month"},
+        "annual": {"amount_cents": 12045, "currency": " EUR ", "interval": "year"},
+        "monthly": {"amount_cents": 1800},
+        "invalid": {"amount_cents": 0, "display": "Free"},
+        "private": {"amount_cents": 1800, "provider_price_id": "private-price"},
+    }
+    plans = [{"plan_id": key, "label": key, "price": price} for key, price in prices.items()]
+    plans.append({"plan_id": "free", "label": "Free"})
+    app = copytree(TEMPLATES, tmp_path / "app")
+    config = app / "config"
+    config.mkdir()
+    (config / "subscriptions.yaml").write_text(yaml.safe_dump({"plans": plans}), encoding="utf-8")
+    monkeypatch.setenv("PLATFORM_PATH", str(app))
+    monkeypatch.syspath_prepend(str(app))
+
+    billing = ModuleLoader(str(app)).load("billing_portal")
+    catalog = await billing.handler.list_plans(None)
+    schema = billing.action_schemas_map["list_plans"]["output"]
+    assert schema["properties"]["plans"]["items"]["properties"]["price_display"] == {"type": "string"}
+    validate(catalog, schema)
+    rows = catalog["plans"]
+    assert [row["plan_id"] for row in rows] == [*prices, "free"]
+    assert {row["plan_id"]: row["price_display"] for row in rows if "price_display" in row} == {
+        "member": "$18 per month",
+        "annual": "EUR 120.45/year",
+        "monthly": "USD 18.00/month",
+    }
+    assert all("price" not in row for row in rows)
+    assert "private-price" not in str(catalog)
+
+
+def test_plan_price_contract_example_is_a_canonical_plan() -> None:
+    boundaries = _read_yaml(MOZAIKSPAY / "contract.yaml")["provider_lifecycle_boundary"]
+    mapping = next(entry for entry in boundaries if entry["id"] == "plan_catalog_mapping")
+    example = mapping["app_requirements"]["subscriptions_yaml_price_block"]["example"]
+    plan = PlanDef.model_validate(yaml.safe_load(example)["plans"][0])
+    assert plan.price is not None and plan.price.amount_cents == 2900
 
 
 def test_billing_portal_manage_actions_require_manage_permission() -> None:

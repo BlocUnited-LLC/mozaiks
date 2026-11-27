@@ -122,5 +122,5 @@ def test_no_cycle_is_introduced() -> None:
 def test_the_planner_is_told_the_rule_so_repair_is_the_fallback() -> None:
     text = open("factory_app/workflows/AppGenerator/agents.yaml", encoding="utf-8").read()
 
-    assert "Every `page_bundle` task must list every `module_contract` task" in text
-    assert "invents the module id" in text
+    assert "copy the exact `task_id` of each declared `module_contract` task into `depends_on`" in text
+    assert "Check every depends_on entry against the exact task_id of another task in that output" in text

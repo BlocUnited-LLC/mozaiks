@@ -102,7 +102,7 @@ def replay(entry: dict[str, Any]) -> dict[str, Any]:
     store.mark_design_doc_status = AsyncMock()
     store.upsert_design_doc = AsyncMock()
     store.save_data_contract = AsyncMock()
-    summary = AsyncMock()
+    summary = AsyncMock(return_value=Mock(id="reviewed-design"))
     log = Mock()
     with (
         patch.object(save_design_doc, "AG2PersistenceManager", Mock()),

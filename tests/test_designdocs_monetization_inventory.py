@@ -152,7 +152,7 @@ def persistence(monkeypatch):
     store.upsert_design_doc = AsyncMock()
     store.save_data_contract = AsyncMock()
     store_factory = Mock(return_value=store)
-    summary = AsyncMock()
+    summary = AsyncMock(return_value=Mock(id="reviewed-design"))
     monkeypatch.setattr(save_design_doc, "AG2PersistenceManager", Mock())
     monkeypatch.setattr(save_design_doc, "BuilderArtifactStore", store_factory)
     monkeypatch.setattr(save_design_doc, "persist_summary_artifact", summary)

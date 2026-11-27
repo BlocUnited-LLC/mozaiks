@@ -392,6 +392,64 @@ def test_plan_auth_mode_taxonomy_matches_runtime():
     assert set(models["AppAuthMode"]["values"]) == set(get_args(AuthMode))
 
 
+@pytest.mark.parametrize(("strategy", "mode", "roles", "witness", "outcome"), [
+    ("public", "private_workspace", [], "verified", "ready"),
+    ("basic-login", "private_workspace", [], "verified", "ready"),
+    ("third-party", "brokered_oidc", [], "verified", "needs_revision"),
+    ("basic-login", "public_self_signup", [], "verified", "needs_revision"),
+    ("role-based", "private_workspace", ["owner"], "verified", "needs_revision"),
+    ("public", "private_workspace", [], "wrong-record", "needs_revision"),
+    ("public", "private_workspace", [], "absent", "needs_revision"),
+    ("basic-login", "public_self_signup", [], "absent", "ready"),
+])
+def test_feature_plan_preserves_verified_login_and_auth_targeted_revisions(strategy, mode, roles, witness, outcome):
+    from factory_app.workflows.AppGenerator.tools.app_plan_review import review_app_build_plan
+    from tests.test_app_plan_review import _revision_with_form
+
+    plan, context, _, _ = _revision_with_form("update_report")
+    plan.update(auth_strategy=strategy, auth_mode=mode, roles=roles)
+    if witness != "absent":
+        context.set("retained_feature_login", {
+            "source_artifact_version_id": "v4" if witness == "verified" else "other",
+            "auth_strategy": "basic-login", "auth_mode": "brokered_oidc",
+        })
+    result = review_app_build_plan(AppBuildPlan=plan, context_variables=context)
+    assert result["outcome"] == outcome, result
+    if outcome == "ready":
+        cached = context.get("app_build_plan")
+        assert cached["auth_strategy"] == "basic-login" and not cached["roles"]
+        assert cached["auth_mode"] == ("brokered_oidc" if witness == "verified" else mode)
+
+
+@pytest.mark.parametrize(("cached_mode", "reject"), [("private_workspace", False), ("public_self_signup", True)])
+async def test_resumed_feature_dispatch_keeps_verified_sign_in_policy(cached_mode, reject):
+    from factory_app.workflows.AppGenerator.tools.app_plan_review import review_app_build_plan
+    from factory_app.workflows.AppGenerator.tools.hydrate_app_build_plan_context import (
+        hydrate_app_build_plan_context,
+    )
+    from mozaiksai.core.workflow.context.frozen import detach
+    from tests.test_app_plan_review import _revision_with_form
+
+    plan, context, _, _ = _revision_with_form("update_report")
+    context.set("retained_feature_login", {
+        "source_artifact_version_id": "v4", "auth_mode": "brokered_oidc", "auth_strategy": "basic-login",
+    })
+    plan.update(auth_strategy="basic-login", auth_mode=None, roles=[])
+    assert review_app_build_plan(AppBuildPlan=plan, context_variables=context)["outcome"] == "ready"
+    ready = detach(context.get("app_build_plan"))
+    ready["auth_mode"] = cached_mode
+    context.set("app_build_plan", ready)
+    assert context.get("app_task_batch_items")
+    if reject:
+        with pytest.raises(ValueError, match="preserves the accepted sign-in strategy"):
+            await hydrate_app_build_plan_context(context)
+        assert context.get("app_build_plan") is None and not context.get("app_plan_ready")
+        assert not context.get("app_task_batch_items")
+    else:
+        assert (await hydrate_app_build_plan_context(context))["reason"] == "task_batch_items_already_present"
+        assert context.get("app_build_plan")["auth_mode"] == "brokered_oidc"
+
+
 def test_approved_auth_mode_change_updates_existing_intent_without_replacing_provider_setup(auth_document):
     from factory_app.workflows.AppGenerator.tools.render_auth_scaffold import (
         materialize_auth_scaffold,

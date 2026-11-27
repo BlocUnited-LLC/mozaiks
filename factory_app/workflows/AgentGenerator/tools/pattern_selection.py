@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Annotated, Any
 
-from factory_app.workflows._shared.workflow_integration import validate_pricing_workflow_features
+from factory_app.workflows._shared.workflow_integration import (
+    validate_pricing_workflow_features,
+    workflow_result_write_plans,
+)
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
+
+
+def selection_fingerprint(selection: dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(selection, sort_keys=True).encode()).hexdigest()
 
 
 def validate_selection(raw_selection: Any, context_variables: Any) -> dict[str, Any]:
@@ -21,6 +30,7 @@ def validate_selection(raw_selection: Any, context_variables: Any) -> dict[str, 
     if len(set(names)) != len(names):
         raise ValueError("Workflow names must be unique")
     for item in workflows:
+        workflow_result_write_plans(item)
         if item["initial_agent"] != "WorkflowBundleBuilderAgent" or item["pattern_id"] not in range(1, 10):
             raise ValueError("Workflow dispatch must use the supported builder and pattern")
         if set(item.get("depends_on") or []) - (set(names) - {item["name"]}):
@@ -59,7 +69,44 @@ def pattern_selection(
     context_variables.set("PatternSelection", selection)
     for key in ("is_multi_workflow", "pack_name", "pack_partition_reason"):
         context_variables.set(key, selection[key])
-    context_variables.set("workflows_spec", selection["workflows"])
+    specs = []
+    for item in selection["workflows"]:
+        plans = item.get("result_write_plans")
+        if plans:
+            instructions = []
+            for plan in plans:
+                write = plan["result_write"]
+                instructions.append(
+                    f"For {plan['event_type']}, the generated prompt and structured output for {plan['agent']} "
+                    f"must request exactly these required fields: {', '.join(write['fields'])}. "
+                    f"The host supplies the record key {write['record_key']}. "
+                    f"{plan['module_id']}.{write['action']} is the receiving app module action. "
+                    "Factory installs the workflow adapter that calls it."
+                )
+            instructions.append(
+                "Factory installs event_payload as object state with model_visible: true and "
+                "writer_ids: [transition_router] in context_variables.yaml. Factory also installs the "
+                "reviewed event trigger on the BackendOnly orchestrator. The agent roster in agents.yaml "
+                "contains the actor's name, prompt and structured_outputs_required: true. Omit the "
+                "variables key from every agents.yaml roster entry, including empty lists. The exposure "
+                "belongs at context_variables.yaml -> agents -> actor name -> variables. The actor's prompt "
+                "reads the needed fields at event_payload.<field> using the triggering event's declared payload. "
+                "Leave the result agent out of generated tool bindings, tool implementations and outcome_plans. "
+                "Use tools: [] when no other agent needs a tool and outcome_plans: [] when "
+                "no other operation needs an outcome. "
+                "Give the result agent one after_turn success continuation. Factory adds the failure routing."
+            )
+            actor = plans[0]["agent"]
+            fields = ", ".join(plans[0]["result_write"]["fields"])
+            roster = {"name": actor, "structured_outputs_required": True,
+                      "system_message": f"{item['description']} Read the triggering content from event_payload. "
+                                        f"Return only the required fields: {fields}."}
+            instructions.append("Valid agents.yaml roster entry for this task; tailor the prompt to the approved design:\n"
+                                + json.dumps(roster, ensure_ascii=True))
+            brief = "\n".join(["[WORKFLOW RESULT PLAN]", *instructions, json.dumps(plans, sort_keys=True)])
+            item = {**item, "initial_message": f"{item['initial_message']}\n\n{brief}"}
+        specs.append(item)
+    context_variables.set("workflows_spec", specs)
     context_variables.set("workflow_plan_review", None)
     return {"outcome": "selected", "workflow_count": len(selection["workflows"])}
 

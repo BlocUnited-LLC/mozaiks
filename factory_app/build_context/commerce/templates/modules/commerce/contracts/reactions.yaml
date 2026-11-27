@@ -1,15 +1,5 @@
 schema_version: mozaiks.reactions.v1
 reactions:
-  - id: commerce_checkout_requested_payment_facade
-    event_type: domain.commerce.checkout.requested
-    target:
-      kind: capability
-      capability_id: mozaikspay.checkout.create_session
-    description: >
-      Optional managed-payment bridge. When the mozaikspay pack is selected,
-      this reaction lets the payment facade create a provider checkout session
-      and call commerce.record_checkout_result after completion.
-
   - id: commerce_paid_order_receipt
     event_type: domain.commerce.order.paid
     target:

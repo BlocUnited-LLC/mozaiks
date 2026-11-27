@@ -250,7 +250,7 @@ def test_module_contract_gate_audits_the_live_code_files(make) -> None:  # noqa:
     assert "('prior',)" not in result["warnings"], "a frozen warning list was stringified as a tuple"
 
 
-def test_ai_pack_workflow_hook_detects_packs_from_the_plan_and_the_concept() -> None:
+def test_ai_pack_workflow_hook_uses_only_the_saved_plan_archetypes() -> None:
     from factory_app.workflows.AppGenerator.tools.hook_ai_pack_workflow_context import (
         inject_ai_pack_workflow_context,
     )
@@ -264,14 +264,15 @@ def test_ai_pack_workflow_hook_detects_packs_from_the_plan_and_the_concept() -> 
 
     assert "[AI PACK WORKFLOW CONTEXT]" in prompt
     assert "ai_review_pack detected" in prompt
-    assert "ai_analysis_pack detected" in prompt
+    assert "ai_analysis_pack detected" not in prompt
+
+    empty = _Capture("AppPlanAgent", _bridge({"concept_blueprint": {"capability_pack_hints": ["ai_analysis_pack"]}}))
+    empty.system_message = prompt
+    inject_ai_pack_workflow_context(empty, [])
+    assert "ai_review_pack detected" not in empty.system_message and "ai_analysis_pack detected" not in empty.system_message
 
 
-@pytest.mark.parametrize("state", ["matching", "stale", "unverified-parent", "empty", "absent"])
-@pytest.mark.asyncio
-async def test_ai_pack_advice_preserves_only_the_bound_workflow_routes_in_planner_prompt(state) -> None:
-    from types import SimpleNamespace
-
+def _configured_prompt_runner(workflow, agent_name, seed):
     import yaml
 
     from mozaiksai.core.workflow.agents.factory import _compose_prompt_sections
@@ -283,22 +284,33 @@ async def test_ai_pack_advice_preserves_only_the_bound_workflow_routes_in_planne
     )
 
     root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
-    path = root / "AppGenerator"
-    agent_name = "AppPlanAgent"
+    path = root / workflow
     loaded = yaml.safe_load((path / "agents.yaml").read_text(encoding="utf-8"))
     agent = next(agent for agent in loaded["agents"] if agent["name"] == agent_name)
     definitions = yaml.safe_load((path / "context_variables.yaml").read_text(encoding="utf-8"))
     view = load_context_variables_config(definitions).agents[agent_name]
     hooks = []
-    for entry in load_prompt_middleware_entries("AppGenerator", base_path=str(root)):
+    for entry in load_prompt_middleware_entries(workflow, base_path=str(root)):
         if entry["agent"] in (agent_name, "all"):
-            hook, _ = _resolve_import("AppGenerator", entry.get("filename"), entry["function"], path)
+            hook, _ = _resolve_import(workflow, entry.get("filename"), entry["function"], path)
             assert hook is not None
             hooks.append(hook)
-    names = [hook.__name__ for hook in hooks]
-    assert names.index("inject_workflow_integration_contract") < names.index("inject_ai_pack_workflow_context")
+    runner = MozaiksPromptMiddleware(
+        None, None, middleware_functions=hooks, agent_name=agent_name,
+        base_system_message=_compose_prompt_sections(agent["prompt_sections"]),
+        context_bridge=_bridge(seed), context_variables=view.variables,
+    )
+    return runner, [hook.__name__ for hook in hooks]
 
-    seed = {"concept_blueprint": {"capability_pack_hints": ["ai_review_pack", "ai_analysis_pack", "ai_extraction_pack"]}}
+
+@pytest.mark.parametrize("state", ["matching", "stale", "unverified-parent", "empty", "absent"])
+@pytest.mark.asyncio
+async def test_ai_pack_advice_preserves_only_the_bound_workflow_routes_in_planner_prompt(state) -> None:
+    from types import SimpleNamespace
+
+    seed = {"app_build_plan": {"capability_packs": [
+        {"pack_type": "ai_review_pack"}, {"pack_type": "ai_analysis_pack"}, {"pack_type": "ai_extraction_pack"},
+    ]}}
     if state != "absent":
         seed.update(artifact_kind="workflow_bundle", artifact_version_id="bundle-2")
         seed["workflow_integration_metadata"] = {
@@ -310,11 +322,8 @@ async def test_ai_pack_advice_preserves_only_the_bound_workflow_routes_in_planne
         }
         if state == "unverified-parent":
             seed.update(artifact_kind="app_bundle", artifact_version_id="selected-app-build")
-    runner = MozaiksPromptMiddleware(
-        None, None, middleware_functions=hooks, agent_name=agent_name,
-        base_system_message=_compose_prompt_sections(agent["prompt_sections"]),
-        context_bridge=_bridge(seed), context_variables=view.variables,
-    )
+    runner, names = _configured_prompt_runner("AppGenerator", "AppPlanAgent", seed)
+    assert names.index("inject_workflow_integration_contract") < names.index("inject_ai_pack_workflow_context")
     prompt = await runner._run_prompt_middleware(SimpleNamespace(variables={}, prompt=[]))
     assert "record_review_result" in prompt and "store_analysis_result" in prompt and "store_extraction_results" in prompt
     assert "With no supplied binding, leave those workflow targets empty" in prompt
@@ -366,16 +375,17 @@ def test_workflow_archetype_hook_reads_the_task_worker_context() -> None:
     assert "[WORKFLOW ARCHETYPE]: ai_review" in prompt
 
 
-def test_ai_pack_surface_hook_detects_packs_from_the_concept() -> None:
-    from factory_app.workflows.DesignDocs.tools.hook_ai_pack_surface_context import (
-        inject_ai_pack_surface_context,
-    )
+async def test_design_prompt_preserves_approved_workflow_without_promoting_category_hints():
+    from types import SimpleNamespace
 
-    prompt = _run_hook(inject_ai_pack_surface_context, "DesignDocsAgent",
-                       {"concept_blueprint": {"capability_pack_hints": ["ai_review_pack"]}})
-
-    assert "[AI PACK SURFACE DECLARATIONS]" in prompt
-    assert "ai_review_pack detected" in prompt
+    seed = {"pack_selection": [], "concept_blueprint": {
+        "agentic_capabilities": ["record_summary"], "capability_pack_hints": ["ai_analysis_pack", "crud_pack"]}}
+    runner, _ = _configured_prompt_runner("DesignDocs", "DesignDocsAgent", seed)
+    context = SimpleNamespace(variables={}, prompt=["[AI PACK SURFACE DECLARATIONS]\nCreate TWO surface_map entries."])
+    prompt = await runner._run_prompt_middleware(context)
+    assert "CONCEPT_BLUEPRINT:" in prompt and "record_summary" in prompt
+    assert "workflow surfaces even when no reusable pack is selected" in prompt
+    assert "[AI PACK SURFACE DECLARATIONS]" not in prompt and "ai_analysis_pack detected" not in prompt
 
 
 def test_domain_scoring_reads_the_concept_from_a_live_container() -> None:

@@ -61,6 +61,7 @@ from mozaiksai.core.workflow.generator_support.module_account_data import (
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     SHARED_UI_OUTPUT_PATHS,
     pack_owned_output_paths,
+    pinned_result_action_schemas,
     scoped_module_implementation_sources,
 )
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
@@ -270,11 +271,18 @@ def save_generated_code(context_variables: Any) -> dict[str, Any]:
             access_policy=resolve_authored_module_access_policy(context_variables),
             subscription_contract=subscription_contract,
             companion_files=admitted_module_file_map(context_variables),
+            result_action_schemas=pinned_result_action_schemas(context_variables),
         )
+        task = detach(context_variables.get("current_build_task")) or {}
+        if task.get("task_type") == "module_contract":
+            from factory_app.workflows.AppGenerator.tools.workflow_result_writes import (
+                compile_result_task_bindings,
+            )
+
+            compile_result_task_bindings(payload, task, context_variables)
         incoming = extract_code_file_map_from_payload(payload)
         incoming = compile_authored_page_files(incoming, payload=payload, context=context_variables)
         deleted = extract_deleted_file_paths_from_payload(payload)
-        task = detach(context_variables.get("current_build_task")) or {}
         repair = detach(context_variables.get("bundle_repair_result")) or {}
         active = repair.get("active") or {}
         owned_paths = active.get("allowed_paths") if active else task.get("owned_paths")

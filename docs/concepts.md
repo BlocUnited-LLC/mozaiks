@@ -73,7 +73,7 @@ Two kinds:
 | Kind | Where | Purpose |
 | --- | --- | --- |
 | **Factory workflows** | `factory_app/workflows/` | Shared builder workflows (AppGenerator, DesignDocs, ValueEngine) that run in Studio when you build an app |
-| **App workflows** | `app/workflows/` or `workflows/` in the workspace | AI processes in your app — support chat, content generation, coding assistant |
+| **App workflows** | `workflows/` at workspace root (beside `app/`) | AI processes in your app — support chat, content generation, coding assistant |
 
 ## Page
 

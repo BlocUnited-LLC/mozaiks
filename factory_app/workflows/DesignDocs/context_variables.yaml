@@ -1,4 +1,12 @@
 definitions:
+  design_docs_artifact_version_id:
+    type: string
+    authority_class: closed_writer_routing_state
+    writer_ids: [deterministic_tool]
+    persisted: true
+    model_visible: false
+    description: Exact DesignDocs summary saved for this build and relayed to its downstream workflows.
+    source: {type: state, default: null}
   pack_selection_outcome:
     type: string
     authority_class: closed_writer_routing_state

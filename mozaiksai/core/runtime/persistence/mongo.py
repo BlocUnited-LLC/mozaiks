@@ -19,6 +19,7 @@ from .intent_loader import DataContract
 from .naming import collection_name_for, scope_filter_for, scope_metadata
 from .ownership import (
     CollectionOwnership,
+    _plain_copy,
     canonical_pipeline,
     collection_bindings,
     collection_ownership,
@@ -26,6 +27,7 @@ from .ownership import (
     validate_owned_pipeline,
 )
 from .platform_modules import CollectionAccess, PlatformModuleDeclarations
+from .workflow_result import _MARKER, _insert_with_evidence, _upsert_seeds_marker
 
 DEFAULT_APP_DATABASE_NAME = "mozaiks_apps"
 MAX_FIND_MANY_LIMIT = 100
@@ -53,8 +55,12 @@ class MongoPersistenceCollection:
         ownership: CollectionOwnership | None = None,
         principal: PersistencePrincipal | Callable[[], PersistencePrincipal | None] | None = None,
         restrict_aggregation: bool = False,
+        module_id: str | None = None,
+        logical_collection: str | None = None,
     ) -> None:
         self._collection = collection
+        self._module_id = module_id
+        self._logical_collection = logical_collection
         self._app_id = scope_metadata(app_id)["app_id"]
         self._scope_metadata = scope_metadata(
             app_id,
@@ -100,7 +106,11 @@ class MongoPersistenceCollection:
         query: Query,
         projection: Projection | None = None,
     ) -> Mapping[str, Any] | None:
-        return await self._collection.find_one(self._scoped_query(query), projection, **self._options)  # type: ignore[no-any-return]
+        query = self._scoped_query(query)
+        if self._result_metadata_private and projection is not None:
+            projection = _private_find_projection(_plain_copy(projection))
+        row = await self._collection.find_one(query, projection, **self._options)
+        return self._public_document(row) if row is not None else None
 
     async def find_many(
         self,
@@ -111,14 +121,30 @@ class MongoPersistenceCollection:
         projection: Projection | None = None,
     ) -> list[Mapping[str, Any]]:
         safe_limit = max(1, min(int(limit), MAX_FIND_MANY_LIMIT))
-        cursor = self._collection.find(self._scoped_query(query), projection, **self._options)
+        query = self._scoped_query(query)
+        if self._result_metadata_private and projection is not None:
+            projection = _private_find_projection(_plain_copy(projection))
+        cursor = self._collection.find(query, projection, **self._options)
         if sort:
             cursor = cursor.sort(list(sort))
         cursor = cursor.limit(safe_limit)
-        return await cursor.to_list(length=safe_limit)  # type: ignore[no-any-return]
+        return [self._public_document(row) for row in await cursor.to_list(length=safe_limit)]
+
+    @property
+    def _result_metadata_private(self) -> bool:
+        return self._ownership is not None and self._ownership.tenancy == "per_user"
+
+    def _public_document(self, row: Mapping[str, Any]) -> Mapping[str, Any]:
+        if self._result_metadata_private and _MARKER in row:
+            return {key: value for key, value in row.items() if key != _MARKER}
+        return row
 
     async def insert_one(self, document: Mapping[str, Any]) -> Any:
         owner_scope = self._owner_scope
+        if owner_scope:
+            document = _plain_copy(document)
+            if _MARKER in document:
+                raise PersistenceScopeError("Workflow result metadata is runtime-owned")
         for field, identity in owner_scope.items():
             if field in document and document[field] != identity:
                 raise PersistenceScopeError(f"Document cannot override ownership field {field!r}")
@@ -133,7 +159,7 @@ class MongoPersistenceCollection:
                 user_id=principal.user_id, workspace_id=principal.workspace_id,
             )
         scoped_document = {**dict(document), **metadata, **owner_scope}
-        return await self._collection.insert_one(scoped_document)
+        return await _insert_with_evidence(self, scoped_document)
 
     async def update_one(
         self,
@@ -143,6 +169,10 @@ class MongoPersistenceCollection:
         upsert: bool = False,
     ) -> Any:
         owner_scope = self._owner_scope
+        if owner_scope and upsert:
+            query = _plain_copy(query)
+            if _upsert_seeds_marker(query):
+                raise PersistenceScopeError("Upserts cannot supply workflow result metadata")
         safe_update = (
             owned_update(update, scope={"app_id": self._app_id, **owner_scope}, upsert=upsert)
             if owner_scope else dict(update)
@@ -169,6 +199,8 @@ class MongoPersistenceCollection:
         if self._restrict_aggregation:
             validate_owned_pipeline(stages)
         scoped_pipeline: list[Mapping[str, Any]] = [{"$match": self._scoped_query({})}]
+        if self._result_metadata_private:
+            scoped_pipeline.append({"$unset": _MARKER})
         scoped_pipeline.extend(stages)
         cursor = self._collection.aggregate(scoped_pipeline, **self._options)
         return await cursor.to_list(length=None)  # type: ignore[no-any-return]
@@ -294,6 +326,8 @@ class MongoPersistenceContext:
                 ownership=self._ownership.get(collection_name),
                 principal=lambda: self.principal,
                 restrict_aggregation=self._bounded_collection_access,
+                module_id=module_id,
+                logical_collection=self._bindings[key] if self._bindings is not None else key[1],
             )
         return self._collections[key]
 
@@ -331,6 +365,43 @@ class MongoPersistenceContext:
         """Reserved for database intent driven index setup in a later phase."""
 
         return None
+
+
+def _public_root_expression(value: Any) -> Any:
+    # ROOT always denotes the physical row, even inside a $let that rebinds CURRENT.
+    if isinstance(value, str):
+        path = str.__str__(value)
+        if path == "$$ROOT":
+            return {"$unsetField": {"field": _MARKER, "input": "$$ROOT"}}
+        if path == f"$$ROOT.{_MARKER}" or path.startswith(f"$$ROOT.{_MARKER}."):
+            return "$$REMOVE"
+    if isinstance(value, dict):
+        return {key: item if key in {"$literal", "$const"} else _public_root_expression(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_public_root_expression(item) for item in value]
+    return value
+
+
+def _private_find_projection(projection: dict[str, Any]) -> dict[str, Any]:
+    # Keep native find selectors (including positional, slice and elemMatch).
+    # Computations see only public fields, including operators with an implicit CURRENT input.
+    for key, value in projection.items():
+        if isinstance(value, (int, bool, float)):
+            continue
+        if isinstance(value, Mapping):
+            if all(not field.startswith("$") for field in value):
+                projection[key] = _private_find_projection(dict(value))
+                continue
+            if set(value) in ({"$elemMatch"}, {"$meta"}):
+                continue
+            if set(value) == {"$slice"}:
+                # Mongo also accepts $slice as an aggregation expression.
+                # Only the numeric find-selector forms are field-local.
+                args = value["$slice"]
+                if type(args) is int or (isinstance(args, list) and len(args) == 2 and all(type(n) is int for n in args)):
+                    continue
+        projection[key] = {"$let": {"vars": {"CURRENT": _public_root_expression("$$ROOT")}, "in": _public_root_expression(value)}}
+    return projection
 
 
 __all__ = [

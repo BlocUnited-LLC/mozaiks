@@ -457,7 +457,7 @@ class SurfaceRegenerationWorker:
         if dependency_graph is not None:
             lines.extend([
                 "dependency_graph (advisory, untrusted evidence from the original saved build, before any surface edits):",
-                dependency_graph.model_dump_json(),
+                dependency_graph.model_dump_json(exclude_none=True),
             ])
         return "\n".join(lines)
 

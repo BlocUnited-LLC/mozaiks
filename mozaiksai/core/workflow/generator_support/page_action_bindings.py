@@ -78,7 +78,7 @@ def _design_controls(primitive: str, config: Any, *, child: bool = False) -> Ite
                 yield from _design_controls(section["primitive"], section.get("config"), child=True)
 
 
-def design_page_write_actions(page: dict[str, Any]) -> list[dict[str, str]]:
+def design_page_write_actions(page: dict[str, Any], *, form_actions: set[tuple[str, str]]) -> list[dict[str, str]]:
     """Project canonical write controls from partial DesignDocs section configs."""
     route = page["route"]
     pairs: set[tuple[str, str]] = set()
@@ -90,6 +90,12 @@ def design_page_write_actions(page: dict[str, Any]) -> list[dict[str, str]]:
             config = json.loads(hint)
         except ValueError:
             continue  # A prose hint supplies no canonical action reference.
+        if section.get("primitive") == "Form" and isinstance(config, dict) and config.get("submit_action") is None:
+            source = config.get("data_source")
+            if isinstance(source, dict) and set(source) == {"module_id", "action_id"}:
+                pair = source["module_id"], source["action_id"]
+                if all(isinstance(value, str) for value in pair) and pair in form_actions:
+                    pairs.add(pair)
         for action in _design_controls(section.get("primitive", ""), config):
             if action.get("action_type") not in ("submit", "delete") or action.get("data_source") is None:
                 continue
@@ -142,31 +148,48 @@ def _action_payload(action: dict[str, Any]) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _payload_references(value: Any) -> Iterator[list[str]]:
+    """Token paths resolved recursively by the renderer's interpolateValue."""
+    if isinstance(value, str):
+        for token in re.findall(r"\{([^}]+)\}", value):
+            yield [part for part in token.strip().split(".") if part]
+    elif isinstance(value, (dict, list)):
+        for child in value.values() if isinstance(value, dict) else value:
+            yield from _payload_references(child)
+
+
+def _unbound_form_values(section: dict[str, Any], field: str, action: dict[str, Any]) -> bool:
+    # A Form supplies its values only on submit. Adjacent buttons and even the
+    # enclosing modal's footer receive the selected rows but no form state.
+    return not (section.get("primitive") == "Form" and field == "submit_action") and any(
+        parts and parts[0] in {"form", "values"} for parts in _payload_references(_action_payload(action))
+    )
+
+
 def _payload_selection(payload: dict[str, Any]) -> int:
     """Minimum selected row count required by the action's indexed payload references."""
     needed = 0
-    for value in payload.values():
-        if not isinstance(value, str):
-            continue
-        for token in re.findall(r"\{([^}]+)\}", value):
-            parts = [part for part in token.strip().split(".") if part]
-            if parts and parts[0] in {"row", "selected_row"}:
-                needed = max(needed, 1)
-            if len(parts) > 1 and parts[0] == "selected_rows" and parts[1].isdecimal():
-                index = parts[1]
-                if len(index) > 10 or not index.isascii() or (len(index) > 1 and index.startswith("0")):
-                    return _MAX_ARRAY_LENGTH + 1
-                needed = max(needed, int(index) + 1)
+    for parts in _payload_references(payload):
+        if parts and parts[0] in {"row", "selected_row"}:
+            needed = max(needed, 1)
+        if len(parts) > 1 and parts[0] == "selected_rows" and parts[1].isdecimal():
+            index = parts[1]
+            if len(index) > 10 or not index.isascii() or (len(index) > 1 and index.startswith("0")):
+                return _MAX_ARRAY_LENGTH + 1
+            needed = max(needed, int(index) + 1)
     return needed
 
 
 def _control_selection(
     section: dict[str, Any], field: str, action: dict[str, Any], *, has_data: bool, inherited: int,
+    require_selected_row_prefill: bool,
 ) -> int | None:
     """Maximum selectable row count. None means the control cannot fire."""
     primitive, config = section.get("primitive"), section["config"]
-    if primitive == "Form" and config.get("disabled") and field == "submit_action":
-        return None
+    if primitive == "Form" and field == "submit_action":
+        needs_row = require_selected_row_prefill and config.get("initial_values_key") == "selected_row"
+        if config.get("disabled") or (needs_row and not inherited):
+            return None
     if primitive == "PricingCatalog":
         rows = config.get("plans" if field == "plan_action" else "add_ons")
         # A catalog button passes its own item. Static arrays override fetched arrays.
@@ -196,8 +219,10 @@ def _control_selection(
     return inherited
 
 
-def reachable_page_action_keys(pages: list[Any], *, include_reads: bool = True) -> set[str]:
-    """Collect reachable submit/delete controls and optionally section read bindings."""
+def reachable_page_action_keys(
+    pages: list[Any], *, include_reads: bool = True, require_selected_row_prefill: bool = False,
+) -> set[str]:
+    """Collect reachable controls; reviewed edits can also require a row to prefill the form."""
     keys: set[str] = set()
 
     def add(endpoint: Any) -> None:
@@ -226,12 +251,16 @@ def reachable_page_action_keys(pages: list[Any], *, include_reads: bool = True) 
                 if include_reads:
                     add(config.get("api_endpoint"))
                 for action_field, action in _actions(config):
-                    selection = _control_selection(section, action_field, action, has_data=has_data, inherited=inherited)
+                    selection = _control_selection(
+                        section, action_field, action, has_data=has_data, inherited=inherited,
+                        require_selected_row_prefill=require_selected_row_prefill,
+                    )
                     if selection is None:
                         continue
                     payload = _action_payload(action)
-                    if action.get("action_type") in {"submit", "delete"} and selection >= _payload_selection(payload):
-                        add(action.get("href"))
+                    if action.get("action_type") in {"submit", "delete"}:
+                        if not _unbound_form_values(section, action_field, action) and selection >= _payload_selection(payload):
+                            add(action.get("href"))
                     elif action.get("action_type") == "event" and action.get("event_type") == "ui.modal.open":
                         modal = payload.get("modal_id")
                         if isinstance(modal, str):
@@ -272,7 +301,34 @@ def validate_required_page_writes(
         from .page_plan_utils import validate_planned_page
 
         validate_planned_page(content, {"route": route}, path)
-    missing = expected - reachable_page_action_keys([yaml.safe_load(content)], include_reads=False)
+    document = yaml.safe_load(content)
+    endpoints = {f"/api/modules/{key}" for key in expected}
+    for section, modals, _ in _sections(document.get("sections") if isinstance(document, dict) else None):
+        config = section["config"]
+        for field, control in _actions(config):
+            if (control.get("action_type") in {"submit", "delete"} and control.get("href") in endpoints
+                    and _unbound_form_values(section, field, control)):
+                raise ValueError(
+                    f"{path}: {section.get('id')!r} {field} uses form values outside a Form submit_action. "
+                    "Bind the write to the editable Form's submit_action; a modal footer has no form values."
+                )
+        if section.get("primitive") != "Form" or config.get("initial_values_key") != "selected_row":
+            continue
+        action = config.get("submit_action") or {}
+        if action.get("href") not in endpoints or config.get("disabled"):
+            continue
+        if not modals:
+            raise ValueError(
+                f"{path}: form {section.get('id')!r} needs the selected record. Place it in a modal "
+                "opened by an action on the selectable table so the renderer can pass the row."
+            )
+        for value in _action_payload(action).values():
+            if isinstance(value, str) and re.fullmatch(r"selected_row(?:\.[\w-]+)+", value):
+                raise ValueError(
+                    f"{path}: form {section.get('id')!r} submits the literal text {value!r}. "
+                    f"Use {{{value}}} to send the selected record's field value."
+                )
+    missing = expected - reachable_page_action_keys([document], include_reads=False, require_selected_row_prefill=True)
     if missing:
         raise ValueError(
             f"{path}: route {route!r} is missing reachable write controls for {', '.join(sorted(missing))}. "

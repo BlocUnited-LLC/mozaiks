@@ -16,8 +16,13 @@ from factory_app.workflows._shared.surface_ownership import (
     related_entity_name,
     selected_subscription_contract,
 )
+from factory_app.workflows.DesignDocs.tools.hook_accepted_module_actions import (
+    validate_implicit_revision_writes,
+)
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.artifacts import persist_summary_artifact
+from mozaiksai.core.artifacts.models import BuildRecord
+from mozaiksai.core.artifacts.summary_artifacts import verified_summary_payload
 from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.runtime.persistence.intent_loader import (
@@ -27,15 +32,19 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import compile_data_contract
 from mozaiksai.core.workflow.generator_support.data_contract_fields import (
+    canonical_write_fields,
     normalize_structured_defaults,
     validate_collection_fields,
 )
 from mozaiksai.core.workflow.generator_support.design_access_policy import (
     access_policy_sha256,
+    explicit_module_writes,
     validate_design_page_roles,
 )
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
+    CANONICAL_WRITE_OPERATIONS,
     canonical_read_actions_for_surface,
+    canonical_write_action_id,
 )
 from mozaiksai.core.workflow.generator_support.module_role_grants import (
     PackAuthorization,
@@ -69,32 +78,77 @@ class _AccessPolicyCancellation(BaseModel):
     ui_event_id: str | None = None
 
 
+def _workflow_review_checkpoints(surface_map: dict[str, Any], context: Any) -> list[str]:
+    surfaces = surface_map["surfaces"]
+    has_workflow = any(surface["surface_kind"] == "workflow" for surface in surfaces)
+    checkpoints = []
+    if not has_workflow:
+        intent = _cv_get(context, "change_intent") or {}
+        impact = _cv_get(context, "impact_set") or {}
+        if context.get("build_mode") != "revision" or not (
+            intent.get("requires_workflow_revision") is True
+            or "workflow_bundle" in (impact.get("affected_declarative_families") or [])
+        ):
+            return []
+        checkpoints.append("This design declares no workflow surfaces.")
+
+    for surface in surfaces:
+        kind = surface["surface_kind"]
+        events = surface.get("events_emitted") or []
+        triggers = surface.get("workflow_triggers") or []
+        facts = []
+        if events and kind in {"module", "workflow"}:
+            facts.append("Emitted events include " + ", ".join(events) + ".")
+        if triggers:
+            facts.append("Declared workflow triggers include " + ", ".join(triggers) + ".")
+        elif kind == "workflow":
+            facts.append("No workflow triggers are declared.")
+        if facts:
+            name = surface["surface_id"]
+            if kind == "workflow" and surface.get("label") and surface["label"] != name:
+                name = f"{surface['label']} ({name})"
+            checkpoints.append(f"{kind.replace('_', ' ').capitalize()} {name}. " + " ".join(facts))
+    return checkpoints
+
+
 async def _review_access_policy(
-    policy: dict[str, Any], *, experience_spec: dict[str, Any], binding: Any, context_variables: Any,
-    pack_authorization: PackAuthorization | None = None,
+    policy: dict[str, Any], *, experience_spec: dict[str, Any], surface_map: dict[str, Any],
+    binding: Any, context_variables: Any,
+    pack_authorization: PackAuthorization | None = None, data_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     page_roles = validate_design_page_roles(experience_spec, policy)
     identities = [row.model_dump() for row in (pack_authorization.identities if pack_authorization else ())]
+    module_writes = explicit_module_writes(data_contract)
     receipt = {
-        "status": "not_required", "policy_sha256": access_policy_sha256(policy, experience_spec, pack_identities=identities),
+        "status": "not_required", "policy_sha256": access_policy_sha256(
+            policy, experience_spec, pack_identities=identities, module_writes=module_writes,
+        ),
         "target_app_id": binding.target_app_id, "build_id": binding.build_id,
         "pack_identities": identities,
     }
-    empty_scope = not identities and not policy["grants"] and not any(page_roles.values())
+    empty_scope = not module_writes and not identities and not policy["grants"] and not any(page_roles.values())
     if empty_scope and not context_variables.get("design_docs_review_requested_changes"):
         return receipt
     user_id, chat_id = _cv_get(context_variables, "user_id"), _cv_get(context_variables, "chat_id")
     if not user_id or not chat_id:
-        raise ValueError("Role grants require an authenticated owner review in this chat")
+        raise ValueError("Design permissions require an authenticated owner review in this chat")
     review_id = uuid4().hex
     labels = {role["role_id"]: role["label"] for role in policy["roles"]}
-    checkpoints = [f"{role['label']} ({role['role_id']}): {role['description']}" for role in policy["roles"]]
+    checkpoints = _workflow_review_checkpoints(surface_map, context_variables)
+    checkpoints.extend(f"{role['label']} ({role['role_id']}): {role['description']}" for role in policy["roles"])
     if empty_scope:
         checkpoints.append("The revised design selects no reusable packs, grants no role permissions and has no role-gated pages.")
     checkpoints.extend(
         f"{labels[grant['role_id']]} may {', '.join(grant['actions'])} on {grant['collection']}."
         for grant in policy["grants"]
     )
+    for row in module_writes:
+        collection = f"{row['module']}.{row['collection']}"
+        if not row["actions"]:
+            checkpoints.append(f"{collection} has no canonical module write actions.")
+        for action, fields in row["actions"].items():
+            inputs = "client-editable fields " + ", ".join(fields) if fields else "no client-editable fields"
+            checkpoints.append(f"{collection} allows {action} with {inputs}.")
     checkpoints.extend(f"Selected pack {row['pack_id']} version {row['version']} ({row['digest']})." for row in identities)
     from factory_app.workflows._shared.pack_selection import rows_for_pack_choices
 
@@ -114,7 +168,7 @@ async def _review_access_policy(
     raw_response = await use_ui_tool(
         "save_design_docs_bundle",
         {
-            "title": "Review app packs and role permissions",
+            "title": "Review app packs, module writes and role permissions" if module_writes else "Review app packs and role permissions",
             "summary": "Approve the selected packs, any explicitly named managed provider, and who may perform the listed read and write actions and open each page. Available offerings are not automatically selected. People without a granted role cannot use restricted actions or pages. Login does not assign roles. Record ownership still applies.",
             "review_id": review_id, "checkpoints": checkpoints,
             "actions": [
@@ -765,6 +819,15 @@ def _validate_design_collections(
             logger.warning(f"DATA_CONTRACT_FIELD_NORMALIZED: {message}")
             field_normalizations.append(message)
         validate_collection_fields(collection, path)
+        writes = canonical_write_fields(collection)
+        if writes is not None:
+            disabled = {canonical_write_action_id(collection["entity"], op) for op in CANONICAL_WRITE_OPERATIONS if op not in writes}
+            conflicts = disabled.intersection(surface.get("owned_mutations") or [])
+            if conflicts:
+                raise ValueError(
+                    f"{path}.lifecycle.module_writes disables {sorted(conflicts)} declared in "
+                    f"{surface_id}.owned_mutations. Remove those actions or enable their operations with approved input fields."
+                )
     # One owner/entity and owner/name must identify one collection across both locations.
     list(iter_data_contract_collections(data_contract))
     for surface in surfaces.values():
@@ -984,7 +1047,9 @@ def _complete_monetization_pages(
             )
 
 
-def _experience_spec_to_yaml(experience_spec: dict[str, Any], surface_map: dict[str, Any]) -> str:
+def _experience_spec_to_yaml(
+    experience_spec: dict[str, Any], surface_map: dict[str, Any], ownership_normalizations: list | None = None,
+) -> str:
     """Generate a human-readable YAML representation of the typed ExperienceSpec.
 
     This is stored as the `content` field in DesignDocuments so that agents that
@@ -999,12 +1064,65 @@ def _experience_spec_to_yaml(experience_spec: dict[str, Any], surface_map: dict[
         "surface_map": surface_map,
         "pages": experience_spec.get("pages", []),
     }
-    return str(yaml.safe_dump(
+    content = str(yaml.safe_dump(
         doc,
         sort_keys=False,
         allow_unicode=False,
         default_flow_style=False,
     )).strip() + "\n"
+    if ownership_normalizations:
+        content += yaml.safe_dump({"ownership_normalizations": ownership_normalizations}, sort_keys=False)
+    return content
+
+
+def verified_design_summary(output: BuildRecord, *, user_id: str, build_id: str) -> dict[str, Any]:
+    summary = verified_summary_payload(output)
+    surface_map, experience = summary.get("surface_map"), summary.get("experience_spec")
+    if (not isinstance(surface_map, dict) or not isinstance(experience, dict)
+            or not output.source_chat_id or output.source_workflow != "DesignDocs"):
+        raise ValueError("Saved design is missing the source or the reviewed design surfaces")
+    review = summary.get("access_policy_review") or {}
+    if (review.get("build_id") != build_id or review.get("target_app_id") != output.app_id
+            or review.get("status") not in {"approved", "not_required"}
+            or review.get("status") == "approved" and review.get("reviewed_by") != user_id):
+        raise ValueError("The saved design review does not belong to this build and owner")
+    return summary
+
+
+def verify_generator_design_inputs(context: Any, output: BuildRecord, *, user_id: str, build_id: str) -> None:
+    """Verify the generator's loaded design against its reviewed artifact."""
+    summary = verified_design_summary(output, user_id=user_id, build_id=build_id)
+    surface_map = summary["surface_map"]
+    ui_spec = _experience_spec_to_yaml(summary["experience_spec"], surface_map, summary.get("ownership_normalizations"))
+    if (context.get("backend_design_document") != summary["backend_markdown"]
+            or context.get("experience_spec_document") != ui_spec
+            or detach(context.get("design_surface_map")) != surface_map):
+        raise ValueError("The design presented to the generator differs from its pinned input")
+
+
+async def verify_design_projections(output: BuildRecord, *, user_id: str, build_id: str) -> None:
+    """Check the target's DesignDocuments against this completed DesignDocs output at retry admission."""
+    summary = verified_design_summary(output, user_id=user_id, build_id=build_id)
+    surface_map, experience = summary["surface_map"], summary["experience_spec"]
+    expected: dict[str, dict[str, Any]] = {
+        DesignDocKinds.FRONTEND: {"content": summary.get("frontend_markdown")},
+        DesignDocKinds.DATABASE: {"content": summary.get("database_markdown")},
+        DesignDocKinds.BACKEND: {"content": summary.get("backend_markdown"), "surface_map": surface_map,
+                                 "access_policy": summary.get("access_policy"),
+                                 "access_policy_review": summary.get("access_policy_review")},
+        DesignDocKinds.UI_SCHEMA: {
+            "content": _experience_spec_to_yaml(experience, surface_map, summary.get("ownership_normalizations", [])),
+            "experience_spec": experience, "surface_map": surface_map,
+        },
+    }
+    docs = await BuilderArtifactStore().list_design_docs(app_id=output.app_id)
+    indexed = {doc["kind"]: doc for doc in docs}
+    for kind, fields in expected.items():
+        doc = indexed.get(kind, {})
+        if (not fields["content"] or doc.get("status") != "succeeded" or doc.get("user_id") != user_id
+                or doc.get("source") != {"workflow": output.source_workflow, "chat_id": output.source_chat_id}
+                or any(doc.get(key) != value for key, value in fields.items())):
+            raise ValueError(f"The {kind} design input no longer matches the saved design for this stage")
 
 
 async def save_design_doc(
@@ -1161,6 +1279,7 @@ async def save_design_docs_bundle(
         field_normalizations = _validate_design_collections(
             data_contract, surface_map, context_variables, pack_authorization=pack_authorization,
         )
+        await validate_implicit_revision_writes(context_variables, data_contract, set(pack_authorization.module_packs))
         access_policy = validate_access_policy(
             bundle.get("access_policy"), data_contract=data_contract, design_surface_map=surface_map,
             pack_authorization=pack_authorization,
@@ -1271,16 +1390,14 @@ async def save_design_docs_bundle(
             {"access_policy": access_policy}, sort_keys=False,
         ) + "```\n"
         # Generate human-readable YAML for agents that consume ui_schema as a string
-        ui_schema_content = _experience_spec_to_yaml(experience_spec, surface_map)
-        if ownership_normalizations:
-            ui_schema_content += yaml.safe_dump({"ownership_normalizations": ownership_normalizations}, sort_keys=False)
+        ui_schema_content = _experience_spec_to_yaml(experience_spec, surface_map, ownership_normalizations)
     except Exception as err:
         return _refused(context_variables, "invalid_design_docs_bundle", str(err))
 
     try:
         access_policy_review = await _review_access_policy(
-            access_policy, experience_spec=experience_spec, binding=binding, context_variables=context_variables,
-            pack_authorization=pack_authorization,
+            access_policy, experience_spec=experience_spec, surface_map=surface_map, binding=binding,
+            context_variables=context_variables, pack_authorization=pack_authorization, data_contract=data_contract,
         )
         if access_policy_review["status"] == "approve":
             if detach(context_variables.get("pack_selection")) != selection:
@@ -1352,7 +1469,7 @@ async def save_design_docs_bundle(
         source_chat_id=str(chat_id) if chat_id else None,
     )
 
-    await persist_summary_artifact(
+    design_record = await persist_summary_artifact(
         app_id=app_id,
         artifact_kind="design_docs",
         artifact_key="design_docs",
@@ -1374,6 +1491,10 @@ async def save_design_docs_bundle(
         revision_mode=str(build_mode or "").strip().lower() == "revision",
         input_artifact_kinds=("concept",),
     )
+    if isinstance(context_variables, dict):
+        context_variables["design_docs_artifact_version_id"] = design_record.id
+    else:
+        context_variables.set("design_docs_artifact_version_id", design_record.id)
 
     await _mark_design_docs_status(
         store=store,

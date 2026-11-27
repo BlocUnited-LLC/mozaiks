@@ -333,6 +333,7 @@ class JourneyOrchestrator:
                     context_variables=extra_fields,
                     trigger_meta={"trigger_source": "run_complete"},
                     source_chat_id=chat_id,
+                    journey_parent_chat_id=chat_id,
                 )
                 created_new = True
             logger.info(

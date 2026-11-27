@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -10,6 +11,7 @@ from ag2.knowledge import MemoryKnowledgeStore
 from ag2.network import EV_CONTEXT_SET, EV_PACKET, Hub
 
 from mozaiksai.core.adapters.ag2_network_runner import (
+    AdmittedBatchDispatch,
     AG2NetworkRunner,
     AG2NetworkRunnerRequest,
     _resume_pending_agent_turns,
@@ -23,6 +25,43 @@ from mozaiksai.core.workflow.context.authority import (
 )
 from tests.test_ag2_network_execution_alignment import _DeterministicAgent
 from tests.test_task_batch_recovery import _config, _context, _request, _runner
+
+
+@pytest.mark.asyncio
+async def test_interrupted_admitted_batch_keeps_wal_and_cannot_repeat_workers_on_resume():
+    store = MemoryKnowledgeStore()
+    dispatches = []
+    policy = build_context_authority_policy(
+        workflow_name="VerifiedRetry", definitions={"results": {"type": "object", "source": "computed"}},
+        task_batch_context_keys={"results"},
+    )
+    planner = _DeterministicAgent("Planner", "should not run")
+    bridge = ContextVariablesBridge({}, authority_policy=policy)
+    planner._mozaiks_context_bridge = bridge
+
+    async def interrupted(channel):
+        dispatches.append(channel)
+        with _workflow_tool_invocation(bridge, writer_id=TASK_BATCH_WRITER):
+            bridge.set("results", {"in_progress": "services"})
+        await checkpoint_agent_context()
+        raise asyncio.CancelledError
+
+    def request(resume):
+        return AG2NetworkRunnerRequest(
+            workflow_name="VerifiedRetry", chat_id="chat", app_id="app", agents={"Planner": planner},
+            initial_agent_name="Planner", initial_message=None if resume else "Continue",
+            transition_rules=[{"source_agent": "Planner", "target_agent": "terminate", "transition_type": "after_turn"}],
+            knowledge_store=store, resume_existing_only=resume, context_authority_policy=policy,
+            admitted_batch=None if resume else AdmittedBatchDispatch("Planner", interrupted),
+        )
+
+    with pytest.raises(asyncio.CancelledError):
+        await AG2NetworkRunner().run(request(False))
+    result = await AG2NetworkRunner().run(request(True))
+    assert result.status is RunStatus.FAILED and result.error == "interrupted_admitted_task_batch"
+    assert dispatches == [result.channel_id] and not planner.ask_calls
+    assert result.context_variables["results"] == {"in_progress": "services"}
+    assert not any(event["event_type"] == EV_PACKET for event in result.wal)
 
 
 @pytest.mark.asyncio

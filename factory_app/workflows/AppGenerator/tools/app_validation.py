@@ -63,6 +63,7 @@ from factory_app.workflows.AppGenerator.tools.task_integrity import (
     artifact_snapshot_digest,
     planned_artifact_diagnostics,
 )
+from factory_app.workflows.AppGenerator.tools.workflow_result_writes import workflow_result_files
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.artifacts.content_store import ContentNotFoundError
 from mozaiksai.core.runtime.app.auth_contract import AppAuthContractError
@@ -1485,6 +1486,19 @@ def validate_workflow_integration_contract(
                 "error": message,
                 "fix_suggestion": "Hydrate the pinned workflow bundle before validating this app build.",
             }],
+            "warnings": [],
+        }
+    try:
+        result_changes = workflow_result_files(generated_files, metadata)
+        if result_changes:
+            raise ValueError(f"Missing compiled workflow result bindings in {sorted(result_changes)}")
+    except (ValueError, yaml.YAMLError) as exc:
+        return {
+            "contract_version": "1.0",
+            "passed": False,
+            "checks": [_check_result(check_id="workflow_result_write", passed=False, message=str(exc))],
+            "failed_tests": [{"test": "workflow_result_write", "error": str(exc),
+                              "fix_suggestion": "Reconcile the module and its result action with the pinned workflow plan."}],
             "warnings": [],
         }
     if not metadata:

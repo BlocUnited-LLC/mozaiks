@@ -20,6 +20,7 @@ from factory_app.workflows._shared.subscription_contract_context import (
     concept_requires_contract,
     selected_feature_gates,
     subscription_assignment_store,
+    subscription_design_context,
     validate_module_contract_updates,
 )
 from mozaiksai.core.artifacts import persist_summary_artifact
@@ -643,7 +644,7 @@ async def save_subscription_contract(
     context_variables: Annotated[Any | None, "Runtime context with structured output"] = None,
 ) -> dict[str, Any]:
     output = _extract_output(context_variables)
-    if not isinstance(output, dict):
+    if context_variables is None or not isinstance(output, dict):
         # Without a declared review_status the outcome validator discards the
         # payload as unrecognised and the reason is lost.
         return {
@@ -674,8 +675,9 @@ async def save_subscription_contract(
         output = {**output, "contract_required": True}
 
     try:
-        normalized = normalize_subscription_contract(output, context_variables)
-        validate_module_contract_updates(normalized, context_variables)
+        design_context = await subscription_design_context(context_variables)
+        normalized = normalize_subscription_contract(output, design_context)
+        validate_module_contract_updates(normalized, design_context)
         page_conflict = (
             _page_inventory_conflict(normalized, context_variables) if binding.phase == "genesis" else None
         )
@@ -698,6 +700,17 @@ async def save_subscription_contract(
             return _request_changes(
                 context_variables, required_by_concept, source="concept_monetization_intent",
             )
+
+    plans = (normalized.get("subscription_config_file") or {}).get("plans", [])
+    if not chat_id and any(plan.get("price") is not None for plan in plans):
+        _cv_set(context_variables, "subscription_contract", None)
+        _cv_set(context_variables, "subscription_contract_files", [])
+        _cv_set(context_variables, "subscription_contract_review_status", "blocked")
+        return {
+            "success": False,
+            "review_status": "blocked",
+            "error": "A recurring plan price requires an owner review session.",
+        }
 
     autonomous_no_contract = (
         _cv_get(context_variables, "coding_participation") == "autonomous"
@@ -745,6 +758,7 @@ async def save_subscription_contract(
         normalized["review_response"] = review_response
 
     try:
+        design_id = _cv_get(context_variables, "design_docs_artifact_version_id")
         artifact = await persist_summary_artifact(
             app_id=str(app_id),
             artifact_kind="subscription_contract",
@@ -754,9 +768,13 @@ async def save_subscription_contract(
             source_chat_id=str(chat_id) if chat_id else None,
             author_user_id=str(user_id) if user_id else None,
             revision_mode=str(build_mode or "").strip().lower() == "revision",
-            input_artifact_kinds=("concept", "design_docs"),
+            input_artifact_kinds=("concept",) if design_id else ("concept", "design_docs"),
+            canonical_inputs_version={"design_docs": design_id} if design_id else None,
         )
-        _cv_set(context_variables, "subscription_contract_artifact_version_id", artifact.id)
+        if isinstance(context_variables, dict):
+            context_variables["subscription_contract_artifact_version_id"] = artifact.id
+        else:
+            context_variables.set("subscription_contract_artifact_version_id", artifact.id)
     except Exception as exc:
         logger.warning("[SubscriptionContractDesigner] Artifact persistence failed: %s", exc)
         raise

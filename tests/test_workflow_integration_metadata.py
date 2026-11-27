@@ -320,6 +320,34 @@ def test_same_build_workflow_output_precedes_revision_baseline():
     store.get_build_record.assert_awaited_once_with(app_id="generated-app", build_record_id="new")
 
 
+@pytest.mark.parametrize("damage", ["newer_same_build_export", "foreign_binding", "wrong_owner", None])
+def test_rebuilt_workflow_handoff_is_the_exact_owned_export(damage):
+    context = factory_context({"artifact_kind": "app_bundle", "artifact_version_id": "handed-off", "user_id": "owner",
+                               "revision_source_artifact_version_id": "old-app", "upstream_workflow_bundle_artifact_version_id":
+                               "newer" if damage == "newer_same_build_export" else "handed-off"})
+    record = _record("handed-off", {**context["run_build_binding"], "workflow_integration_metadata": _metadata()})
+    record.source_workflow = "AgentGenerator"
+    record.source_chat_id = "completed-workflow-chat"
+    record.commit_metadata.source_workflow = record.source_workflow
+    record.commit_metadata.source_chat_id = record.source_chat_id
+    record.commit_metadata.author_user_id = "other-owner" if damage == "wrong_owner" else "owner"
+    if damage == "foreign_binding":
+        record.commit_metadata.metadata["build_id"] = "another-build"
+    store = _FakeArtifactStore(record)
+    store.get_build_record = AsyncMock(return_value=record)
+    if damage:
+        with pytest.raises(ValueError, match="exact workflow handoff"):
+            asyncio.run(hydrate_workflow_integration_context_from_latest_artifact(context, artifact_store=store))
+        assert context["workflow_integration_metadata"] is None
+        if damage == "newer_same_build_export":
+            store.get_build_record.assert_not_awaited()
+    else:
+        result = asyncio.run(hydrate_workflow_integration_context_from_latest_artifact(context, artifact_store=store))
+        assert result["artifact_version_id"] == "handed-off"
+        context["artifact_version_id"] = "new-app-draft"
+        assert workflow_integration_source_error(context) is None
+
+
 @pytest.mark.asyncio
 async def test_new_workflow_result_is_selected_by_the_runtime_build_identity(monkeypatch):
     from mozaiksai.core.workflow.context.schema import ContextVariableDefinition
