@@ -110,8 +110,7 @@ Canonical ownership:
 | `factory_app/build_context/{context_name}/context.yaml` | Factory layer — named build-context registries for static catalogs, contracts, reusable packs, and templates |
 | `factory_app/refinement_harness/` | Factory layer — declarative builder harness pack: checkpoints, classifier prompts, routing policies, context tools |
 | `factory_app/app/` | Studio first-party app bundle — pages, modules, brand, config loaded by the Studio host; not a synonym for the Factory layer |
-| `factory_app/app/ui/pages/custom/studio/` | Studio management UI components |
-| `factory_app/app/admin/` | Admin portal layer — `admin_registry.yaml` declares pages, `admin/index.js` registers components, `admin/pages/` holds custom admin page React files |
+| `factory_app/app/admin/` | Admin portal layer — `admin_registry.yaml` declares pages, `admin/index.js` registers components, `admin/pages/` holds the custom admin page React files, which are the Studio management UI |
 | `factory_app/app/modules/factory_control_plane/` | Studio identity module only — no backend actions |
 | `chat-ui/src/admin/` | Shared core AdminPortal rendered from app-declared registries; Studio owns its custom management extensions |
 | `platform/` | Repo-local infrastructure assets only — not an app workspace |
@@ -196,7 +195,7 @@ Examples:
 
 - `factory_app/build_context/AppGenerator/file_contracts.yaml`
 - `factory_app/build_context/AgentGenerator/ag2_network_patterns.yaml`
-- `factory_app/build_context/Communications/context.yaml`
+- `factory_app/build_context/notifications/context.yaml`
 - `workspace/build_context/mozaikspay/context.yaml`
 - `workspace/build_context/mozaikspay/contract.yaml`
 

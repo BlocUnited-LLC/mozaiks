@@ -130,7 +130,7 @@ Customer-facing terminology follows a different layer:
 
 1. **Framework/platform mode** — `mozaiksai.hosts.runtime`, `mozaiksai.hosts.platform`, `mozaiksai/`, `chat-ui/`, `web_shell/`, repo-local infrastructure/packaging
 2. **Factory mode** — `factory_app/workflows/`, `factory_app/refinement_harness/` — the builder/generator workflows, agent configs, structured outputs, and refinement harness
-3. **Studio mode** — `mozaiksai.hosts.studio`, `factory_app/app/ui/pages/custom/studio/`, `factory_app/app/admin/`, `factory_app/app/modules/factory_control_plane/`, `chat-ui/src/admin/` — the management interface that surfaces Factory capabilities
+3. **Studio mode** — `mozaiksai.hosts.studio`, `factory_app/app/admin/`, `factory_app/app/modules/factory_control_plane/`, `chat-ui/src/admin/` — the management interface that surfaces Factory capabilities
 4. **Hosted product contract mode** — contracts that external hosted product workspaces consume; concrete hosted-product hosts live in those product workspaces
 
 ---
@@ -285,7 +285,7 @@ Note: `factory_app/` as a directory co-locates the Factory layer (`workflows/`, 
 **Key files:**
 - `mozaiksai.hosts.studio`
 - `factory_app/app/` (first-party Studio app bundle — pages, modules, brand, config)
-- `factory_app/app/ui/pages/custom/studio/`
+- `factory_app/app/admin/pages/` (Studio management UI pages)
 - `factory_app/app/modules/factory_control_plane/` (module identity plus a stub backend handler only — no actions, capabilities, or behavior)
 - `chat-ui/src/admin/`
 

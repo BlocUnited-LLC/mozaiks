@@ -20,8 +20,7 @@ This repo is the canonical runtime/platform/factory repo.
   `factory_app/workflows/{WorkflowName}/`; generated app bundles do not contain
   factory catalogs.
 - `factory_app/app/` is the Studio first-party app bundle — pages, modules, brand, config loaded by the Studio host.
-- `factory_app/app/ui/pages/custom/studio/` contains the Studio management UI.
-- `factory_app/app/admin/` is the admin portal layer — `admin_registry.yaml` declares pages, `admin/index.js` registers components, `admin/pages/` holds custom admin page React files.
+- `factory_app/app/admin/` is the admin portal layer — `admin_registry.yaml` declares pages, `admin/index.js` registers components, `admin/pages/` holds the custom admin page React files, which are the Studio management UI.
 - `factory_app/app/modules/factory_control_plane/` is a Studio identity stub only — no backend, no logic.
 - `factory_app/` as a directory co-locates both concerns; it is not a synonym for either.
 - `platform/` contains repo-local infrastructure assets only. It is not an app workspace.
@@ -47,7 +46,7 @@ Working modes:
 
 1. **Framework/platform mode** — work on runtime, platform host, app shell contracts and shared `chat-ui/src/admin/` surfaces, package/install flows, and repo-local infrastructure
 2. **Factory mode** — work on `factory_app/workflows/`, `factory_app/refinement_harness/` — builder/generator workflows, agent configs, structured outputs, refinement harness
-3. **Studio mode** — work on `mozaiksai/hosts/studio.py`, `factory_app/app/ui/pages/custom/studio/`, `factory_app/app/admin/`, `factory_app/app/modules/factory_control_plane/` — the management interface that surfaces Factory capabilities
+3. **Studio mode** — work on `mozaiksai/hosts/studio.py`, `factory_app/app/admin/`, `factory_app/app/modules/factory_control_plane/` — the management interface that surfaces Factory capabilities
 4. **Hosted product contract mode** — work on contracts that external hosted product workspaces consume; concrete hosted-product hosts live in those product workspaces
 
 ## Pre-Production Cleanup Policy
@@ -153,8 +152,7 @@ Deterministic app behavior belongs in generated app/module contracts hosted by `
 | Port / contract | `mozaiksai/core/ports/` |
 | AG2 tool function | `mozaiksai/core/workflow/` |
 | First-party Studio bundle | `factory_app/app/` |
-| First-party Studio UI (Studio management) | `factory_app/app/ui/pages/custom/studio/` |
-| First-party admin/Studio pages | `factory_app/app/admin/pages/` |
+| First-party admin and Studio management UI pages | `factory_app/app/admin/pages/` |
 | Admin portal registry | `factory_app/app/admin/admin_registry.yaml` |
 | Shared factory workflows | `factory_app/workflows/` |
 | Factory bundle-quality scorers and regression eval | `factory_app/eval/` |
