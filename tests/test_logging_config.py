@@ -184,3 +184,233 @@ def test_json_formatter_handles_opaque_websocket_extra_without_raw_error_output(
     assert rendered["extra"]["websocket"] == "<Connection>"
     assert "synthetic-credential" not in rendered["msg"]
     assert "***REDACTED***" in rendered["msg"]
+
+
+# ---------------------------------------------------------------------------
+# Audit fallback: the rendered output must keep the sanitized evidence (#1003)
+# ---------------------------------------------------------------------------
+
+_DRIVER_SECRET = "SECRET-IN-DRIVER-ERROR"
+_DIGEST = "a" * 64
+
+
+class _FailingCollection:
+    async def insert_one(self, document):
+        raise RuntimeError(f"insert failed: payload={_DRIVER_SECRET}")
+
+
+class _FakeMongoClient:
+    """Subscriptable stand-in: client[database][collection] -> collection."""
+
+    def __init__(self, collection):
+        self._collection = collection
+
+    def __getitem__(self, _database):
+        return {"audit_log": self._collection}
+
+    def __class_getitem__(cls, _item):
+        return cls
+
+
+def _fallback_message(rendered: str) -> str:
+    """The human-readable message of the first rendered fallback line.
+
+    JSON output also carries the whole audit document (unchanged by design), so
+    checks about what the readable line includes look at ``msg`` only.
+    """
+
+    import json
+
+    first = rendered.strip().splitlines()[0]
+    if first.startswith("{"):
+        return json.loads(first)["msg"]
+    return first.split("  (audit_logger.py")[0]
+
+
+def _billing_shaped_record(**overrides):
+    """An AuditRecord shaped like the billing fulfilment record (hosts/routers/billing.py)."""
+
+    from mozaiksai.core.audit.audit_logger import AuditEventKind, AuditRecord
+
+    fields = {
+        "kind": AuditEventKind.ADMIN_WRITE,
+        "actor_id": "user-7",
+        "app_id": "app-1",
+        "tenant_id": "tenant-3",
+        "workspace_id": "ws-4",
+        "resource": "billing.fulfillment",
+        "action": "applied",
+        "inputs_hash": _DIGEST,
+        "outcome": "ok",
+        "extra": {"command_id": "cmd-1", "event_type": "tokens.granted", "source": "hosted-billing"},
+    }
+    fields.update(overrides)
+    return AuditRecord(**fields)
+
+
+def _denied_module_action_record(**overrides):
+    """An AuditRecord shaped like a denied module action (ModuleExecutor._emit_dispatch_audit)."""
+
+    from mozaiksai.core.audit.audit_logger import AuditEventKind, AuditRecord
+
+    fields = {
+        "kind": AuditEventKind.MODULE_ACTION_FAIL,
+        "actor_id": "user-7",
+        "app_id": "app-1",
+        "tenant_id": "tenant-3",
+        "workspace_id": "ws-4",
+        "resource": "contacts",
+        "action": "create_contact",
+        "outcome": "denied",
+        "error": "PERMISSION_DENIED",
+        "extra": {"dispatch": {"module": "contacts", "action": "create_contact", "outcome": "denied"}},
+    }
+    fields.update(overrides)
+    return AuditRecord(**fields)
+
+
+def _render_audit_fallback(
+    monkeypatch, formatter, *, collection_available: bool, record=None
+) -> str:
+    """Run the real AuditLogger and return what a handler with ``formatter`` writes."""
+
+    import asyncio
+    import io
+
+    from mozaiksai.core import core_config
+    from mozaiksai.core.audit.audit_logger import AuditLogger
+
+    client = _FakeMongoClient(_FailingCollection()) if collection_available else None
+    monkeypatch.setattr(core_config, "get_mongo_client", lambda: client)
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(formatter)
+    audit_logger = logging_config.get_core_logger("audit")
+    previous_level = audit_logger.level
+    audit_logger.setLevel(logging.INFO)
+    audit_logger.addHandler(handler)
+    try:
+        asyncio.run(AuditLogger().log(record or _billing_shaped_record()))
+    finally:
+        audit_logger.removeHandler(handler)
+        audit_logger.setLevel(previous_level)
+    return stream.getvalue()
+
+
+_FORMATTERS = pytest.mark.parametrize(
+    "make_formatter",
+    [lambda: PrettyConsoleFormatter(no_color=True), logging_config.ProductionJSONFormatter],
+    ids=["pretty", "json"],
+)
+_FALLBACK_PATHS = pytest.mark.parametrize(
+    "collection_available", [False, True], ids=["no-collection", "insert-failure"]
+)
+
+
+@_FALLBACK_PATHS
+@_FORMATTERS
+@pytest.mark.parametrize(
+    ("make_record", "evidence"),
+    [
+        (
+            _billing_shaped_record,
+            ("admin.write", "user-7", "app-1", "tenant-3", "ws-4", "billing.fulfillment", "applied", _DIGEST, "hosted-billing"),
+        ),
+        (
+            _denied_module_action_record,
+            ("module.action.fail", "user-7", "app-1", "tenant-3", "ws-4", "contacts", "create_contact", "PERMISSION_DENIED"),
+        ),
+    ],
+    ids=["billing-record", "denied-module-action"],
+)
+def test_audit_fallback_keeps_sanitized_evidence_in_rendered_output(
+    monkeypatch, make_formatter, collection_available, make_record, evidence
+) -> None:
+    rendered = _render_audit_fallback(
+        monkeypatch, make_formatter(), collection_available=collection_available, record=make_record()
+    )
+
+    for item in evidence:
+        assert item in rendered, f"{item!r} missing from the rendered fallback:\n{rendered}"
+
+
+@_FALLBACK_PATHS
+@_FORMATTERS
+def test_audit_fallback_renders_the_error_code_of_a_denied_module_action(
+    monkeypatch, make_formatter, collection_available
+) -> None:
+    rendered = _render_audit_fallback(
+        monkeypatch,
+        make_formatter(),
+        collection_available=collection_available,
+        record=_denied_module_action_record(),
+    )
+
+    assert "error=PERMISSION_DENIED" in _fallback_message(rendered)
+
+
+@_FORMATTERS
+def test_audit_insert_failure_does_not_render_raw_driver_exception_text(
+    monkeypatch, make_formatter
+) -> None:
+    rendered = _render_audit_fallback(monkeypatch, make_formatter(), collection_available=True)
+
+    assert "AUDIT_WRITE_FAIL" in rendered
+    assert _DRIVER_SECRET not in rendered
+
+
+@_FALLBACK_PATHS
+@_FORMATTERS
+def test_audit_fallback_leaves_out_values_that_are_not_safe_tokens(
+    monkeypatch, make_formatter, collection_available
+) -> None:
+    secret = "sk-live-secret-in-free-text"
+    record = _denied_module_action_record(
+        chat_id="chat-9" + chr(10) + "FORGED-LINE",
+        error="Permission denied for " + secret,
+        extra={
+            "source": "bad source " + secret,
+            "dispatch": {"params": secret},  # arbitrary content under a key the fallback never reads
+        },
+    )
+
+    rendered = _render_audit_fallback(
+        monkeypatch, make_formatter(), collection_available=collection_available, record=record
+    )
+
+    message = _fallback_message(rendered)
+    assert "tenant=tenant-3" in message  # the safe evidence is still there
+    assert "FORGED-LINE" not in message
+    assert "Permission denied" not in message
+    assert secret not in message
+    # The readable line stays a single line; nothing forged can start a new one.
+    assert chr(10) not in message
+
+
+def test_audit_fallback_renders_only_the_listed_fields(monkeypatch) -> None:
+    rendered = _render_audit_fallback(
+        monkeypatch,
+        PrettyConsoleFormatter(no_color=True),
+        collection_available=False,
+        record=_billing_shaped_record(),
+    )
+
+    message = _fallback_message(rendered)
+    assert "source=hosted-billing" in message
+    for unlisted in ("cmd-1", "tokens.granted", "command_id", "trace", "model", "paths"):
+        assert unlisted not in message
+
+
+def test_audit_fallback_renders_nothing_extra_for_a_minimal_record(monkeypatch) -> None:
+    from mozaiksai.core.audit.audit_logger import AuditEventKind, AuditRecord
+
+    record = AuditRecord(kind=AuditEventKind.ADMIN_ACCESS, actor_id="admin-1", resource="/admin", action="GET")
+
+    rendered = _render_audit_fallback(
+        monkeypatch, PrettyConsoleFormatter(no_color=True), collection_available=False, record=record
+    )
+
+    assert "AUDIT kind=admin.access actor=admin-1 resource=/admin action=GET outcome=ok" in rendered
+    for absent in (" digest=", " error=", " source=", " tenant=", "chat_id="):
+        assert absent not in rendered
