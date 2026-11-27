@@ -5,6 +5,8 @@ import logging
 import uuid
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field, create_model
+
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 from mozaiksai.control_plane.contracts import (
     CodingWorkerPlan,
@@ -28,14 +30,61 @@ _CHECKPOINT_EVENT = "coding_requested"
 _MODEL_VALIDATION_COMMAND_MAX_LENGTH = 240
 
 
+class _TextReplacement(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    old_text: str = Field(min_length=1, description="Exact unique substring of the original scoped file.")
+    new_text: str = Field(description="Literal replacement text; use an empty string to remove the matched text.")
+
+
+class _AnchoredFileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    replacements: list[_TextReplacement] = Field(min_length=1)
+
+    def apply(self, original: str) -> str:
+        spans = []
+        for edit in self.replacements:
+            start = original.find(edit.old_text)
+            if start < 0 or original.find(edit.old_text, start + 1) >= 0:
+                raise ValueError(f"{self.path}: old_text must match exactly once in the original scoped file")
+            if edit.old_text == edit.new_text:
+                raise ValueError(f"{self.path}: replacement makes no change")
+            spans.append((start, start + len(edit.old_text), edit.new_text))
+
+        pieces: list[str] = []
+        cursor = 0
+        for start, end, replacement in sorted(spans):
+            if start < cursor:
+                raise ValueError(f"{self.path}: replacement anchors overlap")
+            pieces.extend((original[cursor:start], replacement))
+            cursor = end
+        pieces.append(original[cursor:])
+        content = "".join(pieces)
+        if content == original:
+            raise ValueError(f"{self.path}: replacements make no change")
+        return content
+
+
+class _ProviderPlanFields(CodingWorkerPlan):
+    model_config = ConfigDict(from_attributes=True)
+
+
+# Keep all public plan fields and the complete-file format used by custom packs.
+_ProviderCodingPlan = create_model(
+    "StructuredCodingEdits", __base__=_ProviderPlanFields,
+    updated_files=(list[_AnchoredFileUpdate | FileUpdate], ...),
+)
+
+
 class StructuredOutputCodingProvider:
     """Single-shot structured-output coding provider.
 
     Implements :class:`~mozaiksai.control_plane.ports.CodingExecutionProvider`
-    with one strict structured-output model turn: the scoped file contents are
-    inlined into the prompt, the model returns a full-file-rewrite
-    :class:`CodingWorkerPlan`, and the plan is normalized and contained to the
-    explicitly scoped paths before it becomes a :class:`StagedPatchProposal`.
+    using exact replacements against the original scoped files or a custom
+    pack's complete-file output. Both forms produce the same checked
+    :class:`CodingWorkerPlan` before staging.
     """
 
     provider_id = "control_plane_coding"
@@ -72,10 +121,9 @@ class StructuredOutputCodingProvider:
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 llm_config=llm_config,
-                response_schema=CodingWorkerPlan,
+                response_schema=_ProviderCodingPlan,
             )
-            resolved_plan = self._normalize_plan(plan)
-            applied_files = self._resolve_updated_files(request=request, plan=resolved_plan)
+            resolved_plan = self._materialize_plan(request=request, plan=plan)
         except Exception as exc:
             return StagedPatchProposal(
                 proposal_id=uuid.uuid4().hex,
@@ -93,11 +141,9 @@ class StructuredOutputCodingProvider:
             rationale=resolved_plan.rationale,
             changed_files=[
                 ProposedFileChange(
-                    path=path,
-                    op="update" if path in request.files else "create",
-                    content=content,
+                    path=update.path, op="update", content=update.content,
                 )
-                for path, content in applied_files.items()
+                for update in resolved_plan.updated_files
             ],
             owned_paths=list(resolved_plan.owned_paths),
             validation_strategy_hint=resolved_plan.validation_strategy,
@@ -159,26 +205,36 @@ class StructuredOutputCodingProvider:
         return results
 
     @staticmethod
-    def _normalize_plan(plan: CodingWorkerPlan) -> CodingWorkerPlan:
-        owned_paths = []
-        seen_owned: set[str] = set()
-        for raw_path in plan.owned_paths:
-            safe = safe_artifact_relpath(raw_path)
-            if safe and safe not in seen_owned:
-                owned_paths.append(safe)
-                seen_owned.add(safe)
+    def _materialize_plan(*, request: CodingWorkerRequest, plan: CodingWorkerPlan) -> CodingWorkerPlan:
+        def scoped_path(raw: str) -> str:
+            path = safe_artifact_relpath(raw)
+            if path is None or path not in request.files:
+                raise ValueError(f"coding worker attempted to edit paths outside the explicit scoped files: {raw!r}")
+            return path
 
-        seen_updated: set[str] = set()
-        normalized_files: list[FileUpdate] = []
-        for file_update in plan.updated_files or []:
-            safe = safe_artifact_relpath(file_update.path)
-            if not safe or safe in seen_updated:
-                continue
-            normalized_files.append(FileUpdate(path=safe, content=str(file_update.content)))
-            seen_updated.add(safe)
-            if safe not in seen_owned:
-                owned_paths.append(safe)
-                seen_owned.add(safe)
+        owned_paths = [scoped_path(raw) for raw in plan.owned_paths]
+        declared = set(owned_paths)
+        if len(declared) != len(owned_paths):
+            raise ValueError("coding worker returned duplicate owned paths")
+        if not plan.updated_files:
+            raise ValueError("coding worker returned no updated_files for the scoped refinement")
+
+        updated_files = []
+        seen = set()
+        for update in plan.updated_files:
+            path = scoped_path(update.path)
+            if path in seen:
+                raise ValueError(f"coding worker returned duplicate updates for {path}")
+            if isinstance(update, _AnchoredFileUpdate):
+                if path not in declared:
+                    raise ValueError(f"anchored update outside the declared owned_paths: {path}")
+                content = update.apply(request.files[path])
+            else:
+                if path not in owned_paths:
+                    owned_paths.append(path)
+                content = update.content
+            updated_files.append(FileUpdate(path=path, content=content))
+            seen.add(path)
 
         commands = []
         for raw_command in plan.validation_commands or []:
@@ -191,37 +247,12 @@ class StructuredOutputCodingProvider:
                     command,
                 )
 
-        return plan.model_copy(
-            update={
-                "owned_paths": owned_paths,
-                "updated_files": normalized_files,
-                "validation_commands": commands,
-            }
-        )
-
-    @staticmethod
-    def _resolve_updated_files(*, request: CodingWorkerRequest, plan: CodingWorkerPlan) -> dict[str, str]:
-        if not plan.updated_files:
-            raise ValueError("coding worker returned no updated_files for the scoped refinement")
-
-        files_as_dict = {fu.path: fu.content for fu in plan.updated_files}
-        allowed_paths = set(request.files.keys())
-        invalid_paths = [path for path in files_as_dict if path not in allowed_paths]
-        if invalid_paths:
-            raise ValueError(
-                "coding worker attempted to edit paths outside the explicit scoped files: "
-                + ", ".join(sorted(invalid_paths))
-            )
-
-        if plan.owned_paths:
-            outside_owned = [path for path in files_as_dict if path not in set(plan.owned_paths)]
-            if outside_owned:
-                raise ValueError(
-                    "coding worker returned updated_files outside the declared owned_paths: "
-                    + ", ".join(sorted(outside_owned))
-                )
-
-        return {path: str(content) for path, content in files_as_dict.items()}
+        return CodingWorkerPlan.model_validate({
+            **plan.model_dump(exclude={"updated_files"}),
+            "owned_paths": owned_paths,
+            "updated_files": updated_files,
+            "validation_commands": commands,
+        })
 
     @staticmethod
     def _build_user_prompt(
@@ -254,10 +285,12 @@ class StructuredOutputCodingProvider:
             "payload_json:",
             json.dumps(payload, indent=2, sort_keys=True, default=str, ensure_ascii=False),
             "",
-            "Return a JSON object with this exact shape:",
+            "Use exact, non-overlapping replacements against the original input_files. Include enough unchanged context in old_text to identify exactly one occurrence.",
+            "A file entry may instead contain path and full content when the selected harness requires complete files.",
+            "JSON shape for anchored edits:",
             (
                 '{"summary":"...","owned_paths":["..."],'
-                '"updated_files":[{"path":"relative/path","content":"full file content"}],'
+                '"updated_files":[{"path":"relative/path","replacements":[{"old_text":"...","new_text":"..."}]}],'
                 '"validation_strategy":"e2b|docker|skip",'
                 '"validation_commands":["..."],"start_preview":false,'
                 '"needs_human_review":false,"rationale":"..."}'

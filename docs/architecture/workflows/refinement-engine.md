@@ -658,6 +658,10 @@ Current first-party coding worker path:
 - when it executes successfully, the worker returns concrete `updated_files`,
   validates the merged staged artifact workspace, and can persist a child artifact
   version for the refined bundle
+- for localized changes, the first-party structured coding prompt asks for
+  exact replacements within the verified editable files. The provider
+  materializes the complete candidate from the original source. Existing
+  custom prompts can still supply complete files to the same validation path.
 - persisted child artifact versions enter Studio review as `draft`
 - app candidates pass both the existing explicit-file acceptance gate and the
   operator-selected app build validator. Source-index checks and parent evidence

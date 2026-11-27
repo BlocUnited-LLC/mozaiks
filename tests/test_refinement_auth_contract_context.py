@@ -207,9 +207,7 @@ async def test_coding_provider_receives_auth_contract_from_real_selected_file_to
     )
     assert result.status == "completed"
     call = runner.run.await_args.kwargs
-    payload = json.loads(
-        call["user_prompt"].split("payload_json:\n", 1)[1].split("\n\nReturn a JSON object", 1)[0]
-    )
+    payload, _ = json.JSONDecoder().raw_decode(call["user_prompt"].split("payload_json:\n", 1)[1])
     scope = payload["refinement_context"]["get_artifact_workspace_scope"]
     assert scope["selected_file_contracts"] == {
         APP_AUTH_CONFIG_PATH: AppAuthContract.model_json_schema()

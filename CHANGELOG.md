@@ -131,6 +131,8 @@ This project follows a practical pre-1.0 changelog format:
 
 - Factory refinement agents can receive advisory file and dependency evidence
   tied to the verified app build they are changing.
+- Scoped editors can return exact text replacements for a local change. Studio
+  builds the candidate from the verified source and rejects ambiguous matches.
 
 - App builders can approve a background workflow to save one result on the
   private record that triggered it. The workflow plan shows the source event,

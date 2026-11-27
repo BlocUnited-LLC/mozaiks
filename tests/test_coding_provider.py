@@ -76,7 +76,7 @@ class _FakeReply:
 
 
 class _FakeAgent:
-    def __init__(self, system_prompt: str, llm_config: dict[str, Any], plan: CodingWorkerPlan) -> None:
+    def __init__(self, system_prompt: str, llm_config: dict[str, Any], plan: CodingWorkerPlan | dict) -> None:
         self.system_prompt = system_prompt
         self.llm_config = llm_config
         self.plan = plan
@@ -179,7 +179,7 @@ def test_coding_prompt_excludes_runtime_state_and_keeps_edit_inputs():
     assert "metadata" not in payload
 
 
-def _provider(plan: CodingWorkerPlan) -> StructuredOutputCodingProvider:
+def _provider(plan: CodingWorkerPlan | dict) -> StructuredOutputCodingProvider:
     return StructuredOutputCodingProvider(
         agent_factory=lambda sp, lc, *, middleware: _FakeAgent(sp, lc, plan),
         config_loader=_enabled_control_plane,
@@ -551,3 +551,105 @@ async def test_provider_execution_metadata_is_persisted(tmp_path: Path) -> None:
     assert execution["events"] == []
     persisted = artifact_store.calls[0]["commit_metadata"]["metadata"]["coding_provider"]
     assert persisted["provider_id"] == "stub_provider"
+
+def _anchored_response(path, replacements, *, owned_paths=None):
+    return {
+        **_GOOD_PLAN.model_dump(exclude={"updated_files", "owned_paths"}),
+        "owned_paths": [path] if owned_paths is None else owned_paths,
+        "updated_files": [{"path": path, "replacements": [
+            {"old_text": old, "new_text": new} for old, new in replacements
+        ]}],
+    }
+
+
+@pytest.mark.asyncio
+async def test_anchored_edits_preserve_unselected_text_and_use_original_offsets():
+    path = "ui/pages/records.yaml"
+    old = "# Crème\r\ncreate: Save\r\nedit: Save\r\ncancel: Cancel\r\n"
+    wire = _anchored_response(path, [("edit: Save", "edit: Save changes"), ("# Crème", "# Dossier")])
+    proposal = await _provider(wire).execute(_request(files={path: old}))
+
+    assert proposal.status == "completed", proposal.error
+    assert proposal.owned_paths == [path]
+    assert proposal.changed_files == [
+        ProposedFileChange(path=path, op="update", content="# Dossier\r\ncreate: Save\r\nedit: Save changes\r\ncancel: Cancel\r\n")
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("source", "replacements", "reason"), [
+    ("aaaa", [("aa", "z")], "exactly once"),
+    ("record: 42", [("reCord", "x")], "exactly once"),
+    ("abcde", [("abc", "t"), ("cde", "r")], "overlap"),
+    ("text", [("text", "text")], "no change"),
+    ("xy", [("x", "xy"), ("y", "")], "no change"),
+    ("abc", [("abc", "new"), ("new", "next")], "exactly once"),
+    ("abc", [("", "new")], "at least 1"),
+])
+async def test_invalid_anchors_refuse_entire_proposal(source, replacements, reason):
+    response = _anchored_response(_SCOPED_PATH, replacements)
+    result = await _provider(response).execute(_request(files={_SCOPED_PATH: source}))
+    assert result.status == "failed" and result.changed_files == []
+    assert reason in result.error
+
+
+@pytest.mark.asyncio
+async def test_adjacent_anchored_edits_and_empty_replacement():
+    result = await _provider(_anchored_response(_SCOPED_PATH, [("a", ""), ("bc", "c")])).execute(
+        _request(files={_SCOPED_PATH: "abc"})
+    )
+    assert result.status == "completed", result.error
+    assert result.changed_files[0].content == "c"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("damage", ["duplicate_update", "alias_duplicate", "unowned", "out_of_scope", "malformed", "invalid_yaml", "missing_owner"])
+async def test_anchored_output_keeps_scope_and_complete_file_validation(damage):
+    path = "ui/pages/records.yaml"
+    request = _request(files={path: "value: old\n"})
+    wire = _anchored_response(path, [("old", "new")])
+    item = wire["updated_files"][0]
+    if damage == "duplicate_update":
+        wire["updated_files"].append({"path": path, "content": "value: other\n"})
+    elif damage == "alias_duplicate":
+        wire["updated_files"].append({"path": "ui/./pages/records.yaml", "replacements": item["replacements"]})
+    elif damage == "unowned":
+        request.files["ui/pages/other.yaml"] = "value: old\n"
+        item["path"] = "ui/pages/other.yaml"
+    elif damage == "out_of_scope":
+        item["path"] = "ui/pages/absent.yaml"
+        wire["owned_paths"].append(item["path"])
+    elif damage == "malformed":
+        item["content"] = "value: fallback"
+    elif damage == "invalid_yaml":
+        item["replacements"][0]["new_text"] = "["
+    else:
+        wire["owned_paths"] = []
+    result = await _provider(wire).execute(request)
+    assert result.status == "failed" and result.changed_files == []
+
+
+def test_structured_provider_wire_preserves_public_plan_fields_and_closed_file_options():
+    from mozaiksai.control_plane.implementations.structured_coding_provider import (
+        _ProviderCodingPlan,
+    )
+
+    public = CodingWorkerPlan.model_json_schema()
+    wire = _ProviderCodingPlan.model_json_schema()
+    assert wire["required"] == public["required"]
+    assert wire["additionalProperties"] is False
+    opts = wire["properties"]["updated_files"]["items"]["anyOf"]
+    entries = [wire["$defs"][item["$ref"].rsplit("/", 1)[1]] for item in opts]
+    assert {tuple(item["required"]) for item in entries} == {("path", "replacements"), ("path", "content")}
+    assert all(item["additionalProperties"] is False for item in entries)
+    assert set(public["$defs"]["FileUpdate"]["properties"]) == {"path", "content"}
+
+
+@pytest.mark.asyncio
+async def test_complete_file_output_adds_omitted_in_scope_ownership():
+    plan = _GOOD_PLAN.model_copy(update={"owned_paths": ["shared.css"]})
+    request = _request(files={_SCOPED_PATH: "previous", "shared.css": "retained"})
+    proposal = await _provider(plan).execute(request)
+    assert proposal.status == "completed", proposal.error
+    assert proposal.owned_paths == ["shared.css", _SCOPED_PATH]
+    assert [change.path for change in proposal.changed_files] == [_SCOPED_PATH]
