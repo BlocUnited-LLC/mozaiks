@@ -15,6 +15,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Mozaiks installs exclude Tree-sitter 0.26.0, which can crash the process
+  while building a workspace dependency graph on Windows and Linux.
 - Notifications pack `0.1.16`: an email the SMTP server accepted no longer
   reports failure when the connection then closes badly, so a retry does not
   send it twice, and a failed send raises its own error. Group and
