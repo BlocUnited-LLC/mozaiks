@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import replace
 from typing import Any
@@ -21,7 +21,11 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.execution.middleware import TaskPromptProjection
 from mozaiksai.core.workflow.generator_support.module_revision import RetainedAskRead
 from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
-from mozaiksai.core.workflow.task_batches import optional_task_output_paths, task_evidence_digest
+from mozaiksai.core.workflow.task_batches import (
+    ReviewedTaskFiles,
+    optional_task_output_paths,
+    task_evidence_digest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -166,20 +170,47 @@ def reviewed_module_choice_prompt(
 async def run_reviewed_module_choice(
     request: AG2TaskBatchRunnerRequest, candidate: dict[str, Any], offer: tuple[str, str],
 ) -> AG2TaskBatchRunnerResult:
-    """Use the same configured agent and its ordinary provider lifecycle for either decision."""
+    return await run_reviewed_file_choice(request, candidate, offer, model_name="ReviewedModuleChoice",
+                                          prompt_projection=REVIEWED_MODULE_SYSTEM_PROMPT, author_decision="author_module")
+
+
+async def run_reviewed_file_choice(
+    request: AG2TaskBatchRunnerRequest, candidate: dict[str, Any], offer: tuple[str, str], *,
+    model_name: str, prompt_projection: TaskPromptProjection, author_decision: str,
+    edit_files: Callable[[list[dict[str, str]]], dict[str, str]] | None = None,
+) -> AG2TaskBatchRunnerResult:
+    """Let the configured author accept the exact offer or run its ordinary authoring turn."""
     models, _ = load_workflow_structured_outputs(request.workflow_name)
     digest, prompt = offer
     runner = AG2TaskBatchRunner()
-    result = await runner.run(replace(request, prompt=prompt, response_model=models["ReviewedModuleChoice"],
-                                      prompt_projection=REVIEWED_MODULE_SYSTEM_PROMPT))
+    result = await runner.run(replace(request, prompt=prompt, response_model=models[model_name],
+                                      prompt_projection=prompt_projection))
     if result.status is not RunStatus.COMPLETED:
-        return replace(result, close_reason="module_choice_failed")
+        return replace(result, output=None, close_reason="file_choice_failed")
     answer = result.output
-    if (not isinstance(answer, dict) or set(answer) != {"candidate_sha256", "decision"}
-            or answer["candidate_sha256"] != digest or answer["decision"] not in ("use_compiled", "author_module")):
-        return replace(result, status=RunStatus.FAILED, output=None, close_reason="module_choice_failed",
-                       error="Module worker did not select the exact offered candidate")
-    logger.info("Reviewed module choice task=%s candidate=%s decision=%s", request.task_id, digest, answer["decision"])
-    if answer["decision"] == "author_module":
+    allowed = {"candidate_sha256", "decision"}
+    decisions = {"use_compiled", author_decision}
+    if edit_files is not None:
+        allowed.add("copy_edits")
+        decisions.add("edit_copy")
+    if (not isinstance(answer, dict) or set(answer) - allowed or answer.get("candidate_sha256") != digest
+            or not isinstance(answer.get("decision"), str) or answer["decision"] not in decisions
+            or (answer["decision"] != "edit_copy" and answer.get("copy_edits") not in (None, []))):
+        return replace(result, status=RunStatus.FAILED, output=None, close_reason="file_choice_failed",
+                       error="Worker did not select the exact offered candidate and permitted disposition")
+    logger.info("Reviewed file choice task=%s candidate=%s decision=%s", request.task_id, digest, answer["decision"])
+    if answer["decision"] == author_decision:
         return await runner.run(request)
-    return replace(result, output=deepcopy(candidate))
+    payload = deepcopy(candidate)
+    revised = None
+    if answer["decision"] == "edit_copy" and edit_files is not None:
+        edits = answer.get("copy_edits")
+        if not isinstance(edits, list) or not edits:
+            return replace(result, status=RunStatus.FAILED, output=None, close_reason="file_choice_failed",
+                           error="Display text correction requires at least one offered field")
+        try:
+            revised = edit_files(edits)
+        except ValueError as exc:
+            return replace(result, status=RunStatus.FAILED, output=None, close_reason="file_choice_failed", error=str(exc))
+        payload["code_files"] = [{"filename": path, "content": content} for path, content in sorted(revised.items())]
+    return replace(result, output=ReviewedTaskFiles(payload, revised))

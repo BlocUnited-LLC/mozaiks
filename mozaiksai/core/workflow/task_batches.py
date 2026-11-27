@@ -100,6 +100,13 @@ _AUTHORED_FILE_LANES = ("code_files", "python_files", "database_files", "model_f
 
 
 @dataclass(frozen=True, slots=True)
+class ReviewedTaskFiles:
+    """Local selection receipt. An ordinary model response cannot construct one."""
+    payload: dict[str, Any]
+    edited_files: dict[str, str] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class _AdmittedTaskBatchStart:
     workflow_name: str
     trigger_agent: str
@@ -1220,6 +1227,7 @@ async def _run_one_task(
     code_owned_output = _code_owned_task_output(task, task_context, workflow_name=workflow_name)
     source_candidate = None
     source_offer = None
+    run_source_choice = None
     offered_files: dict[str, str] | None = None
     if (not prior_failure and code_owned_output is None and workflow_name == "AppGenerator"
             and task.get("task_type") == "module_contract"):
@@ -1254,6 +1262,39 @@ async def _run_one_task(
                 source_offer = reviewed_module_choice_prompt(
                     base_context, task, source_candidate, retained_ask_callers, compiled_evidence=evidence,
                 )
+                run_source_choice = run_reviewed_module_choice
+    elif (not prior_failure and code_owned_output is None and workflow_name == "AppGenerator"
+          and task.get("task_type") == "page_bundle"):
+        from functools import partial
+
+        from factory_app.workflows.AppGenerator.tools.reviewed_module_choice import (
+            run_reviewed_file_choice,
+        )
+        from factory_app.workflows.AppGenerator.tools.reviewed_page_choice import (
+            REVIEWED_PAGE_SYSTEM_PROMPT,
+            reviewed_page_choice_prompt,
+        )
+        from factory_app.workflows.AppGenerator.tools.reviewed_result_page_task import (
+            apply_reviewed_page_copy,
+            reviewed_result_page_task_output,
+        )
+
+        page_source = await reviewed_result_page_task_output(task, base_context, task_context)
+        if page_source is not None:
+            source_candidate = page_source.candidate
+            try:
+                normalized = _normalize_owned_page_files_from_plan(
+                    source_candidate["code_files"], task=task, base_context=task_context, plan_context=base_context,
+                    reject_api_endpoints=False,
+                )
+            except ValueError:
+                logger.info("Page source requires ordinary authoring: task=%s", task["task_id"])
+            else:
+                offered_files = {entry["filename"]: entry["content"] for entry in normalized}
+                source_offer = reviewed_page_choice_prompt(base_context, task, page_source, offered_files)
+                run_source_choice = partial(run_reviewed_file_choice, model_name="ReviewedPageChoice",
+                                            prompt_projection=REVIEWED_PAGE_SYSTEM_PROMPT, author_decision="author_page",
+                                            edit_files=partial(apply_reviewed_page_copy, page_source, offered_files))
     pack_paths = pack_owned_output_paths(base_context)
 
     async with semaphore:
@@ -1320,13 +1361,13 @@ async def _run_one_task(
                     context_authority_policy=context_authority_policy,
                     timeout_seconds=batch.execution.timeout_seconds,
                 )
-                if source_offer is not None and source_candidate is not None and not last_error:
-                    runner_result = await run_reviewed_module_choice(request, source_candidate, source_offer)
+                if source_offer is not None and source_candidate is not None and run_source_choice and not last_error:
+                    runner_result = await run_source_choice(request, source_candidate, source_offer)
                 else:
                     runner_result = await AG2TaskBatchRunner().run(request)
             if runner_result.status is not RunStatus.COMPLETED:
                 last_error = runner_result.error or runner_result.status.value
-                if runner_result.close_reason == "module_choice_failed":
+                if runner_result.close_reason == "file_choice_failed":
                     raise _TaskRejected(TaskBatchFailure(
                         task_id=str(task["task_id"]), worker_agent=agent_name, failure_kind="execution_failed",
                         error=last_error, attempts=_attempt + 1,
@@ -1339,8 +1380,15 @@ async def _run_one_task(
             # the attempt's ownership errors instead of spending a round each.
             rendered_failures: list[str] = []
             try:
-                output = _normalize_agent_reply(runner_result.output)
-                used_offer = source_offer is not None and not last_error and output == source_candidate
+                selection = runner_result.output
+                used_offer = isinstance(selection, ReviewedTaskFiles)
+                if used_offer:
+                    if source_offer is None or last_error:
+                        raise ValueError("Compiled files require a current worker offer")
+                    if selection.edited_files is not None:
+                        offered_files = selection.edited_files
+                    selection = selection.payload
+                output = _normalize_agent_reply(selection)
                 if not isinstance(output, dict):
                     output = {"agent_message": str(output)}
                 # AG2 task attempts have independent streams; preserve the candidate for repair.
@@ -1380,9 +1428,12 @@ async def _run_one_task(
                 # A page task's binding, identity and schema errors are raised
                 # together below, so its one bounded correction sees them all.
                 page_failures: list[str] = []
-                canonical_file_map = compile_authored_page_files(
-                    canonical_file_map, payload=output, context=task_context, failures=page_failures,
-                )
+                # The selected page compilation already contains resolved action endpoints.
+                # All page files still undergo final endpoint, identity and row-binding validation below.
+                if not (used_offer and task.get("task_type") == "page_bundle"):
+                    canonical_file_map = compile_authored_page_files(
+                        canonical_file_map, payload=output, context=task_context, failures=page_failures,
+                    )
                 if page_failures and str(task.get("task_type") or "").strip() != "page_bundle":
                     raise ValueError("\n".join(page_failures))
                 policies = materialize_task_module_policies(
@@ -1475,8 +1526,8 @@ async def _run_one_task(
                 if ownership_failures:
                     raise ValueError("\n".join(ownership_failures))
                 _validate_exclusive_task_paths(task, output, all_task_items)
-                if used_offer and canonical_file_map != offered_files:
-                    raise ValueError("The admitted module files differ from the worker's verified compilation offer")
+                if used_offer and {entry["filename"]: entry["content"] for entry in output["code_files"]} != offered_files:
+                    raise ValueError("The admitted files differ from the worker's verified compilation offer")
             except ValueError as exc:
                 message = str(exc)
                 deferred_failures = [failure for failure in rendered_failures if failure not in message]

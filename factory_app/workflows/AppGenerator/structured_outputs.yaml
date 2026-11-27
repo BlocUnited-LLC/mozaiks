@@ -3715,6 +3715,27 @@ models:
         type: literal
         values: [use_compiled, author_module]
         description: Select the offered compilation when it fulfills the original request in this module, or author the module through its ordinary task.
+  ReviewedPageCopyEdit:
+    type: model
+    fields:
+      section_id: {type: str, description: Stable ID from the offered list.}
+      field: {type: literal, values: [subtitle, description]}
+      expected: {type: str, description: Exact current text.}
+      replacement: {type: str, description: New plain display text for this field.}
+  ReviewedPageChoice:
+    type: model
+    fields:
+      candidate_sha256:
+        type: str
+        description: Exact digest of the accepted and proposed page evidence shown to this worker.
+      decision:
+        type: literal
+        values: [use_compiled, edit_copy, author_page]
+        description: Select the exact proposed files, correct stale display text, or author the page through the ordinary task.
+      copy_edits:
+        type: optional_list
+        items: ReviewedPageCopyEdit
+        description: Supply only for edit_copy. Copy the ID, field and expected text exactly from the offer.
   ConfigMiddlewareOutput:
     type: model
     fields:

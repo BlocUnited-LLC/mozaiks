@@ -1060,6 +1060,18 @@ It does **not** emit shell content such as header actions, profile menu items, n
 assembly validate those schemas without replacing their sections, forms, or
 bindings with planner hints. Invalid schemas receive bounded task feedback.
 Missing worker pages fail instead of being synthesized from incomplete hints.
+
+During a feature revision, a reviewed collection page can retain its accepted
+layout and Create action while adding a result column and a selected-record
+editor. Factory checks the accepted artifact, the new public action schemas,
+the approved workflow result and the page task before offering this compilation
+to AppSchemaAgent. The worker receives the owner's request, exact old and
+proposed files, their build identities, related tasks and source-matched graph
+edges. It can select the compiled files, correct existing display text that
+the new behavior makes inaccurate, or author the page using its ordinary task.
+The final files still pass the page schema, row-binding and ownership checks.
+Changes to copy require the offered section ID, field and exact original text.
+
 Generated-module capability plans declare `user_data_scope`, matching the
 runtime module field. True requires a planned `backend/account_data_handler.py`
 and its module stub; bundle validation rejects scope drift or a missing handler.

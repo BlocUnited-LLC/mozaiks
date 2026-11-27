@@ -59,13 +59,13 @@ class VerifiedResultModuleSource:
         }
 
 
-def _matches_reviewed_task(task: dict[str, Any], context: Any) -> None:
+def require_reviewed_build_task(task: dict[str, Any], context: Any) -> None:
     planned = [t for t in (context.get("app_build_plan") or {}).get("build_tasks", []) if t.get("task_id") == task.get("task_id")]
     dispatched = [t for t in context.get("app_task_batch_items") or [] if t.get("task_id") == task.get("task_id")]
     if (len(planned) != 1 or len(dispatched) != 1 or detach(dispatched[0]) != detach(task)
             or detach(planned[0]) != detach(task.get("current_build_task"))
             or any(detach(task.get(k)) != detach(v) for k, v in planned[0].items())):
-        raise ValueError("Result module compilation requires the reviewed task and its exact registered dispatch")
+        raise ValueError("Compilation requires the reviewed task and its exact registered dispatch")
 
 
 def _module_surface(context: Any, module: str) -> dict[str, Any] | None:
@@ -107,7 +107,7 @@ async def reviewed_result_module_task_output(
             or not coverage.get(module, {}).get("module_contract") or context.get("build_mode") != "revision"
             or context.get("workflow_sequence") != "design_revision" or context.get("revision_scope") != "feature"):
         return None
-    _matches_reviewed_task(task, context)
+    require_reviewed_build_task(task, context)
     source = revision_source_artifact_id(context)
     if not source or source != context.get("revision_source_artifact_version_id"):
         raise ValueError("Result module compilation requires the exact accepted revision source")
