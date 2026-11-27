@@ -257,6 +257,20 @@ class SessionStateStore:
         payload["sequence_status"] = state.sequence_status.value
         await coll.update_one({"_id": state.session_id}, {"$set": payload}, upsert=True)
 
+    async def restore_failed_stage_cursor(
+        self, *, app_id: str, user_id: str, target_app_id: str, change_id: str, revision_id: str,
+        workflow_id: str, replacement_chat_id: str, failed_chat_id: str,
+    ) -> None:
+        """Revert a partially bound retry only while it still owns this revision's cursor."""
+        coll = await self._coll()
+        await coll.update_one(
+            {"_id": self.session_id_for_scope(app_id, user_id, target_app_id),
+             "app_id": app_id, "user_id": user_id, "target_app_id": target_app_id,
+             "active_change_request_id": change_id, "active_revision_id": revision_id,
+             "current_workflow_id": workflow_id, "current_chat_id": replacement_chat_id},
+            {"$set": {"current_chat_id": failed_chat_id, "updated_at": datetime.now(UTC)}},
+        )
+
     async def consume_pending_harness_decision(self, state: SessionState, *, explanation: str) -> bool:
         """Clear precisely the decision read by this caller, once and without upsert."""
         pending = state.pending_harness_decision

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -13,7 +11,7 @@ from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
 from mozaiksai.core.workflow.ui_tools import use_ui_tool
 
-from .pattern_selection import validate_selection
+from .pattern_selection import selection_fingerprint, validate_selection
 
 
 class WorkflowPlanReviewResponse(BaseModel):
@@ -21,10 +19,6 @@ class WorkflowPlanReviewResponse(BaseModel):
     approved: StrictBool
     review_id: StrictStr
     rationale: StrictStr = Field(default="", max_length=4000)
-
-
-def _fingerprint(selection: dict[str, Any]) -> str:
-    return hashlib.sha256(json.dumps(selection, sort_keys=True).encode()).hexdigest()
 
 
 async def mermaid_sequence_diagram(
@@ -42,7 +36,7 @@ async def mermaid_sequence_diagram(
         raw = output.get("MermaidSequenceDiagram") if isinstance(output, dict) else None
     diagram = models["MermaidSequenceDiagram"].model_validate(detach(raw)).model_dump(mode="json")
     review_id = f"workflow_review_{uuid4().hex}"
-    fingerprint = _fingerprint(selection)
+    fingerprint = selection_fingerprint(selection)
     review = {"review_id": review_id, "selection_hash": fingerprint, "status": "pending"}
     context_variables.set("workflow_plan_review", review)
     context_variables.set("workflow_review_feedback", "")
@@ -61,7 +55,13 @@ async def mermaid_sequence_diagram(
                 "title": selection["pack_name"],
                 "summary": selection["pack_partition_reason"] or "Review the workflows to generate.",
                 "workflow_count": len(workflows),
-                "checkpoints": [f"{item['name']}: {item['description']}" for item in workflows]
+                "checkpoints": [f"{item['name']}: {item['description']}" for item in workflows] + [
+                    f"{item['name']} · {plan['event_type']}: {plan['agent']} can write "
+                    f"{', '.join(plan['result_write']['fields'])} through {plan['module_id']}.{plan['result_write']['action']} "
+                    f"on the {plan['result_write']['collection']} record ({plan['result_write']['record_key']}) "
+                    f"inserted by {plan['result_write']['source_action']}."
+                    for item in workflows for plan in item.get("result_write_plans", [])
+                ]
                 or ["No AI workflows. App modules and pages provide the requested functionality."],
             },
             chat_id=context_variables.get("chat_id"),
@@ -69,7 +69,7 @@ async def mermaid_sequence_diagram(
         ))
         current = validate_selection(context_variables.get("PatternSelection"), context_variables)
         current_review = detach(context_variables.get("workflow_plan_review"))
-        if current_review != review or response.review_id != review_id or _fingerprint(current) != fingerprint:
+        if current_review != review or response.review_id != review_id or selection_fingerprint(current) != fingerprint:
             raise ValueError("Workflow approval does not match the current draft")
         if response.approved is not (response.action == "approve"):
             raise ValueError("Workflow review action and approval disagree")

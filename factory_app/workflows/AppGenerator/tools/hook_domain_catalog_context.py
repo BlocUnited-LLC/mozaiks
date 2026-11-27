@@ -272,6 +272,7 @@ def _build_manifest_guard_body(
         "  4. Never write a companion contract as a raw code_files entry. Code removes an empty raw companion whose typed field is null, rejects one that carries content (put that content in the typed field), and overwrites one whose typed field is set; raw files cannot substitute for typed manifests.",
         "  5. Leave events_yaml null if the module publishes no events.",
         "  6. Leave reactions_yaml null if approved scope declares no incoming, self, platform, or workflow-triggered reaction.",
+        "     A reaction matches its declared event type. When the design requires a condition, use the reviewed event that represents it.",
         "  7. Leave notifications_yaml null if no events warrant user notifications.",
         "  8. Leave settings_yaml null if the module has no configurable behavior.",
         "  9. Leave admin_yaml null if the module needs no admin panels.",

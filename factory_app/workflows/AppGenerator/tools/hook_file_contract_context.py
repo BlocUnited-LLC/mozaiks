@@ -10,6 +10,9 @@ from typing import Any
 
 from factory_app.workflows._shared.hook_utils import update_agent_section, workflow_context_path
 from factory_app.workflows.AppGenerator.tools.app_build_plan import _ALLOWED_TASK_TYPES
+from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
+    bind_retained_feature_login,
+)
 from mozaiksai.core.runtime.persistence.adapter import PersistenceCollection
 from mozaiksai.core.runtime.persistence.naming import collection_name_for
 from mozaiksai.core.workflow.context.frozen import detach
@@ -21,7 +24,10 @@ from mozaiksai.core.workflow.generator_support.design_access_policy import (
     resolve_authored_module_access_policy,
     resolve_reviewed_page_writes,
 )
-from mozaiksai.core.workflow.generator_support.module_account_data import owns_per_user_collections
+from mozaiksai.core.workflow.generator_support.module_account_data import (
+    account_data_handler_path,
+    owns_per_user_collections,
+)
 from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     all_module_actions,
     canonical_read_actions_for_surface,
@@ -185,11 +191,38 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
                 "Constructed get_<collection> takes id and returns item; list_<collection> takes page/page_size/search and returns items/total. "
                 "Explicit reviewed read grants supply their exact code-derived permissions without changing ownership. "
                 "Absent those grants, owner-scoped reads require login and ownership without a role gate; never infer read grants from writes. "
-                "These ids establish identity, not a permission or public-access grant."
+                "These ids establish identity, not a permission or public-access grant. Factory compiles the separate internal "
+                "workflow result receivers from the pinned integration contract. Retain all approved custom reads and mutations. "
+                "An omittable input property uses required: false and nullable: false."
             )
 
     if agent_name == "AppPlanAgent":
         context = getattr(agent, "context_variables", None)
+        login: dict[str, Any] = {}
+        bind_retained_feature_login(login, context)
+        if login:
+            lines.append("Preserve these exact accepted AppBuildPlan fields: "
+                         + json.dumps({**login, "roles": []}, sort_keys=True) + ".")
+        coverage = _context_get(context, "revision_result_module_coverage") or {}
+        if coverage:
+            from factory_app.workflows.AppGenerator.tools.app_plan_review import (
+                _required_module_paths,
+            )
+
+            data = _context_get(context, "data_contract")
+            for module in sorted(coverage):
+                scoped = owns_per_user_collections(module, data)
+                owners = _required_module_paths({"capability_pack_id": module, "user_data_scope": scoped}, context)
+                schema, = owners["data_models"]
+                lines.append(
+                    f"For {module}, data_models can own only {schema}. A data_migrations task for this module "
+                    f"uses capability_pack_id and surface_id {module}, surface_kind module and data/migrations/ paths. "
+                    "A data contract is not a module or migration surface."
+                )
+                if scoped:
+                    path = account_data_handler_path(module)
+                    lines.append(f"{path} belongs to business_services when an account data handler change is required. "
+                                 "Leave inherited account export and deletion alone for a feature that does not change them.")
         experience = _context_get(context, "experience_spec", {}) or {}
         pages = experience.get("pages") or []
         if pages:
@@ -330,14 +363,13 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
                 ownership["authored"],
             ))
         lines.append(
-            "module_contract.python_stubs, downstream_python_defaults, and current_build_task.owned_paths "
-            "describe the final artifact inventory, not a request to author every file. "
-            "Implement only model-owned source; policy.py is rendered from the approved data_contract. "
-            "Do not emit a comment-only or pass stub for a code-rendered artifact. "
-            "Keep its planned path so the canonical renderer can fulfill that task's ownership."
+            "The approved plan and module_contract.python_stubs describe the final artifact inventory, not a request to author every file. "
+            "Return only model-owned paths from current_build_task.owned_paths. "
+            "Factory fulfills factory_rendered_paths from data_contract, including any acceptance criteria about the policy. "
+            "Do not emit a comment-only or pass stub for a code-rendered artifact."
         )
         policy_paths = [
-            str(path) for path in task.get("owned_paths") or []
+            str(path) for path in task.get("factory_rendered_paths", task.get("owned_paths")) or []
             if str(path).endswith("/backend/policy.py")
         ]
         lines.extend(_format_list_block(

@@ -11,7 +11,14 @@ from collections.abc import Mapping
 from datetime import date, datetime
 from typing import Any
 
-from mozaiksai.core.workflow.generator_support.module_action_inventory import entity_identifier
+from mozaiksai.core.runtime.persistence.collection_writes import (
+    DATE_FIELD_TYPES,
+    MANAGED_TIMESTAMP_FIELDS,
+    DataContractFieldError,
+    canonical_write_fields,
+    is_managed_timestamp,
+    record_id_field,
+)
 
 # One canonical logical type per storage shape. The DesignDocs structured output
 # literal, the prompt and this list must agree; tests hold them together.
@@ -19,9 +26,6 @@ CANONICAL_FIELD_TYPES: tuple[str, ...] = (
     "string", "boolean", "integer", "number", "date", "datetime", "object", "array",
 )
 STRUCTURED_FIELD_TYPES = frozenset({"object", "array"})
-DATE_FIELD_TYPES = frozenset({"date", "datetime"})
-# Record timestamps canonical writes stamp when declared as date or datetime.
-MANAGED_TIMESTAMP_FIELDS = frozenset({"created_at", "updated_at"})
 # Words that mean exactly one boolean value, however they are cased.
 _BOOLEAN_WORDS = {"true": "true", "false": "false", "yes": "true", "no": "false"}
 
@@ -29,10 +33,6 @@ _PYTHON_KINDS: dict[str, tuple[type, ...]] = {
     "string": (str,), "boolean": (bool,), "integer": (int,), "number": (int, float),
     "date": (str,), "datetime": (str,), "object": (dict,), "array": (list,),
 }
-
-
-class DataContractFieldError(ValueError):
-    """A collection field the design agent must revise; the message lists valid choices."""
 
 
 def field_type(field: Mapping[str, Any], location: str) -> str:
@@ -98,21 +98,6 @@ def _examples(kind: str) -> list[str]:
     }[kind]
 
 
-def record_id_field(collection: Mapping[str, Any], names: list[str]) -> str:
-    """The generated record id is ``<entity>_id`` when declared, else ``id``, else ``_id``.
-
-    ``search_by`` is a lookup key and may be a user-entered natural key; it is
-    never overwritten with a generated id. The owner field is stamped by the
-    runtime, so it can never be the generated id either.
-    """
-    identifier = entity_identifier(str(collection.get("entity") or ""))
-    owner_field = collection.get("owner_field")
-    for candidate in (f"{identifier}_id", "id"):
-        if candidate in names and candidate != owner_field:
-            return candidate
-    return "_id"
-
-
 def read_lookup_field(collection: Mapping[str, Any]) -> str:
     """The canonical get input addresses search_by, then declared id, then Mongo _id."""
     names = {field["name"] for field in collection.get("fields") or []}
@@ -165,11 +150,6 @@ def _as_string_default(raw: Any) -> str:
         if isinstance(decoded, str):
             return ""
     return f" and default {json.dumps(raw if isinstance(raw, str) else json.dumps(raw))!r}"
-
-
-def is_managed_timestamp(field: Mapping[str, Any]) -> bool:
-    """A created_at/updated_at date or datetime: canonical writes stamp it, whatever its default."""
-    return field.get("name") in MANAGED_TIMESTAMP_FIELDS and field.get("type") in DATE_FIELD_TYPES
 
 
 def normalize_structured_defaults(collection: Mapping[str, Any], location: str) -> list[str]:
@@ -232,6 +212,7 @@ def validate_collection_fields(collection: Mapping[str, Any], location: str) -> 
     names = [str(field.get("name") or "") for field in fields]
     if len(names) != len(set(names)) or any(not name for name in names):
         raise DataContractFieldError(f"{location}: field names must be nonempty and unique")
+    canonical_write_fields(collection)
     for field in fields:
         kind = field_type(field, location)
         # The enum's shape comes first: a non-string enum makes any default check against it moot.
@@ -271,6 +252,7 @@ __all__ = [
     "DataContractFieldError",
     "MANAGED_TIMESTAMP_FIELDS",
     "STRUCTURED_FIELD_TYPES",
+    "canonical_write_fields",
     "field_type",
     "is_managed_timestamp",
     "normalize_structured_defaults",

@@ -174,6 +174,93 @@ def test_entity_names_project_to_canonical_write_ids():
         canonical_write_action_id("Task", "list")
 
 
+def test_explicit_collection_writes_control_generated_actions_and_each_request_shape():
+    contract = _contract()
+    collection = contract["surfaces"][0]["collections"][0]
+    collection["lifecycle"]["module_writes"] = [
+        {"operation": "create", "fields": ["title", "description"]},
+        {"operation": "update", "fields": ["description"]},
+    ]
+    files = _files(contract)
+    manifest = yaml.safe_load(files[MANIFEST])
+    actions = {action["id"]: action["input_schema"] for action in manifest["actions"]}
+    assert set(actions) == {"create_task", "update_task", "get_tasks", "list_tasks"}
+    assert set(actions["create_task"]["properties"]) == {"title", "description"}
+    assert actions["create_task"]["required"] == ["title"]
+    assert set(actions["update_task"]["properties"]) == {"task_id", "description"}
+    assert actions["update_task"]["required"] == ["task_id"]
+    assert all("def delete_task(" not in files[f"{BACKEND}/{name}.py"] for name in ("handler", "service", "repo"))
+    namespace = {}
+    exec(compile(files[SCHEMAS], SCHEMAS, "exec"), namespace)
+    assert namespace["TaskCreateInput"].__annotations__.keys() == {"title", "description"}
+    assert namespace["TaskUpdateInput"].__annotations__.keys() == {"description"}
+    supplied = {"title": "Title", "description": "Edit", "priority": "high", "is_completed": True}
+    assert namespace["task_create_values"](supplied) == {
+        "title": "Title", "description": "Edit", "priority": "normal", "is_completed": False,
+    }
+    assert namespace["task_update_changes"](supplied) == {"description": "Edit"}
+    assert namespace["task_hook_values"](supplied, "update") == {"description": "Edit"}
+    assert namespace["task_hook_values"](supplied, "create") == namespace["task_create_values"](supplied)
+    surface = {"surface_id": MODULE, "surface_kind": "module", "owner": "app", "primary_entities": ["Task"]}
+    assert set(canonical_write_actions_for_surface(surface, contract)) == {"create_task", "update_task"}
+    assert materialize_module_actions(files, app_build_plan=_plan(), data_contract=contract) == {}
+
+
+def test_explicit_empty_collection_writes_leave_only_reads_and_declared_custom_actions():
+    contract = _contract()
+    contract["surfaces"][0]["collections"][0]["lifecycle"]["module_writes"] = []
+    assert set(_actions(_closed(contract=contract))) == {"get_tasks", "list_tasks"}
+    with pytest.raises(ValueError, match="remove canonical actions.*delete_task"):
+        _closed(_output([{"id": "delete_task", "handler_method": "remove_task"}]), contract)
+
+
+def test_worker_cannot_add_retained_fields_to_an_operation_with_an_explicit_allowlist():
+    contract = _contract()
+    contract["surfaces"][0]["collections"][0]["lifecycle"]["module_writes"] = [{"operation": "update", "fields": ["description"]}]
+    previous = _actions(_closed())["update_task"]
+    with pytest.raises(ValueError, match="remove input fields.*priority.*lifecycle.module_writes"):
+        _closed(_output([previous]), contract)
+
+
+async def test_explicit_write_limits_hold_after_in_place_service_hooks(tmp_path, monkeypatch):
+    from mozaiksai.core.runtime.composition.module_authority import ModuleDispatchAuthority
+    from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
+
+    contract = _contract()
+    contract["surfaces"][0]["collections"][0]["lifecycle"]["module_writes"] = [
+        {"operation": "create", "fields": ["title"]}, {"operation": "update", "fields": ["description"]},
+    ]
+    hooks = ("async def before_create_task(ctx, values):\n    values['priority'] = 'high'\n"
+             "async def before_update_task(ctx, record, changes):\n    changes['priority'] = 'high'\n")
+    files = _files(contract, {f"{BACKEND}/service.py": hooks})
+    handler, _ = _import_backend(tmp_path, monkeypatch, files, "scoped_hook_backend")
+    actions = handler.TaskManagementHandler()
+    manifest = yaml.safe_load(files[MANIFEST])["actions"]
+    assert "delete_task" not in {a["id"] for a in manifest} and not hasattr(actions, "delete_task")
+    executor = ModuleExecutor()
+    monkeypatch.setattr(executor, "_emit_dispatch_audit", AsyncMock())
+    executor.register(MODULE, actions, action_method_map={a["id"]: a["handler_method"] for a in manifest},
+                      action_schemas={a["id"]: {"input": a["input_schema"], "output": a["output_schema"]} for a in manifest})
+    storage = _RawCollection()
+    ctx = _context(storage, "author")
+    authority = ModuleDispatchAuthority(kind="authenticated_user", permission_mode="enforce", reason="test request", actor_id="author")
+
+    async def run(action, **params):
+        return await executor.execute(ModuleRequest(module=MODULE, action=action, params=params,
+                                                    app_id="app", user_id="author", authority=authority), context=ctx)
+
+    assert (await run("create_task", title="Start", priority="high")).error_code == "INVALID_PARAMS"
+    assert not storage.rows
+    assert (await run("create_task", title="Start")).success
+    assert storage.rows[0]["priority"] == "normal"
+    identity = {"task_id": storage.rows[0]["task_id"]}
+    await ctx.persistence.collection(MODULE, "tasks").update_one(identity, {"$set": {"priority": "low"}})
+    assert (await run("update_task", **identity, description="Changed", priority="high")).error_code == "INVALID_PARAMS"
+    assert (await run("update_task", **identity, description="Changed")).success
+    assert (storage.rows[0]["description"], storage.rows[0]["priority"]) == ("Changed", "low")
+    assert (await run("delete_task", **identity)).error_code == "ACTION_NOT_FOUND"
+
+
 @pytest.mark.parametrize("tenancy", ["per_user", "per_workspace", "app_wide"])
 def test_canonical_writes_are_constructed_from_the_contract(tenancy):
     actions = _actions(_closed(contract=_contract(tenancy)))

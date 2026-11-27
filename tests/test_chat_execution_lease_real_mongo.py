@@ -177,6 +177,16 @@ async def test_bridge_race_on_real_lock_loser_mutates_nothing(monkeypatch) -> No
 # 3. Cross-process exclusion: a subprocess holder blocks this process
 # ---------------------------------------------------------------------------
 
+async def test_contended_socket_turn_receives_only_direct_refusal(monkeypatch) -> None:
+    from tests.test_transport_input_handlers import _assert_contended_socket_admission
+
+    app_id, chat_id = _ids()
+    try:
+        await _assert_contended_socket_admission(monkeypatch, app_id, chat_id)
+    finally:
+        await _cleanup_resource(dl.chat_lock_resource(app_id, chat_id))
+
+
 _SUBPROCESS_HOLDER = """
 import asyncio, sys
 

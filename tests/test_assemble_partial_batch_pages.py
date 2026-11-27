@@ -140,3 +140,48 @@ def test_the_call_site_supplies_the_batch_state() -> None:
     source = inspect.getsource(assemble_app_tasks._assemble_app_tasks)
     assert "_failed_batch_task_ids" in source, "assembly must read the batch failures"
     assert "app_task_batch_results" in source
+
+
+@pytest.mark.parametrize("fault", [
+    None, "authored_overlay", "no_verified_source", "different_dependency", "prior_attempt",
+    "no_history", "admitted_output", "incomplete_failure",
+])
+def test_a_blocked_page_keeps_its_exact_verified_source_until_its_worker_runs(monkeypatch, fault):
+    from factory_app.workflows.AppGenerator.tools import assemble_app_tasks as assembly
+
+    path = "ui/pages/dashboard.yaml"
+    task_id = "task_management_page_bundle"
+    plan = _plan()
+    plan["build_tasks"][0]["depends_on"] = ["service"]
+    failure = {"task_id": task_id, "status": "failed", "failure_kind": "dependency_blocked",
+               "attempts": 0, "blocked_by": ["service"], "rejected_output": None}
+    result = {"_failed": {task_id: failure}, "_meta": {"failure_history": {task_id: [failure]}}}
+    original = "# accepted page" + chr(10) + PAGE_YAML
+    file = {"filename": path, "content": original}
+    base = {path: original}
+    if fault == "authored_overlay":
+        file["content"] += "# authored overlay" + chr(10)
+    elif fault == "no_verified_source":
+        base = {}
+    elif fault == "different_dependency":
+        failure["blocked_by"] = ["different"]
+    elif fault == "prior_attempt":
+        result["_meta"]["failure_history"][task_id].insert(0, {**failure, "attempts": 1, "failure_kind": "output_rejected"})
+    elif fault == "no_history":
+        result["_meta"]["failure_history"] = {}
+    elif fault == "admitted_output":
+        result[task_id] = {"code_files": [file]}
+    elif fault == "incomplete_failure":
+        del failure["blocked_by"]
+
+    calls = []
+    def normalize(text, **kwargs):
+        calls.append(text)
+        return text
+    monkeypatch.setattr(assembly, "normalize_planned_page_content", normalize)
+    actual = _apply_planned_page_contracts(
+        [file], plan, failed_task_ids={task_id}, revision_baseline=base,
+        context_variables={"app_task_batch_results": result},
+    )
+    assert actual == [file]
+    assert calls == ([file["content"]] if fault else [])

@@ -203,7 +203,7 @@ class ArtifactScopeProposer:
             refinement_model=refinement_request.refinement_model,
         )
         if graph_context is not None:
-            results["dependency_graph"] = graph_context.model_dump(mode="json")
+            results["dependency_graph"] = graph_context.model_dump(mode="json", exclude_none=True)
         return results
 
     @staticmethod

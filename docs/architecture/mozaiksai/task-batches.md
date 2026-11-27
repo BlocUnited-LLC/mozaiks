@@ -152,6 +152,24 @@ controlled only by `depends_on`, `concurrency`, and the batch failure policy.
 Once all ready tasks complete, the downstream parent workflow phase starts with
 the updated `result.context_key` and `status_key` context values.
 
+On an app revision, the module worker receives the retained custom action
+contracts from the selected app archive. If an unchanged schema page or route
+uses one of those reads for Ask, the worker must preserve its Ask eligibility,
+empty permissions, and absence of emitted events. An incompatible module
+response fails the worker task. The read must keep every previously required
+response key and its JSON types, including keys whose value may be null.
+During bounded recovery, the
+module worker receives a scoped `RetainedReadCorrection` response schema.
+This turn uses the same configured agent, provider and task stream. Its prompt
+contains the original request, the selected source identity and relevant graph
+edges, the affected read declarations, the task brief and the validation errors.
+It returns the rejected-candidate SHA-256 and a choice for every offered read.
+An action ID retains its complete accepted declaration. A typed action supplies
+a compatible change to that read. An empty list declines the repair.
+The runner checks the handler and access policy, applies the choices to the same
+task's candidate and validates the complete module and its files. A coordinated change may edit the referring
+page in the same plan and must pass normal app-level reference validation.
+
 For both explicit batches and decomposition conveyors, `depends_on` controls
 both scheduling and context routing. A downstream task receives:
 

@@ -172,7 +172,7 @@ class AppLoader:
             raise AppLoadError(str(exc)) from exc
 
         try:
-            data_contract = load_data_contract(base_path)
+            data_contract = module_loader.data_contract
             data_entities_by_key = index_data_contract_by_entity(data_contract)
         except DataContractLoadError as exc:
             raise AppLoadError(f"Invalid data/contract.json: {exc}") from exc

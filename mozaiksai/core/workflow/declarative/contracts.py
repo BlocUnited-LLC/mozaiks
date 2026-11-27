@@ -772,6 +772,26 @@ class ToolsConfig(DeclarativeModel):
     lifecycle_tools: list[LifecycleToolSpec] = Field(default_factory=list)
 
 
+RESULT_TOOL_FUNCTION = "save_workflow_result"
+RESULT_TOOL_FILE = f"tools/{RESULT_TOOL_FUNCTION}.py"
+
+
+def workflow_result_binding(tools: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Resolve the unique result operation in a validated tools declaration."""
+    matches = [tool for tool in tools if tool.get("function") == RESULT_TOOL_FUNCTION or tool.get("file") == RESULT_TOOL_FILE]
+    if len(matches) != 1:
+        return None
+    tool = matches[0]
+    outcome = tool.get("outcome") or {}
+    if (tool.get("function") == RESULT_TOOL_FUNCTION and tool.get("file") == RESULT_TOOL_FILE
+            and tool.get("tool_type") == "Agent_Tool" and tool.get("auto_tool_call") is True
+            and tool.get("bind_to_agent") is False and isinstance(tool.get("agent"), str)
+            and outcome.get("result_field", "status") == "status" and outcome.get("error_value") == "failed"
+            and set(outcome.get("values", ())) == {"applied", "already_applied", "failed"}):
+        return tool
+    return None
+
+
 class PromptMiddlewareSpec(DeclarativeModel):
     agent: str
     filename: str | None = None

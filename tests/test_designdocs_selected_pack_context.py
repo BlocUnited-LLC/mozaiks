@@ -262,7 +262,8 @@ def test_selected_pack_guidance_composes_with_all_declared_design_middleware(tmp
 
     assert prompt.startswith("[REPAIR REQUIRED]")
     assert "Use the approved editor role." in prompt
-    assert "[AI PACK SURFACE DECLARATIONS]" in prompt
+    assert "[AI PACK SURFACE DECLARATIONS]" not in prompt
+    assert "ai_review_pack detected" not in prompt
     assert "[EXISTING APP ENHANCEMENT]" in prompt
     assert "[UI SURFACE TAXONOMY]" in prompt
     assert prompt.count(HEADER) == 1

@@ -19,6 +19,7 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
     CANONICAL_WRITE_OPERATIONS,
     canonical_read_action_id,
     canonical_write_action_id,
+    canonical_write_operations,
     collection_has_canonical_writes,
 )
 
@@ -209,7 +210,7 @@ def _canonical_spelling(action: str, name: str, collection: dict[str, Any], cano
     operation = action.split("_", 1)[0]
     if operation in ("get", "list"):
         candidate = canonical_read_action_id(name, operation)
-    elif operation in CANONICAL_WRITE_OPERATIONS and collection_has_canonical_writes(collection):
+    elif operation in canonical_write_operations(collection):
         candidate = canonical_write_action_id(collection["entity"], operation)
     else:
         return ""
@@ -234,7 +235,7 @@ def _other_collection_owner(action: str, name: str, canonical_owners: dict[tuple
 def _custom_action_remedy(action: str, owner: str, collection: dict[str, Any]) -> str:
     """Say how an undeclared domain action, such as an approval, becomes grantable."""
     generic = (f" or grant the canonical {canonical_write_action_id(collection['entity'], 'update')!r}"
-               if collection_has_canonical_writes(collection) else "")
+               if "update" in canonical_write_operations(collection) else "")
     return (f"To grant {action!r}, declare it in surface_map surface {owner!r} owned_mutations "
             f"(custom_reads for a read) in this same bundle{generic}. ")
 
@@ -274,7 +275,7 @@ def validate_access_policy(
         actions = {canonical_read_action_id(name, operation) for operation in ("get", "list")}
         if collection_has_canonical_writes(collection):
             actions.update(canonical_write_action_id(collection["entity"], operation)
-                           for operation in CANONICAL_WRITE_OPERATIONS)
+                           for operation in canonical_write_operations(collection))
         canonical_owners.update({(owner, action): name for action in actions})
     selected: dict[tuple[str, str], set[str]] = defaultdict(set)
     role_actions: dict[str, set[tuple[str, str]]] = defaultdict(set)
@@ -291,7 +292,7 @@ def validate_access_policy(
         collection = index.collections[owner, name]
         canonical = {
             canonical_write_action_id(collection["entity"], operation)
-            for operation in CANONICAL_WRITE_OPERATIONS
+            for operation in canonical_write_operations(collection)
         } if collection_has_canonical_writes(collection) else set()
         reads = {canonical_read_action_id(name, operation) for operation in ("get", "list")}
         pack_actions = pack_authorization.actions.get(owner)
@@ -299,6 +300,13 @@ def validate_access_policy(
             surfaces[owner].get("owned_mutations") or []
         ) | set(surfaces[owner].get("custom_reads") or [])
         for action in grant["actions"]:
+            if pack_actions is None and collection_has_canonical_writes(collection) and action in {
+                canonical_write_action_id(collection["entity"], operation) for operation in CANONICAL_WRITE_OPERATIONS
+            } - canonical:
+                raise ValueError(
+                    f"access_policy grant {action!r} conflicts with the reviewed "
+                    f"lifecycle.module_writes for {reference!r}; remove the grant or revise the collection"
+                )
             if action not in allowed:
                 choices = sorted(candidate for candidate in allowed
                                  if canonical_owners.get((owner, candidate), name) == name)
@@ -337,16 +345,18 @@ def validate_access_policy(
         for (owner, action), names in sorted(action_collections.items()) if len(names) > 1
     ]
     write_gaps = False
+    explicit_gaps = False
     for (owner, name), actions in sorted(selected.items()):
         collection = index.collections[owner, name]
         if owner in pack_authorization.actions:
             continue
         required = {
             canonical_write_action_id(collection["entity"], operation)
-            for operation in CANONICAL_WRITE_OPERATIONS
+            for operation in canonical_write_operations(collection)
         } if collection_has_canonical_writes(collection) else set()
         if missing := required - actions:
             write_gaps = True
+            explicit_gaps |= collection["lifecycle"].get("module_writes") is not None
             errors.append(f"access_policy for {name!r} omits canonical write grants {sorted(missing)}")
         reads = {canonical_read_action_id(name, operation) for operation in ("get", "list")}
         if actions & reads and (missing_reads := reads - actions):
@@ -355,7 +365,10 @@ def validate_access_policy(
                 "canonical get and list both use the collection name, so grant "
                 f"{sorted(missing_reads)} wherever {sorted(actions & reads)} is granted"
             )
-    if write_gaps:
+    if explicit_gaps:
+        errors.append("Grant every enabled canonical write to an approved role. "
+                      "To disable an operation, change the reviewed collection lifecycle.module_writes.")
+    elif write_gaps:
         # The rejection must name the remedy: a design that keeps members from editing
         # or deleting records repeated the same omission until its repairs ran out.
         errors.append(

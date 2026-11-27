@@ -63,7 +63,7 @@ The minimal contract works with environment variables and needs no cloud service
 ```yaml
 version: 1
 secrets:
-  - env: EMAIL_API_KEY
+  - env: SMTP_PASSWORD
 ```
 
 Optional `provider.type: azure_key_vault` declares vault policy and each entry's

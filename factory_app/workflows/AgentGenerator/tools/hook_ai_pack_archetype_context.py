@@ -1,27 +1,4 @@
-"""
-Hook: Inject AI Pack Archetype and Callback Context
-
-Fires as an prompt middleware function on PatternAgent and WorkflowBundleBuilderAgent.
-
-Closes Gap #5 (async event callback loop) — ensures that AI-native pack workflows
-generate:
-  1. A backend_request tool declaration in tools.yaml
-  2. ResultAgent instructions to POST the result to /api/modules/{module_id}/{action_id}
-
-**PatternAgent** — detects AI-native workflow surfaces in design_surface_map and
-injects [AI PACK ARCHETYPE CONTEXT] so PatternAgent:
-  - Uses the fixed archetype + workflow_startup_mode instead of free-form selection
-  - Writes a rich initial_message for the WorkflowBundleBuilderAgent worker that
-    includes module_id, callback_endpoint, and explicit generation requirements
-
-**WorkflowBundleBuilderAgent** — if any AI-native workflow surfaces exist in
-design_surface_map, injects [AI PACK CALLBACK CONTRACT] so any worker generating
-an AI-native pack workflow knows how to declare the backend_request tool and
-call the owning module action.
-
-Both injections are conditional — no-op when no AI-native workflow surfaces are
-detected in design_surface_map.
-"""
+"""Project AI capability archetypes and approved automatic result writes into AgentGenerator."""
 
 from __future__ import annotations
 
@@ -165,8 +142,8 @@ def _build_pattern_body(ai_surfaces: list[dict]) -> str:
         "  - role: supporting (all AI-native workflows run in the background)\n"
         "  - workflow_startup_mode: BackendOnly (no user chat session)\n"
         "  - human_in_the_loop: false\n"
-        "  - The initial_message MUST include module_id, callback_action, and callback_endpoint\n"
-        "    so the scoped task includes the full return-path contract.\n",
+        "  - For a requested automatic write on private record creation, declare result_write_plans in "
+        "WorkflowInPack and use the actual module actions, event and collection from the app design.\n",
     ]
 
     for s in ai_surfaces:
@@ -178,16 +155,15 @@ def _build_pattern_body(ai_surfaces: list[dict]) -> str:
         result_action = s["result_action"]
         result_agent = s["result_agent"]
         tb = s.get("task_batches_required", False)
-        callback_endpoint = f"POST /api/modules/{module_id}/{result_action}"
 
         initial_msg = (
             f"Generate a BackendOnly {archetype} workflow bundle. "
             f"capability_id={cap_id}, workflow_name={_to_pascal(cap_id)}. "
             f"Use the {pattern} orchestration pattern with agent sequence: {agents_seq}. "
             f"workflow_startup_mode=BackendOnly, human_in_the_loop=false. "
-            f"CALLBACK CONTRACT: the {result_agent} MUST call backend_request "
-            f"(POST {callback_endpoint}) to write the result back to the owning module. "
-            f"Declare backend_request from mozaiksai.core.workflow.app_backend_tools in tools.yaml. "
+            f"Archetype example: {module_id}/{result_action}. For an approved private record insert, "
+            f"honor the reviewed result_write_plans and give its named agent the exact result-field model. "
+            f"Require the actual collection, stable record key, and source action from the build. "
         )
         if tb:
             initial_msg += "task_batches.yaml is required for parallel worker dispatch. "
@@ -200,8 +176,7 @@ def _build_pattern_body(ai_surfaces: list[dict]) -> str:
             f"  workflow_startup_mode: BackendOnly\n"
             f"  agent_sequence: {agents_seq}\n"
             f"  result_agent: {result_agent}\n"
-            f"  result_callback_action: {result_action}\n"
-            f"  callback_endpoint: {callback_endpoint}\n"
+            f"  example_result_action: {result_action}\n"
         )
         if tb:
             block += "  task_batches_required: true\n"
@@ -221,33 +196,15 @@ def _to_pascal(capability_id: str) -> str:
 # =============================================================================
 
 def _build_callback_body(ai_surfaces: list[dict]) -> str:
-    lines: list[str] = [
-        "If your initial_message identifies this workflow as an AI-native pack workflow "
-        "(capability_id ending in -review-workflow, -analysis-workflow, or -extraction-workflow), "
-        "you MUST follow this callback contract in addition to your standard bundle generation.\n",
-        "REQUIRED FILES for AI-native pack workflows:\n"
-        "\n"
-        "1. backend_request tool in tools.yaml\n"
-        "   Add this entry to the tools[] list:\n"
-        "   ```yaml\n"
-        "   - name: backend_request\n"
-        "     type: Agent_Tool\n"
-        "     module: mozaiksai.core.workflow.app_backend_tools\n"
-        "     function: backend_request\n"
-        "   ```\n"
-        "   Assign backend_request to the {result_agent} only.\n"
-        "   Do NOT generate a Python stub for backend_request — it is a platform tool.\n"
-        "\n"
-        "2. {result_agent} instructions in agents.yaml\n"
-        "   The result/writer/synthesis agent MUST:\n"
-        "   - Call backend_request(method='POST', path='/api/modules/{module_id}/{result_action}',\n"
-        "     payload={...result fields...})\n"
-        "   - Confirm success before terminating\n"
-        "   - Terminate to 'terminate' (BackendOnly — no user reply)\n"
-        "\n"
-        "3. No Python stub for backend_request\n"
-        "   backend_request is provided by mozaiksai.core.workflow.app_backend_tools.\n"
-        "   Only generate stubs for workflow-local custom tools.\n",
+    lines = [
+        "For an automatic write to the triggering private record, use the result_write_plans in the "
+        "reviewed workflow task. The result agent returns a validated model with exactly the approved "
+        "fields. Factory materializes tools/save_workflow_result.py and its automatic, unbound tool. "
+        "Declare the real event, owning module, acknowledged inserting source action, private collection, "
+        "stable record key and internal result action. Each supported event must have one binding. "
+        "A read-only workflow has an empty result plan. If the source does not authorize the required "
+        "write, request the missing design decision. Never send a bearer token or arbitrary HTTP path as "
+        "the callback, or invent a source action or schema field."
     ]
 
     # Add per-surface details for context
@@ -261,8 +218,8 @@ def _build_callback_body(ai_surfaces: list[dict]) -> str:
                 f"result_agent: {s['result_agent']}"
             )
         lines.append(
-            "\nMatch your initial_message's capability_id against the list above to find "
-            "the exact module_id and result_action for your backend_request callback.\n"
+            "\nUse the exact module, action and result fields from the reviewed task. "
+            "The archetype examples above describe possible workflow shapes.\n"
         )
 
     return "\n".join(lines)
@@ -283,8 +240,7 @@ def inject_ai_pack_archetype_context(
     workflow_startup_mode, and enriched initial_message templates.
 
     WorkflowBundleBuilderAgent: injects [AI PACK CALLBACK CONTRACT] so any
-    worker generating an AI-native pack workflow knows to declare backend_request
-    and call the owning module action.
+    worker generating an AI-native pack workflow uses the reviewed result fields.
 
     No-ops when no AI-native workflow surfaces are found.
     """

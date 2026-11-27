@@ -117,6 +117,30 @@ For module-owned business data, each collection should declare:
 - `lifecycle.write_mode`
 - `lifecycle.migration_policy`
 
+For a module-owned collection, `lifecycle.module_writes` can specify the
+canonical actions and public input fields. For example, this collection allows
+a customer to open an order and update its instructions. A separate approved
+action can populate the review result.
+
+```json
+{
+  "write_mode": "module_action",
+  "migration_policy": "additive_only",
+  "module_writes": [
+    {"operation": "create", "fields": ["description", "instructions"]},
+    {"operation": "update", "fields": ["instructions"]}
+  ]
+}
+```
+
+The compiler supplies the record key on update and delete. The runtime supplies
+ownership, and canonical writes manage declared date timestamps. Omit those
+fields from the lists. Declare delete with an empty field list when the app
+should offer it. An empty `module_writes` list disables all canonical writes.
+An absent or null list keeps the existing create, update and delete defaults.
+Custom actions, their permissions, and workflow result subscriptions retain
+their own explicit contracts.
+
 The index runner only applies indexes declared in
 `surfaces[*].collections[*].indexes`. It validates index names, ordered keys,
 and supported options, compares them with existing Mongo indexes, and creates

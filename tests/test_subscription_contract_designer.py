@@ -521,9 +521,27 @@ def test_agentgenerator_preserves_workflow_metering_without_selling_workflow_fea
     assert "OSS runtime token wallet primitives" in agents_text
 
 
+def _designer_reply(output):
+    from mozaiksai.core.workflow.outputs.runtime_validation import validate_agent_structured_output
+    from mozaiksai.core.workflow.outputs.structured import build_models_from_config
+
+    spec = _read_yaml(SUBSCRIPTION_WORKFLOW / "structured_outputs.yaml")
+    models = build_models_from_config(spec["models"], exact_model_ids=frozenset(spec["models"]))
+    registry = {agent: models[model] for agent, model in spec["registry"].items()}
+    return validate_agent_structured_output(
+        agent_name="ContractDesignerAgent", reply=output, structured_registry=registry,
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("read_only", [False, True])
-async def test_save_subscription_contract_validates_and_persists_provider_neutral_config(monkeypatch: pytest.MonkeyPatch, read_only: bool) -> None:
+@pytest.mark.parametrize(
+    "price",
+    [None, {"amount_cents": 1800, "currency": "usd", "interval": "month", "display": "Member rate"}],
+)
+async def test_save_subscription_contract_validates_and_persists_provider_neutral_config(
+    monkeypatch: pytest.MonkeyPatch, read_only: bool, price: dict | None,
+) -> None:
     from factory_app.workflows.SubscriptionContractDesigner.tools import (
         save_subscription_contract as module,
     )
@@ -550,6 +568,24 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
         "structured_output": _sample_contract(),
     }
 
+    if price is not None:
+        context["structured_output"]["subscription_config_file"]["plans"][1]["price"] = price
+    if read_only:
+        from factory_app.workflows._shared import subscription_contract_context
+        from tests.factory_export_fixture import summary_record
+
+        payload = {
+            "surface_map": context["design_surface_map"], "experience_spec": {"pages": []},
+            "access_policy_review": {"status": "not_required", "target_app_id": "app_test",
+                                     "build_id": context["run_build_binding"]["build_id"]},
+        }
+        design = summary_record("design_docs", payload, app="app_test", user="user_1")
+        context.update(design_docs_artifact_version_id=design.id, experience_spec=payload["experience_spec"])
+        monkeypatch.setattr(subscription_contract_context, "get_artifact_store", lambda: SimpleNamespace(
+            get_build_record=AsyncMock(return_value=design)))
+    reply = _designer_reply(context["structured_output"])
+    assert reply.validation_passed, reply.error
+    context["structured_output"] = reply.structured_data
     if read_only:
         from mozaiksai.core.workflow.context.frozen import freeze
         context["structured_output"] = freeze(context["structured_output"])
@@ -577,6 +613,18 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
     assert config.pricing_catalog.default_group_id == "platform"
     assert config.pricing_catalog.groups[1].group_id == "ai_usage"
     assert config.usage_charge_policies[0].markup_percent == 35
+    from factory_app.workflows.AppGenerator.tools.materialize_app_config_contracts import (
+        _materialize_subscriptions_yaml,
+    )
+
+    rendered = _materialize_subscriptions_yaml(context_variables=context)
+    assert SubscriptionsConfig.model_validate(yaml.safe_load(rendered)) == config
+    assert config.plans[0].price is None
+    if price is not None:
+        assert config.plans[1].price.model_dump() == price
+        assert review_payload["plans"][1]["price"] == price
+    else:
+        assert config.plans[1].price is None
     assert config.plans[1].token_allowances[0].amount == 250000
     assert config.plans[0].capabilities == ["feature.module.reports.generate_report"]
     assert config.plans[0].usage_limits[0].capability_id == "feature.module.reports.generate_report"
@@ -594,7 +642,9 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
 
     assert persisted["artifact_kind"] == "subscription_contract"
     assert persisted["artifact_key"] == "subscription_contract"
-    assert persisted["input_artifact_kinds"] == ("concept", "design_docs")
+    assert context["subscription_contract_artifact_version_id"] == "av_subscription_contract"
+    assert persisted["input_artifact_kinds"] == (("concept",) if read_only else ("concept", "design_docs"))
+    assert persisted["canonical_inputs_version"] == ({"design_docs": context["design_docs_artifact_version_id"]} if read_only else None)
 
 
 @pytest.mark.asyncio
@@ -635,6 +685,50 @@ async def test_save_subscription_contract_blocks_downstream_context_when_review_
     assert context["subscription_contract"] is None
     assert context["subscription_contract_files"] == []
     assert context["subscription_contract_review_status"] == "changes_requested"
+
+
+@pytest.mark.parametrize(
+    "field,value", [("amount_cents", 0), ("currency", "US"), ("interval", "forever"), ("provider_price_id", "private")],
+)
+def test_invalid_recurring_price_is_rejected_before_review(field, value) -> None:
+    from factory_app.workflows.SubscriptionContractDesigner.tools.save_subscription_contract import (
+        normalize_subscription_contract,
+    )
+
+    output = _sample_contract()
+    price = {"amount_cents": 1800, "currency": "usd", "interval": "month", field: value}
+    output["subscription_config_file"]["plans"][1]["price"] = price
+    reply = _designer_reply(output)
+    if field in {"provider_price_id", "interval"}:
+        assert not reply.validation_passed
+        assert field in reply.error
+    else:
+        assert reply.validation_passed
+        with pytest.raises(ValueError, match=field):
+            normalize_subscription_contract(reply.structured_data, {"design_surface_map": _sample_design_surface_map()})
+
+
+@pytest.mark.asyncio
+async def test_priced_contract_cannot_be_saved_without_owner_review(monkeypatch) -> None:
+    from factory_app.workflows.SubscriptionContractDesigner.tools import (
+        save_subscription_contract as module,
+    )
+
+    output = _sample_contract()
+    output["subscription_config_file"]["plans"][1]["price"] = {"amount_cents": 1800}
+    persist = AsyncMock()
+    monkeypatch.setattr(module, "persist_summary_artifact", persist)
+    context = {
+        **factory_context({"app_id": "app_test"}),
+        "structured_output": output,
+        "design_surface_map": _sample_design_surface_map(),
+        "coding_participation": "autonomous",
+    }
+    result = await module.save_subscription_contract(context)
+    assert result["review_status"] == "blocked"
+    assert context["subscription_contract"] is None
+    assert context["subscription_contract_files"] == []
+    persist.assert_not_awaited()
 
 
 def test_transition_graph_routes_changes_requested_back_to_designer() -> None:

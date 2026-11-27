@@ -117,6 +117,7 @@ actions:
               plan_id: {type: string}
               label: {type: string}
               description: {type: string}
+              price_display: {type: string}
               capabilities: {type: array, items: {type: string}}
               usage_limits: {type: object}
               token_allowances: {type: array}

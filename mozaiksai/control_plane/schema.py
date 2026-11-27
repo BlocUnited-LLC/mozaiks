@@ -105,6 +105,7 @@ class ControlPlaneArtifactRoutingManifest(BaseModel):
     label: str | None = None
     routes: ControlPlaneArtifactChangeRoutesManifest
     branding_routes: dict[BrandingIntent, ControlPlaneChangeRouteManifest] = Field(default_factory=dict)
+    workflow_revision_route: ControlPlaneChangeRouteManifest | None = None
 
     @field_validator("build_family")
     @classmethod

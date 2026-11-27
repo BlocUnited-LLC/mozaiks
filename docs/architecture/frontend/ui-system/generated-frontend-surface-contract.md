@@ -99,6 +99,10 @@ of defaults, preserving `false`, `0`, and empty strings. An omitted or null
 default falls back to the primitive's empty value (false for checkboxes, an empty
 string otherwise).
 
+For a reviewed edit that prefills from `selected_row`, open the form in a modal
+from the selectable table. Bind the identifier in its submit payload with
+`{selected_row.record_id}`. Without braces the renderer sends literal text.
+
 Inside a `Modal`, `AlertBanner` and `ActionButton` actions inherit the row
 selection that opened the modal, so payloads such as
 `{selected_row.record_id}` resolve to that record. These controls do not own

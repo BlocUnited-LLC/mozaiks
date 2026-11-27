@@ -1012,17 +1012,8 @@ def _validate_action_closure(
         diagnostics.extend(validate_ask_context_references(
             page.meta.ask_context or [], action_index=action_index, ask_context_index=ask_context_index,
         ))
-    for location, endpoint in _walk_api_endpoints(page.model_dump(mode="json", exclude_none=True)):
-        match = _MODULE_API_RE.fullmatch(endpoint)
-        if match:
-            diagnostics.extend(
-                _validate_module_action(
-                    match.group("module"),
-                    match.group("action"),
-                    location,
-                    action_index,
-                )
-            )
+    for location, module, action in iter_page_module_endpoints(page):
+        diagnostics.extend(_validate_module_action(module, action, location, action_index))
     return diagnostics
 
 
@@ -1081,9 +1072,19 @@ def _validate_module_action(
     return []
 
 
+def iter_page_module_endpoints(page: AppPageSchema) -> Iterable[tuple[str, str, str]]:
+    """Canonical module calls from the endpoint slots of a validated page."""
+    for location, endpoint in _walk_api_endpoints(page.model_dump(mode="json", exclude_none=True)):
+        match = _MODULE_API_RE.fullmatch(endpoint)
+        if match:
+            yield location, match.group("module"), match.group("action")
+
+
 def _walk_api_endpoints(value: Any, location: str = "$") -> Iterable[tuple[str, str]]:
     if isinstance(value, Mapping):
         for key, item in value.items():
+            if key in {"payload", "context_variables", "params"}:
+                continue  # Data sent to an action can include literal URL strings.
             child_location = f"{location}.{key}"
             if key in {"api_endpoint", "href"} and isinstance(item, str) and item.startswith("/api/"):
                 yield child_location, item
@@ -1252,6 +1253,7 @@ __all__ = [
     "build_page_action_index_from_module_contracts",
     "validate_ask_context_references",
     "discover_page_schema_paths",
+    "iter_page_module_endpoints",
     "load_and_validate_page_schema",
     "load_app_page_schemas",
     "safe_page_schema_error_detail",

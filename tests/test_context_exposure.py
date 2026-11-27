@@ -11,6 +11,38 @@ from mozaiksai.core.workflow.context.context_utils import (
 )
 
 
+@pytest.mark.asyncio
+async def test_compact_task_projection_is_trusted_and_turn_local():
+    from ag2 import Context, MemoryStream
+    from ag2.events import ModelRequest, ModelResponse
+
+    from mozaiksai.core.workflow.execution.middleware import (
+        TaskPromptProjection,
+        build_prompt_middleware,
+    )
+
+    def expensive_hook(agent, _history):
+        agent.update_system_message(agent.system_message + " CATALOG")
+
+    middleware = build_prompt_middleware(
+        agent_name="Worker", base_system_message="GENERAL ROLE", middleware_functions=[expensive_hook],
+        context_bridge={"generated_files": {"private.py": "APP_SOURCE"}}, context_variables=["generated_files"],
+    )
+    rendered = []
+
+    async def capture(_events, ctx):
+        rendered.append(list(ctx.prompt))
+        return ModelResponse()
+
+    for deps in [{TaskPromptProjection: TaskPromptProjection("BOUNDED ROLE")}, {}]:
+        context = Context(MemoryStream(), prompt=["base"], dependencies=deps,
+                          variables={"TaskPromptProjection": {"system_message": "UNTRUSTED"}})
+        await middleware(ModelRequest("correct"), context).on_llm_call(capture, [], context)
+    assert rendered[0] == ["BOUNDED ROLE"]
+    assert all(word in rendered[1][0] for word in ("GENERAL ROLE", "CATALOG", "APP_SOURCE"))
+    assert "UNTRUSTED" not in rendered[1][0]
+
+
 @pytest.mark.parametrize("agent", [
     "AppPlanAgent", "AppSchemaAgent", "DatabaseAgent", "ConfigMiddlewareAgent",
     "ModelAgent", "ServiceAgent", "ControllerAgent", "FrontendStubAgent",

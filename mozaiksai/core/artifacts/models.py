@@ -100,6 +100,7 @@ class ChangeIntentDoc(BaseModel):
 
     change_class: ChangeClassification
     branding_intent: BrandingIntent | None = None
+    requires_workflow_revision: bool = False
     source: str = "declared"
     signals: list[str] = Field(default_factory=list)
     rationale: str

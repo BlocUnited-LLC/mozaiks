@@ -571,7 +571,6 @@ async def _register_app_bundle_artifact_version(
             ArtifactLifecycleStatus,
             ArtifactValidationStatus,
             get_artifact_store,
-            resolve_latest_artifact_version_refs,
         )
         from mozaiksai.core.artifacts.content_store import get_artifact_content_store
     except Exception as exc:  # pragma: no cover
@@ -596,6 +595,9 @@ async def _register_app_bundle_artifact_version(
             if isinstance(validation_result, dict):
                 sandbox_session_id = validation_result.get("sandbox_session_id")
                 sandbox_provider = validation_result.get("sandbox_provider")
+        except ValueError:
+            # An invalid declared parent must not turn a revision into a parentless draft.
+            raise
         except Exception:
             parent_version_id = None
             validation_status_raw = None
@@ -706,10 +708,11 @@ async def _register_app_bundle_artifact_version(
             wf_logger.warning("Content store put_bundle failed; falling back to local path: %s", cs_exc)
 
     artifact_store = artifact_store or get_artifact_store()
-    canonical_inputs_version = await resolve_latest_artifact_version_refs(
-        app_id=str(app_id),
-        artifact_kinds=("design_docs", "subscription_contract", "theme_capture"),
-        artifact_store=artifact_store,
+    from factory_app.workflows._shared.export_inputs import export_input_versions
+
+    canonical_inputs_version = await export_input_versions(
+        context_variables, workflow=workflow_name, app_id=str(app_id), user_id=user_id,
+        artifact_store=artifact_store, additional_families=("theme_capture",),
     )
     # A different workflow bundle may become current between acceptance and registration.
     workflow_check = (acceptance_result or {}).get("workflow_integration") or {}
@@ -727,6 +730,10 @@ async def _register_app_bundle_artifact_version(
             bundle_content_metadata["compilation_inputs"] = compilation_inputs
             inputs = compilation_inputs["inputs"]
             for family in ("design_docs", "subscription_contract"):
+                if _context_get(context_variables, f"{family}_artifact_version_id") and (
+                    not inputs.get(family) or inputs[family]["record_id"] != canonical_inputs_version[family]
+                ):
+                    raise ValueError(f"Compilation differs from the pinned {family} export input")
                 canonical_inputs_version.pop(family, None)
                 if inputs.get(family) is not None:
                     canonical_inputs_version[family] = inputs[family]["record_id"]

@@ -3,14 +3,30 @@
 from copy import deepcopy
 
 import pytest
+from pydantic import ValidationError
 
 from mozaiksai.core.runtime.persistence.intent_loader import index_data_contract_by_entity
 from mozaiksai.core.workflow.context.frozen import detach
-from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
+from mozaiksai.core.workflow.outputs.structured import (
+    get_provider_response_model,
+    load_workflow_structured_outputs,
+)
 from tests import test_designdocs_capability_ownership as ownership
 from tests import test_designdocs_monetization_inventory as inventory
 
 persistence = inventory.persistence
+
+
+def test_design_index_direction_matches_persistence_on_the_provider_wire():
+    models, _ = load_workflow_structured_outputs("DesignDocs")
+    key = models["DataContractIndexKey"]
+    direction = get_provider_response_model(key).model_json_schema()["properties"]["order"]
+    assert direction["type"] == "integer"
+    assert set(direction["enum"]) == {-1, 1}
+    for order in (-1, 1):
+        assert key(field="created_at", order=order).model_dump(mode="json")["order"] == order
+    with pytest.raises(ValidationError):
+        key(field="created_at", order=2)
 
 
 def _bundle():

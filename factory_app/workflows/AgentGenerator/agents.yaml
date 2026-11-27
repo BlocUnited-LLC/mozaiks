@@ -130,6 +130,8 @@ agents:
       2. **Pattern Assignment**: Select the optimal AG2 orchestration pattern (1–9) for each workflow based on its interaction model.
       3. **Dispatch Instructions**: For each workflow, write a self-contained `initial_message` with the requirements and input data needed to generate its complete bundle. Do not rely on knowledge of this conversation or the producer of the brief.
       4. **Pack Structure**: When multi-workflow, define the full pack: workflow list, explicit dependencies, and journey ordering.
+      5. When the user requests an automatic write to the private record being created, declare one result_write_plans entry per triggering insert. Name the local structured-result agent, exact event, owning module, source action, private collection, stable record key, internal result action, and result fields. Respect the existing module and data contracts. This binding is shown in workflow plan review.
+         Before returning the plan, compare its structured entries with the requested behavior. If the workflow promises to save a result on the triggering record, an empty list leaves that operation unimplemented.
   - id: pack_partition_concept
     heading: '[PACK PARTITIONING]'
     content: |-
@@ -496,7 +498,7 @@ agents:
       Generate a production-ready workflow bundle for the assigned workflow. The bundle must include:
 
       **Required YAML files** (at workflow root):
-      - `orchestrator.yaml` — schema_version: mozaiks.orchestrator.v1, workflow_name, max_turns, human_in_the_loop, workflow_startup_mode, orchestration_pattern, initial_agent, initial_message, triggers[]
+      - `orchestrator.yaml` — schema_version: mozaiks.orchestrator.v1, workflow_name, max_turns (1–500, sized for the declared agent path), human_in_the_loop, workflow_startup_mode, orchestration_pattern, initial_agent, initial_message, triggers[]
       - `agents.yaml` — agents list with name, prompt_sections (role/objective/context/instructions/output_format), max_consecutive_auto_reply, structured_outputs_required
       - `transition_graph.yaml` — transition_rules derived from the assigned pattern's transition_generation.strategy
       - `tools.yaml` — tools[] and lifecycle_tools[] matching the agent tools planned below
@@ -518,6 +520,7 @@ agents:
         one-line docstring or comment; never start a triple-quoted string that is
         not closed in the same file. Do not emit explanatory prose inside code.
       - Reuse declared module capabilities and public runtime APIs. Do not invent provider APIs, persistence interfaces, or successful results for unavailable integrations.
+      - For an approved automatic update of the triggering private record, use the supplied result_write_plans in this task. Declare every exact BackendOnly event trigger. Bind the named agent in structured_outputs.yaml to a model with exactly the approved required result fields. Route every successful path through that agent and give it one after_turn continuation for a successful save. Factory adds the automatic tool, Python adapter and failure routing. Leave the result agent's tools and outcome plan to Factory. The agent receives the triggering content and returns the result. The host selects the record and authorizes the write.
       - Missing external configuration must produce an explicit actionable error. Unfinished implementations, `raise NotImplementedError`, `pass`-only bodies, and ellipsis bodies block export.
       - `tools.yaml` entries must use the runtime schema:
         ```yaml
@@ -615,6 +618,12 @@ agents:
         populated and exposed; never invent a semantic-looking input path.
       - Persist and expose any cross-step data the generated workflow needs through
         its declared context/tools contracts. A prompt reference alone supplies no data.
+      - Event workflows receive the triggering module's declared payload in `event_payload`.
+        For a reviewed result write, Factory installs the event trigger and protected
+        input exposure in `context_variables.yaml`. The `agents.yaml` roster owns
+        the agent prompt and `structured_outputs_required`. Omit `variables` there,
+        even when empty. Read input fields from `event_payload` using their names in the
+        module event contract. Keep the event fields separate from the approved output.
       - If an input is absent, use the workflow's declared clarification or failure
         path. Preserve the response schema; do not invent fields or append prose.
       - Keep exact identifiers in declarative roster, routing, tool, and output
@@ -639,8 +648,10 @@ agents:
     heading: '[OPERATION OUTCOMES]'
     content: |-
       Include outcome_plans in WorkflowBundleBuilderOutput. Declare a plan for every
-      operation whose success or failure determines the workflow's next step, including
-      validation, persistence, and external actions. Use [] only when none exist.
+      worker-authored operation whose success or failure determines the workflow's next
+      step, including validation, persistence, and external actions. Factory owns the
+      operation for each result_write_plans entry. Exclude that agent from outcome_plans
+      and use [] when there are no other operations to declare.
       Each plan names agent, function, context_key, attempts_key, result_field,
       error_value, max_attempts, retry_on, retry_without_attempt, and routes
       [{value, target_agent}].
@@ -775,7 +786,8 @@ agents:
       ## STEP 3: Plan Tools and UI
 
       For each agent:
-      - Does it need to persist structured output to context? → `Agent_Tool` with `auto_tool_call: true`
+      - For a result_write_plans agent, both its generated system prompt and its structured-output model request exactly the approved result fields. The host supplies the record key. Factory supplies the automatic save tool.
+      - Does another agent need to persist structured output to context? → `Agent_Tool` with `auto_tool_call: true`
       - Does it need to present UI to the user? → `UI_Tool` (interactive) or `UI_Surface` (one-way)
       - Does it call an external API? → `Agent_Tool` for the API call
       - Does it route via Coordinator pattern? → `Agent_Tool` for a typed AG2 1.0 `Handoff(target=...)` result when WorkflowAdapter dynamic routing is required

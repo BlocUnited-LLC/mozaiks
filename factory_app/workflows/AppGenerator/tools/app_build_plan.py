@@ -7,6 +7,9 @@ from typing import Annotated, Any, get_args
 
 from pydantic import Field
 
+from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
+    bind_retained_feature_login,
+)
 from mozaiksai.core.runtime.app.auth_contract import AuthMode
 from mozaiksai.core.runtime.app.paths import (
     APP_AUTH_CONFIG_PATH,
@@ -34,6 +37,7 @@ from mozaiksai.core.workflow.generator_support.module_action_inventory import (
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
     resolve_subscription_contract,
 )
+from mozaiksai.core.workflow.generator_support.module_revision import bind_legacy_read_timestamps
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_stem_from_path,
     approved_page_action_ids,
@@ -1354,18 +1358,26 @@ def _normalize_managed_capability_adapter_task_pack_ids(
     return normalized
 
 
-def _apply_reviewed_page_writes(pages: list[dict[str, Any]], context: Any) -> None:
+def _apply_reviewed_page_writes(
+    pages: list[dict[str, Any]], context: Any, retained_asks: dict[str, list[dict[str, Any]]] | None = None,
+) -> None:
     """Bind canonical, page-callable identities to their reviewed route before dispatch."""
     by_route = resolve_reviewed_page_writes(context)
     inventory = approved_page_action_ids(context) if by_route else {}
     for page in pages:
         page.pop("required_write_actions", None)  # The plan cannot author this projection.
+        page.pop("retained_ask_context", None)
+        page.pop("partial_ask_context", None)
         route = page.get("route", "")
         required = by_route.get(route, [])
         if page.get("ui_surface") != "declarative_page":
             if required:
                 raise ValueError(f"Reviewed writes on {route!r} require its approved declarative_page")
             continue
+        path = planned_page_path(page)
+        retained = (context.get("retained_workflow_page_bindings") or {}).get(path) if context is not None else None
+        if required and retained:
+            required = [*required, *(ref for ref in retained["writes"] if ref not in required)]
         for source in required:
             module, action = source["module_id"], source["action_id"]
             if action not in inventory.get(module, []):
@@ -1374,6 +1386,13 @@ def _apply_reviewed_page_writes(pages: list[dict[str, Any]], context: Any) -> No
                     "Revise the approved DesignDocs action reference."
                 )
         page["required_write_actions"] = required
+        if required and retained:
+            if "ask_context" in retained:
+                page["retained_ask_context"] = retained["ask_context"]
+                if retained.get("partial_ask_context"):
+                    page["partial_ask_context"] = True
+        elif required and retained_asks is not None and path in retained_asks:
+            page["retained_ask_context"] = retained_asks[path]
 
 
 def _normalize_page_task_dependencies(
@@ -2181,6 +2200,17 @@ def _validate_task_dependencies(
             )
 
 
+def batch_item_for_plan_task(task: dict[str, Any]) -> dict[str, Any]:
+    """Create the dispatch row for a normalized, reviewed plan task."""
+    return {
+        **task,
+        "task_run_mode": True,
+        "current_build_task_id": str(task.get("task_id") or "").strip(),
+        "current_build_task_type": str(task.get("task_type") or "").strip(),
+        "current_build_task": dict(task),
+    }
+
+
 def app_build_plan(
     *,
     AppBuildPlan: Annotated[
@@ -2191,6 +2221,7 @@ def app_build_plan(
         Any | None,
         Field(description="AG2-injected workflow context variables."),
     ] = None,
+    _retained_page_asks: dict[str, list[dict[str, Any]]] | None = None,
 ) -> str:
     if context_variables is not None and hasattr(context_variables, "set"):
         context_variables.set("app_plan_ready", False)
@@ -2211,13 +2242,17 @@ def app_build_plan(
     pages = _normalize_object_list(AppBuildPlan.get("pages"))
     entities = _normalize_object_list(AppBuildPlan.get("entities"))
     roles = _normalize_string_list(AppBuildPlan.get("roles"))
+    bind_retained_feature_login(AppBuildPlan, context_variables)
     auth_strategy = AppBuildPlan.get("auth_strategy")
     auth_required_from_strategy(auth_strategy, roles=roles, field="AppBuildPlan.auth_strategy")
     auth_mode = AppBuildPlan.get("auth_mode")
     if auth_mode is not None and auth_mode not in get_args(AuthMode):
         raise ValueError("AppBuildPlan.auth_mode must use a canonical runtime auth mode")
     if auth_mode is not None and auth_strategy in (None, "public"):
-        raise ValueError("AppBuildPlan.auth_mode requires a sign-in auth_strategy")
+        raise ValueError(
+            "AppBuildPlan.auth_mode requires a sign-in auth_strategy. Public means anonymous access. "
+            "Use the approved sign-in strategy for a private app; name roles only when the design declares them."
+        )
     service_scope = _normalize_string_list(AppBuildPlan.get("service_scope"))
     frontend_scope = _normalize_string_list(AppBuildPlan.get("frontend_scope"))
     theme_preferences = AppBuildPlan.get("theme_preferences")
@@ -2325,7 +2360,7 @@ def app_build_plan(
         capability_packs=capability_packs,
         context_variables=context_variables,
     )
-    _apply_reviewed_page_writes(pages, context_variables)
+    _apply_reviewed_page_writes(pages, context_variables, _retained_page_asks)
     managed_capability_ids = frozenset(
         _pack_id_from_descriptor(p)
         for p in capability_packs
@@ -2377,16 +2412,7 @@ def app_build_plan(
         normalized_context = _normalize_context_variables(normalized_task.get("context_variables"))
         if normalized_context is not None:
             normalized_task["context_variables"] = normalized_context
-        task_id = str(normalized_task.get("task_id") or "").strip()
-        task_type = str(normalized_task.get("task_type") or "").strip()
-        item = {
-            **normalized_task,
-            "task_run_mode": True,
-            "current_build_task_id": task_id,
-            "current_build_task_type": task_type,
-            "current_build_task": dict(normalized_task),
-        }
-        task_batch_items.append(item)
+        task_batch_items.append(batch_item_for_plan_task(normalized_task))
         normalized_build_tasks.append(normalized_task)
 
     normalized_plan = {
@@ -2415,6 +2441,7 @@ def app_build_plan(
         "demo_fixture_sets": demo_fixture_sets,
     }
 
+    bind_legacy_read_timestamps(normalized_plan, context_variables)
     if context_variables is not None and hasattr(context_variables, "set"):
         try:
             context_variables.set("app_build_plan", normalized_plan)

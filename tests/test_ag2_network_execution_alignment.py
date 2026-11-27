@@ -2125,13 +2125,22 @@ async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("interview_first", [False, True])
-@pytest.mark.parametrize("batch_fails", [False, True])
+@pytest.mark.parametrize(("entry", "batch_fails"), [
+    ("planner", False), ("planner", True), ("interview", False), ("interview", True),
+    ("admitted", False), ("admitted", True), ("missing_proof", False), ("changed_rows", False), ("changed_plan", False),
+])
 async def test_run_workflow_orchestration_executes_batches_at_the_declared_trigger(
     monkeypatch: pytest.MonkeyPatch,
-    interview_first: bool,
+    entry: str,
     batch_fails: bool,
 ) -> None:
+    interview_first = entry != "planner"
+    reuse = entry not in {"planner", "interview"}
+    task = {
+        "task_id": "module_contract", "execution_agent": "WorkerAgent", "task_prompt": "Build module contract.",
+        "owned_paths": ["modules/campaigns/module.yaml"],
+    }
+
     class _Persistence:
         def __init__(self) -> None:
             self.assistant_messages: list[dict[str, Any]] = []
@@ -2158,7 +2167,10 @@ async def test_run_workflow_orchestration_executes_batches_at_the_declared_trigg
             user_id: str,
         ) -> dict[str, Any]:
             assert workflow_name == "TaskBatchAlignmentSmoke"
-            return {}
+            return {"retry_plan_source": {
+                "chat_id": "previous", "dispatch_sha256": task_batches_module.task_evidence_digest([task]),
+                "plan_sha256": task_batches_module.task_evidence_digest({"title": "original"}),
+            }} if reuse else {}
 
         async def persist_context_variables(
             self,
@@ -2216,18 +2228,7 @@ async def test_run_workflow_orchestration_executes_batches_at_the_declared_trigg
     transport = _Transport()
     planner_agent = _ContextAwareAgent(
         "PlannerAgent",
-        lambda _context: {
-            "DecompositionPlan": {
-                "tasks": [
-                    {
-                        "task_id": "module_contract",
-                        "execution_agent": "WorkerAgent",
-                        "task_prompt": "Build module contract.",
-                        "owned_paths": ["modules/campaigns/module.yaml"],
-                    }
-                ]
-            }
-        },
+        lambda _context: {"DecompositionPlan": {"tasks": [task]}},
     )
     def _worker_reply(context):
         if batch_fails:
@@ -2288,7 +2289,16 @@ async def test_run_workflow_orchestration_executes_batches_at_the_declared_trigg
                         {
                             "source_agent": "PlannerAgent",
                             "target_agent": "SynthesisAgent",
+                            "transition_type": "condition",
+                            "condition_type": "context_equals",
+                            "condition_key": "runtime_tasks_status",
+                            "condition_value": "completed",
+                        },
+                        {
+                            "source_agent": "PlannerAgent",
+                            "target_agent": "terminate",
                             "transition_type": "after_turn",
+                            "termination_reason": "workflow_failed",
                         },
                         {
                             "source_agent": "SynthesisAgent",
@@ -2321,17 +2331,56 @@ async def test_run_workflow_orchestration_executes_batches_at_the_declared_trigg
     )
     monkeypatch.setattr(structured_outputs_module, "load_workflow_structured_outputs", lambda workflow_name: ({}, {}))
 
-    result = await run_workflow_orchestration(
+    if reuse:
+        from unittest.mock import AsyncMock
+
+        batches = task_batches_module.load_task_batches_config("TaskBatchAlignmentSmoke")
+        batches.batches[0].source.kind = "context_variable"
+        batches.batches[0].source.path = "admitted_tasks"
+        batches.batches[0].recovery = task_batches_module.TaskBatchRecovery(
+            trigger_agent="RecoveryAgent", request_key="repair", outcome_key="outcome", status_key="repair_status",
+            input_keys=["admitted_plan"],
+        )
+        monkeypatch.setattr(task_batches_module, "load_task_batches_config", lambda _: batches)
+
+        async def readmit(*, context_variables):
+            context_variables.set("admitted_tasks", [dict(task, task_prompt="changed")] if entry == "changed_rows" else [task])
+            context_variables.set("admitted_plan", {"title": "changed" if entry == "changed_plan" else "original"})
+            if entry == "missing_proof":
+                context_variables.set("_mozaiks_admitted_task_batch_start", {"trigger_agent": "PlannerAgent"})
+                return
+            task_batches_module.admit_task_batch_start(
+                context_variables, workflow_name="TaskBatchAlignmentSmoke", trigger_agent="PlannerAgent", plan_context_key="admitted_plan",
+            )
+
+        monkeypatch.setattr("mozaiksai.core.workflow.execution.lifecycle.get_lifecycle_manager", lambda _: SimpleNamespace(
+            trigger_before_chat=readmit, execute_trigger=AsyncMock(),
+        ))
+
+    run = run_workflow_orchestration(
         workflow_name="TaskBatchAlignmentSmoke",
         app_id="app-1",
         chat_id="chat-1",
         user_id="user-1",
         initial_message="Build a campaign module.",
         agents_factory=_agents_factory,
-        context_factory=lambda: {},
+        context_factory=create_context_container if reuse else lambda: {},
     )
 
+    if entry == "missing_proof":
+        with pytest.raises(ValueError, match="requires re-admission"):
+            await run
+        assert not worker_agent.context_seen and not planner_agent.context_seen and not persistence.completed
+        return
+    result = await run
     assert result is not None
+    if reuse:
+        assert not planner_agent.context_seen
+        assert all(message["agent_name"] != "InterviewAgent" for message in persistence.assistant_messages)
+    if entry in {"changed_rows", "changed_plan"}:
+        assert result["failed"] and not worker_agent.context_seen and not synthesis_agent.context_seen
+        assert not persistence.completed
+        return
     if batch_fails:
         assert result["run_completed"] is False
         assert result["failed"] is True
@@ -2348,10 +2397,8 @@ async def test_run_workflow_orchestration_executes_batches_at_the_declared_trigg
     assert synthesis_agent.context_seen[0]["runtime_tasks_results"]["module_contract"]["summary"] == (
         "Worker used AG2 task lifecycle context."
     )
-    assert [message["agent_name"] for message in persistence.assistant_messages] == (["InterviewAgent"] if interview_first else []) + [
-        "PlannerAgent",
-        "SynthesisAgent",
-    ]
+    prior = [] if reuse else (["InterviewAgent"] if interview_first else []) + ["PlannerAgent"]
+    assert [message["agent_name"] for message in persistence.assistant_messages] == [*prior, "SynthesisAgent"]
     assert persistence.completed == [("chat-1", "app-1")]
 
 

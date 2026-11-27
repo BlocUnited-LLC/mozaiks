@@ -21,6 +21,11 @@ from typing import Any
 
 import yaml
 
+from mozaiksai.core.runtime.app.page_schema import (
+    PageSchemaValidationError,
+    iter_page_module_endpoints,
+    validate_page_schema,
+)
 from mozaiksai.core.utils.sequences import dedupe_strings
 
 from ._source_syntax import (
@@ -190,6 +195,7 @@ def build_context_graph_from_file_map(
         )
 
     _add_workflow_reaction_references(graph, extracted_by_path, file_node_by_path)
+    _add_page_module_calls(graph, extracted_by_path, file_node_by_path)
 
     for path, file_context in extracted_by_path.items():
         file_node_id = file_node_by_path[path]
@@ -1156,6 +1162,31 @@ def _module_action_ids_by_module(extracted_by_path: dict[str, ExtractedFileConte
     return out
 
 
+def _add_page_module_calls(
+    graph: _GraphDraft, files: dict[str, ExtractedFileContext], file_nodes: dict[str, str],
+) -> None:
+    """Connect a runtime page to the unique manifest declaring its actual endpoint."""
+    manifests: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for path, context in files.items():
+        module = context.structured_metadata.get("declared_module_id")
+        if module:
+            root = path.removesuffix(_contract_path(path))
+            manifests[(root, module)].append(path)
+
+    for path, context in files.items():
+        calls: dict[str, set[str]] = defaultdict(set)
+        for module, action in context.structured_metadata.get("page_module_endpoints", []):
+            root = path.removesuffix(_contract_path(path))
+            target = f"{root}modules/{module}/module.yaml"
+            if manifests[(root, module)] != [target]:
+                continue
+            if files[target].structured_metadata.get("declared_action_ids", ()).count(action) == 1:
+                calls[target].add(action)
+        for target, actions in calls.items():
+            graph.add_edge(file_nodes[path], file_nodes[target], GraphEdgeType.CALLS,
+                           metadata={"source_path": path, "resolved": True, "action_ids": sorted(actions)})
+
+
 def _add_workflow_reaction_references(
     graph: _GraphDraft, files: dict[str, ExtractedFileContext], file_nodes: dict[str, str],
 ) -> None:
@@ -1205,6 +1236,12 @@ def _extract_structured_metadata(path: str, content: str) -> dict[str, Any]:
         )
         metadata["action_ids"] = _extract_action_ids(data)
         metadata["event_producers"] = _extract_action_event_producers(data)
+        if len(parts) == 3 and parts[0] == "modules" and parts[-1] == "module.yaml" and isinstance(module_block.get("id"), str):
+            metadata["declared_module_id"] = module_block["id"]
+            actions = data.get("actions")
+            metadata["declared_action_ids"] = [
+                action["id"] for action in actions if isinstance(action, dict) and isinstance(action.get("id"), str)
+            ] if isinstance(actions, list) else []
         if parts == ["modules", module_block.get("id"), "module.yaml"]:
             capabilities = data.get("capabilities")
             if isinstance(capabilities, list):
@@ -1240,6 +1277,15 @@ def _extract_structured_metadata(path: str, content: str) -> dict[str, Any]:
         metadata["module_ids"] = _extract_module_refs(data)
         metadata["action_refs"] = _extract_action_refs(data)
         metadata["schema_version"] = _first_text(data, "schema_version", "schemaVersion")
+        flat = len(parts) == 3 and path.lower().endswith((".yaml", ".yml"))
+        nested = len(parts) == 4 and parts[-1] in {"page.yaml", "page.yml"}
+        if flat or nested:
+            try:
+                page = validate_page_schema(data, expected_name=PurePosixPath(parts[2]).stem if flat else parts[2])
+            except PageSchemaValidationError:
+                pass  # Generic graph inspection can also encounter incomplete page documents.
+            else:
+                metadata["page_module_endpoints"] = sorted({(module, action) for _, module, action in iter_page_module_endpoints(page)})
     else:
         metadata["schema_version"] = _first_text(data, "schema_version", "schemaVersion")
     return {key: value for key, value in metadata.items() if value not in (None, "", [])}

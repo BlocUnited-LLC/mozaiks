@@ -23,22 +23,22 @@ def _recorded_context(**changes: object) -> ContextVariablesBridge:
     return ContextVariablesBridge(data)
 
 
-def _prompt(context: ContextVariablesBridge) -> str:
+async def _prompt(context: ContextVariablesBridge) -> str:
     agent = SimpleNamespace(
         name="ContractDesignerAgent", context_variables=context, system_message="BASE SYSTEM PROMPT",
     )
-    inject_subscription_action_inventory(agent, [])
+    await inject_subscription_action_inventory(agent, [])
     return agent.system_message
 
 
-def test_recorded_concept_decision_leads_designer_prompt() -> None:
+async def test_recorded_concept_decision_leads_designer_prompt() -> None:
     context = _recorded_context()
     blueprint = context.get("concept_blueprint")
     assert isinstance(blueprint, MappingProxyType)
     assert isinstance(blueprint["monetization_intent"], MappingProxyType)
     assert concept_requires_contract(context) is not None
 
-    prompt = _prompt(context)
+    prompt = await _prompt(context)
 
     assert prompt.startswith("[CONTRACT DECISION]")
     assert 'money_flow_summary: "Users can subscribe to a free tier or a paid Pro version, unlocking advanced features and unlimited task management."' in prompt
@@ -48,27 +48,27 @@ def test_recorded_concept_decision_leads_designer_prompt() -> None:
     assert prompt.index("[CONTRACT DECISION]") < prompt.index("BASE SYSTEM PROMPT")
 
 
-def test_undetermined_concept_adds_no_contract_decision() -> None:
+async def test_undetermined_concept_adds_no_contract_decision() -> None:
     context = _recorded_context(concept_blueprint={"agentic_capabilities": []})
     assert concept_requires_contract(context) is None
 
-    prompt = _prompt(context)
+    prompt = await _prompt(context)
 
     assert "[CONTRACT DECISION]" not in prompt
     assert "[REQUIRED CORRECTION]" not in prompt
     assert "[APPROVED PRICING FEATURE INVENTORY]" in prompt
 
 
-def test_brownfield_retains_no_forced_contract_decision() -> None:
+async def test_brownfield_retains_no_forced_contract_decision() -> None:
     context = _recorded_context(brownfield_build_path="full_migration")
     assert concept_requires_contract(context) is None
 
-    prompt = _prompt(context)
+    prompt = await _prompt(context)
 
     assert "[CONTRACT DECISION]" not in prompt
 
 
-def test_requested_changes_lead_retry_prompt() -> None:
+async def test_requested_changes_lead_retry_prompt() -> None:
     context = _recorded_context(subscription_contract_review_response={
         "action": "request_changes",
         "requested_changes": "Provide a valid subscription_config_file plan design.",
@@ -76,7 +76,7 @@ def test_requested_changes_lead_retry_prompt() -> None:
     review = context.get("subscription_contract_review_response")
     assert isinstance(review, MappingProxyType)
 
-    prompt = _prompt(context)
+    prompt = await _prompt(context)
 
     assert prompt.startswith("[REQUIRED CORRECTION]\nProvide a valid subscription_config_file plan design.")
     assert prompt.index("[REQUIRED CORRECTION]") < prompt.index("[CONTRACT DECISION]")

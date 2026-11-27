@@ -1,16 +1,16 @@
-"""Hydrate AppGenerator workflow integration context from workflow_bundle artifacts."""
+"""Verify the app and workflow inputs in order before plan hydration."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from factory_app.workflows._shared.workflow_integration import (
-    hydrate_workflow_integration_context_from_latest_artifact,
+from factory_app.workflows.AppGenerator.tools.hydrate_app_revision_context import (
+    hydrate_app_revision_context,
 )
 
 
-async def hydrate_workflow_integration_context(context_variables: Any = None) -> dict[str, Any]:
-    return await hydrate_workflow_integration_context_from_latest_artifact(context_variables)
+async def hydrate_app_build_inputs(context_variables: Any = None) -> dict[str, Any]:
+    return await hydrate_app_revision_context(context_variables, load_workflows=True)
 
 
-__all__ = ["hydrate_workflow_integration_context"]
+__all__ = ["hydrate_app_build_inputs"]

@@ -46,6 +46,7 @@ def test_the_live_failure_is_rejected_before_it_reaches_the_batch() -> None:
         assert missing in message, f"{missing} must be named so the agent can act on it"
     # task_completion_4 is declared, so it must not be reported as missing.
     assert "task_completion_5 waits on ['task_borrow_requests_module_contract']" in message
+    assert "Declared task IDs: ['task_completion_4', 'task_completion_5']" in message
 
 
 def test_an_empty_or_absent_depends_on_is_not_a_dangling_reference() -> None:

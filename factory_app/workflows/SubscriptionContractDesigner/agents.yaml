@@ -168,6 +168,9 @@ agents:
              - Name plans in the app's domain when upstream context makes that
                clearer; otherwise use stable labels like Free, Pro, Team, Business,
                or Enterprise with snake_case ids.
+             - Set plans[].price only when the owner or approved requirements specify
+               the recurring amount, currency and interval. Use positive amount_cents.
+               Leave free, negotiated, unspecified or hypothetical prices unset.
 
           3. Feature and quota selection:
              - Set each plan's included_features by selecting exact feature ids

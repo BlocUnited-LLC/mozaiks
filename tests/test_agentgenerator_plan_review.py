@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
@@ -253,6 +254,45 @@ def test_invalid_approval_cannot_authorize_generation(monkeypatch, failure):
     persist.assert_not_awaited()
 
 
+async def test_private_result_plan_is_visible_at_review_and_bound_to_its_task(monkeypatch):
+    from factory_app.workflows.AgentGenerator.tools.workflow_quality_gate import (
+        run_workflow_bundle_quality_gate,
+    )
+
+    write = {"source_action": "create", "action": "save_summary", "collection": "tasks",
+             "record_key": "task_key", "fields": ["summary"]}
+    binding = {"event_type": "domain.tasks.created", "module_id": "tasks", "agent": "Result", "result_write": write}
+    item = {**workflow(), "result_write_plans": [binding]}
+    ctx = context([item])
+    assert partition.pattern_selection(PatternSelection=selection([item]), context_variables=ctx)["outcome"] == "selected"
+    brief = ctx.data["workflows_spec"][0]["initial_message"]
+    assert "generated prompt and structured output for Result must request exactly these required fields: summary" in brief
+    assert "host supplies the record key task_key" in brief
+    assert "tasks.save_summary is the receiving app module action" in brief
+    assert "event_payload as object state with model_visible: true and writer_ids: [transition_router]" in brief
+    assert "variables key from every agents.yaml roster entry" in brief
+    assert "context_variables.yaml -> agents -> actor name -> variables" in brief
+    assert "tools: []" in brief and "outcome_plans: []" in brief
+    assert "one after_turn success continuation" in brief
+    assert json.loads(brief.splitlines()[-1]) == [binding]
+    assert ctx.data["PatternSelection"]["workflows"][0]["initial_message"] == item["initial_message"]
+
+    async def respond(**kwargs):
+        payload = kwargs["payload"]
+        checkpoint = payload["checkpoints"][1]
+        assert all(text in checkpoint for text in ["domain.tasks.created", "Result", "summary", "tasks.save_summary",
+                                                   "tasks", "task_key", "create"])
+        return {"action": "approve", "approved": True, "review_id": payload["review_id"]}
+
+    monkeypatch.setattr(review, "use_ui_tool", respond)
+    assert (await review.mermaid_sequence_diagram(context_variables=ctx))["outcome"] == "approved"
+    gate = run_workflow_bundle_quality_gate(bundle_entries=[], context_variables=ctx)
+    assert not any("exact approved workflow plan review" in error for error in gate["errors"])
+    ctx.data["workflows_spec"][0]["result_write_plans"] = []
+    gate = run_workflow_bundle_quality_gate(bundle_entries=[], context_variables=ctx)
+    assert any("exact approved workflow plan review" in error for error in gate["errors"])
+
+
 def test_failed_empty_partition_save_cannot_complete(monkeypatch):
     ctx = context()
     monkeypatch.setattr(export, "_record_context_and_artifacts", AsyncMock(side_effect=RuntimeError("storage failed")))
@@ -296,7 +336,7 @@ def test_autonomous_empty_partition_persists_truthful_not_required_decision(monk
     assert result["outcome"] == ctx.get(spec.context_key) == "no_workflows"
     assert ctx.get(spec.attempts_key) == 1
     assert ctx.get("workflow_plan_review")["status"] == "not_required"
-    assert ctx.get("workflow_plan_review")["selection_hash"] == review._fingerprint(selection())
+    assert ctx.get("workflow_plan_review")["selection_hash"] == partition.selection_fingerprint(selection())
     ui.assert_not_awaited()
     persist.assert_awaited_once()
     assert persist.call_args.kwargs["bundle_entries"] == []

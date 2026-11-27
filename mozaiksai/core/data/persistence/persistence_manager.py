@@ -26,7 +26,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from pydantic import TypeAdapter
@@ -36,11 +36,14 @@ from logs.logging_config import get_workflow_logger
 from mozaiksai.core.core_config import current_mongo_client, get_mongo_client
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id, dual_write_app_scope
 from mozaiksai.core.runtime.persistence.distributed_lock import assert_chat_mutable
-from mozaiksai.core.session.build_binding import RefinementModel
+from mozaiksai.core.session.build_binding import BuildIdentity, RefinementModel, RetryPlanSource
 from mozaiksai.core.workflow.outputs.runtime_validation import normalize_json_candidate_text
 
 from ..models import WorkflowStatus, WorkflowUIState
 from .namespaces import SYSTEM_DATABASE, RuntimeCollections
+
+if TYPE_CHECKING:
+    from mozaiksai.core.runtime.composition.workflow_result import WorkflowResultGrant
 
 # Lazy import to avoid circular dependency - see _format_message_for_storage
 
@@ -147,8 +150,11 @@ SERVER_OWNED_SESSION_FIELDS = frozenset({
     "platform_user_email",
     "build_terminal_receipt",
     "run_build_binding",
+    "journey_parent_chat_id",
+    "retry_plan_source",
     "workflow_run_id",
     "workflow_run_model",
+    "workflow_result_grant",
 })
 
 
@@ -496,10 +502,30 @@ class AG2PersistenceManager:
         *,
         extra_fields: dict[str, Any] | None = None,
         run_model: RefinementModel | None = None,
+        workflow_result_grant: WorkflowResultGrant | None = None,
+        journey_parent_chat_id: str | None = None,
+        retry_plan_source: RetryPlanSource | None = None,
     ) -> None:
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
+        if journey_parent_chat_id is not None:
+            TypeAdapter(BuildIdentity).validate_python(journey_parent_chat_id)
+            if journey_parent_chat_id == chat_id or not user_id or not workflow_name:
+                raise ValueError("Journey handoff requires a distinct parent and an owned workflow session")
+        if retry_plan_source is not None and (not isinstance(retry_plan_source, RetryPlanSource)
+                or not journey_parent_chat_id or retry_plan_source.chat_id in {chat_id, journey_parent_chat_id}):
+            raise ValueError("Plan reuse requires a distinct source and an owned journey predecessor")
+        grant_document = None
+        if workflow_result_grant is not None:
+            from mozaiksai.core.runtime.composition.workflow_result import WorkflowResultGrant
+
+            if (not isinstance(workflow_result_grant, WorkflowResultGrant)
+                    or workflow_result_grant.workflow != workflow_name or workflow_result_grant.chat_id != chat_id
+                    or workflow_result_grant.subject.app_id != resolved_app_id
+                    or workflow_result_grant.subject.user_id != user_id):
+                raise ValueError("Workflow result authority must match the new session")
+            grant_document = workflow_result_grant.model_dump(mode="json")
         if run_model is not None:
             if not user_id or not workflow_name:
                 raise ValueError("user_id and workflow_name are required when binding a run model")
@@ -512,7 +538,7 @@ class AG2PersistenceManager:
         # mutation, never a silent success.
         if isinstance(extra_fields, dict) and extra_fields:
             injected_server_owned = sorted(
-                k for k in extra_fields if k in SERVER_OWNED_SESSION_FIELDS
+                k for k in extra_fields if isinstance(k, str) and k.split(".", 1)[0] in SERVER_OWNED_SESSION_FIELDS
             )
             if injected_server_owned:
                 logger.warning(
@@ -532,6 +558,15 @@ class AG2PersistenceManager:
             # Scope the duplicate check to this app to maintain tenant isolation.
             existing = await coll.find_one({"_id": chat_id, **build_app_scope_filter(resolved_app_id)})
             if existing:
+                if journey_parent_chat_id is not None and (
+                    existing.get("journey_parent_chat_id") != journey_parent_chat_id
+                    or existing.get("user_id") != user_id or existing.get("workflow_name") != workflow_name
+                ):
+                    raise ValueError("Cannot replace the parent of an existing journey session")
+                if retry_plan_source is not None and existing.get("retry_plan_source") != retry_plan_source.model_dump():
+                    raise ValueError("Cannot replace the plan source of an existing retry")
+                if grant_document is not None and existing.get("workflow_result_grant") != grant_document:
+                    raise ValueError("Cannot attach result authority to an existing session")
                 if run_model is not None and (
                     existing.get("workflow_run_model") != run_model
                     or existing.get("user_id") != user_id
@@ -558,6 +593,12 @@ class AG2PersistenceManager:
                 # Publish the model and session together so a simultaneous list
                 # or websocket request can never observe an unbound run.
                 session_doc["workflow_run_model"] = run_model
+            if grant_document is not None:
+                session_doc["workflow_result_grant"] = grant_document
+            if journey_parent_chat_id is not None:
+                session_doc["journey_parent_chat_id"] = journey_parent_chat_id
+            if retry_plan_source is not None:
+                session_doc["retry_plan_source"] = retry_plan_source.model_dump()
 
             if isinstance(extra_fields, dict) and extra_fields:
                 # Prevent callers from overwriting canonical identifiers/state.
@@ -607,6 +648,21 @@ class AG2PersistenceManager:
         except Exception as e:  # pragma: no cover
             logger.error("Failed to create chat session %s: %s", chat_id, e, exc_info=True)
             raise
+
+    async def read_workflow_result_grant(
+        self, *, app_id: str, chat_id: str, workflow: str, user_id: str,
+    ) -> WorkflowResultGrant:
+        """Read an immutable event result binding, never a chat context or trigger hint."""
+        from mozaiksai.core.runtime.composition.workflow_result import WorkflowResultGrant
+
+        coll = await self._coll()
+        doc = await coll.find_one(
+            {"_id": chat_id, "user_id": user_id, "workflow_name": workflow, **build_app_scope_filter(app_id)},
+            {"workflow_result_grant": 1},
+        )
+        if not doc or not isinstance(doc.get("workflow_result_grant"), dict):
+            raise PermissionError("No workflow result was authorized for this session")
+        return WorkflowResultGrant.model_validate(doc["workflow_result_grant"])
 
     async def fetch_chat_session_extra_context(
         self,
@@ -661,6 +717,8 @@ class AG2PersistenceManager:
             "workflow_model",
             "workflow_model_rebind_pending",
             "workflow_run_model",
+            "workflow_result_grant",
+            "journey_parent_chat_id",
             "workflow_name",
             "user_id",
             "status",
@@ -791,7 +849,7 @@ class AG2PersistenceManager:
                 continue
             if key.split(".", 1)[0] in {"workflow_model", "workflow_model_rebind_pending"}:
                 continue
-            if key in SERVER_OWNED_SESSION_FIELDS:
+            if key.split(".", 1)[0] in SERVER_OWNED_SESSION_FIELDS:
                 # Server-owned lifecycle authority fields are never writable
                 # through generic context persistence: a model/tool-authored
                 # context update must not install or replace them. The
@@ -890,6 +948,12 @@ class AG2PersistenceManager:
                 value = RunBuildBinding.model_validate(value).model_dump()
             if key == "workflow_run_model":
                 raise ValueError("A workflow run model can only be bound when its session is created")
+            if key == "workflow_result_grant":
+                raise ValueError("A workflow result grant can only be bound when its session is created")
+            if key == "retry_plan_source":
+                raise ValueError("A retry plan source can only be bound when its session is created")
+            if key == "journey_parent_chat_id":
+                raise ValueError("A journey parent can only be bound when its session is created")
             updates[key] = deepcopy(value)
         if not updates:
             return
@@ -1280,6 +1344,24 @@ class AG2PersistenceManager:
     async def load_run_events(self, *, chat_id: str, app_id: str) -> list[Any]:
         stream = self.build_run_stream(chat_id=chat_id, app_id=app_id)
         return list(await stream.history.get_events())
+
+    async def latest_workflow_user_input(self, *, chat_id: str, app_id: str, user_id: str) -> str | None:
+        """Read the owner's most recent transport-admitted message in this workflow chat."""
+        if not chat_id or not app_id or not user_id:
+            return None
+        sessions = await self._coll()
+        event = await sessions.database[RuntimeCollections.AG2_STREAM_EVENTS].find_one(
+            {
+                **build_app_scope_filter(app_id),
+                "stream_id": str(self._run_stream_id(chat_id=chat_id, app_id=app_id)),
+                "event_class": "TextInput",
+                "event_payload.metadata.source": "workflow_user",
+                "event_payload.metadata.user_id": user_id,
+            },
+            {"event_payload.content": 1},
+            sort=[("sequence", -1)],
+        )
+        return event["event_payload"]["content"] if event else None
 
     @staticmethod
     def _is_json_container_text(content: str) -> bool:

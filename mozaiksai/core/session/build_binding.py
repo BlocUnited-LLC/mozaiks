@@ -27,6 +27,16 @@ class BuildTargetReference(BaseModel):
     source_chat_id: BuildIdentity | None = None
 
 
+class RetryPlanSource(BaseModel):
+    """Creation-only reference to an admitted plan and its exact dispatch rows."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    chat_id: BuildIdentity
+    plan_sha256: Annotated[str, StringConstraints(strict=True, pattern=r"^[a-f0-9]{64}$")]
+    dispatch_sha256: Annotated[str, StringConstraints(strict=True, pattern=r"^[a-f0-9]{64}$")]
+
+
 class RunBuildBinding(BaseModel):
     """Persisted in ChatSessions, never accepted as workflow caller input.
 

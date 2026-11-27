@@ -45,11 +45,44 @@ class WorkflowOutcomePlan(BaseModel):
         })
 
 
-def materialize_workflow_outcomes(entry: dict[str, Any]) -> dict[str, Any]:
+def _required_save_plan(agent: str, function: str, rules: list[dict[str, Any]]) -> WorkflowOutcomePlan:
+    """Use the reviewed agent's normal continuation only after a confirmed record write."""
+    state_key = "workflow_result_write_status"
+    owned = [rule for rule in rules if rule.get("source_agent") == agent]
+    target = "terminate"
+    if len(owned) == 1 and owned[0].get("transition_type") == "after_turn":
+        rule = owned[0]
+        if rule.get("termination_reason") == "workflow_failed":
+            raise ValueError("The workflow result agent needs a successful continuation")
+        target = rule["target_agent"]
+        rules.remove(rule)
+    elif owned:
+        # An already materialized bundle must agree with every canonical route below.
+        success = next((rule for rule in owned if rule.get("condition_key") == state_key
+                        and rule.get("condition_value") == "applied"), None)
+        if success is None:
+            raise ValueError("The workflow result agent needs one unconditional success continuation")
+        target = success["target_agent"]
+    return WorkflowOutcomePlan(
+        agent=agent, function=function, context_key=state_key, attempts_key="workflow_result_write_attempts",
+        # A lost turn acknowledgement may replay an already committed save.
+        # The bound storage receipt adjudicates replays without consuming an attempt.
+        max_attempts=2, retry_on=["applied", "already_applied"], retry_without_attempt=["applied", "already_applied"],
+        error_value="failed", routes=[
+            OutcomeRoute(value="applied", target_agent=target),
+            OutcomeRoute(value="already_applied", target_agent=target),
+            OutcomeRoute(value="failed", target_agent="terminate", termination_reason="workflow_failed"),
+        ],
+    )
+
+
+def materialize_workflow_outcomes(
+    entry: dict[str, Any], *, required_save: tuple[str, str] | None = None,
+) -> dict[str, Any]:
     raw_plans = entry.get("outcome_plans", [])
     if not isinstance(raw_plans, list):
         raise ValueError("outcome_plans must be a list")
-    if not raw_plans:
+    if not raw_plans and required_save is None:
         return entry
     plans = [WorkflowOutcomePlan.model_validate(plan) for plan in raw_plans]
     if len({plan.agent for plan in plans}) != len(plans):
@@ -68,12 +101,23 @@ def materialize_workflow_outcomes(entry: dict[str, Any]) -> dict[str, Any]:
     tools = payloads["tools"].get("tools", [])
     definitions = payloads["context_variables"].setdefault("definitions", {})
     rules = payloads["transition_graph"].setdefault("transition_rules", [])
+    if required_save is not None:
+        agent, function = required_save
+        if any(plan.agent == agent for plan in plans):
+            raise ValueError(
+                f"Factory supplies the save operation for {agent}. Remove that agent's outcome_plan, "
+                "its generated save tool binding and its Python implementation. Keep the agent's "
+                "structured output and one after_turn success continuation."
+            )
+        plans.append(_required_save_plan(agent, function, rules))
     owned_keys: set[str] = set()
     for plan in plans:
         outcome = plan.tool_outcome()
         matches = [tool for tool in tools if tool.get("agent") == plan.agent and tool.get("function") == plan.function]
         if len(matches) != 1:
             raise ValueError(f"outcome plan must resolve one tool: {plan.agent}.{plan.function}")
+        if required_save == (plan.agent, plan.function) and matches[0].get("outcome") not in (None, outcome.model_dump()):
+            raise ValueError("The workflow result tool outcome is owned by the Factory")
         matches[0].update(auto_tool_call=True, bind_to_agent=False, outcome=outcome.model_dump())
         for key, kind, default, authority in (
             (plan.context_key, "string", plan.error_value, "closed_writer_routing_state"),

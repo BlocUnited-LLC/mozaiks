@@ -217,7 +217,6 @@ def test_the_known_good_helpers_have_not_regressed() -> None:
         ("factory_app/workflows/AppGenerator/tools/save_admin_registry.py", "_context_get"),
         ("factory_app/workflows/AppGenerator/tools/generate_and_download.py", "_context_get"),
         ("factory_app/workflows/AgentGenerator/tools/hook_ai_pack_archetype_context.py", "_context_get"),
-        ("factory_app/workflows/DesignDocs/tools/hook_ai_pack_surface_context.py", "_context_get"),
         ("factory_app/workflows/ExistingAppDiscovery/tools/source_context_retrieval.py", "_ctx_get"),
         ("mozaiksai/core/workflow/generator_support/connector_request.py", "_context_get"),
         ("mozaiksai/core/utils/context_vars.py", "context_get"),
