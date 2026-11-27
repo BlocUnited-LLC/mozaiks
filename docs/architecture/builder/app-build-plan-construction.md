@@ -101,3 +101,8 @@ publication, and page tasks gain dependencies from their explicit data source
 pairs. This does not infer ownership from endpoint strings. See the
 [typed page data source contract](appgenerator-output-assembly-contract.md#typed-page-data-sources)
 for construction boundaries and protected-action handling.
+
+For declarative-only page inventories, plan review releases draft page-task claims
+on `ui/index.js` and `ui/route_manifest.json` when the remaining outputs match
+the approved page scope. Pack composition and the auth scaffold supply these
+files as needed. Approved custom React pages retain their registry requirements.

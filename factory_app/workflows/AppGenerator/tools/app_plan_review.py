@@ -1801,7 +1801,21 @@ def _label_page_tasks(plan: dict[str, Any], context: Any) -> list[str]:
     approved = _approved_surface_ids(context)
     ui_only = _approved_ui_only_surfaces(context)
     repairs: list[str] = []
+    approved_pages = _approved_page_inventory(context)
+    shell_paths = {"ui/index.js", "ui/route_manifest.json"}
+    declarative_only = approved_pages and all(
+        page.get("ui_surface") == "declarative_page" for page in approved_pages
+    )
     for task in plan.get("build_tasks") or []:
+        if declarative_only and task.get("task_type") == "page_bundle":
+            paths = task.get("owned_paths") or []
+            retained = [
+                path for path in paths
+                if not is_safe_app_path(path) or normalize_app_path(path).lower() not in shell_paths
+            ]
+            if retained and retained != paths and _owns_only_approved_pages({**task, "owned_paths": retained}, context):
+                task["owned_paths"] = retained
+                repairs.append(f"{task.get('task_id')}: released shell files supplied by pack composition or auth")
         surface_id, surface_kind = str(task.get("surface_id") or ""), task.get("surface_kind")
         if (
             surface_id in ui_only
