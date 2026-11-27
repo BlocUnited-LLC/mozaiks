@@ -1351,7 +1351,7 @@ def test_studio_trigger_endpoint_can_auto_scope_before_coding_worker(monkeypatch
     assert persisted_changes[0]["router_decision"]["execution_mode"] == "coding_worker"
 
 
-@pytest.mark.parametrize("confirmation", ["exact", "restore", "race", "changed_request", "changed_artifact", "changed_paths", "malformed"])
+@pytest.mark.parametrize("confirmation", ["exact", "restore", "race", "changed_request", "changed_artifact", "changed_paths", "changed_model", "malformed"])
 def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypatch, confirmation):
     from mozaiksai.core.auth import reset_auth_adapter
 
@@ -1364,6 +1364,8 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
     persisted_invalidations: list[dict] = []
     proposal_count = 0
     execution_count = 0
+    select_model = AsyncMock(return_value="openai")
+    monkeypatch.setattr(studio_app, "select_studio_model", select_model)
 
     async def fail_prepare(**kwargs):  # noqa: ANN003
         raise AssertionError("workflow launch should not run for coding worker execution")
@@ -1410,6 +1412,7 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
     async def _fake_execute(request):  # noqa: ANN001
         nonlocal execution_count
         execution_count += 1
+        assert request.run_build_binding.refinement_model == "openai"
         assert sorted(request.files.keys()) == [
             "app/ui/components/ExportPanel.jsx",
             "app/ui/pages/Dashboard.jsx",
@@ -1553,6 +1556,8 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
                 },
             },
         }
+    if confirmation == "changed_model":
+        confirmation_body["trigger_payload"]["refinement_request"]["refinement_model"] = "gemini"
     if confirmation == "race":
         import httpx
 
@@ -1586,6 +1591,7 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
         return
     second = client.post("/api/workflows/trigger", json=confirmation_body)
 
+    select_model.assert_awaited_once()
     assert proposal_count == 1
     if confirmation not in {"exact", "restore"}:
         assert second.status_code == (400 if confirmation == "malformed" else 409), second.text

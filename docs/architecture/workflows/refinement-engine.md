@@ -706,6 +706,8 @@ Current first-party harness decision layer:
   - a follow-up trigger with `harness_action.action_id=apply_proposed_scope`
     can continue into the coding worker without forcing the user to manually
     reselect files
+  - confirmation uses the model selection stored with the proposal when the
+    client omits it. An explicit change of model requires a new proposal.
 - current first-party `decision_type` values are:
   - `workflow_reentry`
   - `core_restart`

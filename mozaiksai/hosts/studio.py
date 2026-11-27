@@ -4455,7 +4455,7 @@ def _confirmed_refinement_decision(
     change_request_id: str | None,
     revision_id: str | None,
     source_chat_id: str | None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], RefinementRequest]:
     """Bind an approval to the existing target-scoped pending decision."""
     pending = (snapshot or {}).get("pending_harness_decision") or {}
     metadata = pending.get("metadata") or {}
@@ -4475,6 +4475,8 @@ def _confirmed_refinement_decision(
         previous = RefinementRequest.model_validate(stored_request)
     except ValidationError as exc:
         raise HTTPException(status_code=409, detail="The proposed scope is unavailable. Submit the change again.") from exc
+    if request.refinement_model is None:
+        request = request.model_copy(update={"refinement_model": previous.refinement_model})
     if any(
         getattr(previous, field) != getattr(request, field)
         for field in (
@@ -4484,7 +4486,7 @@ def _confirmed_refinement_decision(
         )
     ):
         raise HTTPException(status_code=409, detail="The proposed scope belongs to a different request or artifact. Submit the change again.")
-    return pending
+    return pending, request
 
 
 async def require_studio_model_admin(
@@ -4700,7 +4702,7 @@ async def trigger_workflow(
 
         pending_decision = None
         if action_id:
-            pending_decision = _confirmed_refinement_decision(
+            pending_decision, refinement_request = _confirmed_refinement_decision(
                 session_snapshot, refinement_request, action_id=action_id,
                 change_request_id=persisted_change_request_id, revision_id=persisted_revision_id,
                 source_chat_id=body.source_chat_id,
