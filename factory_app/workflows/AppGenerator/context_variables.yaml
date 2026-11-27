@@ -127,6 +127,11 @@ definitions:
     source:
       type: state
       default: false
+  retry_plan_source:
+    type: object
+    model_visible: false
+    description: Server-owned reference to the admitted plan and dispatch selected for this retry.
+    source: {type: runtime, required: false}
   run_build_binding:
     type: object
     description: Server-verified target and build lineage. Execution app_id remains the host identity.

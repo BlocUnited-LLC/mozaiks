@@ -91,6 +91,7 @@ from mozaiksai.core.workflow.task_batches import (
 logger = logging.getLogger(__name__)
 
 _WORKFLOWS_ROOT = Path(__file__).resolve().parents[2]
+MAX_PLAN_REVIEW_ATTEMPTS = 3
 
 
 def _clear_plan(context: Any) -> None:
@@ -2473,7 +2474,7 @@ def review_app_build_plan(
     attempts = context_variables.get("app_plan_attempts") or 0
     if type(attempts) is not int or attempts < 0:
         raise ValueError("Invalid runtime plan attempt counter")
-    if attempts >= 3:
+    if attempts >= MAX_PLAN_REVIEW_ATTEMPTS:
         feedback = context_variables.get("app_plan_feedback") or "Plan review attempt budget exhausted"
         context_variables.set(
             "app_build_failure_message",
@@ -2551,7 +2552,7 @@ def review_app_build_plan(
         _clear_plan(context_variables)
         feedback = _plan_validation_feedback(error, AppBuildPlan)
         context_variables.set("app_plan_feedback", feedback)
-        outcome = "needs_revision" if attempts < 3 else "blocked"
+        outcome = "needs_revision" if attempts < MAX_PLAN_REVIEW_ATTEMPTS else "blocked"
         context_variables.set("app_plan_outcome", outcome)
         if outcome == "blocked":
             context_variables.set(

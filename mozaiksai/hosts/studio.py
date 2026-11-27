@@ -166,6 +166,7 @@ from mozaiksai.core.secrets.contract import is_secret_contract_path, validate_se
 from mozaiksai.core.session.build_binding import (
     BuildIdentity,
     BuildTargetReference,
+    RetryPlanSource,
     RunBuildBinding,
 )
 from mozaiksai.core.session.launcher import (
@@ -3483,6 +3484,7 @@ class _DownstreamRetry(TriggerRoutingContribution):
     failed_chat_id: str
     parent_chat_id: str
     journey_scope: dict[str, Any]
+    plan_source: RetryPlanSource | None = None
 
 
 def _retry_chat_id(app_id: str, user_id: str, failed_chat_id: str, binding: RunBuildBinding) -> str:
@@ -3490,6 +3492,42 @@ def _retry_chat_id(app_id: str, user_id: str, failed_chat_id: str, binding: RunB
     # whose process disappeared before it published the replacement session.
     scope = ["mozaiks/studio/stage-retry", app_id, user_id, failed_chat_id, binding.model_dump()]
     return str(uuid5(NAMESPACE_URL, json.dumps(scope, separators=(",", ":"), sort_keys=True)))
+
+
+async def _select_retry_plan(
+    sessions: Any, *, failed: dict[str, Any], scope: dict[str, Any], binding: RunBuildBinding,
+) -> RetryPlanSource | None:
+    """Inspect only the failed attempt and its direct, server-minted retry ancestry."""
+    from factory_app.workflows.AppGenerator.tools.retry_plan import (
+        PLAN_SOURCE_PROJECTION,
+        admitted_source,
+    )
+
+    if binding.phase != "refinement" or not binding.refinement_model or not all(scope.values()):
+        return None
+    lookup = {key: value for key, value in scope.items() if not isinstance(value, dict)}
+    child_created = None
+    chat_id = failed["_id"]
+    # A bounded _id lookup per native retry, never a scan for similar sessions.
+    for _ in range(16):
+        row = await sessions.find_one({"_id": chat_id, **lookup}, {
+            **dict.fromkeys(scope, 1), **PLAN_SOURCE_PROJECTION, "trigger_meta": 1, "created_at": 1, "failed_at": 1, "retry_plan_source": 1,
+        })
+        if (not row or any(row.get(key) != value for key, value in scope.items())
+                or any(row.get(key) for key in ("workflow_model", "workflow_model_rebind_pending", "workflow_run_model"))
+                or not isinstance(row.get("failed_at"), datetime) or not isinstance(row.get("created_at"), datetime)
+                or row["created_at"] > row["failed_at"] or (child_created is not None and row["failed_at"] > child_created)):
+            return None
+        # A reused plan originated in an earlier WAL; keep following native edges.
+        if row.get("app_plan_ready") and not row.get("retry_plan_source"):
+            return admitted_source(row)
+        trigger = row.get("trigger_meta") or {}
+        parent_id = trigger.get("retry_of_chat_id")
+        if (not isinstance(parent_id, str) or trigger.get("trigger_source") != "manual"
+                or _retry_chat_id(scope["app_id"], scope["user_id"], parent_id, binding) != chat_id):
+            return None
+        child_created, chat_id = row["created_at"], parent_id
+    return None
 
 
 def _registered_retry_cursor(
@@ -3842,12 +3880,28 @@ async def _failed_workflow_retry_contribution(
 
         seed = {**_project_launch_context({**predecessor, **verified_inputs}, body.workflow_id), **seed,
                 "artifact_version_id": source["artifact_version_id"]}
+        journey_scope = {key: source[key] for key in (
+            "journey_instance_id", "journey_key", "journey_position", "journey_total_steps", "session_router_session_id",
+        )}
+        plan_source = None
+        if (body.workflow_id == "AppGenerator" and verified_inputs.get("design_docs_artifact_version_id")
+                and verified_inputs.get("subscription_contract_artifact_version_id")):
+            scope = {key: seed[key] for key in (
+                "refinement_request", "change_intent", "impact_set", "change_request_id", "revision_id", "artifact_version_id",
+            )}
+            plan_source = await _select_retry_plan(
+                sessions, failed=source, binding=binding, scope={
+                    **scope, **journey_scope, **verified_inputs, "revision_source_artifact_version_id": baseline.id,
+                    "workflow_bundle_artifact_version_id": source["artifact_version_id"], "workflow_name": body.workflow_id,
+                    "app_id": app_id, "user_id": user_id, "status": 2, "journey_parent_chat_id": predecessor["_id"],
+                    "run_build_binding": binding.model_dump(),
+                },
+            )
         contribution = _DownstreamRetry(
             workflow_id=body.workflow_id, journey_id=journey_id, require_exact_route=True,
             explanation="Retry the verified downstream stage with its completed predecessor's launch inputs",
-            binding=binding, failed_chat_id=source["_id"], parent_chat_id=predecessor["_id"],
-            journey_scope={key: source[key] for key in ("journey_instance_id", "journey_key", "journey_position",
-                                                       "journey_total_steps", "session_router_session_id")},
+            binding=binding, failed_chat_id=source["_id"], parent_chat_id=predecessor["_id"], plan_source=plan_source,
+            journey_scope=journey_scope,
         )
     contribution.context_seed = validate_context_for_workflow(body.workflow_id, seed)
     return contribution
@@ -3885,10 +3939,13 @@ async def _publish_downstream_retry(retry: _DownstreamRetry, *, app_id: str, use
                 "journey_parent_chat_id": retry.parent_chat_id,
                 **{key: retry.context_seed[key] for key in ("artifact_version_id", "change_request_id", "revision_id")}}
     extra_run_authority = ("workflow_model", "workflow_model_rebind_pending", "workflow_run_model", "workflow_result_grant")
-    projection = dict.fromkeys((*expected, *retry.journey_scope, "trigger_meta", "run_build_binding", *extra_run_authority), 1)
+    projection = dict.fromkeys((*expected, *retry.journey_scope, "retry_plan_source", "trigger_meta", "run_build_binding", *extra_run_authority), 1)
     existing = await sessions.find_one({"_id": chat_id}, projection)
+    # A session published before plan reuse was available retains its original startup behavior.
+    plan_source = retry.plan_source if existing is None or "retry_plan_source" in existing else None
     if existing is not None and (
-        any(existing.get(key) != value for key, value in expected.items())
+        existing.get("retry_plan_source") != (plan_source.model_dump() if plan_source else None)
+        or any(existing.get(key) != value for key, value in expected.items())
         or existing.get("run_build_binding") not in (None, retry.binding.model_dump())
         or any(existing.get(key) is not None for key in extra_run_authority)
         or (existing.get("trigger_meta") or {}).get("retry_of_chat_id") != retry.failed_chat_id
@@ -3928,7 +3985,9 @@ async def _publish_downstream_retry(retry: _DownstreamRetry, *, app_id: str, use
                                     "build_record_id": retry.context_seed["refinement_request_meta"]["build_record_id"]},
             )
             assert_chat_mutable(app_id=app_id, chat_id=chat_id)
-            return await launch_prepared_workflow(launch, journey_parent_chat_id=retry.parent_chat_id)
+            return await launch_prepared_workflow(
+                launch, journey_parent_chat_id=retry.parent_chat_id, retry_plan_source=plan_source,
+            )
         except Exception:
             assert_chat_mutable(app_id=app_id, chat_id=chat_id)
             # An inserted child carries the protected parent. Leave its claim

@@ -318,6 +318,12 @@ lifecycle_tools:
     function: hydrate_app_build_plan_context
     description: Hydrate task-batch context from a preloaded AppBuildPlan before AppGenerator agents run.
     tool_type: Agent_Tool
+  - trigger: before_chat
+    agent: null
+    file: retry_plan.py
+    function: readmit_retry_plan
+    description: Re-review the selected original plan against this retry's verified inputs before starting fresh tasks.
+    tool_type: Agent_Tool
   - trigger: on_start
     agent: null
     file: tools/platform/build_lifecycle.py

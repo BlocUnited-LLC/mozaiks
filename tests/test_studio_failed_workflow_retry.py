@@ -8,7 +8,7 @@ from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import yaml
@@ -358,6 +358,12 @@ async def test_app_stage_retry_requires_its_reviewed_export_and_distinct_app_sou
     assert fresh["design_docs_artifact_version_id"] == "design_docs_v1"
     assert "workflow_result_grant" not in fresh and "generated_files" not in fresh
     assert await launch(r, workflow_id="AppGenerator") == result
+    # An old, published destination was not issued plan reuse. An upgrade must
+    # return the same chat even if its source would now offer an admitted plan.
+    marker = studio.RetryPlanSource(chat_id="older", plan_sha256="a" * 64, dispatch_sha256="b" * 64)
+    with patch.object(studio, "_select_retry_plan", AsyncMock(return_value=marker)):
+        assert await launch(r, workflow_id="AppGenerator") == result
+    assert "retry_plan_source" not in fresh
 
 
 async def test_inserted_retry_remains_recoverable_after_a_transient_binding_error(downstream, monkeypatch):

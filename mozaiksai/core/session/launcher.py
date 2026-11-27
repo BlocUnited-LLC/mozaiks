@@ -27,7 +27,7 @@ from mozaiksai.core.workflow.context.authority import (
 from mozaiksai.core.workflow.pack.config import get_transition, load_global_pack_graph
 from mozaiksai.core.workflow.pack.schema import WorkflowTransition
 
-from .build_binding import BuildIdentity, RefinementModel, RunBuildBinding
+from .build_binding import BuildIdentity, RefinementModel, RetryPlanSource, RunBuildBinding
 from .build_context import revalidate_build_context
 from .model import RoutingDecision, TriggerInput
 from .trigger_routing import TriggerRoutingContribution
@@ -43,6 +43,7 @@ class _SessionOptions(TypedDict, total=False):
     run_model: RefinementModel
     workflow_result_grant: WorkflowResultGrant
     journey_parent_chat_id: str
+    retry_plan_source: RetryPlanSource
 
 
 @dataclass(slots=True)
@@ -246,6 +247,7 @@ async def create_routed_chat_session(
     run_model: RefinementModel | None = None,
     workflow_result_grant: WorkflowResultGrant | None = None,
     journey_parent_chat_id: str | None = None,
+    retry_plan_source: RetryPlanSource | None = None,
 ) -> str:
     persistence = persistence_manager if persistence_manager is not None else _PERSISTENCE_MANAGER
     chat_id = chat_id or str(uuid4())
@@ -286,6 +288,8 @@ async def create_routed_chat_session(
         options["workflow_result_grant"] = workflow_result_grant
     if journey_parent_chat_id is not None:
         options["journey_parent_chat_id"] = journey_parent_chat_id
+    if retry_plan_source is not None:
+        options["retry_plan_source"] = retry_plan_source
     await persistence.create_chat_session(
         chat_id=chat_id,
         app_id=app_id,
@@ -448,9 +452,11 @@ async def prepare_routed_workflow_launch(
 
 
 async def launch_prepared_workflow(
-    launch: PreparedWorkflowLaunch, *, journey_parent_chat_id: str | None = None,
+    launch: PreparedWorkflowLaunch, *, journey_parent_chat_id: str | None = None, retry_plan_source: RetryPlanSource | None = None,
 ) -> WorkflowLaunchResult:
     options: _SessionOptions = {"journey_parent_chat_id": journey_parent_chat_id} if journey_parent_chat_id is not None else {}
+    if retry_plan_source is not None:
+        options["retry_plan_source"] = retry_plan_source
     chat_id = await create_routed_chat_session(
         workflow_id=launch.workflow_id,
         app_id=launch.app_id,
