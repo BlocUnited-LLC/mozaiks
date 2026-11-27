@@ -56,6 +56,7 @@ repository's own Studio bundle under `factory_app/app` instead.
 | `python -m mozaiks add <feature>` | Enable one feature in `app/app.json` |
 | `python -m mozaiks add --preset <preset>` | Switch `app/app.json` to a preset |
 | `python -m mozaiks gen {workflow,app} --prompt "..."` | Generate from a one-shot prompt |
+| `python -m mozaiks package android <workspace> --config <file> --output <dir>` | Prepare portable Android sources and compile a debug APK |
 | `python -m mozaiks migrations status` | Report generated-app migration health |
 | `python -m mozaiks context index --app-id <id>` | Index a local workspace for App Intelligence |
 | `python -m mozaiks sync-agent-guidance --dir <path>` | Check or repair coding-agent guidance files |
