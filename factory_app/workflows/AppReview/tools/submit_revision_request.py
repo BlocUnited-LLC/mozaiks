@@ -8,6 +8,7 @@ from factory_app.workflows.AppReview.tools.review_context import (
     mark_review_promoted,
     mark_review_revision_submitted,
 )
+from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 
 
 async def submit_revision_request(
@@ -65,6 +66,13 @@ async def submit_revision_request(
     chat_id = str(ctx.get("chat_id") or "").strip()
     if not chat_id:
         raise ValueError("Revision requests require a review chat session")
+    if ctx.get("revision_submitted"):
+        return {"success": True, "status": "already_submitted"}
+    user_text = await AG2PersistenceManager().latest_workflow_user_input(
+        chat_id=chat_id, app_id=ctx.get("app_id") or "", user_id=ctx.get("user_id") or "",
+    )
+    if user_text != request_text:
+        return {"success": False, "status": "awaiting_owner_request"}
     refinement_payload = build_refinement_request_payload(ctx, request_text)
     mark_review_revision_submitted(ctx, refinement_payload)
 

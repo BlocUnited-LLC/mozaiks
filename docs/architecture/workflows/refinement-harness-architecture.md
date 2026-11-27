@@ -205,6 +205,10 @@ coding request. Review, accept, and reject continue through the existing artifac
 lifecycle APIs. A validated coding attempt alone does not certify the entire
 application or replace independent runtime acceptance.
 
+AppReview checks the proposed revision against the most recent message its
+owner submitted in that chat. The transport records that input on the AG2
+stream. Merely opening the review presents the app and waits for the owner.
+
 AppReview revision responses open the same workbench with the original bundle
 and the inline result. They do not start another workflow or automatically
 accept the candidate. A failed or partial saved draft remains reviewable while

@@ -1345,6 +1345,24 @@ class AG2PersistenceManager:
         stream = self.build_run_stream(chat_id=chat_id, app_id=app_id)
         return list(await stream.history.get_events())
 
+    async def latest_workflow_user_input(self, *, chat_id: str, app_id: str, user_id: str) -> str | None:
+        """Read the owner's most recent transport-admitted message in this workflow chat."""
+        if not chat_id or not app_id or not user_id:
+            return None
+        sessions = await self._coll()
+        event = await sessions.database[RuntimeCollections.AG2_STREAM_EVENTS].find_one(
+            {
+                **build_app_scope_filter(app_id),
+                "stream_id": str(self._run_stream_id(chat_id=chat_id, app_id=app_id)),
+                "event_class": "TextInput",
+                "event_payload.metadata.source": "workflow_user",
+                "event_payload.metadata.user_id": user_id,
+            },
+            {"event_payload.content": 1},
+            sort=[("sequence", -1)],
+        )
+        return event["event_payload"]["content"] if event else None
+
     @staticmethod
     def _is_json_container_text(content: str) -> bool:
         candidate = normalize_json_candidate_text(str(content or ""))

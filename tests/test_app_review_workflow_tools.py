@@ -157,6 +157,8 @@ async def test_submit_revision_request_records_and_emits_refinement_payload(
         return _Transport()
 
     monkeypatch.setattr(SimpleTransport, "get_instance", classmethod(_get_instance))
+    owner_input = AsyncMock(return_value="Add a dark mode toggle.")
+    monkeypatch.setattr(submit_module.AG2PersistenceManager, "latest_workflow_user_input", owner_input)
 
     ctx = _review_context()
     result = await submit_module.submit_revision_request(
@@ -167,6 +169,8 @@ async def test_submit_revision_request_records_and_emits_refinement_payload(
     assert result["success"] is True
     assert result["action"] == "revise"
     assert result["event_emitted"] is True
+    owner_input.assert_awaited_once_with(chat_id="chat_review_1", app_id="factory", user_id="owner")
+    assert (await submit_module.submit_revision_request("Add a dark mode toggle.", context_variables=ctx))["status"] == "already_submitted"
     assert ctx.data["review_complete"] is True
     assert ctx.data["revision_submitted"] is True
     assert ctx.data["refinement_request"] == "Add a dark mode toggle."
@@ -209,6 +213,22 @@ async def test_submit_revision_request_rejects_empty_revision() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("offered", "typed"), [(".", None), ("Please redesign it.", None), ("Redesign it.", "Rename the save button.")])
+async def test_review_requires_the_owners_exact_chat_input(monkeypatch, offered, typed):
+    module = importlib.import_module("factory_app.workflows.AppReview.tools.submit_revision_request")
+    from mozaiksai.core.transport.simple_transport import SimpleTransport
+
+    monkeypatch.setattr(module.AG2PersistenceManager, "latest_workflow_user_input", AsyncMock(return_value=typed))
+    transport = AsyncMock()
+    monkeypatch.setattr(SimpleTransport, "get_instance", transport)
+    ctx = _review_context()
+    result = await module.submit_revision_request(offered, context_variables=ctx)
+    assert result == {"success": False, "status": "awaiting_owner_request"}
+    transport.assert_not_awaited()
+    assert "revision_submitted" not in ctx.data and "review_complete" not in ctx.data
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("chat_id", [None, "", "   "])
 async def test_revision_without_a_chat_cannot_complete_or_broadcast(chat_id, monkeypatch):
     module = importlib.import_module("factory_app.workflows.AppReview.tools.submit_revision_request")
@@ -243,6 +263,7 @@ async def test_revision_reaches_only_its_websocket_through_real_transport(monkey
         "other_chat": {"websocket": other, "workflow_name": "AppReview"},
     }
     monkeypatch.setattr(SimpleTransport, "get_instance", AsyncMock(return_value=transport))
+    monkeypatch.setattr(module.AG2PersistenceManager, "latest_workflow_user_input", AsyncMock(return_value="Make the timer teal."))
     result = await module.submit_revision_request("Make the timer teal.", context_variables=_review_context())
     assert result["event_emitted"] is True
     assert len(source.messages) == 1

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from ag2.events import ModelResponse
@@ -830,6 +832,23 @@ async def test_append_run_user_message_persists_text_input_to_ag2_stream(monkeyp
     event = captured["event"]
     assert isinstance(event, TextInput)
     assert event.content == "launch demand maybe"
+
+
+@pytest.mark.asyncio
+async def test_latest_workflow_input_reads_only_this_owners_transport_events(monkeypatch):
+    manager = AG2PersistenceManager()
+    lookup = AsyncMock(return_value={"event_payload": {"content": "Save this note"}})
+    sessions = SimpleNamespace(database={"AG2StreamEvents": SimpleNamespace(find_one=lookup)})
+    monkeypatch.setattr(manager, "_coll", AsyncMock(return_value=sessions))
+    assert await manager.latest_workflow_user_input(chat_id="review", app_id="studio", user_id="owner") == "Save this note"
+    lookup.assert_awaited_once_with(
+        {**_persistence_mod.build_app_scope_filter("studio"),
+         "stream_id": str(manager._run_stream_id(chat_id="review", app_id="studio")),
+         "event_class": "TextInput", "event_payload.metadata.source": "workflow_user", "event_payload.metadata.user_id": "owner"},
+        {"event_payload.content": 1}, sort=[("sequence", -1)],
+    )
+    lookup.return_value = None
+    assert await manager.latest_workflow_user_input(chat_id="empty", app_id="studio", user_id="owner") is None
 
 
 @pytest.mark.asyncio
