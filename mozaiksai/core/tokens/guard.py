@@ -136,11 +136,7 @@ class TokenUsageGuard:
         if config is None or not config.effective_token_wallets:
             return TokenUsageDecision(allowed=True, reason="not_configured")
 
-        wallets = [
-            wallet for wallet in config.effective_token_wallets
-            if wallet.auto_debit_usage
-            and (not config.products or wallet.usage_meter_id == "ai_tokens")
-        ]
+        wallets = config.llm_usage_wallets
         if not wallets:
             return TokenUsageDecision(allowed=True, reason="auto_debit_disabled")
 

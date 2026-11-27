@@ -52,7 +52,7 @@ For `patch` requests, the Refinement Engine runs a scoped coding worker backed b
 `ScopedRefinementCodingWorker` (also using `agent.ask()`). The coding worker:
 
 1. proposes file scope from the workspace catalog if none is provided
-2. generates complete updated file content for the scoped files only
+2. applies the editor’s exact text replacements to the scoped source files
 3. validates the output and persists a new artifact version
 
 The coding worker is intentionally conservative — it only edits files explicitly

@@ -232,6 +232,7 @@ def _build_evidence(
     parse_counts = health.get("parse_coverage") or {}
     evidence = DependencyGraphContext(
         app_id=provenance["app_id"], build_record_id=provenance["build_record_id"],
+        source_build_id=provenance.get("source_build_id"),
         build_family=provenance["build_family"], build_key=provenance["build_key"],
         bundle_digest=provenance["bundle_digest"], graph_hash=graph.graph_hash,
         files=files, dependencies=dependencies,
@@ -255,6 +256,6 @@ def _build_evidence(
 
 def _model_input(evidence: DependencyGraphContext, raw_request: str) -> str:
     return json.dumps(
-        {"request": raw_request[:2000], "evidence": evidence.model_dump(mode="json")},
+        {"request": raw_request[:2000], "evidence": evidence.model_dump(mode="json", exclude_none=True)},
         ensure_ascii=False, separators=(",", ":"),
     )

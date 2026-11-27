@@ -144,7 +144,7 @@ capabilities:
       - Messaging has scope_type app/workspace and subject_app_id so support can be app-scoped while future social DMs can be workspace-scoped.
       - Do not generate contacts, friends, follows, invites, or feeds inside the messaging pack; those belong to social_pack.
       - Use support_pack for help desk ticket metadata and support pages.
-      - Use notifications pack only for email/push delivery beyond runtime in-app notifications.
+      - Use notifications pack only for email delivery beyond runtime in-app notifications.
     capabilities_provided:
       - messaging.threads.list
       - messaging.messages.send
@@ -365,30 +365,25 @@ capabilities:
     domains:
       - notifications
       - email
-      - push
-      - sms
       - alerts
     capabilities_provided:
       - notifications.preferences.read
       - notifications.preferences.write
     intent_signals:
-      - App delivers email alerts, push notifications, or SMS messages to users.
+      - App delivers email alerts to users.
       - Users need to opt in or out of notification channels.
-      - Domain events should trigger transactional email or mobile push delivery.
+      - Domain events should trigger transactional email.
     selection_aliases:
       - notifications
       - email notifications
-      - push notifications
-      - sms notifications
       - transactional email
-      - mobile push
       - email delivery
       - external notifications
     generator_notes:
-      - Generate the notification_settings facade module for user preferences and a provider-neutral adapter stub under services/adapters/notifications/.
+      - Generate the notification_settings facade module for user preferences and the configured SMTP email adapter under services/adapters/notifications/. The pack has no push or SMS delivery. Do not generate an adapter for them, and tell the user they are not included; plan an app-owned external adapter only when the user names a provider.
       - Do not re-implement in-app notification storage or websocket delivery — the runtime handles those via contracts/notifications.yaml on event-producing modules.
       - Do not embed provider SDK calls in module service.py — delivery mechanics belong in services/adapters/notifications/{channel}.py.
-      - Generated adapter stubs must not include credential values — load from env vars (EMAIL_API_KEY, FCM_SERVER_KEY, etc.).
+      - Generated adapters must not include credential values. SMTP uses SMTP_HOST, SMTP_FROM, SMTP_PORT, SMTP_SECURITY and optional paired SMTP_USER/SMTP_PASSWORD handles. The same code serves self-hosted and managed hosting; only deployment configuration differs.
     alternatives:
       - id: managed_notification_platform
         capability_kind: managed_capability

@@ -19,15 +19,25 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from mozaiksai.control_plane.config import ControlPlaneConfig
+from mozaiksai.control_plane.context_graph.assessment import DependencyGraphContext
 from mozaiksai.control_plane.contracts import (
     ContractSurfacePlan,
     ContractSurfaceUpdate,
     SurfacePlanExecutionResult,
 )
+from mozaiksai.control_plane.implementations.refinement_router import (
+    ChangeClass,
+    ChangeIntent,
+    ImpactSet,
+    RefinementRequest,
+    RefinementRoutingDecision,
+)
 from mozaiksai.control_plane.implementations.surface_regeneration_worker import (
     SurfaceRegenerationWorker,
 )
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
+from mozaiksai.core.session.build_binding import RunBuildBinding
+from mozaiksai.core.usage.context import AuxiliaryUsageContext
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -53,21 +63,14 @@ def _make_surface(
     )
 
 
-def _make_routing_decision(change_class: str = "feature") -> Any:
-    from unittest.mock import MagicMock
-
-    from mozaiksai.control_plane.implementations.refinement_router import ChangeClass
-
-    intent = MagicMock()
-    intent.change_class = ChangeClass(change_class)
-    intent.rationale = "add export"
-    intent.confidence = 0.9
-
-    rd = MagicMock()
-    rd.change_intent = intent
-    rd.workflow_id = "AppGenerator"
-    rd.workflow_sequence = "app_revision"
-    return rd
+def _make_routing_decision(change_class: str = "feature") -> RefinementRoutingDecision:
+    return RefinementRoutingDecision(
+        workflow_id="AppGenerator",
+        workflow_sequence="app_revision",
+        refinement_request=_make_refinement_request(),
+        change_intent=ChangeIntent(change_class=ChangeClass(change_class), rationale="add export", confidence=0.9),
+        impact_set=ImpactSet(workflow_sequence="app_revision"),
+    )
 
 
 def _make_refinement_request(
@@ -75,14 +78,32 @@ def _make_refinement_request(
     user_id: str = "user-1",
     raw_user_request: str = "add export controls to projects",
     artifact_kind: str = "app_bundle",
-) -> Any:
-    from mozaiksai.control_plane.implementations.refinement_router import RefinementRequest
-
+) -> RefinementRequest:
     return RefinementRequest(
         app_id=app_id,
         user_id=user_id,
         raw_user_request=raw_user_request,
         artifact_kind=artifact_kind,
+    )
+
+
+def _bound_request():
+    usage = AuxiliaryUsageContext(
+        app_id="studio", user_id="user-1",
+        run_build_binding=RunBuildBinding(
+            build_registry_id="registry", target_app_id="app-1", build_id="new-run", phase="refinement",
+        ),
+    )
+    return _make_refinement_request(app_id="studio").model_copy(update={
+        "target_app_id": "app-1", "build_record_id": "saved-source", "usage_context": usage,
+    })
+
+
+def _graph_for(*paths):
+    return DependencyGraphContext(
+        app_id="app-1", build_family="app_bundle", build_key="app_bundle",
+        build_record_id="saved-source", bundle_digest="sha256:" + "1" * 64, graph_hash="sha256:" + "2" * 64,
+        files=paths, dependencies=(), coverage_incomplete=False, recommended_paths=paths[-1:],
     )
 
 
@@ -378,7 +399,8 @@ def test_build_current_files_requires_saved_source():
 
 
 @pytest.mark.asyncio
-async def test_execute_plan_success_two_surfaces():
+@pytest.mark.parametrize("graph_available", [True, False])
+async def test_execute_plan_success_two_surfaces(graph_available):
     schema_surface = _make_surface(
         "data_schema", "projects",
         ["modules/projects/backend/schemas.py"],
@@ -416,8 +438,12 @@ async def test_execute_plan_success_two_surfaces():
         },
     ])
 
-    request = _make_refinement_request()
+    request = _bound_request()
     routing = _make_routing_decision()
+    paths = (*schema_surface.affected_paths, *action_surface.affected_paths)
+    graph = _graph_for(*paths)
+    lookup = AsyncMock(return_value=graph) if graph_available else AsyncMock(side_effect=OSError("store unavailable"))
+    worker._dependency_graph_agent.analyze = lookup
 
     result = await worker.execute_plan(
         plan=plan,
@@ -434,6 +460,17 @@ async def test_execute_plan_success_two_surfaces():
     assert "modules/projects/backend/handler.py" in result.all_files
     assert result.metadata["surfaces_succeeded"] == 2
     assert result.metadata["surfaces_failed"] == 0
+    lookup.assert_awaited_once()
+    args = lookup.await_args.kwargs
+    assert args["selected_paths"] == paths
+    assert args["usage_context"] == request.usage_context
+    assert args["context"].build_record_id == "saved-source"
+    for call, surface in zip(worker._agent_runner.calls, plan.surfaces, strict=True):
+        assert _prompt_payload(call)["affected_paths"] == surface.affected_paths
+        if graph_available:
+            assert json.loads(call["user_prompt"].splitlines()[-1]) == graph.model_dump(mode="json", exclude_none=True)
+        else:
+            assert "saved-source" not in call["user_prompt"]
 
 
 @pytest.mark.asyncio
@@ -791,14 +828,14 @@ async def test_execute_plan_admits_saved_schema_custom_and_workflow_sources(surf
 @pytest.mark.parametrize("case", [
     "excluded_scope", "empty_scope", "wrong_artifact", "wrong_plane", "wrong_target_kind",
     "missing_source", "empty_source", "missing_registry", "ambiguous_registration",
-    "later_invalid_surface", "write_registry", "patch_class", "workflow_fallback",
+    "later_invalid_surface", "write_registry", "patch_class", "workflow_revision", "workflow_fallback",
 ])
 async def test_execute_plan_rejects_invalid_whole_plan_before_config_or_model(case):
     path = "ui/pages/custom/focus.jsx"
     workspace = _custom_page_workspace()
     surface = _make_surface("page_binding", "Focus", [path], target_kind="page")
     plan = _plan_for(surface)
-    request = _make_refinement_request()
+    request = _bound_request()
     routing = _make_routing_decision()
     allowed_paths = None
     if case == "excluded_scope":
@@ -838,6 +875,8 @@ async def test_execute_plan_rejects_invalid_whole_plan_before_config_or_model(ca
         surface.affected_paths.append("ui/index.js")
     elif case == "patch_class":
         routing = _make_routing_decision("patch")
+    elif case == "workflow_revision":
+        routing.change_intent.requires_workflow_revision = True
     elif case == "workflow_fallback":
         plan.fallback_to_workflow = True
     baseline = dict(workspace)
@@ -847,6 +886,8 @@ async def test_execute_plan_rejects_invalid_whole_plan_before_config_or_model(ca
     worker = SurfaceRegenerationWorker(
         agent_runner=runner, config_loader=config_loader, pack_loader=pack_loader,
     )
+    lookup = AsyncMock()
+    worker._dependency_graph_agent.analyze = lookup
 
     result = await worker.execute_plan(
         plan=plan, refinement_request=request, routing_decision=routing,
@@ -860,6 +901,7 @@ async def test_execute_plan_rejects_invalid_whole_plan_before_config_or_model(ca
     assert result.metadata["surfaces_succeeded"] == 0
     assert result.metadata["surfaces_failed"] == len(plan.surfaces)
     assert runner.calls == []
+    lookup.assert_not_awaited()
     config_loader.assert_not_called()
     pack_loader.assert_not_called()
     assert workspace == baseline
@@ -881,13 +923,16 @@ async def test_execute_plan_rejects_model_write_to_read_only_page_binding(read_o
     worker = SurfaceRegenerationWorker(
         agent_runner=runner, config_loader=_surface_config, pack_loader=_make_mock_pack,
     )
+    graph = _graph_for(path, read_only_path)
+    worker._dependency_graph_agent.analyze = AsyncMock(return_value=graph)
     result = await worker.execute_plan(
         plan=_plan_for(_make_surface("page_binding", "Focus", [path], target_kind="page")),
-        refinement_request=_make_refinement_request(), routing_decision=_make_routing_decision(),
+        refinement_request=_bound_request(), routing_decision=_make_routing_decision(),
         workspace_files=workspace, allowed_paths=[path],
     )
 
     assert len(runner.calls) == 1
+    assert json.loads(runner.calls[0]["user_prompt"].splitlines()[-1])["recommended_paths"] == [read_only_path]
     assert _prompt_payload(runner.calls[0])["read_only_files"][read_only_path] == baseline[read_only_path]
     assert result.status == "failed"
     assert result.all_files == {}

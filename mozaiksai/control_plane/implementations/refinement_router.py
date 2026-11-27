@@ -364,6 +364,7 @@ class ChangeIntent(BaseModel):
 
     change_class: ChangeClass
     branding_intent: BrandingIntent | None = None
+    requires_workflow_revision: bool = False
     source: str = "llm"
     signals: list[str] = Field(default_factory=list)
     rationale: str
@@ -414,10 +415,16 @@ class ArtifactRoutePolicy:
     feature: ControlPlaneChangeRouteManifest
     core: ControlPlaneChangeRouteManifest
     branding_routes: dict[BrandingIntent, ControlPlaneChangeRouteManifest] = field(default_factory=dict)
+    workflow_revision_route: ControlPlaneChangeRouteManifest | None = None
 
     def route_for(
         self, change_class: ChangeClass, *, branding_intent: BrandingIntent | None = None,
+        requires_workflow_revision: bool = False,
     ) -> ControlPlaneChangeRouteManifest:
+        if requires_workflow_revision and change_class != ChangeClass.CORE:
+            if self.workflow_revision_route is None:
+                raise ValueError("The app refinement pack must declare a workflow_revision_route for this change")
+            return self.workflow_revision_route
         if (
             change_class in (ChangeClass.PATCH, ChangeClass.DESIGN)
             and branding_intent is not None
@@ -461,6 +468,7 @@ class RefinementTriggerRouteResolver:
             feature=policy.routes.feature,
             core=policy.routes.core,
             branding_routes=policy.branding_routes,
+            workflow_revision_route=policy.workflow_revision_route,
         )
 
     def _families_for_route(self, route: ControlPlaneChangeRouteManifest, build_family: str) -> list[str]:
@@ -1509,13 +1517,21 @@ class RefinementTriggerRouteResolver:
         signals = [str(signal).strip() for signal in classification.signals if str(signal).strip()]
         policy = self._policy_for(request.build_family)
         branding_intent = getattr(classification, "branding_intent", None)
-        if change_class not in (ChangeClass.PATCH, ChangeClass.DESIGN) or branding_intent not in policy.branding_routes:
+        requires_workflow_revision = (
+            getattr(classification, "requires_workflow_revision", False) is True
+            and request.build_family == "app_bundle"
+            and change_class != ChangeClass.CORE
+        )
+        if requires_workflow_revision:
+            change_class = ChangeClass.FEATURE
+            branding_intent = None
+        elif change_class not in (ChangeClass.PATCH, ChangeClass.DESIGN) or branding_intent not in policy.branding_routes:
             branding_intent = None
         elif branding_intent == "theme_color_patch":
             change_class = ChangeClass.PATCH
         else:
             change_class = ChangeClass.DESIGN
-        route = policy.route_for(change_class, branding_intent=branding_intent)
+        route = policy.route_for(change_class, branding_intent=branding_intent, requires_workflow_revision=requires_workflow_revision)
         families = set(self._families_for_route(route, request.build_family))
         label = self._artifact_label(request.build_family, policy)
 
@@ -1555,6 +1571,7 @@ class RefinementTriggerRouteResolver:
         return ChangeIntent(
             change_class=change_class,
             branding_intent=branding_intent,
+            requires_workflow_revision=requires_workflow_revision,
             source=source,
             signals=signals,
             rationale=rationale,
@@ -1568,7 +1585,8 @@ class RefinementTriggerRouteResolver:
 
     async def _derive_impact_set(self, request: RefinementRequest, intent: ChangeIntent) -> ImpactSet:
         policy = self._policy_for(request.build_family)
-        route = policy.route_for(intent.change_class, branding_intent=intent.branding_intent)
+        route = policy.route_for(intent.change_class, branding_intent=intent.branding_intent,
+                                 requires_workflow_revision=intent.requires_workflow_revision)
         families = self._families_for_route(route, request.build_family)
         label = self._artifact_label(request.build_family, policy)
         workflow_id = self._route_workflow_id(route)
@@ -1611,7 +1629,8 @@ class RefinementTriggerRouteResolver:
         impact_set: ImpactSet,
     ) -> RefinementRoutingDecision:
         policy = self._policy_for(request.build_family)
-        route = policy.route_for(change_intent.change_class, branding_intent=change_intent.branding_intent)
+        route = policy.route_for(change_intent.change_class, branding_intent=change_intent.branding_intent,
+                                 requires_workflow_revision=change_intent.requires_workflow_revision)
         label = self._artifact_label(request.build_family, policy)
         workflow_id = self._route_workflow_id(route)
 

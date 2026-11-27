@@ -23,10 +23,14 @@ from mozaiksai.control_plane import (
 
 
 class _FakeChangeClassifier:
-    def __init__(self, *, change_class: str, rationale: str, branding_intent: str | None = None) -> None:
+    def __init__(
+        self, *, change_class: str, rationale: str, branding_intent: str | None = None,
+        requires_workflow_revision: bool = False,
+    ) -> None:
         self._result = SimpleNamespace(
             change_class=change_class,
             branding_intent=branding_intent,
+            requires_workflow_revision=requires_workflow_revision,
             rationale=rationale,
             confidence=0.92,
             signals=["test_signal"],
@@ -1552,6 +1556,34 @@ async def test_branding_intent_routes_through_declared_policy_without_rewriting_
         impact_set=decision.impact_set.model_dump(mode="json"),
     )
     assert ChangeRequestDoc.model_validate_json(stored.model_dump_json()).change_intent.branding_intent == expected_branding
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("classification", "sequence", "first_workflow"), [
+    ("feature", "design_revision", "DesignDocs"),
+    ("design", "design_revision", "DesignDocs"),
+    ("core", "full_rebuild", "ValueEngine"),
+])
+async def test_event_driven_app_request_routes_workflow_and_app_owners(monkeypatch, classification, sequence, first_workflow):
+    _patch_artifact_store(monkeypatch, [])
+    resolver = _factory_resolver(_FakeChangeClassifier(
+        change_class=classification, rationale="A new event-driven assistant must produce and save its answer.",
+        requires_workflow_revision=True,
+    ))
+    request = resolver.request_from_payload(
+        payload={"refinement_request": {
+            "build_family": "app_bundle", "build_record_id": "av_accepted",
+            "raw_user_request": "Suggest a title when I create a note. Leave the suggestion alone when I edit it.",
+        }},
+        app_id="studio", target_app_id="notes", user_id="owner",
+    )
+    decision = await resolver.route(request)
+    assert decision.workflow_sequence == sequence
+    assert decision.workflow_id == first_workflow
+    assert {"AgentGenerator", "AppGenerator"} <= set(decision.impact_set.affected_workflows)
+    assert {"design_docs", "workflow_bundle", "app_bundle"} <= set(decision.impact_set.affected_declarative_families)
+    assert decision.context_seed["change_intent"]["requires_workflow_revision"] is (classification != "core")
+    assert decision.context_seed["refinement_request_meta"]["build_record_id"] == "av_accepted"
 
 
 @pytest.mark.asyncio

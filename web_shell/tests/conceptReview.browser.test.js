@@ -196,7 +196,8 @@ test('subscription review keeps a no-billing decision compact and preserves paid
         <main style={{maxWidth: 640, margin: '0 auto', padding: 12}}>
           <SubscriptionContractReview payload={{app_name: 'Quiet Focus', contract_required: paid,
             rationale: 'The approved app scope has no billing or paid feature requirements.',
-            plans: paid ? [{plan_id: 'pro', label: 'Pro', description: 'Paid access'}] : [],
+            plans: paid ? [{plan_id: 'pro', label: 'Pro', description: 'Paid access',
+              price: {amount_cents: 1800, currency: 'usd', interval: 'month', display: 'Member rate'}}] : [],
             validation_notes: ['No config/subscriptions.yaml will be generated.'],
             forbidden_outputs: ['Do not add billing facades or token wallets.']}}
             onResponse={value => window.submissions.push(value)} />
@@ -272,6 +273,8 @@ test('subscription review keeps a no-billing decision compact and preserves paid
 
     await page.goto(`${url}?paid`);
     await expect(page.getByRole('heading', {name: 'Pro', exact: true})).toBeVisible();
+    await expect(page.getByText('Recurring price: USD 18.00 / month', {exact: true})).toBeVisible();
+    await expect(page.getByText('Customer-facing label: Member rate', {exact: true})).toBeVisible();
     const confirm = page.getByTestId('confirm-subscription-contract-cta');
     await expect(confirm).toBeDisabled();
     await page.getByTestId('confirm-subscription-contract-checkbox').check();

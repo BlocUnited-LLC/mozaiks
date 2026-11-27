@@ -558,6 +558,8 @@ def _validate_route_sequences(*, manifest: ControlPlaneManifest, pack_path: Path
             route_refs.append((artifact.build_family, change_class, route.workflow_sequence))
         for intent, route in artifact.branding_routes.items():
             route_refs.append((artifact.build_family, f"branding_routes.{intent}", route.workflow_sequence))
+        if artifact.workflow_revision_route:
+            route_refs.append((artifact.build_family, "workflow_revision_route", artifact.workflow_revision_route.workflow_sequence))
 
     if not route_refs:
         return

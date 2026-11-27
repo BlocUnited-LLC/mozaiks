@@ -13,6 +13,7 @@ from ag2.network import (
     Envelope,
     FromSpeaker,
     ToolCalled,
+    TransitionRegistry,
     WorkflowState,
     register_condition,
 )
@@ -157,6 +158,22 @@ register_condition(SourceScopedContextEquals)
 register_condition(SourceScopedContextExpression)
 register_condition(SourceScopedToolCalled)
 register_condition(BootstrapInitialDispatch)
+
+
+@dataclass(slots=True)
+class BootstrapBatchTransition(BootstrapInitialDispatch):
+    """Evaluate the admitted batch owner's declared edge on the first human turn."""
+
+    condition: dict[str, Any]
+    name: ClassVar[str] = "mozaiks_bootstrap_batch_transition"
+
+    def evaluate(self, state: WorkflowState, envelope: Envelope) -> bool:
+        return BootstrapInitialDispatch.evaluate(self, state, envelope) and (
+            TransitionRegistry.default().condition_from_dict(self.condition).evaluate(state, envelope)
+        )
+
+
+register_condition(BootstrapBatchTransition)
 
 
 __all__ = [

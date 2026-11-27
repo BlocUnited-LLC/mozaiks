@@ -5,152 +5,41 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from datetime import datetime
 from typing import Any
 
-from factory_app.workflows._shared.artifact_bundle import read_artifact_bundle
+import yaml
+
 from factory_app.workflows._shared.platform.build_target import require_build_binding
-from factory_app.workflows._shared.platform.genesis_import import require_accepted_genesis_baseline
-from mozaiksai.control_plane.contracts import (
-    BUILD_ACCEPTANCE_TRANSITIONS,
-    acceptance_evidence_names,
+from factory_app.workflows._shared.revision_app_source import (
+    design_revision_source,
+    is_accepted_revision_source,
+    read_bound_revision_files,
+    read_revision_source,
+    revision_baseline_required,
+    revision_source_artifact_id,
 )
-from mozaiksai.core.artifacts.models import (
-    BuildRecord,
-    BuildRecordStatus,
-    BuildRecordValidationStatus,
+from factory_app.workflows._shared.workflow_integration import (
+    hydrate_workflow_integration_context_from_latest_artifact,
 )
-from mozaiksai.core.artifacts.store import get_artifact_store
+from mozaiksai.core.artifacts.models import BuildRecord
+from mozaiksai.core.runtime.app.auth_contract import validate_app_auth_contract
+from mozaiksai.core.runtime.app.paths import APP_AUTH_CONFIG_PATH
 from mozaiksai.core.runtime.app.theme_contract import APP_THEME_PATH
+from mozaiksai.core.validation.compilation_inputs import resolve_app_compilation_inputs
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.code_files import (
+    data_contract_requires_auth,
     extract_deleted_file_paths_from_payload,
 )
+from mozaiksai.core.workflow.generator_support.design_access_policy import (
+    resolve_design_access_policy,
+)
+from mozaiksai.core.workflow.generator_support.module_revision import (
+    legacy_optional_updated_at_reads,
+    retained_workflow_page_bindings,
+)
 
-
-def _first_generation(context_variables: Any) -> bool:
-    """Only the baseline owner can establish this exception for a design revision."""
-    binding = context_variables.get("run_build_binding")
-    return bool(
-        context_variables.get("build_mode") == "revision"
-        and context_variables.get("revision_first_generation") is True
-        and context_variables.get("workflow_sequence") == "design_revision"
-        and context_variables.get("artifact_kind") == "design_docs"
-        and not context_variables.get("revision_source_artifact_version_id")
-        and isinstance(binding, Mapping) and binding.get("phase") == "refinement"
-    )
-
-
-def revision_baseline_required(context_variables: Any) -> bool:
-    return bool(
-        context_variables is not None
-        and context_variables.get("build_mode") == "revision"
-        and context_variables.get("workflow_sequence") not in {"conceptual_replan", "full_rebuild"}
-        and not _first_generation(context_variables)
-    )
-
-
-def revision_source_artifact_id(context_variables: Any) -> str | None:
-    """Keep the selected source stable after artifact_version_id becomes the result."""
-    if context_variables.get("build_mode") != "revision":
-        return None
-    if _first_generation(context_variables):
-        return None
-    source = context_variables.get("revision_source_artifact_version_id") or context_variables.get("artifact_version_id")
-    return source if isinstance(source, str) and source else None
-
-
-async def read_bound_revision_files(
-    context_variables: Any, *, include_binary: bool = False,
-) -> dict[str, str | bytes]:
-    """Recheck the selected immutable source and its owner on every read."""
-    artifact_id = revision_source_artifact_id(context_variables)
-    return await _read_revision_files(context_variables, artifact_id, include_binary=include_binary)
-
-
-def _require_owned_record(context_variables: Any, artifact: BuildRecord | None, artifact_id: str) -> BuildRecord:
-    binding = require_build_binding(context_variables)
-    if artifact is None or artifact.app_id != binding.target_app_id or artifact.id != artifact_id:
-        raise ValueError("revision_baseline_artifact_unavailable")
-    if artifact.lifecycle_status in {BuildRecordStatus.ARCHIVED, BuildRecordStatus.DELETED}:
-        raise ValueError("revision_baseline_artifact_retired")
-    metadata = artifact.commit_metadata.metadata
-    if (
-        not context_variables.get("user_id")
-        or artifact.commit_metadata.author_user_id != context_variables.get("user_id")
-        or metadata.get("target_app_id") != binding.target_app_id
-        or metadata.get("build_registry_id") != binding.build_registry_id
-    ):
-        raise ValueError("revision_baseline_owner_mismatch")
-    return artifact
-
-
-def _require_design_revision_baseline(artifact: BuildRecord) -> None:
-    if (
-        artifact.build_family != "app_bundle" or artifact.build_key != "app_bundle"
-        or artifact.validation_status != BuildRecordValidationStatus.PASSED
-        or artifact.lifecycle_status not in {BuildRecordStatus.CURRENT, BuildRecordStatus.STALE}
-    ):
-        raise ValueError("revision_baseline_not_accepted")
-    metadata = artifact.commit_metadata.metadata
-    if (
-        artifact.lifecycle_status == BuildRecordStatus.CURRENT
-        or metadata.get("bundle_mode") == "brownfield_genesis_import"
-    ):
-        # Imported sources still require their canonical registry receipt below.
-        return
-    # Invalidation can also mark an unaccepted draft stale. Only the existing
-    # acceptance marker establishes that an ordinary stale record was accepted.
-    evidence = metadata.get("acceptance")
-    if not isinstance(evidence, dict) or not acceptance_evidence_names(artifact, evidence):
-        raise ValueError("revision_baseline_not_accepted")
-    principal = evidence.get("accepted_by")
-    transition = evidence.get("transition")
-    accepted_at = evidence.get("accepted_at")
-    if isinstance(accepted_at, str):
-        try:
-            accepted_at = datetime.fromisoformat(accepted_at)
-        except ValueError:
-            accepted_at = None
-    if (
-        not isinstance(principal, str) or not principal.strip()
-        or not isinstance(transition, str) or transition not in BUILD_ACCEPTANCE_TRANSITIONS
-        or not isinstance(accepted_at, datetime)
-    ):
-        raise ValueError("revision_baseline_not_accepted")
-
-
-async def _read_revision_files(
-    context_variables: Any, artifact_id: str | None, *, include_binary: bool = False,
-) -> dict[str, str | bytes]:
-    binding = require_build_binding(context_variables)
-    if binding.phase != "refinement" or not artifact_id:
-        raise ValueError("revision_baseline_binding_missing")
-    artifact = await get_artifact_store().get_build_record(
-        app_id=binding.target_app_id, build_record_id=artifact_id,
-    )
-    artifact = _require_owned_record(context_variables, artifact, artifact_id)
-    if context_variables.get("workflow_sequence") == "design_revision":
-        _require_design_revision_baseline(artifact)
-
-    await require_accepted_genesis_baseline(
-        artifact, owner_user_id=context_variables.get("user_id"),
-        execution_app_id=context_variables.get("app_id"),
-        build_registry_id=binding.build_registry_id,
-    )
-
-    # The selected version can be stale after refinement invalidation. Its
-    # committed archive remains the baseline; mutable workspace copies do not.
-    files, diagnostics = await read_artifact_bundle(artifact, include_binary=include_binary)
-    blocking = [item for item in diagnostics if item["blocking"]]
-    if blocking:
-        raise ValueError("revision_baseline_incomplete: " + ", ".join(
-            str(item["code"]) for item in blocking
-        ))
-    manifest = files.get("app.json")
-    if not isinstance(manifest, str) or json.loads(manifest).get("appId") != binding.target_app_id:
-        raise ValueError("revision_baseline_app_identity_mismatch")
-    return files
+from .revision_result_coverage import revision_result_module_coverage
 
 
 def _set(context_variables: Any, key: str, value: Any) -> None:
@@ -160,44 +49,11 @@ def _set(context_variables: Any, key: str, value: Any) -> None:
         context_variables.set(key, value)
 
 
-async def _design_revision_source(context_variables: Any) -> str | None:
-    """Select an implementation independently of the upstream design being revised."""
-    binding = require_build_binding(context_variables)
-    request = context_variables.get("refinement_request_meta")
-    if (
-        binding.phase != "refinement"
-        or context_variables.get("artifact_kind") != "design_docs"
-        or not isinstance(request, Mapping)
-        or request.get("build_family") != "design_docs"
-        or not isinstance(request.get("build_record_id"), str)
-        or not request["build_record_id"].strip()
-    ):
-        raise ValueError("revision_design_source_binding_missing")
-    store = get_artifact_store()
-    source_id = request["build_record_id"]
-    source = _require_owned_record(context_variables, await store.get_build_record(
-        app_id=binding.target_app_id, build_record_id=source_id,
-    ), source_id)
-    if source.build_family != "design_docs" or source.build_key != "design_docs" or source.source_workflow != "DesignDocs":
-        raise ValueError("revision_design_source_invalid")
-    pinned = context_variables.get("revision_source_artifact_version_id")
-    if pinned:
-        if not isinstance(pinned, str):
-            raise ValueError("revision_baseline_binding_missing")
-        return pinned
-    # Do not filter by acceptance/lifecycle: a failed or retired bundle is not
-    # evidence that this app has never had an implementation. Store failures
-    # propagate; an unavailable lookup must not authorize fresh generation.
-    candidates = await store.list_build_records(
-        app_id=binding.target_app_id, build_family="app_bundle", limit=1,
-    )
-    if not isinstance(candidates, list):
-        raise ValueError("revision_baseline_lookup_invalid")
-    if not candidates:
-        return None
-    candidate = _require_owned_record(context_variables, candidates[0], candidates[0].id)
-    _require_design_revision_baseline(candidate)
-    return candidate.id
+def discard_executable_plan(context: Any) -> None:
+    """Invalidate dispatch while leaving the batch runner's historical status intact."""
+    _set(context, "app_plan_ready", False)
+    _set(context, "app_build_plan", None)
+    _set(context, "app_task_batch_items", [])
 
 
 async def read_bound_revision_binary_assets(context_variables: Any) -> dict[str, bytes]:
@@ -235,8 +91,92 @@ async def revision_asset_evidence(
     return assets, evidence
 
 
-async def hydrate_app_revision_context(context_variables: Any = None) -> dict[str, Any]:
-    if context_variables is None or context_variables.get("build_mode") != "revision":
+async def hydrate_app_revision_context(context_variables: Any = None, *, load_workflows: bool = False) -> dict[str, Any]:
+    """Verify the source before exposing its theme or resuming cached work."""
+    try:
+        result = await hydrate_revision_files(context_variables, initialize_theme=True, load_workflows=load_workflows)
+        if load_workflows and result["status"] == "skipped":
+            return await hydrate_workflow_integration_context_from_latest_artifact(context_variables)
+        return result
+    except Exception:
+        if context_variables is not None and (context_variables.get("app_build_plan") or context_variables.get("app_task_batch_items")):
+            discard_executable_plan(context_variables)
+        raise
+
+
+def uses_revision_source_theme(context_variables: Any) -> bool:
+    return (
+        revision_baseline_required(context_variables)
+        and context_variables.get("artifact_kind") == "app_bundle"
+        and context_variables.get("workflow_sequence") not in {"theme_revision", "theme_patch"}
+    )
+
+
+def read_revision_theme(files: dict[str, Any]) -> dict[str, Any] | None:
+    theme = json.loads(files[APP_THEME_PATH]) if APP_THEME_PATH in files else None
+    if theme is not None and not isinstance(theme, dict):
+        raise ValueError("revision_baseline_theme_invalid")
+    return theme
+
+
+async def _retained_feature_login(context: Any, artifact: BuildRecord, files: dict[str, Any]) -> dict[str, str]:
+    """Recover login intent from the accepted compilation for a bounded product-feature edit."""
+    if context.get("revision_scope") != "feature" or not is_accepted_revision_source(artifact):
+        return {}
+    impact = detach(context.get("impact_set"))
+    paths = impact.get("affected_bundle_paths") if isinstance(impact, dict) else None
+    if not isinstance(paths, list) or not paths or not all(
+        isinstance(path, str) and path.startswith(("modules/", "data/", "ui/pages/"))
+        and ".." not in path.split("/") and "\\" not in path for path in paths
+    ):
+        return {}
+    saved = artifact.commit_metadata.metadata.get("compilation_inputs")
+    if (not isinstance(saved, dict) or saved.get("version") != 2 or APP_AUTH_CONFIG_PATH not in files
+            or json.loads(files["app.json"]).get("authRequired") is not True):
+        return {}
+    config = validate_app_auth_contract(yaml.safe_load(files[APP_AUTH_CONFIG_PATH]))
+    if config.signup_enabled or config.mode not in {"brokered_oidc", "private_workspace"} or config.authorization.roles:
+        return {}
+    compilation = await resolve_app_compilation_inputs(
+        app_id=artifact.app_id, build_record_id=artifact.id, owner_user_id=context.get("user_id"),
+        build_registry_id=require_build_binding(context).build_registry_id,
+    )
+    prior = compilation.context_for(artifact.app_id).get("app_build_plan") if compilation else None
+    if (not isinstance(prior, dict) or prior.get("roles") or prior.get("auth_strategy") not in {"basic-login", "third-party"}
+            or prior.get("auth_mode") not in {None, config.mode}):
+        return {}
+    return {"source_artifact_version_id": artifact.id, "auth_strategy": prior["auth_strategy"], "auth_mode": config.mode}
+
+
+def bind_retained_feature_login(plan: dict[str, Any], context: Any) -> None:
+    """Bind an authored or restored plan to the accepted feature's verified sign-in policy."""
+    retained = detach(context.get("retained_feature_login")) if context is not None else None
+    if (not isinstance(retained, dict) or not retained.get("source_artifact_version_id")
+            or retained["source_artifact_version_id"] != context.get("revision_source_artifact_version_id")
+            or not data_contract_requires_auth(detach(context.get("data_contract")))
+            or resolve_design_access_policy(context) != {"roles": [], "grants": []}):
+        return
+    strategies = {None, "public", retained["auth_strategy"]}
+    modes = {None, "private_workspace", retained["auth_mode"]}
+    if plan.get("roles") or plan.get("auth_strategy") not in strategies or plan.get("auth_mode") not in modes:
+        raise ValueError(
+            "The scoped feature preserves the accepted sign-in strategy "
+            f"{retained['auth_strategy']!r} and mode {retained['auth_mode']!r}, with no named roles. "
+            "An access change needs a revision scoped to authentication or a reviewed role change."
+        )
+    plan.update(auth_strategy=retained["auth_strategy"], auth_mode=retained["auth_mode"])
+
+
+async def hydrate_revision_files(
+    context_variables: Any, *, initialize_theme: bool = False, load_workflows: bool = False,
+) -> dict[str, Any]:
+    if context_variables is None:
+        return {"status": "skipped", "reason": "not_revision"}
+    _set(context_variables, "revision_result_module_coverage", None)
+    _set(context_variables, "legacy_optional_updated_at_reads", {})
+    _set(context_variables, "retained_workflow_page_bindings", {})
+    _set(context_variables, "retained_feature_login", {})
+    if context_variables.get("build_mode") != "revision":
         return {"status": "skipped", "reason": "not_revision"}
     # Recompute even after replay. A carried flag cannot waive source/owner or
     # existence checks, and a failed recheck leaves the baseline required.
@@ -245,22 +185,33 @@ async def hydrate_app_revision_context(context_variables: Any = None) -> dict[st
         return {"status": "skipped", "reason": "explicit_rebuild"}
 
     if context_variables.get("workflow_sequence") == "design_revision":
-        artifact_id = await _design_revision_source(context_variables)
+        artifact_id = await design_revision_source(context_variables)
         if artifact_id is None:
             _set(context_variables, "revision_first_generation", True)
             return {"status": "skipped", "reason": "first_generation"}
-        files = await _read_revision_files(context_variables, artifact_id)
-        _set(context_variables, "revision_source_artifact_version_id", artifact_id)
     else:
-        files = await read_bound_revision_files(context_variables)
         artifact_id = revision_source_artifact_id(context_variables)
-    if context_variables.get("artifact_kind") == "app_bundle" and context_variables.get("workflow_sequence") not in {
-        "theme_revision", "theme_patch",
-    }:
-        saved_theme = json.loads(files[APP_THEME_PATH]) if APP_THEME_PATH in files else None
-        if saved_theme is not None and not isinstance(saved_theme, dict):
-            raise ValueError("revision_baseline_theme_invalid")
-        _set(context_variables, "captured_theme_config", saved_theme)
+    artifact, files = await read_revision_source(context_variables, artifact_id)
+    _set(context_variables, "revision_source_artifact_version_id", artifact.id)
+    if load_workflows:
+        # The active cursor can be a new workflow. Resolve it only after pinning its original app.
+        await hydrate_workflow_integration_context_from_latest_artifact(context_variables)
+    login = await _retained_feature_login(context_variables, artifact, files)
+    _set(context_variables, "retained_feature_login", login)
+    existing_plan = context_variables.get("app_build_plan")
+    if login and isinstance(existing_plan, Mapping):
+        rebound = detach(existing_plan)
+        bind_retained_feature_login(rebound, context_variables)
+        if rebound != existing_plan:
+            _set(context_variables, "app_build_plan", rebound)
+    if initialize_theme and uses_revision_source_theme(context_variables):
+        _set(context_variables, "captured_theme_config", read_revision_theme(files))
+    if is_accepted_revision_source(artifact):
+        coverage = revision_result_module_coverage(context_variables, files)
+        _set(context_variables, "revision_result_module_coverage", coverage)
+        _set(context_variables, "retained_workflow_page_bindings", retained_workflow_page_bindings(context_variables, files))
+        reads = legacy_optional_updated_at_reads(files, context_variables.get("data_contract"))
+        _set(context_variables, "legacy_optional_updated_at_reads", reads)
     current = detach(context_variables.get("generated_files")) or {}
     if not isinstance(current, dict):
         raise ValueError("revision_baseline_generated_files_invalid")

@@ -6,6 +6,8 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+from .collection_writes import DataContractFieldError, canonical_write_fields
+
 DataContract = dict[str, Any]
 DataEntityIndex = dict[tuple[str, str], dict[str, Any]]
 _OWNERSHIP_FIELDS = frozenset({"scope", "entity", "tenancy", "owner_field", "fields"})
@@ -147,6 +149,14 @@ def iter_data_contract_collections(
             ownership = _require_object(ownership_value, f"{path}.ownership")
             owner_id = ownership.get("surface_id", group_id) if explicit else collection.get("module_id") or ownership.get("surface_id", group_id)
             owner_kind = ownership.get("surface_kind", group_kind)
+            try:
+                writes = canonical_write_fields(collection)
+            except DataContractFieldError as exc:
+                raise DataContractLoadError(f"{path}: {exc}") from exc
+            if writes is not None:
+                if not owner_id or owner_kind != "module":
+                    raise DataContractLoadError(f"{path}.lifecycle.module_writes requires a module-owned collection")
+                validate_collection_ownership(collection, path)
             if not group_id and "ownership" not in collection:
                 if collection.get("tenancy") in {"per_user", "per_workspace"} and collection.get("owner_field"):
                     raise DataContractLoadError(f"{path}.ownership is required for scoped shared collections")
@@ -210,6 +220,9 @@ def index_data_contract_by_entity(contract: DataContract | None) -> DataEntityIn
     for ordinal, value in enumerate(_require_list(contract.get("entities", []), "data_contract.entities")):
         path = f"data_contract.entities[{ordinal}]"
         entity = _require_object(value, path)
+        lifecycle = entity.get("lifecycle")
+        if isinstance(lifecycle, dict) and lifecycle.get("module_writes") is not None:
+            raise DataContractLoadError(f"{path}.lifecycle.module_writes requires a collection with explicit module ownership")
         module_id = str(entity.get("module_id") or "").strip()
         entity_name = str(entity.get("entity_name") or entity.get("name") or "").strip()
         if not module_id or not entity_name:

@@ -16,7 +16,8 @@ agents:
       immediately — do not produce any text before the tool call.
 
       After the workspace is presented, give one short sentence inviting the
-      user to try the draft and describe any changes. Do not list options.
+      user to try the draft and describe any changes. End your turn so the
+      user can reply. A startup signal such as "." only opens the workspace.
 
       If review_notice is present, briefly explain that saved result or
       retry guidance. Do not describe an unsuccessful edit as a new validated app.
@@ -32,9 +33,11 @@ agents:
       review_complete. Do not claim checks passed from acceptance controls alone.
 
       When the user types a revision request, acknowledge it briefly, then call
-      submit_revision_request with the user's non-empty text as the
+      submit_revision_request with the user's exact message as the
       revision_request argument. The tool supplies the selected artifact
-      reference. Studio verifies the owned build target and loads its saved
+      reference and checks the latest message the owner sent. If it returns
+      awaiting_owner_request, yield the turn to the user.
+      Studio verifies the owned build target and loads its saved
       metadata. Never invent or override execution app_id, run_build_binding,
       build IDs, or file paths.
 

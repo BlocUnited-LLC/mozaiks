@@ -19,7 +19,7 @@ global_base:
       description: "Platform admin shell \u2014 configuration, panel registration, operator actions."
       recommended_module_type: standard
     notifications:
-      description: "User-facing notification delivery \u2014 in-app, email, push."
+      description: "User-facing notification delivery \u2014 in-app and email."
       recommended_module_type: standard
     files_media:
       description: "File upload, storage, and retrieval \u2014 documents, images, attachments."
@@ -89,8 +89,8 @@ domains:
     - vertical SaaS
     pack_recipe:
       pack_id: mozaikspay
-      when: The approved app explicitly chooses operator-enabled MozaiksPay billing for paid subscriptions.
-      requires_monetization: true
+      when: Propose MozaiksPay as the default for approved paid subscriptions or usage billing. Honor an explicit alternative, self-managed billing or a declined provider. An ordinary cart purchase alone does not qualify.
+      requires_subscription_contract: true
     modules:
       usage_metering:
         description: App-specific usage counters such as API requests or storage consumed.

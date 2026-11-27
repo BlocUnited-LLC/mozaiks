@@ -1,11 +1,12 @@
 """Contract tests for the notifications build context pack.
 
-This pack is for EXTERNAL notification delivery (email, push, SMS) beyond the
-runtime in-app notification record.
+This pack is for EXTERNAL email delivery beyond the runtime in-app notification
+record.
 
 Verifies that:
 - context.yaml registers the pack as generated_module for AppGenerator
-- context.yaml declares 4 capabilities (email.send, push.send, preferences.read/write)
+- context.yaml declares 3 capabilities (email.send, preferences.read/write)
+- context.yaml declares the SMTP deployment environment names
 - context.yaml declares both contract and templates assets
 - templates/ directory ships with the pack
 - contract.yaml required_outputs are templates or workspace owned (no generator-owned)
@@ -15,8 +16,8 @@ Verifies that:
 - account_data_handler.py: delete_user_data and export_user_data
 - repo.py uses ctx.persistence, not ctx.db or raw Motor
 - service.py does not call adapter functions directly
-- email.py and push.py declare provider-neutral interfaces
-- No credentials hardcoded in adapter files
+- email.py declares a provider-neutral interface, and no unfinished adapter ships
+- No credentials hardcoded in the adapter
 - data/contract.json declares the notification_settings preferences collection;
   the data migration emits only additive ensure_collection/ensure_index operations
 - reactions.yaml has correct schema_version
@@ -66,13 +67,12 @@ def test_notifications_context_registers_active_appgenerator_pack() -> None:
     assert context["pack"]["capability_source"] == "generated_module"
 
 
-def test_notifications_context_declares_four_capabilities() -> None:
+def test_notifications_context_declares_three_capabilities() -> None:
     context = _read_yaml(NOTIFICATIONS / "context.yaml")
     capability_ids = {cap["capability_id"] for cap in (context.get("capabilities") or [])}
 
     assert capability_ids == {
         "notifications.email.send",
-        "notifications.push.send",
         "notifications.preferences.read",
         "notifications.preferences.write",
     }
@@ -108,9 +108,8 @@ def test_notifications_templates_has_notification_settings_module() -> None:
     assert MODULE.is_dir(), "templates must have modules/notification_settings/"
 
 
-def test_notifications_templates_has_adapter_stubs() -> None:
-    assert (ADAPTERS / "email.py").exists(), "templates must have services/adapters/notifications/email.py"
-    assert (ADAPTERS / "push.py").exists(), "templates must have services/adapters/notifications/push.py"
+def test_notifications_templates_ship_only_the_email_adapter() -> None:
+    assert {path.name for path in ADAPTERS.glob("*.py")} == {"__init__.py", "email.py"}
 
 
 def test_notifications_templates_has_data_migration() -> None:
@@ -144,7 +143,7 @@ def test_notifications_contract_required_outputs_include_preferences_module_and_
 
     assert "modules/notification_settings/module.yaml" in output_paths
     assert "services/adapters/notifications/email.py" in output_paths
-    assert "services/adapters/notifications/push.py" in output_paths
+    assert "services/adapters/notifications/push.py" not in output_paths
 
 
 def test_notifications_contract_handler_is_workspace_owned() -> None:
@@ -263,57 +262,58 @@ def test_notification_settings_service_does_not_call_adapters_directly() -> None
     assert "send_email" not in service, (
         "service.py must not call send_email directly — delivery is triggered by reactions"
     )
-    assert "send_push" not in service, (
-        "service.py must not call send_push directly — delivery is triggered by reactions"
-    )
 
 
 # ---------------------------------------------------------------------------
-# Adapter stubs
+# Email adapter
 # ---------------------------------------------------------------------------
 
 
-def test_email_adapter_declares_send_email_interface() -> None:
-    email = _read_text(ADAPTERS / "email.py")
-    assert "def send_email" in email or "async def send_email" in email, (
-        "email.py must declare send_email function"
+def test_email_adapter_declares_provider_neutral_interface() -> None:
+    import ast
+
+    tree = ast.parse(_read_text(ADAPTERS / "email.py"))
+    function = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "send_email")
+    assert [arg.arg for arg in function.args.kwonlyargs] == ["to", "subject", "body"]
+
+
+def test_no_adapter_is_an_unfinished_placeholder() -> None:
+    from mozaiksai.core.validation.functional_generated_app import scan_placeholder_implementations
+
+    files = {f"services/adapters/notifications/{path.name}": _read_text(path) for path in ADAPTERS.glob("*.py")}
+    assert scan_placeholder_implementations(files) == []
+
+
+def test_deployment_env_names_every_setting_the_email_adapter_reads() -> None:
+    """A host can supply only what the pack declares, so the two lists must agree."""
+    import re
+
+    from factory_app.workflows.AppGenerator.tools.deployment_contract import (
+        generate_deployment_artifacts,
     )
-    assert "to" in email and "subject" in email and "body" in email, (
-        "send_email must accept provider-neutral args: to, subject, body"
+    from factory_app.workflows.AppGenerator.tools.generate_and_download import (
+        _deployment_env_for_capability_packs,
     )
 
+    pack = _read_yaml(NOTIFICATIONS / "context.yaml")["pack"]
+    env = _deployment_env_for_capability_packs([pack])
+    read = set(re.findall(r'"(SMTP_[A-Z]+)"', _read_text(ADAPTERS / "email.py")))
+    assert set(env["optional"]) == read
+    assert env["secret"] == ["SMTP_PASSWORD"]
+    assert env["required"] == [] and env["public"] == []
 
-def test_push_adapter_declares_send_push_interface() -> None:
-    push = _read_text(ADAPTERS / "push.py")
-    assert "def send_push" in push or "async def send_push" in push, (
-        "push.py must declare send_push function"
+    contract = generate_deployment_artifacts(
+        app_id="mail-app",
+        extra_optional_variables=env["optional"],
+        extra_secret_variables=env["secret"],
     )
-    assert "token" in push and "title" in push and "body" in push, (
-        "send_push must accept provider-neutral args: token, title, body"
-    )
-
-
-def test_adapters_do_not_hardcode_credentials() -> None:
-    """API keys and secrets must come from env vars, never committed."""
-    for adapter_file in [ADAPTERS / "email.py", ADAPTERS / "push.py"]:
-        text = _read_text(adapter_file)
-        # Should reference env vars, not raw secrets
-        assert "os.environ" in text or "os.getenv" in text or "environ.get" in text, (
-            f"{adapter_file.name} must load credentials from environment variables"
-        )
-        # Should not contain string patterns that look like hardcoded API keys
-        assert "sk-" not in text, f"{adapter_file.name} must not contain hardcoded API keys"
-        assert "SG." not in text, f"{adapter_file.name} must not contain hardcoded SendGrid keys"
-
-
-def test_adapters_have_not_implemented_stub() -> None:
-    """Adapter stubs must raise NotImplementedError so operators know they need to fill in the body."""
-    for adapter_file in [ADAPTERS / "email.py", ADAPTERS / "push.py"]:
-        text = _read_text(adapter_file)
-        assert "NotImplementedError" in text, (
-            f"{adapter_file.name} must raise NotImplementedError — "
-            "it is a stub; operators fill in their provider SDK"
-        )
+    assert contract.get("bundle_errors") in (None, [])
+    environment = contract["deploy_target_spec"]["environment"]
+    assert read <= set(environment["optional_variables"])
+    assert "SMTP_PASSWORD" in environment["secret_variables"]
+    assert not read & set(environment["public_variables"])
+    for example in (content for name, content in contract["artifacts"].items() if "env" in name and "example" in name):
+        assert read <= set(re.findall(r"^#?\s*(SMTP_[A-Z]+)=", example, flags=re.M))
 
 
 # ---------------------------------------------------------------------------

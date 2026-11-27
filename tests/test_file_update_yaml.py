@@ -141,7 +141,7 @@ def test_syntax_validation_does_not_grant_file_scope():
         files={"ui/pages/other.yaml": "title: Other"},
     )
     with pytest.raises(ValueError, match="outside the explicit scoped files"):
-        StructuredOutputCodingProvider._resolve_updated_files(request=request, plan=plan)
+        StructuredOutputCodingProvider._materialize_plan(request=request, plan=plan)
 
 
 def test_file_update_wire_fields_remain_required_strings():

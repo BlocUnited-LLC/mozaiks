@@ -1,0 +1,403 @@
+"""Real loopback SMTP acceptance; reaction policy remains module-owned.
+
+The reaction fixture uses explicit in-memory app records. It does not claim
+to prove the notification_settings pack's separate persistence integration.
+"""
+from __future__ import annotations
+
+import asyncio
+import importlib.util
+import smtplib
+from email import policy
+from email.parser import BytesParser
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
+from mozaiksai.core.runtime.app.module_loader import ModuleReactionsManifest
+from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
+
+
+def test_smtp_adapter_uses_the_canonical_deterministic_pack_materializer():
+    from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+        resolve_templates_for_pack,
+    )
+
+    pack = Path(__file__).resolve().parents[1] / "factory_app/build_context/notifications"
+    first = resolve_templates_for_pack(pack, "notifications", context_variables={})
+    assert first == resolve_templates_for_pack(pack, "notifications", context_variables={})
+    source = next(row["content"] for row in first if row["filename"] == "services/adapters/notifications/email.py")
+    assert source == (pack / "templates/services/adapters/notifications/email.py").read_text(encoding="utf-8")
+    compile(source, "services/adapters/notifications/email.py", "exec")
+
+
+@pytest.fixture
+def email_adapter(monkeypatch, tmp_path):
+    for key in ("SMTP_HOST", "SMTP_FROM", "SMTP_PORT", "SMTP_SECURITY", "SMTP_USER", "SMTP_PASSWORD",
+                "SMTP_PASSWORD_SECRET_NAME", "AZURE_KEY_VAULT_URL", "AZURE_KEY_VAULT_NAME",
+                "MOZAIKS_SECRETS_CONFIG_PATH"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("PLATFORM_PATH", str(tmp_path))
+    path = Path(__file__).resolve().parents[1] / "factory_app/build_context/notifications/templates/services/adapters/notifications/email.py"
+    spec = importlib.util.spec_from_file_location("notification_email_under_test", path)
+    adapter = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(adapter)
+    return adapter
+
+
+@pytest.fixture
+async def smtp_sink(monkeypatch, email_adapter):
+    messages = []
+
+    async def receive(reader, writer):
+        writer.write(b"220 localhost test sink\r\n")
+        await writer.drain()
+        try:
+            while line := await reader.readline():
+                command = line.upper()
+                if command.startswith((b"EHLO ", b"HELO ")):
+                    writer.write(b"250 localhost\r\n")
+                elif command.startswith(b"MAIL FROM:"):
+                    writer.write(b"250 sender accepted\r\n")
+                elif command.startswith(b"RCPT TO:"):
+                    writer.write(b"550 rejected\r\n" if b"REJECTED@" in command else b"250 recipient accepted\r\n")
+                elif command.startswith(b"DATA"):
+                    writer.write(b"354 send content\r\n")
+                    await writer.drain()
+                    chunks = []
+                    while content := await reader.readline():
+                        if content == b".\r\n":
+                            break
+                        chunks.append(content[1:] if content.startswith(b"..") else content)
+                    messages.append(BytesParser(policy=policy.default).parsebytes(b"".join(chunks)))
+                    writer.write(b"250 message accepted\r\n")
+                elif command.startswith(b"QUIT"):
+                    writer.write(b"221 bye\r\n")
+                    await writer.drain()
+                    break
+                elif command.startswith(b"RSET"):
+                    writer.write(b"250 reset\r\n")
+                else:
+                    writer.write(b"502 command unsupported\r\n")
+                await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server = await asyncio.start_server(receive, "127.0.0.1", 0)
+    monkeypatch.setenv("SMTP_HOST", "127.0.0.1")
+    monkeypatch.setenv("SMTP_PORT", str(server.sockets[0].getsockname()[1]))
+    monkeypatch.setenv("SMTP_FROM", "sender@example.test")
+    monkeypatch.setenv("SMTP_SECURITY", "none")
+    try:
+        yield messages
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_real_smtp_acceptance_preserves_recipient_subject_and_body(email_adapter, smtp_sink):
+    assert await email_adapter.send_email(to="recipient@example.test", subject="Ready ✓", body="Hello\n.leading dot\n") is True
+    assert len(smtp_sink) == 1
+    message = smtp_sink[0]
+    assert str(message["From"]) == "sender@example.test"
+    assert str(message["To"]) == "recipient@example.test"
+    assert str(message["Subject"]) == "Ready ✓"
+    assert message.get_content().replace("\r\n", "\n") == "Hello\n.leading dot\n"
+    assert message["Date"].datetime.tzinfo is not None
+    assert str(message["Message-ID"]).endswith("@example.test>")
+
+
+@pytest.mark.asyncio
+async def test_sender_display_name_is_kept_and_blank_settings_use_defaults(email_adapter, smtp_sink, monkeypatch):
+    monkeypatch.setenv("SMTP_FROM", "Example App <sender@example.test>")
+    monkeypatch.setenv("SMTP_USER", "")
+    monkeypatch.setenv("SMTP_PASSWORD", "")
+    assert await email_adapter.send_email(to="recipient@example.test", subject="Named", body="Body") is True
+    assert str(smtp_sink[0]["From"]) == "Example App <sender@example.test>"
+    assert email_adapter._port("starttls") == int(email_adapter.os.environ["SMTP_PORT"])
+    monkeypatch.setenv("SMTP_PORT", "")
+    assert (email_adapter._port("starttls"), email_adapter._port("none"), email_adapter._port("ssl")) == (587, 587, 465)
+
+
+@pytest.mark.asyncio
+async def test_smtp_rejection_does_not_report_delivery(email_adapter, smtp_sink):
+    with pytest.raises(smtplib.SMTPRecipientsRefused):
+        await email_adapter.send_email(to="rejected@example.test", subject="Rejected", body="No delivery")
+    assert smtp_sink == []
+
+
+@pytest.mark.asyncio
+async def test_starttls_is_required_by_default_without_plaintext_fallback(email_adapter, smtp_sink, monkeypatch):
+    monkeypatch.delenv("SMTP_SECURITY")
+    with pytest.raises(smtplib.SMTPNotSupportedError):
+        await email_adapter.send_email(to="recipient@example.test", subject="TLS", body="No downgrade")
+    assert smtp_sink == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("security", ["starttls", "ssl"])
+async def test_secure_transport_authenticates_after_tls(email_adapter, monkeypatch, security):
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
+    monkeypatch.setenv("SMTP_FROM", "sender@example.test")
+    monkeypatch.setenv("SMTP_SECURITY", security)
+    monkeypatch.setenv("SMTP_USER", "test-user")
+    monkeypatch.setenv("SMTP_PASSWORD", "test-only-password")
+    client = MagicMock()
+    smtp = client.return_value
+    smtp.send_message.return_value = {}
+    monkeypatch.setattr(email_adapter.smtplib, "SMTP_SSL" if security == "ssl" else "SMTP", client)
+    assert await email_adapter.send_email(to="recipient@example.test", subject="TLS", body="Body") is True
+    assert client.call_args.args == ("smtp.example.test", 465 if security == "ssl" else 587)
+    assert client.call_args.kwargs["timeout"] == 15
+    smtp.login.assert_called_once_with("test-user", "test-only-password")
+    if security == "ssl":
+        assert client.call_args.kwargs["context"].check_hostname
+        smtp.starttls.assert_not_called()
+    else:
+        assert smtp.starttls.call_args.kwargs["context"].check_hostname
+        assert [call[0] for call in smtp.method_calls] == ["starttls", "login", "send_message", "quit"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("update,arguments", [
+    ({"SMTP_HOST": ""}, {}),
+    ({"SMTP_HOST": "smtp.example.test"}, {}),
+    ({"SMTP_USER": "test-user", "SMTP_PASSWORD": "test-only-password"}, {}),
+    ({"SMTP_PASSWORD": "test-only-password"}, {}),
+    ({"SMTP_SECURITY": "unknown"}, {}),
+    ({"SMTP_PORT": "0"}, {}),
+    ({"SMTP_PORT": "abc"}, {}),
+    ({"SMTP_FROM": "sender@"}, {}),
+    ({"SMTP_FROM": "a@example.test, b@example.test"}, {}),
+    ({}, {"to": ""}),
+    ({}, {"to": "@example.test"}),
+    ({}, {"to": "a@"}),
+    ({}, {"to": "a@example.test, b@example.test"}),
+    ({}, {"to": "recipient@example.test\r\nBcc: other@example.test"}),
+    ({}, {"subject": "Hello\r\nBcc: other@example.test"}),
+])
+async def test_invalid_configuration_or_headers_never_send(email_adapter, smtp_sink, monkeypatch, update, arguments):
+    for key, value in update.items():
+        monkeypatch.setenv(key, value)
+    with pytest.raises(ValueError):
+        await email_adapter.send_email(**{"to": "recipient@example.test", "subject": "Subject", "body": "Body", **arguments})
+    assert smtp_sink == []
+
+
+@pytest.mark.asyncio
+async def test_user_without_password_never_connects(email_adapter, monkeypatch):
+    from mozaiksai.core.secrets import SecretResolutionError
+
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
+    monkeypatch.setenv("SMTP_FROM", "sender@example.test")
+    monkeypatch.setenv("SMTP_USER", "test-user")
+    client = MagicMock()
+    monkeypatch.setattr(email_adapter.smtplib, "SMTP", client)
+    with pytest.raises(SecretResolutionError, match="SMTP_PASSWORD"):
+        await email_adapter.send_email(to="recipient@example.test", subject="Subject", body="Body")
+    client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_password_resolves_from_the_vault_entry_the_app_declares(email_adapter, monkeypatch, tmp_path):
+    from mozaiksai.core.secrets import app_secrets
+
+    (tmp_path / "app.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "security").mkdir()
+    (tmp_path / "security/secrets.yaml").write_text(
+        "version: 1\nprovider:\n  type: azure_key_vault\n"
+        "secrets:\n- env: SMTP_PASSWORD\n  azure_key_vault:\n    secret_name: mail-password\n",
+        encoding="utf-8",
+    )
+    vault = MagicMock()
+    vault.get_secret.return_value = SimpleNamespace(value="vault-test-password")
+    monkeypatch.setattr(app_secrets, "build_secret_client", lambda url: vault)
+    monkeypatch.setenv("AZURE_KEY_VAULT_URL", "https://vault.example.test")
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
+    monkeypatch.setenv("SMTP_FROM", "sender@example.test")
+    monkeypatch.setenv("SMTP_USER", "test-user")
+    client = MagicMock()
+    smtp = client.return_value
+    smtp.send_message.return_value = {}
+    monkeypatch.setattr(email_adapter.smtplib, "SMTP", client)
+    assert await email_adapter.send_email(to="recipient@example.test", subject="Subject", body="Body") is True
+    vault.get_secret.assert_called_once_with("mail-password")
+    smtp.login.assert_called_once_with("test-user", "vault-test-password")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [
+    "Group: recipient@example.test;",
+    "recipient@example.test,",
+    "recipient@example.test;",
+    "recipient@example.test, ",
+    "Group: recipient@example.test;(comment)",
+    "Group: ; recipient@example.test",
+    ", recipient@example.test",
+    "recipient@example.test;other@example.test",
+    "recip\x00ient@example.test",
+])
+async def test_only_one_plain_mailbox_is_accepted(email_adapter, smtp_sink, monkeypatch, value):
+    # An environment variable cannot hold a NUL, so that value only reaches the recipient.
+    headers = (("To", {"to": value}),) + ((("From", {}),) if "\x00" not in value else ())
+    for header, call in headers:
+        if header == "From":
+            monkeypatch.setenv("SMTP_FROM", value)
+        with pytest.raises(ValueError, match=header):
+            await email_adapter.send_email(**{"to": "recipient@example.test", "subject": "S", "body": "B", **call})
+    assert smtp_sink == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [
+    "recipient@[127.0.0.1]",
+    '"john..doe"@example.test',
+    '"Smith, J; Jr" <recipient@example.test>',
+    "Example App <recipient+tag@example.test>",
+])
+async def test_unusual_but_valid_mailboxes_are_accepted(email_adapter, smtp_sink, value):
+    assert await email_adapter.send_email(to=value, subject="S", body="B") is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("host", ["localhost", "::1", "127.0.0.2"])
+async def test_plaintext_is_allowed_for_every_loopback_spelling(email_adapter, monkeypatch, host):
+    monkeypatch.setenv("SMTP_HOST", host)
+    monkeypatch.setenv("SMTP_FROM", "sender@example.test")
+    monkeypatch.setenv("SMTP_SECURITY", "none")
+    client = MagicMock()
+    client.return_value.send_message.return_value = {}
+    monkeypatch.setattr(email_adapter.smtplib, "SMTP", client)
+    assert await email_adapter.send_email(to="recipient@example.test", subject="S", body="B") is True
+    client.return_value.starttls.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("host", ["localhost.example.test", "localhostx", "10.0.0.1"])
+async def test_plaintext_is_refused_for_hosts_that_only_look_local(email_adapter, monkeypatch, host):
+    monkeypatch.setenv("SMTP_HOST", host)
+    monkeypatch.setenv("SMTP_FROM", "sender@example.test")
+    monkeypatch.setenv("SMTP_SECURITY", "none")
+    with pytest.raises(ValueError, match="Plaintext"):
+        await email_adapter.send_email(to="recipient@example.test", subject="S", body="B")
+
+
+@pytest.mark.asyncio
+async def test_surrounding_spaces_in_settings_are_ignored(email_adapter, monkeypatch):
+    monkeypatch.setenv("SMTP_HOST", "  smtp.example.test  ")
+    monkeypatch.setenv("SMTP_FROM", " sender@example.test ")
+    monkeypatch.setenv("SMTP_SECURITY", " SSL ")
+    monkeypatch.setenv("SMTP_PORT", " 2465 ")
+    client = MagicMock()
+    client.return_value.send_message.return_value = {}
+    monkeypatch.setattr(email_adapter.smtplib, "SMTP_SSL", client)
+    assert await email_adapter.send_email(to="recipient@example.test", subject="S", body="B") is True
+    assert client.call_args.args == ("smtp.example.test", 2465)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("user", "password", "secret"), [
+    ("test-user", "pässword-test-only", "pässword"),
+    ("tëst-user", "test-only-password", "tëst"),
+])
+async def test_non_ascii_credentials_are_refused_without_echoing_them(email_adapter, monkeypatch, user, password, secret):
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
+    monkeypatch.setenv("SMTP_FROM", "sender@example.test")
+    monkeypatch.setenv("SMTP_USER", user)
+    monkeypatch.setenv("SMTP_PASSWORD", password)
+    client = MagicMock()
+    monkeypatch.setattr(email_adapter.smtplib, "SMTP", client)
+    with pytest.raises(ValueError) as raised:
+        await email_adapter.send_email(to="recipient@example.test", subject="S", body="B")
+    assert secret not in repr(raised.value) and secret not in str(raised.value)
+    client.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [smtplib.SMTPResponseException(421, b"closing"), smtplib.SMTPServerDisconnected()])
+async def test_an_accepted_message_is_reported_sent_when_the_goodbye_fails(email_adapter, monkeypatch, failure):
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
+    monkeypatch.setenv("SMTP_FROM", "sender@example.test")
+    client = MagicMock()
+    smtp = client.return_value
+    smtp.send_message.return_value = {}
+    smtp.quit.side_effect = failure
+    monkeypatch.setattr(email_adapter.smtplib, "SMTP", client)
+    assert await email_adapter.send_email(to="recipient@example.test", subject="S", body="B") is True
+    smtp.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("step", "failure"), [
+    ("starttls", smtplib.SMTPNotSupportedError("STARTTLS extension not supported by server.")),
+    ("login", smtplib.SMTPAuthenticationError(535, b"bad credentials")),
+    ("send_message", smtplib.SMTPRecipientsRefused({"recipient@example.test": (550, b"no such user")})),
+    ("send_message", smtplib.SMTPDataError(554, b"rejected")),
+])
+async def test_the_real_failure_is_raised_and_no_goodbye_is_attempted(email_adapter, monkeypatch, step, failure):
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
+    monkeypatch.setenv("SMTP_FROM", "sender@example.test")
+    monkeypatch.setenv("SMTP_USER", "test-user")
+    monkeypatch.setenv("SMTP_PASSWORD", "test-only-password")
+    client = MagicMock()
+    smtp = client.return_value
+    getattr(smtp, step).side_effect = failure
+    smtp.quit.side_effect = smtplib.SMTPServerDisconnected()
+    monkeypatch.setattr(email_adapter.smtplib, "SMTP", client)
+    with pytest.raises(type(failure)):
+        await email_adapter.send_email(to="recipient@example.test", subject="S", body="B")
+    smtp.quit.assert_not_called()
+    smtp.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_router_calls_smtp_only_after_app_owned_recipient_and_opt_in_check(email_adapter, smtp_sink):
+    records = {
+        ("app-a", "alice", "allowed"): {"email": "alice@example.test", "email_enabled": True},
+        ("app-a", "alice", "opted-out"): {"email": "alice@example.test", "email_enabled": False},
+    }
+
+    class FixtureHandler:
+        async def on_notice(self, ctx, *, record_id, **_event_supplied):
+            record = records.get((ctx.app_id, ctx.user_id, record_id))
+            if record is None:
+                return {"success": False, "error_code": "NOTICE_NOT_OWNED"}
+            if not record["email_enabled"]:
+                return {"success": True, "delivery": "opted_out"}
+            return await email_adapter.send_email(to=record["email"], subject="Owned notice", body="Ready")
+
+    module = SimpleNamespace(
+        name="fixture_notices", handler=FixtureHandler(), definition=None,
+        manifests=SimpleNamespace(
+            events=None, notifications=None,
+            reactions=ModuleReactionsManifest.model_validate({
+                "schema_version": "mozaiks.reactions.v1", "reactions": [{
+                    "id": "fixture_notices.email", "event_type": "domain.fixture.notice_ready",
+                    "target": {"kind": "handler", "handler_method": "on_notice"},
+                }],
+            }),
+        ),
+    )
+    router = ModuleEventRouter([module])
+
+    async def dispatch(app="app-a", user="alice", record_id="allowed", **payload):
+        return await router.handle_event("domain.fixture.notice_ready", {
+            "id": f"{app}-{user}-{record_id}", "type": "domain.fixture.notice_ready",
+            "tenant": {"app_id": app}, "actor": {"type": "user", "id": user},
+            "payload": {"record_id": record_id, **payload},
+        })
+
+    assert (await dispatch()).success
+    assert len(smtp_sink) == 1 and str(smtp_sink[0]["To"]) == "alice@example.test"
+    assert (await dispatch(record_id="opted-out")).success
+    assert not (await dispatch(app="app-b")).success
+    assert not (await dispatch(user="bob")).success
+    assert len(smtp_sink) == 1
+    await dispatch(to="attacker@example.test", email_enabled=True)
+    assert {str(message["To"]) for message in smtp_sink} == {"alice@example.test"}
+    await dispatch(record_id="opted-out", to="attacker@example.test", email_enabled=True)
+    assert {str(message["To"]) for message in smtp_sink} == {"alice@example.test"}

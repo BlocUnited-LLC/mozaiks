@@ -10,6 +10,7 @@ from mozaiksai.core.artifacts import (
     persist_summary_artifact,
     resolve_latest_artifact_version_refs,
 )
+from mozaiksai.core.artifacts.summary_artifacts import verified_summary_payload
 
 
 class _FakeArtifactStore:
@@ -82,6 +83,7 @@ class _FakeArtifactStore:
             build_key=kwargs["build_key"],
             version_number=2,
             parent_build_record_id=kwargs.get("parent_build_record_id"),
+            files_manifest=kwargs["files_manifest"],
             lineage_root_id="av_design_docs_1",
             canonical_inputs_version=dict(kwargs.get("canonical_inputs_version") or {}),
             lifecycle_status=kwargs["lifecycle_status"],
@@ -129,6 +131,10 @@ async def test_persist_summary_artifact_registers_parent_inputs_and_summary_payl
     assert store.create_calls[0]["lifecycle_status"] == ArtifactLifecycleStatus.DRAFT
     assert store.create_calls[0]["validation_status"] == ArtifactValidationStatus.SKIPPED
     assert extract_summary_payload(artifact) == {"surface_map": {"surfaces": [{"surface_id": "dashboard"}]}}
+    assert verified_summary_payload(artifact) == extract_summary_payload(artifact)
+    artifact.commit_metadata.metadata["summary_payload"]["surface_map"]["surfaces"][0]["surface_id"] = "elsewhere"
+    with pytest.raises(ValueError, match="manifest"):
+        verified_summary_payload(artifact)
 
 
 # ── DRAFT suppression and first-run tests ─────────────────────────────────────

@@ -861,21 +861,29 @@ async def test_refinement_requires_parent_before_staging(saved, tmp_path):
     assert not output.exists()
 
 
-def test_subscription_record_id_relay_uses_runtime_router_authority(monkeypatch):
+def test_guarded_input_ids_survive_normal_stage_persistence_and_routing(monkeypatch):
     from mozaiksai.core.workflow.context.authority import build_context_authority_policy
     from mozaiksai.core.workflow.pack.journey_orchestrator import _project_launch_context
     from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
     root = Path(__file__).resolve().parents[1] / "factory_app/workflows"
-    configs = {}
-    for name in ("SubscriptionContractDesigner", "AgentGenerator", "AppGenerator"):
-        configs[name] = {"context_variables": yaml.safe_load((root / name / "context_variables.yaml").read_text(encoding="utf-8"))}
-        policy = build_context_authority_policy(workflow_name=name, definitions=configs[name]["context_variables"]["definitions"])
-        assert policy.can_write("subscription_contract_artifact_version_id", writer_id="lifecycle_tool")
-        for writer in ("caller_input", "structured_output", "agent_text"):
-            assert not policy.can_write("subscription_contract_artifact_version_id", writer_id=writer)
-    monkeypatch.setattr(workflow_manager, "get_config", lambda name: configs[name])
-    seed = {"subscription_contract_artifact_version_id": "exact-saved-subscription"}
-    for name in ("AgentGenerator", "AppGenerator"):
-        seed = _project_launch_context(seed, name)
-        assert seed == {"subscription_contract_artifact_version_id": "exact-saved-subscription"}
+
+    def config(name):
+        return {file: yaml.safe_load((root / name / f"{file}.yaml").read_text("utf-8"))
+                for file in ("context_variables", "transition_graph")}
+    monkeypatch.setattr(workflow_manager, "get_config", config)
+    values = {}
+    for stage in ("DesignDocs", "SubscriptionContractDesigner", "AgentGenerator", "AppGenerator"):
+        policy = build_context_authority_policy(workflow_name=stage, definitions=config(stage)["context_variables"]["definitions"])
+        assert _project_launch_context(values, stage) == values
+        if stage in {"DesignDocs", "SubscriptionContractDesigner"}:
+            key = "design_docs_artifact_version_id" if stage == "DesignDocs" else "subscription_contract_artifact_version_id"
+            assert policy.can_write(key, writer_id="deterministic_tool")
+            values[key] = "exact-" + stage
+        for key in values:
+            assert not policy.variables[key].model_visible
+            assert not policy.can_write(key, writer_id="caller_input")
+            assert not policy.can_write(key, writer_id="structured_output")
+            assert not policy.can_write(key, writer_id="agent_text")
+        persisted = policy.filter_for_persistence(values)
+        assert policy.filter_for_replay(persisted, writer_id="persisted_replay") == values

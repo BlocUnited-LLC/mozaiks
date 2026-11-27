@@ -92,6 +92,9 @@ class _Collection:
         for stage in pipeline:
             if "$match" in stage:
                 rows = [row for row in rows if _matches(row, stage["$match"])]
+            elif "$unset" in stage:
+                for row in rows:
+                    row.pop(stage["$unset"], None)
             elif "$sort" in stage:
                 rows = _Cursor(rows).sort(list(stage["$sort"].items())).rows
             elif "$skip" in stage:

@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mozaiksai.core.ports.orchestration import RunStatus
+from mozaiksai.core.transport.handlers.input_handlers import handle_user_input_submit
 from tests import test_run_complete_dispatch_once as dispatch_tests
 from tests.test_run_complete_dispatch_once import live_send_path as live_send_path
 from tests.test_workflow_bridge import (
@@ -239,6 +240,75 @@ async def test_recovery_announces_once_before_refusing_undeliverable_input(live_
     assert len(dispatch_tests._run_complete_envelopes(path.broadcast)) == 1
     assert result["outcome_announced"] is True
     assert path.adapter.runs == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ready_type", ["chat.awaiting_reply", "chat.run_complete"])
+async def test_immediate_socket_reply_is_admitted_after_each_persisted_pause(live_send_path, monkeypatch, ready_type):  # noqa: F811
+    """The user can reply from the first ready frame, even before the prior socket task returns."""
+    p = live_send_path
+    transport, chat_id = p.transport, dispatch_tests.CHAT_ID
+    lease = asyncio.Lock()
+
+    @asynccontextmanager
+    async def acquire(*, app_id, chat_id):
+        assert (app_id, chat_id) == (dispatch_tests.APP_ID, dispatch_tests.CHAT_ID)
+        async with lease:
+            yield
+
+    monkeypatch.setattr(_bridge_mod, "chat_execution_lease", acquire)
+    monkeypatch.setattr(transport, "_apply_user_text_context_updates", AsyncMock(return_value={}))
+    monkeypatch.setattr(transport, "process_incoming_user_message", AsyncMock())
+    monkeypatch.setattr(_bridge_mod.session_registry, "is_in_general_mode", lambda _: False)
+    monkeypatch.setattr(_bridge_mod.session_registry, "get_active_workflow", lambda _: None)
+    channel = _Channel([], block=True)
+    socket = SimpleNamespace(send_json=AsyncMock())
+    replies = [FIRST_TEXT, SECOND_TEXT]
+    tasks, at_ready = [], []
+    broadcast = transport._broadcast_to_websockets
+
+    async def receive(envelope, chat_id=None):
+        await broadcast(envelope, chat_id)
+        if envelope["type"] == ready_type and len(tasks) < len(replies):
+            at_ready.append((lease.locked(), chat_id in transport._background_tasks))
+            await handle_user_input_submit(transport, {
+                "text": replies[len(tasks)], "context": {"client_message_id": f"reply-{len(tasks)}"},
+            }, chat_id, socket)
+            tasks.append(transport._background_tasks[chat_id])
+            if len(tasks) == 1:
+                await asyncio.wait_for(channel.entered.wait(), 5)
+
+    monkeypatch.setattr(transport, "_broadcast_to_websockets", receive)
+
+    async def start(request):
+        transport.register_live_ag2_workflow_run(chat_id, channel)
+        await transport.send_event_to_ui({"kind": "awaiting_reply", "workflow": dispatch_tests.WORKFLOW,
+                                         "chat_id": chat_id, "reason": "awaiting_user_reply"}, chat_id)
+        p.adapter.status = RunStatus.PAUSED
+        await p.adapter._announce()
+        return SimpleNamespace(status=RunStatus.PAUSED)
+
+    monkeypatch.setattr(p.adapter, "run", start)
+    launch = asyncio.create_task(p.run())
+    transport._background_tasks[chat_id] = launch
+    try:
+        await asyncio.wait_for(launch, 10)
+        assert tasks and transport._background_tasks.get(chat_id) is tasks[0]
+        channel.release.set()
+        await asyncio.wait_for(tasks[0], 10)
+        assert len(tasks) == 2
+        await asyncio.wait_for(tasks[1], 10)
+        assert at_ready == [(False, False), (False, False)]
+        assert channel.deliveries == replies
+        assert [c.args[0]["data"] for c in socket.send_json.await_args_list] == [
+            {"chat_id": chat_id, "status": "accepted", "client_message_id": f"reply-{i}"} for i in range(2)]
+        assert chat_id not in transport._background_tasks
+    finally:
+        channel.release.set()
+        for task in [launch, *tasks]:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(launch, *tasks, return_exceptions=True)
 
 
 @pytest.mark.asyncio

@@ -235,6 +235,14 @@ models:
         variants: [str, 'null']
         description: Optional exact approved feature id this limit corresponds to; code derives the capability id.
 
+  PlanPrice:
+    type: model
+    fields:
+      amount_cents: {type: int}
+      currency: {type: str, default: usd}
+      interval: {type: literal, values: [month, year, week, day], default: month}
+      display: {type: optional_str}
+
   SubscriptionPlan:
     type: model
     fields:
@@ -248,6 +256,9 @@ models:
         type: union
         variants: [str, 'null']
         description: Short plan description.
+      price:
+        type: union
+        variants: [PlanPrice, 'null']
       included_features:
         type: list
         items: str

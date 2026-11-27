@@ -351,6 +351,10 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         websocket: WebSocket,
         message: str,
         error_code: str,
+        *,
+        chat_id: str | None = None,
+        client_message_id: str | None = None,
+        delivery_state: str | None = None,
     ) -> None:
         """Send a standardized error response to the WebSocket client."""
         if getattr(websocket, "application_state", None) is not WebSocketState.CONNECTED:
@@ -361,7 +365,10 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             await send_event_envelope(websocket, {
                 "schema_version": "mozaiks.ui.event.v1",
                 "type": "chat.error",
-                "data": {"message": message, "error_code": error_code},
+                "data": {"message": message, "error_code": error_code,
+                         **({"chat_id": chat_id} if chat_id else {}),
+                         **({"client_message_id": client_message_id} if client_message_id else {}),
+                         **({"delivery_state": delivery_state} if delivery_state else {})},
                 "timestamp": _utc_timestamp(),
             })
         except RuntimeError:
@@ -372,7 +379,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
     # ==================================================================================
     
     async def submit_user_input(
-        self, input_request_id: str, user_input: str, *, chat_id: str | None = None,
+        self, input_request_id: str, user_input: str, *, chat_id: str | None = None, acknowledge_request: bool = True,
     ) -> bool:
         """
         Submit user input response for a pending input request.
@@ -437,7 +444,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 except Exception as e:
                     logger.debug("Failed to clear pending input request: %s", e)
             # Emit chat.input_ack for B9/B10 protocol compliance
-            if ack_chat_id:
+            if ack_chat_id and acknowledge_request:
                 try:
                     await self.send_event_to_ui({
                         'kind': 'input_ack',
@@ -656,6 +663,9 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         Serializes and sends a raw AG2 event to the UI.
         This is the primary method for forwarding AG2 native events.
         """
+        if self._defer_pause_event(event, chat_id):
+            return
+
         is_transport_envelope = (
             isinstance(event, dict) and 'type' in event and 'data' in event and 'kind' not in event
         )

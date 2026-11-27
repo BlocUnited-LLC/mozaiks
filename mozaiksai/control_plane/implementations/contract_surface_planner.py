@@ -224,6 +224,8 @@ def validate_contract_surface_plan(
     _validate_workspace_files(workspace_files)
     _validate_allowed_paths(allowed_paths, workspace_files)
     change_class = routing_decision.change_intent.change_class.value
+    if routing_decision.change_intent.requires_workflow_revision:
+        raise ValueError("This app change requires both workflow and app generation")
     if plan.build_family != refinement_request.build_family or plan.change_class != change_class:
         raise ValueError("Surface plan does not match its request family and classification")
     if change_class not in _ELIGIBLE_CHANGE_CLASSES or plan.fallback_to_workflow or not plan.surfaces:

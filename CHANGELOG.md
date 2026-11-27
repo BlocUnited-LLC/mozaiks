@@ -15,6 +15,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Mozaiks installs exclude Tree-sitter 0.26.0, which can crash the process
+  while building a workspace dependency graph on Windows and Linux.
+- Notifications pack `0.1.16`: an email the SMTP server accepted no longer
+  reports failure when the connection then closes badly, so a retry does not
+  send it twice, and a failed send raises its own error. Group and
+  leading or trailing separator addresses and non-ASCII credentials are
+  refused. The app planner is told to say push and SMS are not included.
 - Studio's app Building page is replaced by a Project page at the same route.
   The old page read a build-state record nothing writes, so its build requests
   and approvals were always empty, and its Continue Build link did not open the
@@ -104,6 +111,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- Apps that select the notifications pack can send email through any SMTP
+  service. Self-hosted operators and managed hosts set the same `SMTP_*` names,
+  which the generated env examples and deployment manifest now list. The pack's
+  unfinished push adapter is removed, so apps with this pack pass acceptance; the
+  pack does not deliver push or SMS.
 - A workflow can use `reply_tool` to send a verified receipt or calculation
   directly into chat. The reply stays in the conversation history, accepts
   follow-up questions, and requires no model call to present the result.
@@ -119,6 +131,15 @@ This project follows a practical pre-1.0 changelog format:
 
 - Factory refinement agents can receive advisory file and dependency evidence
   tied to the verified app build they are changing.
+- Scoped editors can return exact text replacements for a local change. Studio
+  builds the candidate from the verified source and rejects ambiguous matches.
+
+- App builders can approve a background workflow to save one result on the
+  private record that triggered it. The workflow plan shows the source event,
+  receiving action and writable fields. Retrying the same result is idempotent.
+- App builders can choose which create, update and delete actions a collection
+  exposes and which fields each action accepts. The choice travels with the
+  app's reviewed data contract during generation and refinement.
 
 - Notification rules can explicitly select `audience.scope: app` for validated
   direct recipients across workspaces. Event ownership remains the default;
@@ -619,6 +640,26 @@ This project follows a practical pre-1.0 changelog format:
   approved build inputs while rejecting changes to verified implementations.
   Commerce no longer requires fixed pricing gates, uses current schema admin panels,
   and declares the product response envelopes used by its mutation actions.
+- Stores built with Commerce pack `0.1.17` can browse and edit products without a
+  payment integration. Checkout creates a pending order and emits
+  `domain.commerce.checkout.requested`. If your workflow used the `0.1.16`
+  `commerce_checkout_requested_payment_facade` reaction, move that single row into
+  the payment module's `contracts/reactions.yaml` in the same reviewed upgrade.
+  Keep its workflow trigger and capability declaration. The upgrade preview
+  lists the changed file. Verify that the receiving module owns exactly one
+  subscription before activating the upgraded app.
+- MozaiksPay pack `0.1.13` shows the approved recurring plan price on the
+  app's Pricing and Billing pages. Fresh Windows and Linux checkouts produce
+  the same integrity pins for both Commerce and MozaiksPay.
+- For new paid memberships or usage billing, DesignDocs proposes MozaiksPay
+  for owner review. A self-hoster can remove the optional
+  `build_context/billing_offering/context.yaml` registry or choose an
+  alternative in the design. CLI initialization preserves an existing registry.
+  One-time Store orders use Commerce and require a merchant payment receiver.
+- The subscription designer can submit an optional recurring price in cents.
+  The owner reviews the amount, currency, interval and display label before the
+  Factory writes them to `app/config/subscriptions.yaml`. Include the cadence
+  in a custom label to show it on the buyer's Pricing and Billing pages.
 - Failed automatic workflow steps now show a safe conversation notice without
   enabling debug messages, exposing result details, or changing retry eligibility.
 
@@ -923,6 +964,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- AI usage larger than the remaining token balance now takes the rest of the
+  balance and stops further calls. It was refused and left the balance unchanged,
+  so a small balance admitted calls without limit. Usage is also charged when an
+  allowance sync fails, when an agent, workspace or app name looks like a secret
+  (`task-planner` contains `sk-`), and on a wallet that may go negative but was
+  never credited. A v1 app's other auto-debit wallets are no longer charged for
+  AI tokens when it declares an `ai_tokens` wallet.
 - Generated app container images now serve as an unprivileged `mozaiks` user
   (uid 10001) that owns `/app`, instead of as root, and write their logs under
   `/app/logs`. The generated `docker-compose.yml` also drops the obsolete

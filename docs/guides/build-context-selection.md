@@ -41,12 +41,28 @@ tracking to an order, and a community can add an appeals workflow for moderators
 The recipes live in `factory_app/build_context/AppGenerator/domain_catalogs.yaml`.
 
 DesignDocs first asks `DesignPackSelectionAgent` for a list of pack IDs. That
-turn sees the app concept and a compact catalog. The deterministic selector
+turn sees the app concept and a compact catalog. For a revision it also receives
+the verified reusable pack identities and a bounded inventory of modules and
+actions from the accepted app. The selector uses the requested change to decide
+which capabilities to reuse, extend or add. The deterministic selector
 checks the requested IDs, dependencies and source digests. An invalid choice
 returns to the selection step before the Factory spends a turn writing the
 design.
 
 `DesignDocsAgent` receives the verified contracts for the chosen packs.
+`source_capability_packs` on a design surface describes capability categories.
+Reusable pack identities come from the verified selection. An approved agentic
+capability can use an app-owned workflow with an empty pack selection.
+AppGenerator reads module archetypes from the saved app build plan and workflow
+event bindings from the corresponding workflow bundle.
+For revisions the design agent also sees a bounded projection of the accepted
+app archive. It lists module-owned collections, record and ownership keys,
+typed fields, schema-page paths and access gates, app roles, and module action
+signatures. Canonical HTTP write operations come from actions present in that
+archive. Their editable fields come from closed inputs and exclude record keys
+and managed fields. An open or unsupported input leaves its editable field
+list unknown. This context guides the proposed design. Owner review and the
+existing save gates still determine the approved contract.
 For each pack-owned module collection the prompt identifies its pack, module,
 collection, entity and tenancy. For example, Content supplies the `entries`
 collection in module `content` with entity `ContentEntry`. A recipe page and a

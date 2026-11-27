@@ -2,17 +2,28 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import io
 import re
+import zipfile
 from collections.abc import Mapping
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from mozaiksai.core.artifacts.models import BuildRecordStatus
+from mozaiksai.core.artifacts.models import (
+    BuildRecord,
+    BuildRecordStatus,
+    canonical_bundle_archive_path,
+)
 from mozaiksai.core.runtime.app.module_loader import (
     CANONICAL_EVENT_PREFIX_LABEL,
     CANONICAL_EVENT_PREFIXES,
+    ModuleReactionResultWrite,
 )
 from mozaiksai.core.workflow.context.frozen import detach
 from mozaiksai.core.workflow.generator_support.module_entitlement_gates import (
@@ -30,6 +41,19 @@ class WorkflowEventBindingError(ValueError):
     def __init__(self, workflow_name: str, message: str) -> None:
         self.workflow_name = workflow_name
         super().__init__(message)
+
+
+class WorkflowResultWritePlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent: str = Field(min_length=1)
+    event_type: str = Field(min_length=1)
+    module_id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    result_write: ModuleReactionResultWrite
+
+
+def workflow_result_write_plans(entry: Mapping[str, Any]) -> list[WorkflowResultWritePlan]:
+    return TypeAdapter(list[WorkflowResultWritePlan]).validate_python(entry.get("result_write_plans", []))
 
 
 def _text(value: Any) -> str | None:
@@ -116,14 +140,14 @@ def _normalize_trigger_event(raw: Any, *, default_capability_id: str | None = No
     }
 
 
-def _load_orchestrator(files: Any) -> dict[str, Any]:
+def _load_manifest(files: Any, name: str) -> dict[str, Any]:
     if not isinstance(files, list):
         return {}
     for file_entry in files:
         if not isinstance(file_entry, Mapping):
             continue
         filename = _text(file_entry.get("filename") or file_entry.get("path"))
-        if filename != "orchestrator.yaml":
+        if filename != name:
             continue
         try:
             parsed = yaml.safe_load(str(file_entry.get("content") or "")) or {}
@@ -131,6 +155,29 @@ def _load_orchestrator(files: Any) -> dict[str, Any]:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
+
+
+def workflow_result_output_schema(entry: Mapping[str, Any], plan: WorkflowResultWritePlan) -> dict[str, Any]:
+    from mozaiksai.core.runtime.app.result_schema import result_object_schema
+    from mozaiksai.core.workflow.declarative.contracts import parse_structured_outputs_config
+    from mozaiksai.core.workflow.outputs.structured import build_models_from_config
+    from mozaiksai.core.workflow.structured_output_contracts import (
+        canonical_structured_output_schema,
+    )
+
+    config = parse_structured_outputs_config(_load_manifest(entry.get("files"), "structured_outputs.yaml"))
+    model_id = config.get("registry", {}).get(plan.agent)
+    definitions = config.get("models", {})
+    models = build_models_from_config(definitions, exact_model_ids=frozenset(definitions))
+    if model_id not in models:
+        raise ValueError(f"{plan.agent} requires a registered workflow result model")
+    schema = result_object_schema(canonical_structured_output_schema(models[model_id]), compiler_output=True)
+    if set(schema["properties"]) != set(plan.result_write.fields) or set(schema.get("required", [])) != set(schema["properties"]):
+        raise ValueError(
+            f"{plan.agent} structured output must declare exactly the approved result fields as required: "
+            f"{', '.join(plan.result_write.fields)}. The host supplies the record key {plan.result_write.record_key}."
+        )
+    return schema
 
 
 def _normalize_workflow_item(raw: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -148,12 +195,28 @@ def _normalize_workflow_item(raw: Mapping[str, Any]) -> dict[str, Any] | None:
         )
         if event is not None
     ]
-    workflow = {
+    workflow: dict[str, Any] = {
         "workflow_name": workflow_name,
         "capability_id": capability_id,
         "startup_mode": startup_mode,
         "trigger_events": trigger_events,
     }
+    plans = workflow_result_write_plans(raw)
+    if plans:
+        from mozaiksai.core.runtime.app.result_schema import result_object_schema
+
+        events = {event["event_type"] for event in trigger_events}
+        selected = {plan.event_type for plan in plans}
+        if (startup_mode != "BackendOnly" or len(selected) != len(plans) or selected != events):
+            raise WorkflowEventBindingError(workflow_name, "Automatic result writes require one plan for each declared BackendOnly event trigger")
+        workflow["result_write_plans"] = [plan.model_dump(mode="json") for plan in plans]
+        if not isinstance(raw.get("result_output_schema"), dict):
+            raise WorkflowEventBindingError(workflow_name, "Workflow result metadata requires its compiled output schema")
+        result_schema = result_object_schema(raw["result_output_schema"])
+        schema_fields = set(result_schema["properties"])
+        if set(result_schema.get("required", [])) != schema_fields or any(set(plan.result_write.fields) != schema_fields for plan in plans):
+            raise WorkflowEventBindingError(workflow_name, "Workflow result schema must require exactly the approved result fields")
+        workflow["result_output_schema"] = result_schema
     design_surface_id = _text(raw.get("design_surface_id"))
     if design_surface_id:
         workflow["design_surface_id"] = design_surface_id
@@ -246,7 +309,7 @@ def extract_workflow_integration_metadata_from_bundle_entries(
     for entry in bundle_entries:
         if not isinstance(entry, Mapping):
             continue
-        orchestrator = _load_orchestrator(entry.get("files"))
+        orchestrator = _load_manifest(entry.get("files"), "orchestrator.yaml")
         workflow_name = _text(orchestrator.get("workflow_name")) or _text(entry.get("workflow_name"))
         if not workflow_name:
             continue
@@ -292,6 +355,9 @@ def extract_workflow_integration_metadata_from_bundle_entries(
             "startup_mode": startup_mode,
             "trigger_events": trigger_events,
         }
+        if result_plans := workflow_result_write_plans(entry):
+            workflow["result_write_plans"] = entry["result_write_plans"]
+            workflow["result_output_schema"] = workflow_result_output_schema(entry, result_plans[0])
         workflows.append(workflow)
 
     if bundle_entries and len(workflows) != len(bundle_entries):
@@ -373,7 +439,23 @@ def _source_app_id(context_variables: Any) -> str | None:
     return None
 
 
+def _app_revision_workflow_handoff(context: Any) -> str | None:
+    """A rebuilt workflow replaces the app cursor while the original app stays pinned."""
+    if _context_get(context, "artifact_kind") != "app_bundle":
+        return None
+    baseline = _text(_context_get(context, "revision_source_artifact_version_id"))
+    verified = _context_get(context, "workflow_integration_source_app")
+    if baseline and isinstance(verified, Mapping) and verified.get("build_record_id") == baseline:
+        return _text(verified.get("workflow_bundle_id"))
+    cursor = _text(_context_get(context, "artifact_version_id"))
+    return cursor if baseline and cursor != baseline else None
+
+
 def workflow_integration_source_error(context_variables: Any) -> str | None:
+    handoff = _app_revision_workflow_handoff(context_variables)
+    upstream = _text(_context_get(context_variables, "upstream_workflow_bundle_artifact_version_id"))
+    if handoff and upstream and handoff != upstream:
+        return "The exact workflow handoff differs from the workflow bundle found for this build."
     baseline_id = _source_app_id(context_variables)
     if baseline_id:
         receipt = _context_get(context_variables, "workflow_integration_source_app")
@@ -435,11 +517,67 @@ def workflow_integration_metadata_from_artifact(artifact: Any) -> dict[str, Any]
     if not isinstance(envelope, Mapping):
         return None
     catalog = envelope.get("workflow_integration_metadata", envelope)
+    if not isinstance(catalog, Mapping) or catalog.get("source_artifact_version_id") not in (None, artifact_id):
+        return None
+    rows = catalog.get("workflows")
+    if isinstance(rows, list) and any(not isinstance(row, Mapping) for row in rows):
+        return None
+    if isinstance(rows, list) and any(row.get("result_write_plans") and "result_output_schema" not in row for row in rows):
+        catalog = _restore_archived_result_schemas(BuildRecord.model_validate(artifact), catalog)
     metadata = _declared_workflow_catalog(catalog)
-    if not metadata or metadata.get("source_artifact_version_id") not in (None, artifact_id):
+    if not metadata:
         return None
     metadata["source_artifact_version_id"] = artifact_id
     return metadata
+
+
+def read_verified_workflow_archive(record: BuildRecord) -> bytes:
+    """Read this workflow pack's single, manifest-bound archive."""
+    from factory_app.workflows._shared.artifact_bundle import APP_BUNDLE_MAX_TOTAL_BYTES
+
+    if record.build_family != "workflow_bundle":
+        raise ValueError("Expected a workflow bundle record")
+    metadata = record.commit_metadata.metadata
+    expected = canonical_bundle_archive_path(record.build_key)
+    entries = [entry for entry in record.files_manifest if entry.content_type == "application/zip"]
+    archive_path = metadata.get("artifact_path")
+    entry = entries[0] if len(entries) == 1 else None
+    if (entry is None or entry.path != expected or entry.size_bytes is None or not entry.sha256
+            or not 0 < entry.size_bytes <= APP_BUNDLE_MAX_TOTAL_BYTES or not isinstance(archive_path, str)
+            or not Path(archive_path).is_absolute()):
+        raise ValueError("Cannot verify the recorded workflow archive for the result schema")
+    try:
+        with Path(archive_path).open("rb") as source:
+            raw = source.read(entry.size_bytes + 1)
+        if len(raw) != entry.size_bytes or hashlib.sha256(raw).hexdigest() != entry.sha256:
+            raise ValueError("Recorded workflow archive digest differs from its manifest")
+    except OSError as exc:
+        raise ValueError("Could not read the recorded workflow archive") from exc
+    return raw
+
+
+def _restore_archived_result_schemas(record: BuildRecord, catalog: Mapping[str, Any]) -> dict[str, Any]:
+    """Recompile older result-bearing records from their own immutable archive."""
+    from factory_app.workflows._shared.artifact_bundle import APP_BUNDLE_MAX_FILE_BYTES
+
+    raw = read_verified_workflow_archive(record)
+    rows = []
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            for row in catalog["workflows"]:
+                if row.get("result_write_plans") and "result_output_schema" not in row:
+                    path = row["workflow_name"] + "/structured_outputs.yaml"
+                    members = [m for m in archive.infolist() if m.filename == path]
+                    if len(members) != 1 or members[0].file_size > APP_BUNDLE_MAX_FILE_BYTES:
+                        raise ValueError(f"Cannot verify {path} in recorded workflow archive")
+                    text = archive.read(members[0]).decode("utf-8-sig")
+                    files = [{"filename": "structured_outputs.yaml", "content": text}]
+                    schema = workflow_result_output_schema({"files": files}, workflow_result_write_plans(row)[0])
+                    row = {**row, "result_output_schema": schema}
+                rows.append(row)
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise ValueError("Could not read the recorded workflow result schema") from exc
+    return {**catalog, "workflows": rows}
 
 
 async def hydrate_workflow_integration_context_from_latest_artifact(
@@ -447,12 +585,18 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
     *,
     artifact_store: Any | None = None,
 ) -> dict[str, Any]:
+    handoff = _app_revision_workflow_handoff(context_variables)
+    upstream = _text(_context_get(context_variables, "upstream_workflow_bundle_artifact_version_id"))
+    if handoff and upstream and (handoff_error := workflow_integration_source_error(context_variables)):
+        apply_workflow_integration_context(context_variables, {"workflows": []})
+        _context_set(context_variables, "workflow_integration_metadata", None)
+        raise ValueError(handoff_error)
     workflow_ref = workflow_integration_source_pin(context_variables)
     baseline_id = _source_app_id(context_variables)
     if baseline_id:
         _context_set(context_variables, "workflow_integration_source_app", None)
     existing_catalog = _context_get(context_variables, "workflow_integration_metadata")
-    existing = _declared_workflow_catalog(existing_catalog)
+    existing = None if workflow_ref or baseline_id else _declared_workflow_catalog(existing_catalog)
     if (
         not workflow_ref and not baseline_id and existing and existing.get("source") == "workflow_bundle_files"
         and not existing.get("source_artifact_version_id")
@@ -466,7 +610,8 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
 
     from factory_app.workflows._shared.platform.build_target import require_build_binding
 
-    app_id = require_build_binding(context_variables).target_app_id
+    binding = require_build_binding(context_variables)
+    app_id = binding.target_app_id
 
     if artifact_store is None:
         try:
@@ -496,6 +641,17 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
     candidates: list[Any] = []
     if workflow_ref:
         artifact = await artifact_store.get_build_record(app_id=app_id, build_record_id=str(workflow_ref))
+        if handoff and upstream:
+            record = BuildRecord.model_validate(artifact)
+            owner = _context_get(context_variables, "user_id")
+            if (record.id != handoff or record.app_id != app_id or record.build_family != "workflow_bundle"
+                    or record.source_workflow != "AgentGenerator" or not record.source_chat_id
+                    or record.lifecycle_status not in {"draft", "current"}
+                    or record.commit_metadata.source_workflow != record.source_workflow
+                    or record.commit_metadata.source_chat_id != record.source_chat_id
+                    or not owner or record.commit_metadata.author_user_id != owner
+                    or any(record.commit_metadata.metadata.get(key) != value for key, value in binding.model_dump().items())):
+                raise ValueError("The exact workflow handoff is outside this build")
         candidates.append(artifact)
     elif hasattr(artifact_store, "list_build_records"):
         try:
@@ -516,10 +672,16 @@ async def hydrate_workflow_integration_context_from_latest_artifact(
         record_app = artifact.get("app_id") if isinstance(artifact, Mapping) else getattr(artifact, "app_id", None)
         if record_app != app_id:
             continue
-        metadata = workflow_integration_metadata_from_artifact(artifact)
+        metadata = await asyncio.to_thread(workflow_integration_metadata_from_artifact, artifact)
         if not metadata or (workflow_ref and metadata.get("source_artifact_version_id") != workflow_ref):
             continue
         apply_workflow_integration_context(context_variables, metadata)
+        if handoff and upstream:
+            # App registration later advances artifact_version_id to its own output.
+            _context_set(context_variables, "workflow_integration_source_app", {
+                "build_record_id": _context_get(context_variables, "revision_source_artifact_version_id"),
+                "workflow_bundle_id": handoff,
+            })
         return {
             "status": "hydrated",
             "source": "workflow_bundle_artifact",
@@ -546,6 +708,7 @@ __all__ = [
     "extract_workflow_integration_metadata_from_bundle_entries",
     "hydrate_workflow_integration_context_from_latest_artifact",
     "normalize_workflow_integration_metadata",
+    "read_verified_workflow_archive",
     "validate_pricing_workflow_features",
     "workflow_integration_metadata_from_artifact",
     "workflow_integration_source_error",

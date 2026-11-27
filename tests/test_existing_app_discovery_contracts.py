@@ -534,7 +534,7 @@ def test_chat_page_renders_user_visible_app_intelligence_progress() -> None:
     assert "cacheWorkflowTranscriptMessage(inlineMessage" in source
     assert "buildComposerArtifactContext" in source
     assert "const artifactContextPayload = buildComposerArtifactContext" in source
-    assert "artifactContextPayload ? { artifact_context: artifactContextPayload } : null" in source
+    assert "artifact_context: artifactContextPayload" in source
     assert "const scopedStoredChatId = !queryFreshStart && !askCarrierMode" in source
     assert "(!queryMode && conversationMode === 'ask')" in source
     assert "rememberWorkflowChatSession(candidateChatId, resolvedCandidateWorkflow)" in source

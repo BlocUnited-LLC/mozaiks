@@ -1,0 +1,344 @@
+"""Real JWT and standalone-Mongo integration from an app action to a structured result."""
+from __future__ import annotations
+
+import logging
+import os
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import uuid4
+
+import httpx
+import pytest
+import yaml
+from motor.motor_asyncio import AsyncIOMotorClient
+
+from factory_app.workflows.AgentGenerator.tools.result_write_materialization import (
+    materialize_workflow_result_write,
+)
+from mozaiksai.core.data.persistence.persistence_manager import (
+    AG2PersistenceManager,
+    _context_authority_policy_for_workflow,
+)
+from mozaiksai.core.events.unified_event_dispatcher import UnifiedEventDispatcher
+from mozaiksai.core.runtime.app.loader import AppLoader
+from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
+from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor
+from mozaiksai.core.runtime.composition.reaction_idempotency_store import ReactionIdempotencyStore
+from mozaiksai.core.runtime.composition.workflow_trigger_guard import WorkflowTriggerGuard
+from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
+from mozaiksai.core.workflow.outputs.runtime_events import emit_validated_agent_output
+from mozaiksai.core.workflow.outputs.structured import (
+    invalidate_workflow_structured_outputs,
+    load_workflow_structured_outputs,
+)
+from mozaiksai.core.workflow.workflow_manager import workflow_manager
+from tests.test_module_reaction_result_write import bundle  # noqa: F401 -- real on-disk module fixture
+from tests.test_runtime_owner_scoping_http import http_runtime  # noqa: F401 -- authentic local signed JWTs
+from tests.test_workflow_trigger_guard import _TenantRateLimiter
+
+WORKFLOW = "ReviewWorkflow"
+AGENT = "SummaryAgent"
+APP = "ownership-test-app"
+CREATED = "domain.tasks.task_created"
+UPDATED = "domain.tasks.task_updated"
+
+
+def write_result_workflow(root: Path, declaration: dict):
+    """Create the workflow through Factory's result-tool materializer for unit and live runs."""
+    trigger = {"type": "event", "event": CREATED, "capability_id": "tasks.review"}
+    files = {
+        "orchestrator.yaml": {"schema_version": "mozaiks.orchestrator.v1", "workflow_name": WORKFLOW,
+                              "initial_agent": AGENT, "orchestration_pattern": "ag2_network", "workflow_startup_mode": "BackendOnly",
+                              "human_in_the_loop": False, "max_turns": 2, "triggers": [trigger],
+                              "initial_message": "Summarize the task in the incoming event."},
+        "agents.yaml": {"agents": [{"name": AGENT, "description": "Summarize the new task.", "structured_outputs_required": True,
+                                   "system_message": "Write a one-sentence summary of event_payload.title. Return only a JSON object with the summary string."}]},
+        "transition_graph.yaml": {"transition_rules": [{"source_agent": AGENT, "target_agent": "terminate",
+                                                        "transition_type": "after_turn", "transition_target": "TerminateTarget"}]},
+        "context_variables.yaml": {"definitions": {"event_payload": {"type": "object", "model_visible": True,
+                                                                    "writer_ids": ["transition_router"], "source": {"type": "state", "default": {}}}},
+                                   "agents": {AGENT: {"variables": ["event_payload"]}}}, "ui_config.yaml": {"visual_agents": []},
+        "structured_outputs.yaml": {"schema_version": "mozaiks.structured_outputs.v1", "registry": {AGENT: "TaskSummary"},
+                                    "models": {"TaskSummary": {"type": "model", "fields": {"summary": {"type": "str"}}}}},
+        "tools.yaml": {"tools": []},
+    }
+    reviewed_spec = {
+        "result_write_plans": [{"agent": AGENT, "module_id": "tasks", "event_type": CREATED, "result_write": declaration}],
+    }
+    result = materialize_workflow_result_write({
+        "files": [{"filename": name, "content": yaml.safe_dump(content)} for name, content in files.items()],
+    }, reviewed_spec)
+    for entry in result["files"]:
+        path = root / WORKFLOW / entry["filename"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(entry["content"], encoding="utf-8")
+
+
+def test_triggered_content_reaches_result_agent_through_its_declared_input(tmp_path, monkeypatch, request):
+    from mozaiksai.core.session.launcher import validate_context_for_workflow
+    from mozaiksai.core.workflow.context.authority import ContextAuthorityError
+    from mozaiksai.core.workflow.context.context_utils import apply_context_exposures
+    from mozaiksai.core.workflow.context.schema import load_context_variables_config
+    from mozaiksai.hosts.platform import _build_workflow_trigger_context
+
+    declaration = request.getfixturevalue("bundle")[1]["reactions"][0]["target"]["result_write"]
+    write_result_workflow(tmp_path, declaration)
+    root = tmp_path / WORKFLOW
+    config = yaml.safe_load((root / "context_variables.yaml").read_text(encoding="utf-8"))
+    trigger, = yaml.safe_load((root / "orchestrator.yaml").read_text(encoding="utf-8"))["triggers"]
+    monkeypatch.setattr(workflow_manager, "get_config", lambda _: {"context_variables": config})
+    event = {"type": CREATED, "payload": {"task_id": "task-42", "title": "Reconcile last month's invoices"}}
+    seed = _build_workflow_trigger_context(capability_id=trigger["capability_id"], source_event=event, trigger=trigger)
+    admitted = validate_context_for_workflow(WORKFLOW, seed)
+    assert admitted == {"event_payload": event["payload"]}
+    with pytest.raises(ContextAuthorityError):
+        validate_context_for_workflow(WORKFLOW, admitted, writer_id="caller_input")
+    agent, = yaml.safe_load((root / "agents.yaml").read_text(encoding="utf-8"))["agents"]
+    view = load_context_variables_config(config).agents[AGENT].variables
+    prompt = apply_context_exposures(agent["system_message"], [], admitted, view)
+    assert event["payload"]["title"] in prompt
+
+
+async def test_public_chat_start_uses_caller_authority(monkeypatch, request):
+    from mozaiksai.hosts import platform
+
+    auth = request.getfixturevalue("http_runtime")
+    definitions = {
+        "event_payload": {"type": "object", "writer_ids": ["transition_router"]},
+        "topic": {"type": "string", "writer_ids": ["caller_input"]},
+    }
+    monkeypatch.setattr(workflow_manager, "get_config", lambda _: {"context_variables": {"definitions": definitions}})
+    monkeypatch.setattr(platform, "get_ordered_workflow_names", lambda: [WORKFLOW])
+    monkeypatch.setattr(platform, "get_platform_hooks", lambda: auth.hooks)
+    monkeypatch.setattr(platform.runtime_app, "_chat_coll", AsyncMock())
+    monkeypatch.setattr(platform.persistence_manager, "get_or_assign_cache_seed", AsyncMock(return_value=1))
+    create = AsyncMock()
+    monkeypatch.setattr(platform, "create_routed_chat_session", create)
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=platform.app), base_url="http://test") as api:
+        path = f"/api/chats/{APP}/{WORKFLOW}/start"
+        headers = auth.token("owner", "workspace")
+        denied = await api.post(path, headers=headers, json={"context_variables": {"event_payload": {"title": "demo"}}})
+        assert denied.status_code == 400, denied.text
+        assert denied.json()["detail"] == {"code": "CONTEXT_AUTHORITY_REJECTED"}
+        create.assert_not_awaited()
+        started = await api.post(path, headers=headers, json={"context_variables": {"topic": "weekend"}})
+        assert started.status_code == 200, started.text
+        create.assert_awaited_once()
+        assert create.await_args.kwargs["context_variables"] == {"topic": "weekend"}
+
+
+async def deliver_result(chat_id: str, actor: str, value: str, turn: int):
+    policy = _context_authority_policy_for_workflow(WORKFLOW)
+    definitions = workflow_manager.get_config(WORKFLOW)["context_variables"]["definitions"]
+    defaults = {key: spec["source"]["default"] for key, spec in definitions.items()}
+    bridge = ContextVariablesBridge({**defaults, "user_id": actor, "app_id": APP, "chat_id": chat_id}, authority_policy=policy)
+    bridge._bind_run((WORKFLOW, APP, chat_id), policy)
+    _, registry = load_workflow_structured_outputs(WORKFLOW)
+    return await emit_validated_agent_output(
+        current_agent_name=AGENT, last_reply={"summary": value}, workflow_name=WORKFLOW, chat_id=chat_id,
+        app_id=APP, user_id=actor, turn_sequence=turn, context_vars_dict=bridge.snapshot(), context_bridge=bridge,
+        structured_registry=registry, auto_tool_agents={AGENT}, wf_logger=logging.getLogger(__name__),
+    )
+
+
+@pytest.mark.parametrize("receipt,expected", [("applied", "completed"), ("already_applied", "completed"), (None, "failed")])
+async def test_required_save_controls_the_ag2_run_outcome(tmp_path, monkeypatch, receipt, expected):
+    from unittest.mock import AsyncMock
+
+    from ag2 import Agent
+    from pydantic import BaseModel
+
+    from mozaiksai.core.adapters.ag2_network_runner import AG2NetworkRunner, AG2NetworkRunnerRequest
+    from mozaiksai.core.events import auto_tool_handler, unified_event_dispatcher
+    from mozaiksai.core.workflow import module_tools
+    from mozaiksai.core.workflow.agents import tools as tool_loader
+    from mozaiksai.core.workflow.context.authority import build_context_authority_policy
+    from mozaiksai.core.workflow.declarative.contracts import ToolOutcomeSpec
+    from mozaiksai.core.workflow.orchestration_patterns import _dispatch_agent_packet_output
+    from mozaiksai.core.workflow.workflow_manager import UnifiedWorkflowManager
+
+    write_result_workflow(tmp_path, {"source_action": "create", "action": "save_summary", "collection": "tasks",
+                                     "record_key": "task_id", "fields": ["summary"]})
+    monkeypatch.setattr(UnifiedWorkflowManager, "_instance", None)
+    manager = UnifiedWorkflowManager(workflows_base_path=str(tmp_path))
+    config = manager.get_config(WORKFLOW)
+    outcome = ToolOutcomeSpec.model_validate(config["tools"][0]["outcome"])
+    for module in (tool_loader, auto_tool_handler):
+        monkeypatch.setattr(module, "workflow_manager", manager)
+
+    class Summary(BaseModel):
+        summary: str
+
+    class ResultAgent(Agent):
+        async def ask(self, *args, **kwargs):
+            return SimpleNamespace(body='{"summary":"Reviewed"}')
+
+    registry = {AGENT: Summary}
+    monkeypatch.setattr(auto_tool_handler, "get_structured_outputs_for_workflow", lambda _: registry)
+    commit = AsyncMock(return_value={"status": receipt}, side_effect=None if receipt else OSError("storage unavailable"))
+    monkeypatch.setattr(module_tools, "commit_workflow_result", commit)
+    handler = auto_tool_handler.AutoToolEventHandler()
+    for method in ("_emit_tool_call", "_emit_tool_result", "_persist_context_variables"):
+        monkeypatch.setattr(handler, method, AsyncMock())
+
+    async def dispatch(kind, payload):
+        await handler.handle_tool_dispatch(payload)
+
+    monkeypatch.setattr(unified_event_dispatcher, "get_event_dispatcher", lambda: SimpleNamespace(emit=dispatch))
+    definitions = config["context_variables"]["definitions"]
+    policy = build_context_authority_policy(workflow_name=WORKFLOW, definitions=definitions)
+    defaults = {key: spec["source"]["default"] for key, spec in definitions.items()}
+    if receipt == "already_applied":
+        # A previous save committed before the runner acknowledged its terminal packet.
+        defaults[outcome.context_key] = "applied"
+    bridge = ContextVariablesBridge(defaults, authority_policy=policy)
+    agent = ResultAgent(AGENT, prompt="Summarize the task.")
+    agent._mozaiks_context_bridge = bridge
+    agent._mozaiks_tool_outcome = outcome
+
+    async def before_packet(agent_name, packet):
+        await _dispatch_agent_packet_output(
+            agent_name=agent_name, packet=packet, workflow_name=WORKFLOW, app_id=APP, chat_id="chat",
+            user_id="owner", context_bridge=bridge, structured_registry=registry, auto_tool_agents={AGENT},
+            wf_logger=logging.getLogger(__name__),
+        )
+
+    result = await AG2NetworkRunner().run(AG2NetworkRunnerRequest(
+        workflow_name=WORKFLOW, app_id=APP, chat_id="chat", agents={AGENT: agent}, initial_agent_name=AGENT,
+        transition_rules=config["transition_graph"]["transition_rules"], initial_message="Review the task.",
+        context_variables=bridge.snapshot(), context_authority_policy=policy, max_turns=2, idle_timeout_seconds=5,
+        agent_output_handler=before_packet,
+    ))
+    commit.assert_awaited_once_with({"summary": "Reviewed"})
+    assert result.status.value == expected
+    assert result.error == ("workflow_failed" if expected == "failed" else None)
+    assert result.context_variables[outcome.context_key] == (receipt or outcome.error_value)
+    assert result.context_variables[outcome.attempts_key] == (0 if receipt else 1)
+
+
+@pytest.fixture
+async def result_runtime(request, tmp_path, monkeypatch):
+    from mozaiksai.hosts import platform
+
+    auth_http = request.getfixturevalue("http_runtime")
+    module, reactions, events, data, write = request.getfixturevalue("bundle")
+    module["actions"][0]["permissions"] = []
+    module["actions"].append({"id": "update", "handler_method": "update_task", "description": "Edit a task", "emits": [UPDATED]})
+    module["actions"].append({"id": "list_tasks", "handler_method": "list_tasks", "description": "List my tasks"})
+    for capability in module["capabilities"]:
+        capability["permissions"] = []
+    events["events"].append({**events["events"][0], "type": UPDATED})
+    write()
+    (tmp_path / "modules/tasks/backend/handler.py").write_text(
+        "class TasksModule:\n"
+        "    async def create_task(self, ctx, *, title, task_id):\n"
+        "        await ctx.persistence.collection('tasks', 'Task').insert_one({'task_id': task_id, 'title': title})\n"
+        f"        await ctx.emit('{CREATED}', {{'task_id': task_id, 'title': title}})\n"
+        "        return {'task_id': task_id}\n"
+        "    async def update_task(self, ctx, *, title, task_id):\n"
+        "        result = await ctx.persistence.collection('tasks', 'Task').update_one({'task_id': task_id}, {'$set': {'title': title}})\n"
+        f"        if result.matched_count: await ctx.emit('{UPDATED}', {{'task_id': task_id, 'title': title}})\n"
+        "        return {'matched': result.matched_count}\n"
+        "    async def list_tasks(self, ctx):\n"
+        "        return {'items': await ctx.persistence.collection('tasks', 'Task').find_many({}, projection={'_id': 0})}\n"
+        "    async def save_summary(self, ctx, *, summary):\n"
+        "        return await ctx.commit_workflow_result({'summary': summary})\n",
+        encoding="utf-8",
+    )
+    folder = tmp_path / "workflows"
+    write_result_workflow(folder, reactions["reactions"][0]["target"]["result_write"])
+    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(folder))
+    monkeypatch.setenv("MOZAIKS_APP_PATH", str(tmp_path))
+    for key in ("_workflows", "_workflow_paths", "_config_cache"):
+        monkeypatch.setattr(workflow_manager, key, {})
+    monkeypatch.setattr(workflow_manager, "workflows_base_path", folder)
+    info = workflow_manager.reload_workflow(WORKFLOW)
+    assert not info.get("error"), info
+    invalidate_workflow_structured_outputs(WORKFLOW)
+    client = AsyncIOMotorClient(os.environ["MONGO_URI"], serverSelectionTimeoutMS=3000)
+    database = "mz_workflow_result_" + uuid4().hex
+    sessions = client[database]["ChatSessions"]
+
+    async def session_collection(self):
+        return sessions
+
+    monkeypatch.setattr(AG2PersistenceManager, "_coll", session_collection)
+    dispatcher = UnifiedEventDispatcher()
+    monkeypatch.setattr("mozaiksai.core.events.unified_event_dispatcher.get_event_dispatcher", lambda: dispatcher)
+    executor = ModuleExecutor(data_contract=data, persistence_client=client, persistence_database=database, event_emitter=dispatcher.emit)
+    app = await AppLoader.load(str(tmp_path))
+    assert not app.failed_module_names, app.failed_module_names
+    for loaded in app.modules:
+        executor.register_loaded_module(loaded)
+    routes = platform._load_workflow_capability_routes(tmp_path)
+    assert "tasks.review" in routes
+    guard = WorkflowTriggerGuard(claim_store=ReactionIdempotencyStore(database_name=database, client=client),
+                                 rate_limiter=_TenantRateLimiter())
+    async def invoke(capability, envelope, subscription):
+        return await platform._invoke_workflow_capability(
+            capability_id=capability, source_event=envelope, subscription=subscription,
+            routes=routes, trigger_guard=guard, auto_start=getattr(request, "param", False),
+        )
+
+    router = ModuleEventRouter(app.modules, capability_invoker=invoke, data_contract=data)
+    router.register(dispatcher)
+    http = auth_http.client().app
+    registry = SimpleNamespace(module_executor=executor)
+    monkeypatch.setattr(platform.app.state, "executor_registry", registry, raising=False)
+    http.state.executor_registry = registry
+    http.state.module_action_surfaces = {"tasks": {"create": "public", "update": "public", "list_tasks": "public", "save_summary": "internal"}}
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=http), base_url="http://test") as api:
+            yield SimpleNamespace(api=api, token=auth_http.token, sessions=sessions, db=client[database],
+                                  workflow_dir=folder / WORKFLOW)
+    finally:
+        invalidate_workflow_structured_outputs(WORKFLOW)
+        await client.drop_database(database)
+        client.close()
+
+
+@pytest.mark.skipif(os.getenv("MOZAIKS_RUN_REAL_MONGO_TESTS") != "1", reason="requires local Mongo")
+async def test_signed_create_delivers_one_result_to_its_own_row(result_runtime):
+    from mozaiksai.core.session.launcher import create_routed_chat_session
+
+    case = result_runtime
+    owner = case.token("owner", "workspace")
+    other = case.token("other", "workspace")
+    for headers in (owner, other):
+        response = await case.api.post("/api/modules/tasks/create", headers=headers, json={"task_id": "shared", "title": "source"})
+        assert response.status_code == 200, response.text
+    sessions = await case.sessions.find({"workflow_name": WORKFLOW}).to_list(None)
+    assert len(sessions) == 2
+    selected = next(s for s in sessions if s["user_id"] == "owner")
+    grant = selected["workflow_result_grant"]
+    assert grant["subject"]["user_id"] == "owner" and grant["subject"]["record_id"] == "shared"
+    collection = case.db[grant["subject"]["physical_collection"]]
+    sibling = await create_routed_chat_session(
+        workflow_id=WORKFLOW, app_id=APP, user_id="owner", context_variables={},
+        trigger_meta={**selected["trigger_meta"], "workflow_result_grant": grant}, session_router=None,
+    )
+    await deliver_result(sibling, "owner", "spoofed sibling", 1)
+    await deliver_result(selected["_id"], "other", "unauthorized", 1)
+    assert await collection.count_documents({"summary": {"$exists": True}}) == 0
+    await deliver_result(selected["_id"], "owner", "accepted summary", 2)
+    receipt = (await collection.find_one({"author": "owner"}))["_mz_workflow_result"]["receipt"]
+    assert receipt["invocation_id"] == grant["invocation_id"] and receipt["action_id"] == "save_summary"
+    await deliver_result(selected["_id"], "owner", "accepted summary", 3)
+    await deliver_result(selected["_id"], "owner", "second write", 4)
+    assert (await collection.find_one({"author": "owner"}))["summary"] == "accepted summary"
+    assert "summary" not in await collection.find_one({"author": "other"})
+    for headers, author in ((owner, "owner"), (other, "other")):
+        listing = await case.api.get("/api/modules/tasks/list_tasks", headers=headers)
+        assert listing.status_code == 200, listing.text
+        [row] = listing.json()["items"]
+        assert row["author"] == author and "_mz_workflow_result" not in row
+        assert row.get("summary") == ("accepted summary" if author == "owner" else None)
+    denied = await case.api.post("/api/modules/tasks/save_summary", headers=other, json={"summary": "bypass"})
+    assert denied.status_code in {403, 404}
+    updated = await case.api.post("/api/modules/tasks/update", headers=owner, json={"task_id": "shared", "title": "edited"})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["matched"] == 1
+    assert await case.sessions.count_documents({"workflow_name": WORKFLOW, "workflow_result_grant": {"$exists": True}}) == 2
+    assert await case.sessions.count_documents({"workflow_name": WORKFLOW}) == 3

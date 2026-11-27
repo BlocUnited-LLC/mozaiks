@@ -3,14 +3,14 @@
  */
 
 import { useEffect, useId, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, matchPath, useNavigate, useSearchParams } from 'react-router-dom'
 
 import {
   CollectionToolbar,
   InlineEmptyState,
   ResourceList,
 } from '@mozaiks/chat-ui/ui'
-import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
+import { WorkspaceLayout, useWorkspaceAppSections } from '@mozaiks/chat-ui/workspace'
 import {
   ActionButton,
   StudioErrorState,
@@ -20,6 +20,7 @@ import {
 import { WorkspaceStudioHero, formatCompactNumber } from './AppStudioChrome.jsx'
 import BuildsInProgress from './BuildsInProgress.jsx'
 import {
+  buildAppDashboardHref,
   fetchDashboardConfig,
   getDefaultPortalRoute,
 } from './dashboardRoutes.js'
@@ -215,12 +216,63 @@ function AppsTable({ rows, onOpen, onDashboard, onDelete }) {
   )
 }
 
+function sectionHref(row, route, hostDashboardRoute) {
+  let appId = row.app?.app_id
+  if (hostDashboardRoute) {
+    // The host's management URL carries its public app ID. The Factory target
+    // in the same directory record can name a different resource.
+    if (typeof row.dashboardHref !== 'string' || !row.dashboardHref.startsWith('/apps/')
+        || /[?#\\]/.test(row.dashboardHref)) return null
+    const match = matchPath({ path: hostDashboardRoute, caseSensitive: true }, row.dashboardHref)
+    if (!match?.params.appId) return null
+    try {
+      appId = decodeURIComponent(match.params.appId)
+    } catch {
+      return null
+    }
+    if (appId === 'undefined' || appId === 'null') return null
+  }
+  if (typeof appId !== 'string' || !appId.trim() || appId === '.' || appId === '..'
+      || appId === 'new' || /[/\\]/.test(appId)) return null
+  return buildAppDashboardHref(route, appId)
+}
+
+function AppSectionChoices({ rows, section, hostDashboardRoute }) {
+  return (
+    <ul className="divide-y divide-border/50 rounded-2xl border border-border/50" aria-label={`Choose an app for ${section.label}`}>
+      {rows.map(row => {
+        const href = sectionHref(row, section.route, hostDashboardRoute)
+        return (
+          <li key={row.id}>
+            {href ? (
+              <Link to={href} aria-label={`Open ${section.label} for ${row.name}`}
+                className="block min-h-11 rounded-xl px-4 py-3 text-sm font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-primary">
+                {row.name}
+              </Link>
+            ) : (
+              <div className="px-4 py-3 text-sm">
+                <span className="font-semibold">{row.name}</span>
+                <span className="ml-2 text-muted-foreground">Section unavailable for this app</span>
+              </div>
+            )}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 export function AppsDirectory({
   apps, loading, error, deleteApp, navigationForApp, pagination,
   searchValue: controlledSearch, onSearchChange, activeFilter: controlledFilter, onFilterChange,
 }) {
   const navigate = useNavigate()
-  const [dashboardConfig, setDashboardConfig] = useState(null)
+  const [searchParams] = useSearchParams()
+  const sectionKeys = searchParams.getAll('section')
+  const choosingSection = sectionKeys.length > 0
+  const sections = useWorkspaceAppSections()
+  const section = sectionKeys.length === 1 ? sections.find(item => item.key === sectionKeys[0]) : null
+  const [dashboardConfig, setDashboardConfig] = useState(undefined)
   const [localSearch, setLocalSearch] = useState('')
   const [localFilter, setLocalFilter] = useState('all')
   const searchValue = controlledSearch ?? localSearch
@@ -232,6 +284,7 @@ export function AppsDirectory({
       .then((payload) => setDashboardConfig(payload))
       .catch((err) => {
         if (err?.name !== 'AbortError') {
+          setDashboardConfig(null)
           console.error('[AppsPage] dashboard manifest load failed:', err)
         }
       })
@@ -249,7 +302,7 @@ export function AppsDirectory({
     return {
       ...model,
       rows: model.rows.map((row) => {
-        const { primaryAction, dashboardHref } = navigationForApp(row.app)
+        const { primaryAction, dashboardHref } = navigationForApp(row.app) ?? {}
         return { ...row, primaryAction, dashboardHref }
       }),
     }
@@ -299,24 +352,46 @@ export function AppsDirectory({
     await deleteApp(buildRegistryId)
   }
 
-  if (loading && !pagination) return <StudioLoadingState label="Loading your apps…" />
-  if (error && !pagination) return <StudioErrorState title="Could not load apps" message={error} />
+  const needsHostRoute = Boolean(section && navigationForApp)
+  const directoryLoading = loading || (needsHostRoute && dashboardConfig === undefined)
+  const routeUnavailable = needsHostRoute && dashboardConfig !== undefined && !appDashboardRoute
+
+  if (!choosingSection && !pagination && (loading || error)) {
+    return (
+      <WorkspaceLayout>
+        {loading ? <StudioLoadingState label="Loading your apps…" /> : <StudioErrorState title="Could not load apps" message={error} />}
+      </WorkspaceLayout>
+    )
+  }
+
+  const backToApps = <Link to="/apps" className="inline-block text-sm font-semibold text-primary underline-offset-4 hover:underline">Back to My Apps</Link>
+  if (choosingSection && !section) {
+    return (
+      <WorkspaceLayout>
+        <div className="space-y-4">
+          <InlineEmptyState title="Studio section unavailable" description="Choose a section from your Studio menu." />
+          {backToApps}
+        </div>
+      </WorkspaceLayout>
+    )
+  }
 
   return (
     <WorkspaceLayout>
       <div className="space-y-6">
         <WorkspaceStudioHero
-          title="My Apps"
-          subtitle={pagination ? 'Manage your apps. Search and filters include all your apps.' : 'Manage your apps, continue builds, and open app Studio.'}
-          summaryItems={pagination ? summaryItems.slice(0, 1) : summaryItems}
+          title={section?.label ?? 'My Apps'}
+          subtitle={section ? 'Choose an app to manage.' : pagination ? 'Manage your apps. Search and filters include all your apps.' : 'Manage your apps, continue builds, and open app Studio.'}
+          summaryItems={section ? [] : pagination ? summaryItems.slice(0, 1) : summaryItems}
           summaryClassName="hidden md:block"
         />
 
         {/* Studio's own directory only: its buttons target Studio's build records. */}
-        {!navigationForApp && !pagination ? <BuildsInProgress apps={apps} /> : null}
+        {!section && !navigationForApp && !pagination ? <BuildsInProgress apps={apps} /> : null}
+        {section && backToApps}
 
         <section className="space-y-4">
-          {pagination && (
+          {pagination && !section && (
             <p className="px-1 text-xs text-muted-foreground md:hidden" aria-live="polite">
               On this page: <span className="font-semibold text-foreground">{summaryItems[0].value}</span>
             </p>
@@ -329,13 +404,17 @@ export function AppsDirectory({
             activeFilter={activeFilter}
             onFilterChange={onFilterChange ?? setLocalFilter}
           />
-          {loading ? <StudioLoadingState label="Loading your apps…" /> : error ? (
+          {directoryLoading ? <StudioLoadingState label="Loading your apps…" /> : routeUnavailable ? (
+            <StudioErrorState title="App navigation unavailable" message="Reload the page to load this workspace’s dashboard route." />
+          ) : error ? (
             <div className="space-y-3">
               <StudioErrorState title="Could not load apps" message={error} />
               {pagination?.onRetry && <ActionButton onClick={pagination.onRetry}>Try again</ActionButton>}
             </div>
           ) : visibleRows.length > 0 ? (
-            <AppsTable rows={visibleRows} onOpen={handleOpen} onDashboard={handleDashboard} onDelete={deleteApp ? handleDelete : null} />
+            section
+              ? <AppSectionChoices rows={visibleRows} section={section} hostDashboardRoute={needsHostRoute ? appDashboardRoute : null} />
+              : <AppsTable rows={visibleRows} onOpen={handleOpen} onDashboard={handleDashboard} onDelete={deleteApp ? handleDelete : null} />
           ) : portfolio.rows.length === 0 && !searchValue && activeFilter === 'all' && (!pagination || pagination.page === 1) ? (
             <InlineEmptyState
               title="No apps yet"

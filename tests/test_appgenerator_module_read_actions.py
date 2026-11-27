@@ -133,6 +133,31 @@ def test_canonical_read_gate_is_preserved_and_contract_is_code_owned():
     assert _closed(closed) == closed
 
 
+@pytest.mark.parametrize("kind,legacy_reads,optional", [
+    ("datetime", {}, set()),
+    ("datetime", {MODULE: ["get_tasks"]}, {"get_tasks"}),
+    ("date", {MODULE: ["get_tasks", "list_tasks"]}, {"get_tasks", "list_tasks"}),
+    ("string", {MODULE: ["get_tasks", "list_tasks"]}, set()),
+    ("datetime", {"another_module": ["list_tasks"]}, set()),
+])
+def test_canonical_reads_preserve_legacy_managed_timestamp_presence(kind, legacy_reads, optional):
+    contract = _contract()
+    fields = contract["surfaces"][0]["collections"][0]["fields"]
+    fields.extend([{"name": "created_at", "type": "datetime", "required": True},
+                   {"name": "updated_at", "type": kind, "required": True}])
+    plan = {**_plan(), "legacy_optional_updated_at_reads": legacy_reads}
+    closed = _closed(contract=contract, plan=plan)
+    actions = {row["id"]: row for row in closed["module_contract"]["module_yaml"]["actions"]}
+    for action_id in ("get_tasks", "list_tasks"):
+        response = actions[action_id]["output_schema"]["properties"]
+        record = response["item"] if action_id == "get_tasks" else response["items"]["items"]
+        assert "updated_at" in record["properties"]
+        assert ("updated_at" not in record["required"]) == (action_id in optional)
+        assert {"created_at", "title", "id", "owner_id"} <= set(record["required"])
+    assert fields[-1]["required"] is True
+    assert _closed(closed, contract, plan) == closed
+
+
 def _read_role_arguments(tenancy="per_user"):
     return {
         "app_build_plan": _plan(), "data_contract": _contract(tenancy),

@@ -17,11 +17,12 @@ from asyncio import CancelledError, Lock, to_thread
 from collections import Counter
 from collections.abc import Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from difflib import unified_diff
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal, NamedTuple, TypeVar
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import yaml
 from anyio import CancelScope
@@ -34,6 +35,7 @@ from factory_app.app.modules.app_registry.backend.service import AppRegistryServ
 from factory_app.workflows._shared.artifact_bundle import (
     APP_BUNDLE_MAX_FILE_BYTES,
     APP_BUNDLE_MAX_TOTAL_BYTES,
+    add_preview_workflow_files,
     read_artifact_bundle,
 )
 from factory_app.workflows._shared.platform.genesis_import import (
@@ -127,6 +129,7 @@ from mozaiksai.core.artifacts.content_store import (
 )
 from mozaiksai.core.artifacts.models import (
     CanonicalBundleEntryError,
+    ChangeRequestDoc,
     resolve_canonical_bundle_entry,
 )
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
@@ -164,9 +167,14 @@ from mozaiksai.core.secrets.contract import is_secret_contract_path, validate_se
 from mozaiksai.core.session.build_binding import (
     BuildIdentity,
     BuildTargetReference,
+    RetryPlanSource,
     RunBuildBinding,
 )
-from mozaiksai.core.session.launcher import launch_prepared_workflow, prepare_routed_workflow_launch
+from mozaiksai.core.session.launcher import (
+    WorkflowLaunchResult,
+    launch_prepared_workflow,
+    prepare_routed_workflow_launch,
+)
 from mozaiksai.core.session.model import (
     PendingDecisionAction,
     PendingHarnessDecision,
@@ -3471,6 +3479,282 @@ class WorkflowTriggerRequest(BaseModel):
     retry_failed: StrictBool = False
 
 
+@dataclass(slots=True, kw_only=True)
+class _DownstreamRetry(TriggerRoutingContribution):
+    binding: RunBuildBinding
+    failed_chat_id: str
+    parent_chat_id: str
+    journey_scope: dict[str, Any]
+    plan_source: RetryPlanSource | None = None
+
+
+def _retry_chat_id(app_id: str, user_id: str, failed_chat_id: str, binding: RunBuildBinding) -> str:
+    # One destination per failed attempt lets the same request finish a claim
+    # whose process disappeared before it published the replacement session.
+    scope = ["mozaiks/studio/stage-retry", app_id, user_id, failed_chat_id, binding.model_dump()]
+    return str(uuid5(NAMESPACE_URL, json.dumps(scope, separators=(",", ":"), sort_keys=True)))
+
+
+async def _select_retry_plan(
+    sessions: Any, *, failed: dict[str, Any], scope: dict[str, Any], binding: RunBuildBinding,
+) -> RetryPlanSource | None:
+    """Inspect only the failed attempt and its direct, server-minted retry ancestry."""
+    from factory_app.workflows.AppGenerator.tools.retry_plan import (
+        PLAN_SOURCE_PROJECTION,
+        admitted_source,
+    )
+
+    if binding.phase != "refinement" or not binding.refinement_model or not all(scope.values()):
+        return None
+    lookup = {key: value for key, value in scope.items() if not isinstance(value, dict)}
+    child_created = None
+    chat_id = failed["_id"]
+    # A bounded _id lookup per native retry, never a scan for similar sessions.
+    for _ in range(16):
+        row = await sessions.find_one({"_id": chat_id, **lookup}, {
+            **dict.fromkeys(scope, 1), **PLAN_SOURCE_PROJECTION, "trigger_meta": 1, "created_at": 1, "failed_at": 1, "retry_plan_source": 1,
+        })
+        if (not row or any(row.get(key) != value for key, value in scope.items())
+                or any(row.get(key) for key in ("workflow_model", "workflow_model_rebind_pending", "workflow_run_model"))
+                or not isinstance(row.get("failed_at"), datetime) or not isinstance(row.get("created_at"), datetime)
+                or row["created_at"] > row["failed_at"] or (child_created is not None and row["failed_at"] > child_created)):
+            return None
+        # A reused plan originated in an earlier WAL; keep following native edges.
+        if row.get("app_plan_ready") and not row.get("retry_plan_source"):
+            return admitted_source(row)
+        trigger = row.get("trigger_meta") or {}
+        parent_id = trigger.get("retry_of_chat_id")
+        if (not isinstance(parent_id, str) or trigger.get("trigger_source") != "manual"
+                or _retry_chat_id(scope["app_id"], scope["user_id"], parent_id, binding) != chat_id):
+            return None
+        child_created, chat_id = row["created_at"], parent_id
+    return None
+
+
+def _registered_retry_cursor(
+    record: dict[str, Any], binding: RunBuildBinding, workflow_id: str, journey_id: str | None,
+) -> tuple[str, str] | None:
+    """Use the active pointer only when both projections identify the same build stage."""
+    current = record.get("current_build_run") or {}
+    active, status = record.get("active_chat_id"), record.get("lifecycle_state")
+    if (not isinstance(active, str) or not isinstance(status, str)
+            or record.get("active_workflow_id") != workflow_id or current.get("active_workflow_id") != workflow_id
+            or current.get("active_chat_id") != active or current.get("status") != status
+            or current.get("phase") != binding.phase or current.get("build_id") != binding.build_id
+            or current.get("workflow_sequence") != journey_id):
+        return None
+    return status, active
+
+
+def _matches_failed_revision(snapshot: dict[str, Any], source: dict[str, Any], change: ChangeRequestDoc) -> bool:
+    review = source.get("workflow_plan_review") or {}
+    if not isinstance(review, dict) or source.get("workflow_review_outcome") == "cancelled" or review.get("status") == "cancelled":
+        return False
+    active = (snapshot.get("active_change_request_id"), snapshot.get("active_revision_id"))
+    if active == (change.id, source["revision_id"]):
+        return True
+    # fail_active_revision closes a failed revision, including its two active
+    # IDs. Re-open only the current, reviewed export that exhausted its repairs.
+    # A cancelled plan and a superseding revision cannot use this evidence.
+    history = snapshot.get("revision_history") or []
+    if (active != (None, None) or snapshot.get("sequence_status") != "stale"
+            or snapshot.get("sequence_completed_at") or snapshot.get("pending_harness_decision") or snapshot.get("pending_transition_id")
+            or snapshot.get("current_chat_id") != source["_id"] or snapshot.get("current_workflow_id") != "AgentGenerator"
+            or source.get("workflow_name") != "AgentGenerator" or not source.get("journey_parent_chat_id")
+            or snapshot.get("journey_position") != source.get("journey_position") or not history):
+        return False
+    if (history[-1].get("change_request_id") != change.id or history[-1].get("revision_id") != source["revision_id"]
+            or history[-1].get("target_workflow") != change.router_decision.get("workflow_id")
+            or history[-1].get("scope") != change.classification.value
+            or (history[-1].get("to_version_refs") or {}).get(change.build_family) != change.build_record_id
+            or (snapshot.get("artifact_version_refs") or {}).get(change.build_family) != change.build_record_id):
+        return False
+    from factory_app.workflows.AgentGenerator.tools.pattern_selection import selection_fingerprint
+
+    repair = source.get("workflow_bundle_repair_result") or {}
+    selection = source.get("PatternSelection")
+    return (
+        isinstance(repair, dict) and repair.get("status") == "blocked" and repair.get("reason") == "workflow_bundle_repair_attempts_exhausted"
+        and repair.get("repairable") is False and type(repair.get("attempt")) is int
+        and repair["attempt"] > 0 and repair["attempt"] == repair.get("max_attempts")
+        and source.get("workflow_bundle_export_outcome") == "blocked"
+        and source.get("workflow_bundle_validation_status") == "failed" and bool(source.get("workflow_bundle_validation_errors"))
+        and source.get("workflow_review_outcome") == "approved" and review.get("status") == "approved"
+        and isinstance(selection, dict) and isinstance(selection.get("workflows"), list) and bool(selection["workflows"])
+        and review.get("selection_hash") == selection_fingerprint(selection)
+    )
+
+
+async def _verify_reviewed_workflow_export(record: BuildRecord, parent: dict[str, Any], binding: RunBuildBinding) -> None:
+    from factory_app.workflows._shared.workflow_integration import (
+        read_verified_workflow_archive,
+        workflow_integration_metadata_from_artifact,
+        workflow_result_write_plans,
+    )
+    from factory_app.workflows.AgentGenerator.tools.pattern_selection import selection_fingerprint
+
+    metadata = record.commit_metadata.metadata
+    review, selection = metadata.get("workflow_plan_review"), parent.get("PatternSelection")
+    if (record.build_family != "workflow_bundle" or record.id != parent.get("artifact_version_id")
+            or any(metadata.get(k) != v for k, v in binding.model_dump().items())
+            or parent.get("workflow_bundle_export_outcome") != "ready" or parent.get("workflow_bundle_validation_status") != "passed"
+            or parent.get("workflow_review_outcome") != "approved"
+            or not isinstance(review, dict) or review.get("status") != "approved" or review != parent.get("workflow_plan_review")
+            or not isinstance(selection, dict) or not isinstance(selection.get("workflows"), list)
+            or not all(isinstance(w, dict) and isinstance(w.get("name"), str) for w in selection["workflows"])
+            or review.get("selection_hash") != selection_fingerprint(selection)):
+        raise ValueError("The predecessor has no matching reviewed workflow export")
+    await to_thread(read_verified_workflow_archive, record)
+    catalog = workflow_integration_metadata_from_artifact(record)
+    if not catalog:
+        raise ValueError("The reviewed workflow export has no integration contract")
+    expected = {w["name"]: workflow_result_write_plans(w) for w in selection["workflows"]}
+    actual = {w["workflow_name"]: workflow_result_write_plans(w) for w in catalog["workflows"]}
+    if (actual != expected or len(actual) != len(catalog["workflows"])
+            or len(expected) != len(selection["workflows"])):
+        raise ValueError("The workflow export differs from the reviewed result plan")
+
+
+async def _verified_retry_predecessor(
+    *, source: dict[str, Any], change: ChangeRequestDoc, binding: RunBuildBinding,
+    app_id: str, user_id: str, workflow_id: str, sessions: Any,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, str]]:
+    """Resolve a completed, owner-scoped prefix before admitting a fresh stage."""
+    from mozaiksai.core.multitenant import build_app_scope_filter
+    from mozaiksai.core.workflow.pack.config import get_workflow_sequence, load_global_pack_graph
+
+    journey_id = change.impact_set.workflow_sequence
+    registry = await _get_app_registry_service().get_app_record(build_registry_id=binding.build_registry_id, owner_user_id=user_id)
+    record = registry.get("app") or {}
+    if (_registered_retry_cursor(record, binding, workflow_id, journey_id) not in {
+            ("needs_revision", source["_id"]), ("building", _retry_chat_id(app_id, user_id, source["_id"], binding))}
+            or binding.refinement_model != change.refinement_request.refinement_model):
+        raise ValueError("The failed stage no longer matches the active registered refinement")
+
+    snapshot = await get_session_router().for_target(binding.target_app_id).get_session_snapshot(app_id=app_id, user_id=user_id) or {}
+    instance = TypeAdapter(BuildIdentity).validate_python(source.get("journey_instance_id"))
+    if (snapshot.get("journey_instance_id") != instance or snapshot.get("journey_key") != journey_id
+            or not _matches_failed_revision(snapshot, source, change)):
+        raise ValueError("The failed stage does not belong to the active refinement journey")
+
+    pack = load_global_pack_graph()
+    journey = get_workflow_sequence(pack, journey_id) if pack is not None else None
+    position = source.get("journey_position")
+    if (journey is None or type(position) is not int or not 0 < position < len(journey.steps)
+            or any(len(step.workflows) != 1 for step in journey.steps[:position + 1])
+            or sum(workflow_id in step.workflows for step in journey.steps) != 1
+            or journey.steps[position].workflows != [workflow_id]
+            or journey.steps[0].workflows != [change.router_decision.get("workflow_id")]
+            or change.router_decision.get("workflow_sequence") != journey_id
+            or change.router_decision.get("execution_mode") != "workflow"):
+        raise ValueError("The failed stage is not a uniquely authorized step of the configured refinement")
+
+    workflow_handoff = (workflow_id == "AppGenerator" and journey.steps[position - 1].workflows == ["AgentGenerator"]
+                        and change.build_family == "app_bundle")
+    stage_artifact = change.build_record_id
+    if workflow_handoff:
+        request = source.get("refinement_request_meta") or {}
+        stage_artifact = TypeAdapter(BuildIdentity).validate_python(source.get("workflow_bundle_artifact_version_id"))
+        if (not source.get("journey_parent_chat_id") or source.get("revision_source_artifact_version_id") != change.build_record_id
+                or not isinstance(request, dict) or request.get("build_record_id") != change.build_record_id
+                or request.get("build_family") != change.build_family):
+            raise ValueError("Saved app stage does not identify its original app and upstream workflow")
+    scope = {"run_build_binding": binding.model_dump(), "session_router_session_id": snapshot["session_id"],
+             "journey_instance_id": instance, "journey_key": journey_id, "journey_total_steps": len(journey.steps),
+             "revision_id": source["revision_id"], "change_request_id": change.id}
+    if source.get("artifact_version_id") != stage_artifact or any(source.get(key) != value for key, value in scope.items()):
+        raise ValueError("Saved refinement stage scope does not match its authorized source")
+    owned_build = {"user_id": user_id, **build_app_scope_filter(app_id), "run_build_binding": binding.model_dump()}
+    child = source
+    immediate_parent = None
+    workflow_record = None
+    subscription_record = None
+    upstream_records: dict[str, str] = {}
+    for index in reversed(range(position)):
+        name = journey.steps[index].workflows[0]
+        is_workflow_parent = workflow_handoff and index == position - 1
+        expected_artifact = stage_artifact if is_workflow_parent else change.build_record_id
+        query = {**owned_build, "workflow_name": name, "status": 1}
+        if "journey_parent_chat_id" in child:
+            parent = await sessions.find_one({**query, "_id": child["journey_parent_chat_id"]})
+        else:
+            # Check uniqueness inside the protected build binding before using
+            # the historical session's mutable journey and revision annotations.
+            parents = await sessions.find(query).limit(2).to_list(length=2)
+            parent = parents[0] if len(parents) == 1 else None
+        if (not parent or parent.get("journey_position") != index or parent.get("artifact_version_id") != expected_artifact
+                or any(parent.get(k) != v for k, v in scope.items())):
+            raise ValueError("Missing or ambiguous completed predecessor for the failed stage")
+        if (not isinstance(parent.get("completed_at"), datetime) or not isinstance(child.get("created_at"), datetime)
+                or parent["completed_at"] > child["created_at"]):
+            raise ValueError("The completed predecessor does not precede this stage")
+        meta = child.get("trigger_meta") or {}
+        if meta.get("trigger_source") == "manual" and meta.get("retry_of_chat_id"):
+            prior = await sessions.find_one({**owned_build, **scope, "artifact_version_id": stage_artifact if is_workflow_parent else change.build_record_id,
+                                             "_id": meta["retry_of_chat_id"], "workflow_name": child["workflow_name"],
+                                             "journey_position": index + 1, "status": 2}, {"_id": 1})
+            if not prior:
+                raise ValueError("Missing failed source for the saved stage retry")
+        elif meta != {"trigger_source": "run_complete"}:
+            raise ValueError("Workflow stage has no verified journey launch")
+        if "journey_parent_chat_id" not in child or is_workflow_parent or name in {"DesignDocs", "SubscriptionContractDesigner"}:
+            # Older handoffs did not store a parent edge. A matching position alone
+            # cannot authorize a retry. Require independent output from this very chat.
+            outputs = await get_artifact_store().list_build_records(
+                app_id=binding.target_app_id, source_chat_id=parent["_id"], limit=2,
+            )
+            if len(outputs) != 1:
+                raise ValueError("Missing or ambiguous saved output from the completed predecessor")
+            output = outputs[0]
+            commit = output.commit_metadata
+            if (not isinstance(parent.get("created_at"), datetime)
+                    or not parent["created_at"] <= output.created_at <= parent["completed_at"]
+                    or output.app_id != binding.target_app_id or output.source_chat_id != parent["_id"]
+                    or output.source_workflow != name or commit.author_user_id != user_id
+                    or commit.source_chat_id != parent["_id"] or commit.source_workflow != name
+                    or output.lifecycle_status in {ArtifactLifecycleStatus.ARCHIVED, ArtifactLifecycleStatus.DELETED}
+                    or output.validation_status == ArtifactValidationStatus.FAILED):
+                raise ValueError("Saved output is not an eligible result of the completed predecessor")
+            if name == "DesignDocs":
+                from factory_app.workflows.DesignDocs.tools.save_design_doc import (
+                    verify_design_projections,
+                )
+
+                if output.build_family != "design_docs":
+                    raise ValueError("The completed design stage has no verified design output")
+                await verify_design_projections(output, user_id=user_id, build_id=binding.build_id)
+                upstream_records["design_docs"] = output.id
+            elif name == "SubscriptionContractDesigner":
+                from mozaiksai.core.artifacts.summary_artifacts import verified_summary_payload
+
+                if output.build_family != "subscription_contract" or parent.get("subscription_contract") != verified_summary_payload(output):
+                    raise ValueError("Completed predecessor's launch input differs from its saved output")
+                subscription_record = output
+                upstream_records["subscription_contract"] = output.id
+            elif is_workflow_parent:
+                await _verify_reviewed_workflow_export(output, parent, binding)
+                workflow_record = output
+        if immediate_parent is None:
+            immediate_parent = parent
+        child = parent
+
+    root_meta = child.get("trigger_meta") or {}
+    if (root_meta.get("trigger_source") not in {"manual", "refinement"} or root_meta.get("rerouted_by_dependency") is not False
+            or root_meta.get("resolved_workflow_id") != child["workflow_name"]
+            or root_meta.get("journey_id") != journey_id or root_meta.get("workflow_sequence") != journey_id
+            or root_meta.get("build_family") != change.build_family):
+        raise ValueError("The completed journey root does not prove the saved refinement launch")
+    assert immediate_parent is not None
+    if subscription_record is not None and "design_docs" in upstream_records:
+        from factory_app.workflows._shared.export_inputs import verify_subscription_design_input
+
+        verify_subscription_design_input(subscription_record, upstream_records["design_docs"])
+    if workflow_record is not None and workflow_record.canonical_inputs_version != upstream_records:
+        raise ValueError("The workflow export references different upstream artifacts than its verified journey")
+    projected_inputs = {f"{family}_artifact_version_id": record_id for family, record_id in upstream_records.items()}
+    return root_meta, immediate_parent, projected_inputs
+
+
 async def _failed_workflow_retry_contribution(
     body: WorkflowTriggerRequest, *, app_id: str, user_id: str,
 ) -> TriggerRoutingContribution:
@@ -3482,11 +3766,17 @@ async def _failed_workflow_retry_contribution(
     if (body.context_variables or body.trigger_payload or body.journey_id is not None
             or body.action_id is not None or body.artifact_key is not None):
         raise ValueError("Failed-workflow retry cannot override saved launch intent")
-    source = await (await _PERSISTENCE_MANAGER._coll()).find_one(
+    sessions = await _PERSISTENCE_MANAGER._coll()
+    source = await sessions.find_one(
         {"_id": body.source_chat_id, "user_id": user_id, "workflow_name": body.workflow_id,
          **build_app_scope_filter(app_id)},
         {"status": 1, "run_build_binding": 1, "trigger_meta": 1, "change_request_id": 1,
-         "revision_id": 1, "coding_participation": 1},
+         "revision_id": 1, "coding_participation": 1, "workflow_name": 1, "created_at": 1,
+         "session_router_session_id": 1, "journey_position": 1, "journey_key": 1,
+         "journey_instance_id": 1, "journey_total_steps": 1, "journey_parent_chat_id": 1, "artifact_version_id": 1,
+         "refinement_request_meta": 1, "revision_source_artifact_version_id": 1, "workflow_bundle_artifact_version_id": 1,
+         "workflow_bundle_repair_result": 1, "workflow_bundle_export_outcome": 1, "workflow_bundle_validation_status": 1,
+         "workflow_bundle_validation_errors": 1, "workflow_review_outcome": 1, "workflow_plan_review": 1, "PatternSelection": 1},
     )
     if not source or source.get("status") != 2:
         raise ValueError("Source workflow session is not an owned failed run")
@@ -3516,6 +3806,14 @@ async def _failed_workflow_retry_contribution(
             or change.created_by_user_id != user_id):
         raise ValueError("Saved refinement request is not available to this owner")
     request = RefinementRequest.model_validate(change.refinement_request.model_dump(mode="python"))
+    predecessor = None
+    verified_inputs: dict[str, str] = {}
+    if (trigger_meta.get("trigger_source") == "run_complete" or trigger_meta.get("retry_of_chat_id")
+            or body.workflow_id != change.router_decision.get("workflow_id")):
+        trigger_meta, predecessor, verified_inputs = await _verified_retry_predecessor(
+            source=source, change=change, binding=binding, app_id=app_id, user_id=user_id,
+            workflow_id=body.workflow_id, sessions=sessions,
+        )
     journey_id = trigger_meta.get("workflow_sequence") or trigger_meta.get("journey_id")
     if not journey_id or journey_id != change.impact_set.workflow_sequence:
         raise ValueError("Saved refinement journey does not match the failed run")
@@ -3574,12 +3872,140 @@ async def _failed_workflow_retry_contribution(
         seed["parent_theme_config"] = await _saved_parent_theme(baseline)
     if extra.get("lifecycle_state"):
         seed["lifecycle_state"] = extra["lifecycle_state"]
-    return TriggerRoutingContribution(
-        workflow_id=body.workflow_id, journey_id=journey_id,
-        context_seed=validate_context_for_workflow(body.workflow_id, seed),
+    contribution = TriggerRoutingContribution(
+        workflow_id=body.workflow_id, journey_id=journey_id, require_exact_route=True,
         explanation="Retry failed workflow with its saved refinement request and selected baseline",
-        require_exact_route=True,
     )
+    if predecessor is not None:
+        from mozaiksai.core.workflow.pack.journey_orchestrator import _project_launch_context
+
+        seed = {**_project_launch_context({**predecessor, **verified_inputs}, body.workflow_id), **seed,
+                "artifact_version_id": source["artifact_version_id"]}
+        journey_scope = {key: source[key] for key in (
+            "journey_instance_id", "journey_key", "journey_position", "journey_total_steps", "session_router_session_id",
+        )}
+        plan_source = None
+        if (body.workflow_id == "AppGenerator" and verified_inputs.get("design_docs_artifact_version_id")
+                and verified_inputs.get("subscription_contract_artifact_version_id")):
+            scope = {key: seed[key] for key in (
+                "refinement_request", "change_intent", "impact_set", "change_request_id", "revision_id", "artifact_version_id",
+            )}
+            plan_source = await _select_retry_plan(
+                sessions, failed=source, binding=binding, scope={
+                    **scope, **journey_scope, **verified_inputs, "revision_source_artifact_version_id": baseline.id,
+                    "workflow_bundle_artifact_version_id": source["artifact_version_id"], "workflow_name": body.workflow_id,
+                    "app_id": app_id, "user_id": user_id, "status": 2, "journey_parent_chat_id": predecessor["_id"],
+                    "run_build_binding": binding.model_dump(),
+                },
+            )
+        contribution = _DownstreamRetry(
+            workflow_id=body.workflow_id, journey_id=journey_id, require_exact_route=True,
+            explanation="Retry the verified downstream stage with its completed predecessor's launch inputs",
+            binding=binding, failed_chat_id=source["_id"], parent_chat_id=predecessor["_id"], plan_source=plan_source,
+            journey_scope=journey_scope,
+        )
+    contribution.context_seed = validate_context_for_workflow(body.workflow_id, seed)
+    return contribution
+
+
+async def _launch_downstream_retry(retry: _DownstreamRetry, *, app_id: str, user_id: str) -> WorkflowLaunchResult:
+    from mozaiksai.core.runtime.persistence.distributed_lock import (
+        ChatLeaseLostError,
+        ChatLockAuthorityUnavailableError,
+        LockAcquisitionError,
+        chat_execution_lease,
+    )
+
+    chat_id = _retry_chat_id(app_id, user_id, retry.failed_chat_id, retry.binding)
+    try:
+        async with chat_execution_lease(app_id=app_id, chat_id=chat_id):
+            return await _publish_downstream_retry(retry, app_id=app_id, user_id=user_id, chat_id=chat_id)
+    except LockAcquisitionError as exc:
+        raise HTTPException(409, "The replacement workflow chat is busy") from exc
+    except (ChatLeaseLostError, ChatLockAuthorityUnavailableError) as exc:
+        raise HTTPException(503, "The retry publication lease is unavailable") from exc
+
+
+async def _publish_downstream_retry(retry: _DownstreamRetry, *, app_id: str, user_id: str, chat_id: str) -> WorkflowLaunchResult:
+    from mozaiksai.core.runtime.persistence.distributed_lock import assert_chat_mutable
+    from mozaiksai.core.session.launcher import _PERSISTENCE_MANAGER
+    from mozaiksai.core.session.persistence import SessionStateStore
+
+    assert retry.workflow_id is not None
+    registry = _get_app_registry_service()
+    selector = {"build_registry_id": retry.binding.build_registry_id, "owner_user_id": user_id,
+                "expected_build_id": retry.binding.build_id, "active_workflow_id": retry.workflow_id}
+    sessions = await _PERSISTENCE_MANAGER._coll()
+    expected = {"user_id": user_id, "app_id": app_id, "workflow_name": retry.workflow_id, "status": 0,
+                "journey_parent_chat_id": retry.parent_chat_id,
+                **{key: retry.context_seed[key] for key in ("artifact_version_id", "change_request_id", "revision_id")}}
+    extra_run_authority = ("workflow_model", "workflow_model_rebind_pending", "workflow_run_model", "workflow_result_grant")
+    projection = dict.fromkeys((*expected, *retry.journey_scope, "retry_plan_source", "trigger_meta", "run_build_binding", *extra_run_authority), 1)
+    existing = await sessions.find_one({"_id": chat_id}, projection)
+    # A session published before plan reuse was available retains its original startup behavior.
+    plan_source = retry.plan_source if existing is None or "retry_plan_source" in existing else None
+    if existing is not None and (
+        existing.get("retry_plan_source") != (plan_source.model_dump() if plan_source else None)
+        or any(existing.get(key) != value for key, value in expected.items())
+        or existing.get("run_build_binding") not in (None, retry.binding.model_dump())
+        or any(existing.get(key) is not None for key in extra_run_authority)
+        or (existing.get("trigger_meta") or {}).get("retry_of_chat_id") != retry.failed_chat_id
+        or any(key in existing and existing[key] != value for key, value in retry.journey_scope.items())
+    ):
+        raise HTTPException(409, "The replacement chat does not match this stage retry")
+    with CancelScope(shield=True):
+        assert_chat_mutable(app_id=app_id, chat_id=chat_id)
+        claim = await registry.update_build_status(
+            **selector, expected_active_chat_id=retry.failed_chat_id, expected_lifecycle_state="needs_revision",
+            active_chat_id=chat_id, status="building",
+        )
+        if not claim["success"]:
+            record = (await registry.get_app_record(build_registry_id=retry.binding.build_registry_id, owner_user_id=user_id)).get("app") or {}
+            if _registered_retry_cursor(record, retry.binding, retry.workflow_id, retry.journey_id) != ("building", chat_id):
+                raise HTTPException(409, "Another session already replaced this failed stage")
+        assert_chat_mutable(app_id=app_id, chat_id=chat_id)
+        if existing is not None and existing.get("run_build_binding") and all(key in existing for key in retry.journey_scope):
+            # Journey annotations are the last write in bind_workflow_session. A
+            # replay after an acknowledged bind must not clear an active review.
+            decision = RoutingDecision(workflow_id=retry.workflow_id, requested_workflow_id=retry.workflow_id,
+                                       journey_id=retry.journey_id, explanation=retry.explanation)
+            return WorkflowLaunchResult(
+                chat_id=chat_id, app_id=app_id, user_id=user_id, workflow_id=retry.workflow_id,
+                requested_workflow_id=retry.workflow_id, journey_id=retry.journey_id,
+                websocket_url=f"/ws/{retry.workflow_id}/{app_id}/{chat_id}/{user_id}", trigger_source="manual",
+                routing_explanation=retry.explanation, rerouted_by_dependency=False, validated_context=dict(retry.context_seed),
+                trigger_meta=existing["trigger_meta"], routing_decision=decision,
+            )
+        try:
+            launch = await prepare_routed_workflow_launch(
+                app_id=app_id, user_id=user_id, chat_id=chat_id, workflow_id=retry.workflow_id, trigger_source="manual",
+                build_registry_id=retry.binding.build_registry_id, source_chat_id=retry.failed_chat_id,
+                session_router=get_session_router(), routing_contribution=retry,
+                extra_trigger_meta={"retry_of_chat_id": retry.failed_chat_id, "workflow_sequence": retry.journey_id,
+                                    "change_class": retry.context_seed["revision_scope"], "build_family": retry.context_seed["artifact_kind"],
+                                    "build_record_id": retry.context_seed["refinement_request_meta"]["build_record_id"]},
+            )
+            assert_chat_mutable(app_id=app_id, chat_id=chat_id)
+            return await launch_prepared_workflow(
+                launch, journey_parent_chat_id=retry.parent_chat_id, retry_plan_source=plan_source,
+            )
+        except Exception:
+            assert_chat_mutable(app_id=app_id, chat_id=chat_id)
+            # An inserted child carries the protected parent. Leave its claim
+            # intact so another submission can finish the binding in place.
+            if await sessions.find_one({"_id": chat_id}, {"_id": 1}) is not None:
+                raise
+            restored = await registry.update_build_status(
+                **selector, expected_active_chat_id=chat_id, expected_lifecycle_state="building",
+                active_chat_id=retry.failed_chat_id, status="needs_revision",
+            )
+            if restored["success"]:
+                await SessionStateStore(_PERSISTENCE_MANAGER).restore_failed_stage_cursor(
+                    app_id=app_id, user_id=user_id, target_app_id=retry.binding.target_app_id,
+                    change_id=retry.context_seed["change_request_id"], revision_id=retry.context_seed["revision_id"],
+                    workflow_id=retry.workflow_id, replacement_chat_id=chat_id, failed_chat_id=retry.failed_chat_id,
+                )
+            raise
 
 
 async def _complete_inline_refinement(*, binding: RunBuildBinding, user_id: str, result: Any) -> None:
@@ -4029,7 +4455,7 @@ def _confirmed_refinement_decision(
     change_request_id: str | None,
     revision_id: str | None,
     source_chat_id: str | None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], RefinementRequest]:
     """Bind an approval to the existing target-scoped pending decision."""
     pending = (snapshot or {}).get("pending_harness_decision") or {}
     metadata = pending.get("metadata") or {}
@@ -4049,6 +4475,8 @@ def _confirmed_refinement_decision(
         previous = RefinementRequest.model_validate(stored_request)
     except ValidationError as exc:
         raise HTTPException(status_code=409, detail="The proposed scope is unavailable. Submit the change again.") from exc
+    if request.refinement_model is None:
+        request = request.model_copy(update={"refinement_model": previous.refinement_model})
     if any(
         getattr(previous, field) != getattr(request, field)
         for field in (
@@ -4058,7 +4486,7 @@ def _confirmed_refinement_decision(
         )
     ):
         raise HTTPException(status_code=409, detail="The proposed scope belongs to a different request or artifact. Submit the change again.")
-    return pending
+    return pending, request
 
 
 async def require_studio_model_admin(
@@ -4103,6 +4531,9 @@ async def trigger_workflow(
     if body.retry_failed:
         try:
             retry_contribution = await _failed_workflow_retry_contribution(body, app_id=app_id, user_id=user_id)
+            if isinstance(retry_contribution, _DownstreamRetry):
+                result = await _launch_downstream_retry(retry_contribution, app_id=app_id, user_id=user_id)
+                return _workflow_trigger_response(result)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     build_registry_id = body.build_registry_id
@@ -4271,7 +4702,7 @@ async def trigger_workflow(
 
         pending_decision = None
         if action_id:
-            pending_decision = _confirmed_refinement_decision(
+            pending_decision, refinement_request = _confirmed_refinement_decision(
                 session_snapshot, refinement_request, action_id=action_id,
                 change_request_id=persisted_change_request_id, revision_id=persisted_revision_id,
                 source_chat_id=body.source_chat_id,
@@ -4358,6 +4789,7 @@ async def trigger_workflow(
         allow_surface = (
             not workflow_continuation
             and not branding_workflow
+            and not refinement_decision.change_intent.requires_workflow_revision
             and orchestration_control.contract_surface_enabled()
             and refinement_decision.change_intent.change_class.value in {"design", "feature"}
             and refinement_request.build_family == "app_bundle"
@@ -4946,6 +5378,12 @@ async def trigger_workflow(
             change_request_id=persisted_change_request_id, artifact_store=artifact_store,
         )
 
+    return _workflow_trigger_response(
+        workflow_launch, harness_decision=harness_decision.model_dump(mode="python") if harness_decision is not None else None,
+    )
+
+
+def _workflow_trigger_response(workflow_launch: WorkflowLaunchResult, *, harness_decision: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "execution_mode": "workflow",
         "chat_id": workflow_launch.chat_id,
@@ -4956,7 +5394,7 @@ async def trigger_workflow(
         "trigger_source": workflow_launch.trigger_source,
         "routing_explanation": workflow_launch.routing_explanation,
         "rerouted_by_dependency": workflow_launch.rerouted_by_dependency,
-        "harness_decision": harness_decision.model_dump(mode="python") if harness_decision is not None else None,
+        "harness_decision": harness_decision,
     }
 
 
@@ -4968,19 +5406,27 @@ async def _resolve_preview_build(principal: UserPrincipal, build_registry_id: st
 async def _resolve_preview_artifact(
     principal: UserPrincipal, artifact_version_id: str, build_registry_id: str,
 ) -> tuple[str, dict[str, str | bytes]]:
-    target_app_id = await _resolve_preview_build(principal, build_registry_id)
-    version = await get_artifact_store().get_build_record(app_id=target_app_id, build_record_id=artifact_version_id)
-    if version is None:
+    from mozaiksai.core.validation.compilation_inputs import resolve_pinned_workflow_bundle
+
+    target_app_id, owner_user_id = await _resolve_studio_artifact_scope(principal, build_registry_id=build_registry_id)
+    store = get_artifact_store()
+    version = await store.get_build_record(app_id=target_app_id, build_record_id=artifact_version_id)
+    if version is None or version.id != artifact_version_id or version.app_id != target_app_id:
         raise HTTPException(status_code=404, detail="Artifact not found")
     if version.build_family != "app_bundle":
         raise HTTPException(status_code=422, detail="Preview requires an app bundle")
     _artifact_build_binding(version, build_registry_id=build_registry_id, target_app_id=target_app_id)
     try:
         files, diagnostics = await read_artifact_bundle(version, include_binary=True)
-    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        if any(item.get("blocking") for item in diagnostics):
+            raise HTTPException(status_code=422, detail="Artifact contains unsafe or oversized preview files")
+        pinned = await resolve_pinned_workflow_bundle(
+            version, app_id=target_app_id, owner_user_id=owner_user_id, build_registry_id=build_registry_id, artifact_store=store,
+        )
+        if pinned is not None:
+            await to_thread(add_preview_workflow_files, files, *pinned)
+    except (OSError, ValueError, ContentNotFoundError, zipfile.BadZipFile) as exc:
         raise HTTPException(status_code=422, detail="Artifact archive is unavailable or failed integrity validation") from exc
-    if any(item.get("blocking") for item in diagnostics):
-        raise HTTPException(status_code=422, detail="Artifact contains unsafe or oversized preview files")
     return target_app_id, files
 
 

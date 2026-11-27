@@ -48,6 +48,8 @@ routing:
           workflow_sequence: full_rebuild
     - build_family: app_bundle
       label: app bundle
+      workflow_revision_route:
+        workflow_sequence: design_revision
       branding_routes:
         theme_color_patch:
           workflow_sequence: app_revision

@@ -36,7 +36,7 @@ def _context_get(context_variables: Any, key: str, default: Any = None) -> Any:
 
 
 def _detect_ai_packs(context_variables: Any) -> list[str]:
-    """Return the list of AI-native pack ids present in the plan or concept context."""
+    """Return advisory archetypes from the normalized app build plan."""
     detected: list[str] = []
     packs = _module_guidance()
 
@@ -48,14 +48,6 @@ def _detect_ai_packs(context_variables: Any) -> list[str]:
                 pack_type = str(pack.get("pack_type") or "").strip()
                 if pack_type in packs and pack_type not in detected:
                     detected.append(pack_type)
-
-    # Check concept_blueprint.capability_pack_hints (ValueEngine output)
-    blueprint = _context_get(context_variables, "concept_blueprint") or {}
-    if isinstance(blueprint, dict):
-        for hint in blueprint.get("capability_pack_hints") or []:
-            hint_str = str(hint or "").strip()
-            if hint_str in packs and hint_str not in detected:
-                detected.append(hint_str)
 
     return detected
 
@@ -86,7 +78,7 @@ def inject_ai_pack_workflow_context(
     agent: Any,
     messages: list[dict[str, Any]],
 ) -> None:
-    """Add the module guidance for AI packs selected in the plan or concept."""
+    """Add module design guidance for the archetypes in the saved plan."""
     agent_name = getattr(agent, "name", "")
     if agent_name != "AppPlanAgent":
         return
@@ -97,7 +89,7 @@ def inject_ai_pack_workflow_context(
         detected = _detect_ai_packs(context_variables)
         if not detected:
             if _HEADER in agent.system_message:
-                update_agent_section(agent, _HEADER, "No AI capability packs are selected.")
+                update_agent_section(agent, _HEADER, "The saved app build plan specifies no AI module archetypes.")
             return
 
         body = _build_body(detected)

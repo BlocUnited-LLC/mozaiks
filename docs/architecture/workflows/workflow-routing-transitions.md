@@ -110,17 +110,50 @@ rejected rather than converted to a partial revision. The trusted contribution's
 state persistence or chat creation. Unmet dependencies or workflow/journey
 drift reject the retry; dependency checks are not bypassed.
 
-AppGenerator retains its declared InterviewAgent entry and revision prompt.
-Its existing first `before_chat` hook verifies the committed baseline archive
+For a later stage of a refinement, Studio verifies the failed chat against
+the registered build, saved change, and steps in the declared journey. A
+successful automatic handoff records its source in `journey_parent_chat_id`
+when it creates the child chat. The session store keeps that field outside
+workflow context. For older chats, Studio needs an unambiguous history of
+completed prerequisite stages and their saved outputs for the same owner and
+build. The replacement starts at the verified stage. Any workflow plan that
+authorizes a private-record write goes through review again in the new chat.
+
+Repeating the same downstream retry addresses the same replacement chat. Studio
+uses its execution lease and the registry's active-chat claim to finish a launch
+interrupted after the claim, session insert, or router bind. Once publication
+finishes, repeating the request returns the existing chat without resetting its
+review. A later failure in that replacement can be retried from its own chat ID.
+
+When AgentGenerator hands a reviewed workflow to AppGenerator, the workflow
+record and the original app record serve different purposes. The failed app
+stage must identify both. Studio verifies the workflow archive digest, its
+generating session, its approved result plan, and the design and subscription
+records that produced it. The original app stays bound to the change request.
+A workflow export citing a different version of those inputs cannot start an
+app-stage retry.
+
+AppGenerator's first `before_chat` hook verifies the committed baseline archive
 and hydrates `generated_files`; it does not read a mutable workspace fallback.
 Lifecycle hook errors are logged, and assembly repeats the verification and
 rejects missing, changed, retired, or unsupported content. Archive integrity
 is verified by that loader, not by the trigger's record-scope checks.
 
-Each retry gets a fresh chat with default execution state. Saved intent IDs and
-baseline/journey provenance survive a subsequent retry, while generated output,
-validation, counters, messages, and the failed source session are not copied or
-reset. An idle same-build chat does not itself supersede the current binding.
+An AppGenerator stage retry can reuse a technical plan that Factory admitted
+earlier in the same retry chain. Studio identifies the source from the failed
+sessions it created for the same owner, app, build, change and journey. Factory
+reloads the accepted app and reviewed workflow inputs, reviews the original
+planner response again, and compares the resulting plan and task assignments
+with the recorded admission. The reviewed workflow artifact remains the source
+of permission for its private result action. Ordinary retries without a
+qualifying technical plan use the workflow's declared planning entry.
+
+A verified plan starts the declared task batch in the replacement chat. Each
+worker runs fresh under the existing dependency and file-ownership rules.
+Assembly, validation and owner acceptance still apply to the resulting draft.
+Prior worker outputs, execution counters and acceptance receipts stay in the
+run that produced them. An idle chat in the same build preserves the current
+binding.
 
 ## Contract
 

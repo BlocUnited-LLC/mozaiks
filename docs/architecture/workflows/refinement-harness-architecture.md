@@ -181,6 +181,13 @@ checks cannot produce a validated result. A saved draft identifies reviewable
 work, not a promoted application. Persistence failure cannot emit completion.
 
 Contract-surface regeneration uses that same worker finalizer and audit writer.
+After admitting an app-bundle plan, the worker asks the dependency-graph agent
+once about its affected paths using the Studio run binding. Each surface receives
+the same bounded relationships, source record ID and digest from the verified
+saved build when available. The graph specialist and coding worker also receive
+`source_build_id` from that artifact's commit metadata when its producing build
+is known. Older artifacts can still supply their verified digest and edges. Earlier surface edits are reflected in the supplied
+file contents. Only the current surface's admitted paths can be written.
 Generation alone does not emit completion: `surface_result.status=success` is
 returned only after the finalizer validates and saves the draft; incomplete
 validation becomes `partial`, and failure becomes `failed`. Exceptions and
@@ -197,6 +204,10 @@ Its **Review patch** action opens that saved candidate; it does not submit anoth
 coding request. Review, accept, and reject continue through the existing artifact
 lifecycle APIs. A validated coding attempt alone does not certify the entire
 application or replace independent runtime acceptance.
+
+AppReview checks the proposed revision against the most recent message its
+owner submitted in that chat. The transport records that input on the AG2
+stream. Merely opening the review presents the app and waits for the owner.
 
 AppReview revision responses open the same workbench with the original bundle
 and the inline result. They do not start another workflow or automatically
@@ -648,6 +659,17 @@ harness.yaml                        extension_registry.json
 The Refinement Engine does not declare `affected_workflows` or
 `affected_declarative_families`. Those are owned by the sequence in
 `extension_registry.json`.
+
+For an existing app, the change classifier sets `requires_workflow_revision`
+when the request needs a new or changed workflow and corresponding app wiring.
+For example, suggesting a title when someone creates a note needs both a
+workflow and a subscription to the create event. The Factory app-bundle policy
+selects its declared `workflow_revision_route`, which starts at DesignDocs
+so an app that previously had no workflow can review the new workflow surface.
+AgentGenerator then works from that design and AppGenerator wires its events
+and actions through the existing design revision sequence. Studio skips
+app-only surface regeneration for that route.
+A change to the approved product concept still starts at ValueEngine.
 
 ### Staleness-aware classification
 

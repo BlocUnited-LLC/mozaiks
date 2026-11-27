@@ -815,7 +815,7 @@ behavior_patterns:
       - Set module.type to `standard`; do not serialize `notification_preferences`
         as module.type.
       - Prefer selecting the `notifications` capability pack, whose templates own
-        the canonical notification_settings module and provider-neutral adapters.
+        the canonical notification_settings module and the SMTP email adapter.
       - The module must be named `notification_settings`, not `notifications`.
       - Do not re-implement in-app notification storage or websocket delivery.
       - Do not add entitlement_gate to get_notification_preferences or

@@ -14,6 +14,7 @@ import importlib.util
 import logging
 import sys
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,13 @@ from ..context.context_utils import apply_context_exposures, context_to_dict
 from ..declarative import parse_middleware_config
 
 logger = logging.getLogger("middleware_loader")
+
+
+@dataclass(frozen=True)
+class TaskPromptProjection:
+    """System instructions selected by the task runner for this AG2 invocation."""
+
+    system_message: str
 
 
 class MozaiksActivityMiddleware(BaseMiddleware):
@@ -86,6 +94,11 @@ class MozaiksPromptMiddleware(BaseMiddleware):
         events: Sequence[BaseEvent],
         context: Context,
     ) -> ModelResponse:
+        projection = context.dependencies.get(TaskPromptProjection)
+        if isinstance(projection, TaskPromptProjection):
+            context.prompt[:] = [projection.system_message]
+            return await call_next(events, context)
+
         if not (self._middleware_functions or self._context_exposures or self._context_variables):
             return await call_next(events, context)
 

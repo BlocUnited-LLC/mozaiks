@@ -36,7 +36,7 @@ def test_service_agent_must_emit_every_owned_path() -> None:
     assert "Emit every model-owned path listed in `current_build_task.owned_paths`" in prompt
     assert "Code renders only the canonical CRUD and read implementations assigned to code by the injected ownership inventories" in prompt
     assert "protected app-wide writes whose narrowed input contracts and implementations stay authored" in prompt
-    assert "the owned `backend/policy.py`, and the module's `backend/schemas.py`" in prompt
+    assert "the policy listed in `current_build_task.factory_rendered_paths`" in prompt
     assert "fails the whole batch" in prompt
 
 

@@ -1442,9 +1442,13 @@ async def get_workflows(
 ):
     """Return loaded workflows in SDK-friendly format."""
     _ = principal
-    from mozaiksai.core.workflow.startup_messages import resolve_workflow_launch_taxonomy
+    from mozaiksai.core.workflow.startup_messages import (
+        load_workflow_launch_entries,
+        resolve_workflow_launch_taxonomy,
+    )
     from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
+    registry_entries = load_workflow_launch_entries()
     workflows = []
     for workflow_name in sorted(workflow_manager.get_all_workflow_names()):
         config = workflow_manager.get_config(workflow_name)
@@ -1452,6 +1456,7 @@ async def get_workflows(
         launch_taxonomy = resolve_workflow_launch_taxonomy(
             workflow_name,
             workflow_startup_mode=startup_mode,
+            registry_entries=registry_entries,
         )
         workflows.append(
             {
