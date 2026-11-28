@@ -346,6 +346,20 @@ this wall.
 
 </div>
 
+### Community contributors
+
+The contributor list below is generated from GitHub commit attribution on
+`main` and the GitHub contributors API. It is refreshed after merges and
+reconciled daily. GitHub avatars link to each contributor's profile.
+
+<!-- contributors:auto:start -->
+<p align="center">
+  <a href="https://github.com/aaas72" title="aaas72"><img src="https://github.com/aaas72.png?size=80" width="64" height="64" alt="aaas72" /></a>
+  <a href="https://github.com/hammadfarooq-ai" title="hammadfarooq-ai"><img src="https://github.com/hammadfarooq-ai.png?size=80" width="64" height="64" alt="hammadfarooq-ai" /></a>
+  <a href="https://github.com/TianHengZhuang" title="TianHengZhuang"><img src="https://github.com/TianHengZhuang.png?size=80" width="64" height="64" alt="TianHengZhuang" /></a>
+</p>
+<!-- contributors:auto:end -->
+
 The wall above is generated from GitHub's contributor data, which credits commits
 that have been merged into the default branch and whose author email is linked
 to a GitHub account. A new contribution can take a little while to appear after
