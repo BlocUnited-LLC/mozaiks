@@ -23,9 +23,9 @@ flowchart LR
 ## The Genesis Build
 
 A Genesis Build is the first full creation of your app. It starts from a
-plain-language description — "a booking site for my studio", "an internal tool
-to track supplier orders" — and ends with a complete, working app you can
-review in Studio.
+plain-language description such as "a booking site for my studio" or "an
+internal tool to track supplier orders." Studio shows the draft and its check
+results so you can decide whether to accept it or request changes.
 
 During a Genesis Build, Mozaiks:
 
@@ -62,8 +62,8 @@ acknowledgment of that server-generated disclosure. It creates the initial
 brownfield baseline for later Refinement Runs; it does not deploy or replace the
 running app.
 
-If you want to see the individual build workflows behind these stages, they are
-described in [The Build Sequence](../concepts.md#the-build-sequence).
+Follow a field journal from its first brief to its editor page, including the
+agents responsible for each decision, in [How the Factory builds your app](how-the-factory-builds-your-app.md).
 
 ## Refinement Runs
 
