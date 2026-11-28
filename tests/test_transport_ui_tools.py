@@ -48,7 +48,7 @@ async def test_submit_tool_call_response_completes_future_on_owner_loop() -> Non
 
         async def _runner() -> None:
             future = loop.create_future()
-            transport.pending_tool_call_responses["evt-1"] = future
+            transport.pending_tool_call_responses[("chat-1", "evt-1")] = future
             ready.set()
             result = await future
             result_queue.put(result)
@@ -61,7 +61,9 @@ async def test_submit_tool_call_response_completes_future_on_owner_loop() -> Non
 
     assert ready.wait(timeout=2.0) is True
 
-    accepted = await transport.submit_tool_call_response("evt-1", {"status": "submitted", "text": "approved"})
+    accepted = await transport.submit_tool_call_response(
+        "evt-1", {"status": "submitted", "text": "approved"}, chat_id="chat-1",
+    )
 
     worker.join(timeout=2.0)
 
@@ -74,7 +76,7 @@ async def test_submit_tool_call_response_completes_future_on_owner_loop() -> Non
 async def test_submit_tool_call_response_buffers_early_response_until_waiter_registers() -> None:
     transport = _FakeTransport()
     _FakeTransport._instance = transport
-    transport._ui_tool_metadata["evt-early"] = {
+    transport._ui_tool_metadata[("chat-1", "evt-early")] = {
         "chat_id": "chat-1",
         "tool_name": "UserInputRequest",
         "display": "inline",
@@ -84,18 +86,18 @@ async def test_submit_tool_call_response_buffers_early_response_until_waiter_reg
         "evt-early",
         {"status": "submitted", "text": "approved"},
     )
-    result = await _FakeTransport.wait_for_tool_call_response("evt-early", timeout=0.1)
+    result = await _FakeTransport.wait_for_tool_call_response("evt-early", timeout=0.1, chat_id="chat-1")
 
     assert accepted is True
     assert result == {"status": "submitted", "text": "approved"}
-    assert "evt-early" not in transport._buffered_tool_call_responses
+    assert ("chat-1", "evt-early") not in transport._buffered_tool_call_responses
 
 
 @pytest.mark.asyncio
 async def test_submit_tool_call_response_ignores_duplicate_resolved_response(caplog: pytest.LogCaptureFixture) -> None:
     transport = _FakeTransport()
     _FakeTransport._instance = transport
-    transport._ui_tool_metadata["evt-dup"] = {
+    transport._ui_tool_metadata[("chat-1", "evt-dup")] = {
         "chat_id": "chat-1",
         "tool_name": "ApprovalCard",
         "display": "inline",
@@ -113,7 +115,7 @@ async def test_submit_tool_call_response_ignores_duplicate_resolved_response(cap
 
     assert accepted_first is True
     assert accepted_second is True
-    assert "evt-dup" in transport._resolved_tool_call_ids
+    assert ("chat-1", "evt-dup") in transport._resolved_tool_call_ids
     assert "[UI_TOOL] No pending event found for evt-dup" not in caplog.text
 
 
@@ -184,7 +186,7 @@ async def test_pending_inline_payload_is_persisted_before_delivery(monkeypatch) 
 @pytest.mark.parametrize("early", [False, True])
 async def test_response_state_is_saved_before_waiter_resumes_even_during_registration(early) -> None:
     transport = _FakeTransport()
-    transport._ui_tool_metadata["review"] = {"chat_id": "chat", "tool_name": "review_policy", "display": "inline"}
+    transport._ui_tool_metadata[("chat", "review")] = {"chat_id": "chat", "tool_name": "review_policy", "display": "inline"}
     entered, release = asyncio.Event(), asyncio.Event()
 
     async def persist(**kwargs):
@@ -198,12 +200,12 @@ async def test_response_state_is_saved_before_waiter_resumes_even_during_registr
     transport._resolve_chat_context = AsyncMock(return_value=("app", "DesignDocs"))
     future = asyncio.get_running_loop().create_future()
     if not early:
-        transport.pending_tool_call_responses["review"] = future
+        transport.pending_tool_call_responses[("chat", "review")] = future
     response = {"action": "approve", "review_id": "original"}
     task = asyncio.create_task(transport.submit_tool_call_response("review", response))
     await asyncio.wait_for(entered.wait(), timeout=2)
     if early:
-        transport.pending_tool_call_responses["review"] = future
+        transport.pending_tool_call_responses[("chat", "review")] = future
     assert not future.done()
     assert await transport.submit_tool_call_response("review", response) is True
     pm.update_tool_call_state.assert_awaited_once()
@@ -218,7 +220,7 @@ async def test_response_state_is_saved_before_waiter_resumes_even_during_registr
 async def test_cancelled_submission_finishes_original_decision_before_releasing_waiter(waiter_registration) -> None:
     transport = _FakeTransport()
     _FakeTransport._instance = transport
-    transport._ui_tool_metadata["review"] = {"chat_id": "chat", "tool_name": "review_policy", "display": "inline"}
+    transport._ui_tool_metadata[("chat", "review")] = {"chat_id": "chat", "tool_name": "review_policy", "display": "inline"}
     entered, release = asyncio.Event(), asyncio.Event()
     saved = []
 
@@ -232,7 +234,7 @@ async def test_cancelled_submission_finishes_original_decision_before_releasing_
     transport._resolve_chat_context = AsyncMock(return_value=("app", "DesignDocs"))
     future = asyncio.get_running_loop().create_future()
     if waiter_registration == "before":
-        transport.pending_tool_call_responses["review"] = future
+        transport.pending_tool_call_responses[("chat", "review")] = future
     response = {"approved": True, "review_id": "original"}
     submission = asyncio.create_task(transport.submit_tool_call_response("review", response))
     await asyncio.wait_for(entered.wait(), timeout=2)
@@ -246,12 +248,12 @@ async def test_cancelled_submission_finishes_original_decision_before_releasing_
     assert await transport.submit_tool_call_response("review", {"approved": False}) is True
     pm.update_tool_call_state.assert_awaited_once()
     if waiter_registration == "during":
-        transport.pending_tool_call_responses["review"] = future
+        transport.pending_tool_call_responses[("chat", "review")] = future
     release.set()
     assert await asyncio.wait_for(finalization, timeout=2) is True
     assert saved[0]["status"] == "responded"
     if waiter_registration == "after":
-        assert await _FakeTransport.wait_for_tool_call_response("review", timeout=0.1) == response
+        assert await _FakeTransport.wait_for_tool_call_response("review", timeout=0.1, chat_id="chat") == response
     else:
         assert future.result() == response
     assert not transport._tool_call_response_tasks

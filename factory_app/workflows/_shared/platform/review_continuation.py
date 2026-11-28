@@ -64,7 +64,7 @@ async def _settle_superseded_workbench(*, app_id: str, user_id: str, source_chat
         connection = transport.connections.get(source_chat_id) or {}
         if any(connection.get(key) not in (None, value) for key, value in (("app_id", app_id), ("user_id", user_id))):
             raise ValueError("The source workbench transport belongs to another owner")
-        metadata = transport._ui_tool_metadata.get(event_id)
+        metadata = transport._ui_tool_metadata.get((source_chat_id, event_id))
         if metadata is None:
             # Missing local metadata says nothing about another process. The
             # existing execution lease excludes a running/resuming source.
@@ -95,7 +95,7 @@ async def _settle_superseded_workbench(*, app_id: str, user_id: str, source_chat
             return
         if metadata.get("chat_id") != source_chat_id:
             raise ValueError("The source workbench transport belongs to another chat")
-        if transport._is_tool_call_response_resolved(event_id):
+        if transport._is_tool_call_response_resolved((source_chat_id, event_id)):
             return
         if (metadata.get("tool_name") != "AppWorkbench"
                 or metadata.get("workflow_name") not in (None, "AppGenerator")):
@@ -103,7 +103,7 @@ async def _settle_superseded_workbench(*, app_id: str, user_id: str, source_chat
         submitted = await transport.submit_tool_call_response(event_id, {
             "status": "superseded", "approved": False,
             "data": {"artifact_version_id": baseline_id},
-        })
+        }, chat_id=source_chat_id)
         if not submitted:
             raise ValueError("The source workbench transport did not accept settlement")
 

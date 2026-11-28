@@ -36,7 +36,9 @@ class TransportProtocol(Protocol):
     async def submit_user_input(
         self, input_request_id: str, user_input: str, *, chat_id: str | None = None, acknowledge_request: bool = True,
     ) -> bool: ...
-    async def submit_tool_call_response(self, event_id: str, response_data: dict[str, Any]) -> bool: ...
+    async def submit_tool_call_response(
+        self, event_id: str, response_data: dict[str, Any], *, chat_id: str | None = None,
+    ) -> bool: ...
     async def submit_tool_call_response_for_user(
         self, event_id: str, response_data: dict[str, Any], *,
         principal: UserPrincipal | WebSocketUser, chat_id: str | None = None, app_id: str | None = None,

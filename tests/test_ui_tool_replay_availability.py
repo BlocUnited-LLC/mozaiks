@@ -23,26 +23,28 @@ def _saved():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["future", "input", "cold", "early", "done", "cancelled", "resolved", "foreign", "ambiguous"])
+@pytest.mark.parametrize("kind", ["future", "input", "cold", "early", "done", "cancelled", "resolved", "foreign", "shared_id"])
 async def test_projection_describes_only_current_scoped_response_registration(harness, kind):
     transport = harness.transport
     if kind != "cold":
         _pending(harness, "input" if kind == "input" else "early" if kind == "early" else "future")
     if kind == "done":
-        transport.pending_tool_call_responses["evt-owned"].set_result({"action": "approve"})
+        transport.pending_tool_call_responses[("chat-owner", "evt-owned")].set_result({"action": "approve"})
     elif kind == "cancelled":
-        transport.pending_tool_call_responses["evt-owned"].cancel()
+        transport.pending_tool_call_responses[("chat-owner", "evt-owned")].cancel()
     elif kind == "resolved":
-        transport._mark_tool_call_response_resolved("evt-owned")
+        transport._mark_tool_call_response_resolved(("chat-owner", "evt-owned"))
     elif kind == "foreign":
-        transport._ui_tool_metadata["evt-owned"]["chat_id"] = "another-chat"
-    elif kind == "ambiguous":
+        moved = transport._ui_tool_metadata.pop(("chat-owner", "evt-owned"))
+        transport._ui_tool_metadata[("another-chat", "evt-owned")] = {**moved, "chat_id": "another-chat"}
+    elif kind == "shared_id":
+        # Another chat holding the same id does not take this chat's reply away.
         transport._input_request_registries["another-chat"] = {"evt-owned": object()}
     state = _saved()
     before = deepcopy(state)
     metadata = deepcopy(transport._ui_tool_metadata)
     result = project_ui_tool_response_state(state, chat_id="chat-owner", transport=transport)
-    assert result == {**state, "response_available": kind in {"future", "input"}}
+    assert result == {**state, "response_available": kind in {"future", "input", "shared_id"}}
     assert state == before and transport._ui_tool_metadata == metadata
     assert transport._buffered_tool_call_responses == {}
     transport._finalize_tool_call_response.assert_not_awaited()
@@ -72,7 +74,7 @@ async def test_saved_review_projection_cannot_authorize_cold_or_foreign_submissi
     assert project_ui_tool_response_state(state, chat_id="chat-owner", transport=harness.transport)["response_available"] is True
     harness.principal.user_id = "foreign-owner"
     assert (await _http(harness)).status_code == 404
-    assert not harness.transport.pending_tool_call_responses["evt-owned"].done()
+    assert not harness.transport.pending_tool_call_responses[("chat-owner", "evt-owned")].done()
 
 
 @pytest.mark.asyncio

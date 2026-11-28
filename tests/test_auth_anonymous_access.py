@@ -1347,7 +1347,7 @@ async def test_ui_tool_owner_waiver_needs_the_shared_development_identity() -> N
             return collection
 
         instance._get_or_create_persistence_manager = lambda: SimpleNamespace(_coll=coll)
-        instance._ui_tool_metadata["evt-owned"] = {"chat_id": "chat-owner", "tool_name": "Card", "display": "artifact"}
+        instance._ui_tool_metadata[("chat-owner", "evt-owned")] = {"chat_id": "chat-owner", "tool_name": "Card", "display": "artifact"}
         return instance
 
     async def answers(principal) -> bool:

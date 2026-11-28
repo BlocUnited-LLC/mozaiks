@@ -861,10 +861,13 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(
         monkeypatch.setattr(router, "bind_workflow_session", AsyncMock(side_effect=bind_review))
         transport = SimpleNamespace(
             connections={"review-parent": {"app_id": "factory", "user_id": "demo-user"}},
-            _ui_tool_metadata={"workbench": {"chat_id": "review-parent", "tool_name": "AppWorkbench", "workflow_name": "AppGenerator"}},
-            _is_tool_call_response_resolved=lambda event_id: False,
+            _ui_tool_metadata={("review-parent", "workbench"): {
+                "chat_id": "review-parent", "tool_name": "AppWorkbench", "workflow_name": "AppGenerator",
+            }},
+            _is_tool_call_response_resolved=lambda key: False,
         )
-        async def submit_response(event_id, response):
+        async def submit_response(event_id, response, *, chat_id):
+            assert chat_id == "review-parent"
             assert handoff_order[-2:] == ["select", "bind"]
             assert record["active_chat_id"] != "review-parent"
             handoff_order.append("settle")
@@ -1011,7 +1014,7 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(
         assert handoff_order == ["select", "bind", "settle"]
         transport.submit_tool_call_response.assert_awaited_once_with("workbench", {
             "status": "superseded", "approved": False, "data": {"artifact_version_id": "av_456"},
-        })
+        }, chat_id="review-parent")
         persistence.mark_chat_failed.assert_not_awaited()
     assert response.json() == {
         "execution_mode": "coding_worker",
@@ -1185,6 +1188,7 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(
         assert transport.submit_tool_call_response.await_args.args == (
             "workbench", {"status": "superseded", "approved": False, "data": {"artifact_version_id": "av_456"}},
         )
+        assert transport.submit_tool_call_response.await_args.kwargs == {"chat_id": "review-parent"}
         worker.execute.assert_not_awaited()
         if continuation_case in {"generator_recover_missing", "generator_recover_misroute"}:
             assert prerequisites.await_count == 2

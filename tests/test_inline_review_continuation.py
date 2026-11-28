@@ -704,19 +704,21 @@ async def test_supersession_settles_only_exact_internal_waiter(monkeypatch, wait
     import asyncio
     monkeypatch.setenv("MOZAIKS_CHAT_LOCK_MODE", "local")
     transport = Transport()
+    # A foreign waiter is another chat's interaction that happens to share the id.
+    key = ("other", "event") if waiter == "foreign" else ("source", "event")
     if waiter != "cold":
-        transport._ui_tool_metadata["event"] = {"chat_id": "other" if waiter == "foreign" else "source", "tool_name": "AppWorkbench"}
-        transport.pending_tool_call_responses["event"] = asyncio.get_running_loop().create_future()
+        transport._ui_tool_metadata[key] = {"chat_id": key[0], "tool_name": "AppWorkbench"}
+        transport.pending_tool_call_responses[key] = asyncio.get_running_loop().create_future()
     if waiter == "resolved":
-        transport._mark_tool_call_response_resolved("event")
+        transport._mark_tool_call_response_resolved(key)
     if waiter == "wrong_tool":
-        transport._ui_tool_metadata["event"]["tool_name"] = "Other"
+        transport._ui_tool_metadata[key]["tool_name"] = "Other"
     if waiter == "wrong_workflow":
-        transport._ui_tool_metadata["event"]["workflow_name"] = "Other"
+        transport._ui_tool_metadata[key]["workflow_name"] = "Other"
     if waiter == "foreign_owner":
         transport.connections["source"] = {"app_id": "factory", "user_id": "other"}
     if waiter == "rejected":
-        transport._ui_tool_metadata["event"]["workflow_primitive"] = "outcome_feedback"
+        transport._ui_tool_metadata[key]["workflow_primitive"] = "outcome_feedback"
     monkeypatch.setattr(SimpleTransport, "get_instance", AsyncMock(return_value=transport))
     source = {}
     _generator_source(SimpleNamespace(source=source))
@@ -726,12 +728,12 @@ async def test_supersession_settles_only_exact_internal_waiter(monkeypatch, wait
     source["run_build_binding"] = {"build_registry_id": "registry", "target_app_id": "target", "build_id": "genesis", "phase": "genesis"}
     persistence = SimpleNamespace(mark_chat_failed=AsyncMock(return_value=True),
         persist_context_variables=AsyncMock(), _coll=AsyncMock(return_value=SimpleNamespace(find_one=AsyncMock(return_value=source))))
-    if waiter in {"foreign", "wrong_tool", "wrong_workflow", "foreign_owner", "rejected"}:
+    if waiter in {"wrong_tool", "wrong_workflow", "foreign_owner", "rejected"}:
         with pytest.raises(ValueError, match="transport"):
             await review._settle_superseded_workbench(
                 app_id="factory", user_id="owner", source_chat_id="source", event_id="event", baseline_id="parent", persistence=persistence,
             )
-        assert not transport.pending_tool_call_responses["event"].done()
+        assert not transport.pending_tool_call_responses[key].done()
         persistence.mark_chat_failed.assert_not_awaited()
         return
     # Use the production helper, not the fixture's settlement stub.
@@ -739,14 +741,17 @@ async def test_supersession_settles_only_exact_internal_waiter(monkeypatch, wait
         app_id="factory", user_id="owner", source_chat_id="source", event_id="event", baseline_id="parent", persistence=persistence,
     )
     if waiter == "live":
-        result = transport.pending_tool_call_responses["event"].result()
+        result = transport.pending_tool_call_responses[key].result()
         assert result == {"status": "superseded", "approved": False, "data": {"artifact_version_id": "parent"}}
         assert transport.finalized["response_data"] == result
         await review._settle_superseded_workbench(
             app_id="factory", user_id="owner", source_chat_id="source", event_id="event", baseline_id="parent", persistence=persistence,
         )
         persistence.mark_chat_failed.assert_not_awaited()
-    elif waiter == "cold":
+    elif waiter in {"cold", "foreign"}:
+        # The source chat has no waiter here: it settles cold, never through another chat.
+        if waiter == "foreign":
+            assert not transport.pending_tool_call_responses[key].done()
         persistence.mark_chat_failed.assert_awaited_once_with("source", app_id="factory")
         fields = persistence.persist_context_variables.await_args.kwargs
         assert fields["workflow_name"] == "AppGenerator"
@@ -754,7 +759,7 @@ async def test_supersession_settles_only_exact_internal_waiter(monkeypatch, wait
         assert "superseded" in fields["variables"]["app_build_failure_message"]
         assert fields["variables"]["generated_app_zip"] is None
     else:
-        assert not transport.pending_tool_call_responses["event"].done()
+        assert not transport.pending_tool_call_responses[key].done()
         persistence.mark_chat_failed.assert_not_awaited()
 
 

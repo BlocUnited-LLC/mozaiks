@@ -173,8 +173,8 @@ def test_use_ui_tool_requests_response_and_returns_event_id() -> None:
         captured.update(kwargs)
         return "evt_interactive_1"
 
-    async def _fake_wait(event_id, timeout=None):
-        assert event_id == "evt_interactive_1"
+    async def _fake_wait(event_id, timeout=None, *, chat_id):
+        assert (chat_id, event_id) == ("chat_456", "evt_interactive_1")
         return {"status": "ok", "ui_event_id": "browser-forged-event"}
 
     ui_tools_module._emit_tool_call_core = _fake_emit
@@ -226,8 +226,8 @@ def test_use_ui_tool_resolves_manifest_component_when_called_by_function_name() 
         captured.update(kwargs)
         return "evt_component_lookup"
 
-    async def _fake_wait(event_id, timeout=None):
-        assert event_id == "evt_component_lookup"
+    async def _fake_wait(event_id, timeout=None, *, chat_id):
+        assert (chat_id, event_id) == ("chat_789", "evt_component_lookup")
         return {"status": "ok"}
 
     ui_tools_module._emit_tool_call_core = _fake_emit

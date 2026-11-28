@@ -56,7 +56,7 @@ def test_invalid_or_attributed_browser_feedback_is_rejected(response):
 
 def _feedback_pending(harness):
     _pending(harness)
-    harness.transport._ui_tool_metadata["evt-owned"].update(
+    harness.transport._ui_tool_metadata[("chat-owner", "evt-owned")].update(
         workflow_primitive="outcome_feedback", workflow_name="AnswerFlow",
         feedback_agent_name="AnswerAgent", outcome_id="result-1",
     )
@@ -91,7 +91,7 @@ async def test_visible_feedback_ack_is_attributed_and_does_not_answer(harness):
         receipt.agent_name, receipt.outcome_id, receipt.ui_event_id,
     ) == ("app-owner", "chat-owner", "owner", "AnswerFlow", "AnswerAgent", "result-1", "evt-owned")
     assert pm.save_workflow_feedback_render_receipt.await_count == 2
-    assert not harness.transport.pending_tool_call_responses["evt-owned"].done()
+    assert not harness.transport.pending_tool_call_responses[("chat-owner", "evt-owned")].done()
     assert harness.transport._buffered_tool_call_responses == {}
     pm.save_workflow_feedback_receipt.assert_not_awaited()
 
@@ -117,14 +117,15 @@ async def test_visible_feedback_ack_fails_closed(harness, fault):
     elif fault == "missing_app":
         harness.session.pop("app_id")
     elif fault == "wrong_primitive":
-        harness.transport._ui_tool_metadata["evt-owned"]["workflow_primitive"] = "other"
+        harness.transport._ui_tool_metadata[("chat-owner", "evt-owned")]["workflow_primitive"] = "other"
     elif fault == "missing_outcome":
-        harness.transport._ui_tool_metadata["evt-owned"].pop("outcome_id")
+        harness.transport._ui_tool_metadata[("chat-owner", "evt-owned")].pop("outcome_id")
     elif fault == "unknown_event":
         body["event_id"] = "unknown"
     elif fault == "rebound":
         async def rebind(*args, **kwargs):
-            harness.transport._ui_tool_metadata["evt-owned"]["chat_id"] = "other"
+            moved = harness.transport._ui_tool_metadata.pop(("chat-owner", "evt-owned"))
+            harness.transport._ui_tool_metadata[("other", "evt-owned")] = {**moved, "chat_id": "other"}
             return harness.session
         harness.lookup.side_effect = rebind
     elif fault == "forged_identity":
@@ -135,13 +136,13 @@ async def test_visible_feedback_ack_fails_closed(harness, fault):
     assert response.status_code == (400 if fault == "forged_identity" else 404)
     if fault != "storage_failure":
         pm.save_workflow_feedback_render_receipt.assert_not_awaited()
-    assert not harness.transport.pending_tool_call_responses["evt-owned"].done()
+    assert not harness.transport.pending_tool_call_responses[("chat-owner", "evt-owned")].done()
     pm.save_workflow_feedback_receipt.assert_not_awaited()
 
 
 async def test_feedback_http_persists_scope_and_response_before_releasing_waiter(harness):
     pm = _feedback_pending(harness)
-    future = harness.transport.pending_tool_call_responses["evt-owned"]
+    future = harness.transport.pending_tool_call_responses[("chat-owner", "evt-owned")]
 
     async def save(receipt):
         assert not future.done()
@@ -174,8 +175,8 @@ async def test_feedback_rejection_keeps_interaction_pending(harness, fault):
     else:
         pm.save_workflow_feedback_receipt.return_value = False
     assert (await _http(harness, response_data=response_data)).status_code == 404
-    assert not harness.transport.pending_tool_call_responses["evt-owned"].done()
-    assert not harness.transport._is_tool_call_response_resolved("evt-owned")
+    assert not harness.transport.pending_tool_call_responses[("chat-owner", "evt-owned")].done()
+    assert not harness.transport._is_tool_call_response_resolved(("chat-owner", "evt-owned"))
 
 
 def _evidence(**updates):
