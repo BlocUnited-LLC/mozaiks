@@ -15,6 +15,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Studio keeps global portfolio navigation separate from selected-app tools.
+  Existing app-picker deep links still work. Revenue lists customer revenue by
+  app with unavailable values shown explicitly. Each app overview shows its
+  recorded build phase linking to Project, without a repeated administration menu.
+
 - Mozaiks installs exclude Tree-sitter 0.26.0, which can crash the process
   while building a workspace dependency graph on Windows and Linux.
 - Notifications pack `0.1.16`: an email the SMTP server accepted no longer

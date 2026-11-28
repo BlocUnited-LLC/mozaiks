@@ -182,14 +182,14 @@ const columns = [
     header: 'Cost',
     width: '10%',
     cellClassName: 'text-muted-foreground tabular-nums',
-    render: (row) => formatCurrencyValue(row.cost, '$0.00'),
+    render: (row) => formatCurrencyValue(row.cost, 'Unavailable'),
   },
   {
     id: 'avg_cost',
     header: 'Avg cost/chat',
     width: '12%',
     cellClassName: 'text-muted-foreground tabular-nums',
-    render: (row) => formatCurrencyValue(row.avgCost, '$0.00'),
+    render: (row) => formatCurrencyValue(row.avgCost, 'Unavailable'),
   },
   {
     id: 'action',
@@ -248,7 +248,7 @@ function UsageMobileItem({ row, onDashboard }) {
         </div>
         <div>
           <div className="text-[12px] text-muted-foreground">Cost</div>
-          <div className="mt-1 font-medium text-foreground tabular-nums">{formatCurrencyValue(row.cost, '$0.00')}</div>
+          <div className="mt-1 font-medium text-foreground tabular-nums">{formatCurrencyValue(row.cost, 'Unavailable')}</div>
         </div>
         <div>
           <div className="text-[12px] text-muted-foreground">Tokens</div>
@@ -256,7 +256,7 @@ function UsageMobileItem({ row, onDashboard }) {
         </div>
         <div>
           <div className="text-[12px] text-muted-foreground">Avg/chat</div>
-          <div className="mt-1 font-medium text-foreground tabular-nums">{formatCurrencyValue(row.avgCost, '$0.00')}</div>
+          <div className="mt-1 font-medium text-foreground tabular-nums">{formatCurrencyValue(row.avgCost, 'Unavailable')}</div>
         </div>
       </div>
     </article>
@@ -266,6 +266,8 @@ function UsageMobileItem({ row, onDashboard }) {
 export default function WorkspaceUsagePage() {
   const navigate = useNavigate()
   const { apps, workspaceRuns, workspaceUsage, loading, error, dataMode } = useWorkspaceStudioData('Workspace usage could not be loaded.')
+  const costUnavailable = workspaceUsage?.pricing_health?.status === 'unpriced_models'
+    || (workspaceUsage?.cost_source === 'not_configured' && Number(workspaceUsage?.totals?.llm_calls || 0) > 0)
   const [searchValue, setSearchValue] = useState('')
   const [page, setPage] = useState(1)
   const [chartMetric, setChartMetric] = useState('cost')
@@ -281,8 +283,15 @@ export default function WorkspaceUsagePage() {
   }, [apps])
 
   const appRows = useMemo(
-    () => buildAppRows(workspaceUsage, appNameMap, dataMode === 'demo' ? workspaceRuns : []),
-    [workspaceUsage, workspaceRuns, appNameMap, dataMode],
+    () => {
+      const unpricedAppIds = new Set((workspaceUsage?.events || [])
+        .filter(event => event.cost_source === 'not_configured').map(event => event.app_id))
+      const costScopeUnknown = costUnavailable && unpricedAppIds.size === 0
+      return buildAppRows(workspaceUsage, appNameMap, dataMode === 'demo' ? workspaceRuns : []).map(row => (
+        (costScopeUnknown || unpricedAppIds.has(row.id)) && row.llmCalls > 0 ? { ...row, cost: null, avgCost: null } : row
+      ))
+    },
+    [workspaceUsage, workspaceRuns, appNameMap, dataMode, costUnavailable],
   )
   const openDashboard = (row) => {
     if (!row?.id) return
@@ -312,16 +321,16 @@ export default function WorkspaceUsagePage() {
     [workspaceUsage, workspaceRuns, dataMode],
   )
   const trendData = useMemo(
-    () => buildUsageTrendSeries(usageRows, chartMetric).map((point) => ({
+    () => buildUsageTrendSeries(chartMetric === 'cost' && costUnavailable ? [] : usageRows, chartMetric).map((point) => ({
       ...point,
       extras: [
         { label: 'Date', value: point.detail || point.label },
-        { label: 'Cost', value: formatCurrencyValue(point.cost, '$0.0000') },
+        { label: 'Cost', value: formatCurrencyValue(costUnavailable ? null : point.cost, 'Unavailable') },
         { label: 'Tokens', value: formatCompactNumber(point.tokens, '0') },
         { label: 'Chats', value: String(point.runs) },
       ],
     })),
-    [usageRows, chartMetric],
+    [usageRows, chartMetric, costUnavailable],
   )
   const activeAppCount = appRows.filter((row) => row.totalTokens > 0 || row.cost > 0 || row.runs > 0).length
   const topApp = appRows.find((row) => row.totalTokens > 0 || row.cost > 0 || row.runs > 0)
@@ -340,7 +349,7 @@ export default function WorkspaceUsagePage() {
   const chartConfig = {
     cost: {
       label: 'Total spend',
-      value: formatCurrencyValue(totalCost, 'Pending'),
+      value: formatCurrencyValue(costUnavailable ? null : totalCost, 'Unavailable'),
       detail: costDetail,
       formatPointValue: (value) => formatCurrencyValue(value, '$0.00'),
     },
@@ -365,12 +374,12 @@ export default function WorkspaceUsagePage() {
       id: 'top-app',
       label: 'Top app',
       value: topApp?.label || 'No usage yet',
-      detail: topApp ? `${formatCurrencyValue(topApp.cost, '$0.00')} across ${formatCompactNumber(topApp.runs, '0')} chats` : 'Start a chat to populate this view.',
+      detail: topApp ? `${formatCurrencyValue(topApp.cost, 'Unavailable')} across ${formatCompactNumber(topApp.runs, '0')} chats` : 'Start a chat to populate this view.',
     },
   ]
 
   if (loading) return <StudioLoadingState label="Loading workspace usage…" />
-  if (error) return <StudioErrorState title="Workspace Token Usage Unavailable" message={error} />
+  if (error || !workspaceUsage) return <WorkspaceLayout><StudioErrorState title="Workspace Token Usage Unavailable" message={error || 'Usage records could not be loaded.'} /></WorkspaceLayout>
 
   return (
     <WorkspaceLayout>
@@ -401,10 +410,10 @@ export default function WorkspaceUsagePage() {
           )}
         />
 
-        {costSource === 'not_configured' && totalCost === 0 && (
+        {costUnavailable && (
           <Alert
             variant="warning"
-            message="Cost estimates show $0.00 because one or more models are not priced. Refresh the provider catalog or set a pricing override."
+            message="Cost is unavailable because one or more recorded models are not priced. Refresh the provider catalog or set a pricing override."
           />
         )}
 

@@ -16,6 +16,7 @@ import { lazy } from 'react'
 const StudioPage        = lazy(() => import('./pages/StudioPage.jsx'))
 const AppsPage           = lazy(() => import('./pages/AppsPage.jsx'))
 const WorkspacePerformancePage   = lazy(() => import('./pages/WorkspacePerformancePage.jsx'))
+const WorkspaceRevenuePage = lazy(() => import('./pages/WorkspaceRevenuePage.jsx'))
 const WorkspaceUsagePage         = lazy(() => import('./pages/WorkspaceUsagePage.jsx'))
 const WorkspaceAIModelsPage = lazy(() => import('./pages/WorkspaceAIModelsPage.jsx'))
 const WorkspaceIntegrationsPage  = lazy(() => import('./pages/WorkspaceIntegrationsPage.jsx'))
@@ -50,6 +51,10 @@ export function registerAdminComponents(registerComponent) {
     description: 'Portfolio performance surface — revenue and user analytics across all apps with attention insights and per-app drill-down.',
   })
 
+  registerComponent('WorkspaceRevenuePage', WorkspaceRevenuePage, {
+    description: 'Customer revenue by app in the authorized portfolio.',
+  })
+
   registerComponent('WorkspaceUsagePage', WorkspaceUsagePage, {
     description: 'Workspace usage surface — portfolio-level usage, capacity, and value trends across all apps.',
   })
@@ -71,7 +76,7 @@ export function registerAdminComponents(registerComponent) {
   })
 
   registerComponent('AppOverviewPage', AppOverviewPage, {
-    description: 'App overview surface — shows app intent, readiness, and the next recommended build step.',
+    description: 'App overview surface — shows app identity, recorded build phase, and available metrics.',
     override: true,
   })
 

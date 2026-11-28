@@ -113,16 +113,14 @@ def test_app_overview_page_fetches_summary_endpoint() -> None:
     hook_source = _read("factory_app/app/admin/pages/useAppStudioData.js")
     assert "/api/studio/overview" in hook_source
     assert "App Overview" in source
-    assert "buildDashboardMetrics" in source
     assert "BusinessSnapshotPanel" not in source
     assert "OperationalHealthPanel" not in source
     assert "ConnectedServicesPanel" not in source
     assert "useAppIntegrationDeclarations" not in source
     assert "getAppJourneyLabel" not in source
-    assert "getLifecycleGuidance" in source
     assert "WorkspaceLayout" in source
-    assert "nextStep={nextStep}" in source
-    assert "action={primaryAction}" in source
+    assert "Open Project:" in source
+    assert "current_build_run" in source
     assert "SurfaceCard accent" not in source
     assert "AppIdentityMark" in chrome_source
     assert "getAppLogoSrc" in chrome_source
@@ -130,7 +128,8 @@ def test_app_overview_page_fetches_summary_endpoint() -> None:
     assert "AppDashboardBanner" in chrome_source
     assert "App description is not available." in chrome_source
     assert "App description appears after the concept brief is captured." not in chrome_source
-    assert "showBanner" in source
+    assert "NextStepCallout" not in source
+    assert "AppIntelligencePanel" not in source
     assert "if (demoMode && isStudioDemoApp(appId))" in hook_source
     assert "build_registry_id=${encodeURIComponent(buildRegistryId)}" in hook_source
     assert "/api/studio/overview?${buildScope}" in hook_source

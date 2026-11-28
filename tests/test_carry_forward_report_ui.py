@@ -5,46 +5,7 @@ These tests check static source content only — no runtime imports, no JSX
 rendering, no side effects.  This follows the same pattern used for other
 UI contract tests in this repo (test_admin_ui_two_tier_contract.py).
 
-Coverage:
-
- CarryForwardReportPanel (full panel — AppOverviewPage, 13 tests):
-  1.  CarryForwardReportPanel.jsx file exists
-  2.  Panel and StatusPill imported from StudioShared
-  3.  No hardcoded hex/rgb/hsl colors
-  4.  No local primitive clones
-  5.  AppOverviewPage imports CarryForwardReportPanel
-  6.  AppOverviewPage mounts CarryForwardReportPanel when cfReport present
-  7.  Component returns null when report absent
-  8.  preserved_paths count rendered
-  9.  Conflicts shown with generated-output-wins explanation
- 10.  Workspace-unavailable warning state
- 11.  Backend-not-copied notice
- 12.  Sensitive path redaction
- 13.  Semantic Tailwind token classes
-
- CarryForwardReportSummary (compact — AppBuildReviewPage, 10 tests):
- 14.  CarryForwardReportSummary.jsx file exists
- 15.  StatusPill imported from StudioShared (no Panel — compact)
- 16.  No hardcoded hex/rgb colors
- 17.  No local primitive clones
- 18.  Returns null when report absent
- 19.  Renders reused_modules and dropped_modules
- 20.  Conflict count with generated-output-wins language
- 21.  Workspace-unavailable warning state
- 22.  Backend-not-copied notice
- 23.  Sensitive path redaction
-
- AppBuildReviewPage (build review, 10 tests):
- 24.  AppBuildReviewPage.jsx file exists
- 25.  Imports CarryForwardReportSummary
- 26.  Conditionally mounts CarryForwardReportSummary when cfReport present
- 27.  Shows "No carry-forward" notice when report absent
- 28.  Imports from StudioShared
- 29.  No hardcoded colors
- 30.  Uses buildHistory from snapshot
- 31.  AppOverviewPage carry-forward behavior still intact (regression)
- 32.  StudioPage.jsx routes /activity to AppBuildReviewPage
- 33.  admin/index.js registers AppBuildReviewPage
+Carry-forward details belong to build review. The app overview stays concise.
 """
 from __future__ import annotations
 
@@ -56,7 +17,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 _PANEL_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "CarryForwardReportPanel.jsx"
 _SUMMARY_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "CarryForwardReportSummary.jsx"
 _BUILD_REVIEW_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "AppBuildReviewPage.jsx"
-_OVERVIEW_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "AppOverviewPage.jsx"
 _INDEX_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "index.js"
 
 
@@ -72,12 +32,6 @@ def _build_review_src() -> str:
     return _BUILD_REVIEW_PATH.read_text(encoding="utf-8")
 
 
-def _overview_src() -> str:
-    return _OVERVIEW_PATH.read_text(encoding="utf-8")
-
-
-def _overview_src() -> str:
-    return _OVERVIEW_PATH.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -154,30 +108,6 @@ def test_panel_no_local_primitive_clones():
         assert decl not in src, (
             f"CarryForwardReportPanel must not locally define shared primitive: {decl!r}"
         )
-
-
-# ---------------------------------------------------------------------------
-# 5 & 6. AppOverviewPage wires the panel
-# ---------------------------------------------------------------------------
-
-def test_overview_imports_carry_forward_report_panel():
-    src = _overview_src()
-    assert "CarryForwardReportPanel" in src, (
-        "AppOverviewPage must import CarryForwardReportPanel"
-    )
-
-
-def test_overview_mounts_carry_forward_report_panel_conditionally():
-    src = _overview_src()
-    # The panel must be conditionally rendered when cfReport is present
-    assert "CarryForwardReportPanel" in src
-    # A conditional guard (cfReport && ...) must be present
-    assert "cfReport" in src, (
-        "AppOverviewPage must extract cfReport from latestArtifact commit_metadata"
-    )
-    assert "carry_forward_report" in src, (
-        "AppOverviewPage must reference carry_forward_report key from artifact metadata"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -541,19 +471,6 @@ def test_build_review_page_uses_build_history():
     assert "buildHistory" in src, (
         "AppBuildReviewPage must use buildHistory from snapshot"
     )
-
-
-# ---------------------------------------------------------------------------
-# 31. AppOverviewPage carry-forward behavior still intact (regression)
-# ---------------------------------------------------------------------------
-
-def test_overview_carry_forward_panel_still_mounted():
-    src = _overview_src()
-    assert "CarryForwardReportPanel" in src, (
-        "AppOverviewPage must still mount CarryForwardReportPanel (regression)"
-    )
-    assert "cfReport" in src
-    assert "carry_forward_report" in src
 
 
 # ---------------------------------------------------------------------------

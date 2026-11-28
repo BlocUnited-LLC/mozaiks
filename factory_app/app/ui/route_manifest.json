@@ -64,10 +64,23 @@
       }
     },
     {
+      "path": "/portfolio/revenue",
+      "component": "WorkspaceRevenuePage",
+      "label": "Revenue",
+      "order": 6,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresAuth": true,
+        "title": "Revenue by app",
+        "appShell": true,
+        "navigation": { "group": "workspace-studio", "scope": "local", "icon": "billing" }
+      }
+    },
+    {
       "path": "/usage",
       "component": "WorkspaceUsagePage",
       "label": "Token Usage",
-      "order": 6,
+      "order": 7,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -168,7 +181,7 @@
         "surfaces": ["studio"],
         "title": "App Overview",
         "appShell": true,
-        "ai_context": "The user is on the App Overview page in App Studio. It shows the app's identity, top-level KPIs, build state, and recent activity.",
+        "ai_context": "The user is on the selected app overview, with its identity, available metrics, and recorded build phase linking to Project.",
         "navigation": {
           "group": "app-studio",
           "scope": "local",

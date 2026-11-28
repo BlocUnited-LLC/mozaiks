@@ -28,6 +28,7 @@ import {
   withConnectorOverlay,
 } from './connectorStatusModel.js'
 import { studioFetch } from './studioApi.js'
+import PortfolioIntegrations from './PortfolioIntegrations.jsx'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 // How a service is classified (connected, needs attention, available) lives in
@@ -827,6 +828,8 @@ export default function WorkspaceIntegrationsPage() {
           title="Integrations"
           subtitle="Connect shared services once. Apps declare what they need, and this page shows only the setup that matters."
         />
+
+        <PortfolioIntegrations />
 
         <SummaryStrip items={summaryItems} />
 

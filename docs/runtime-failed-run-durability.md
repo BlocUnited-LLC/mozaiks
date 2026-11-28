@@ -77,7 +77,7 @@ Regression coverage and aligned test doubles:
 - `tests/test_runtime_websocket_contract.py`
 - `tests/test_lifecycle_identity_guard.py`
 - `tests/test_chat_execution_lease.py`
-- `tests/failed-run-status.test.mjs`
+- `web_shell/tests/adminPortalPanels.test.js`
 
 Contract documentation:
 
@@ -118,7 +118,7 @@ Report: `.local/failed-run-validation/consolidated-final-mongo.xml`.
   -q -o addopts='' --no-cov -p no:cacheprovider --tb=short --show-capture=no `
   '--basetemp=\\?\C:\Repos\BlocUnitedRepo\mozaiks\.local\worktrees\factory-repeatable-integration\.local\failed-run-validation\temp-final-2' `
   --junitxml=.local/failed-run-validation/consolidated-final-mongo.xml
-node --test tests/failed-run-status.test.mjs
+node --test web_shell/tests/adminPortalPanels.test.js
 ```
 
 JS: **4 passed**, using existing read-only esbuild/React packages to evaluate

@@ -14,11 +14,11 @@ test keeps the two lists equal.
 
 | Scope | Menu | Purpose |
 | --- | --- | --- |
-| Workspace Dashboard | My Apps `/apps`, Performance `/performance`, Token Usage `/usage`, Integrations `/integrations`, Support `/support`, AI models `/settings/ai-models` | Manage the portfolio: app records, cross-app performance and usage, shared provider setup, support activity, and the AI models builds may use. |
+| Workspace Dashboard | My Apps `/apps`, Performance `/performance`, Revenue `/portfolio/revenue`, Token Usage `/usage`, Integrations `/integrations`, Support `/support`, AI models `/settings/ai-models` | Manage the portfolio: app records, cross-app performance and usage, shared provider setup, support activity, and the AI models builds may use. |
 | App Dashboard | Overview, Revenue, Users, Project, Integrations, Launch, Billing, Token Usage, Health and Support, each under `/apps/:appId/...` | Manage one app. |
 
 In the workspace menu, **My Apps** lists the apps you own. **Performance** shows
-revenue and user metrics across those apps. Open an app's **Dashboard** to switch
+revenue and user metrics across those apps. **Revenue** lists customer revenue by app; it does not include personal wallet balances or hosted account billing. **Integrations** begins with each app's connections and build requirements, followed by shared service setup. Missing measurements and unpriced costs are shown as unavailable. Open an app's **Dashboard** to switch
 to that app's own sidebar. Selected-app tools are not repeated in the workspace
 menu. Existing `/apps?section=...` chooser links still resolve to the mounted,
 role-filtered app routes and use each app page's existing authorization checks.
@@ -66,7 +66,7 @@ Every Studio page should answer a concrete operator question:
 | Usage | Where are tokens and cost coming from across the workspace? |
 | Integrations | Which shared services are connected, which app-used services need setup, and what is available later? |
 | AI models | Which AI models may builds use, and which one is the default? |
-| Overview | What is happening with this app, and what should I do next? |
+| Overview | What is this app, what measurements are available, and which recorded build phase is it in? |
 | App Usage | Which chats and workflows are driving this app's tokens and cost? |
 | Health | Is anything wrong with this app's latest build, its runs, or its integrations? |
 | Support | Which support chats need a reply, which are being handled, and which are resolved? |

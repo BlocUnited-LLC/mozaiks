@@ -29,6 +29,13 @@ workspace:
           type: workspace_usage_summary
           title: Performance
 
+    - id: revenue
+      label: Revenue
+      route: /portfolio/revenue
+      icon: billing
+      order: 15
+      description: Customer revenue by app in the authorized portfolio.
+
     - id: usage
       label: Usage
       route: /usage
