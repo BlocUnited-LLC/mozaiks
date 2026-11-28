@@ -4,6 +4,7 @@ import { PageHeader, SummaryStrip } from '@mozaiks/chat-ui/ui'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ActionButton,
+  LinkButton,
   StatusPill,
   StudioErrorState,
   StudioInlineEmptyState,
@@ -28,6 +29,7 @@ import {
   withConnectorOverlay,
 } from './connectorStatusModel.js'
 import { studioFetch } from './studioApi.js'
+import PortfolioIntegrations from './PortfolioIntegrations.jsx'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 // How a service is classified (connected, needs attention, available) lives in
@@ -827,6 +829,10 @@ export default function WorkspaceIntegrationsPage() {
           title="Integrations"
           subtitle="Connect shared services once. Apps declare what they need, and this page shows only the setup that matters."
         />
+
+        <PortfolioIntegrations />
+
+        <LinkButton to="/settings/ai-models" variant="outline" size="sm">AI model settings</LinkButton>
 
         <SummaryStrip items={summaryItems} />
 

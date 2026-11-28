@@ -15,6 +15,26 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Saved workflow interviews retain the automatic tool's displayed question on
+  reload. Public text is stored once through the existing run transcript;
+  structured model output and interactive review cards keep their own paths.
+- Generated app operators can open only the app-local admin panels admitted by
+  their existing module permissions. Support staff get the configured inbox;
+  runtime and connected-backend administration remain admin-only. No roles or
+  action grants are added.
+- Selected-app Branding and Subscription settings reuse Factory refinement.
+  Edits carry the displayed saved build and reject stale or cross-app selections.
+  Subscription plans come from that build's catalog and reviewed inputs; edits
+  stage for review. Pending edits can be cancelled, active edits paused, and saved
+  sessions resumed with a return to the same app's settings.
+
+- Studio keeps global portfolio navigation separate from selected-app tools.
+  Existing app-picker deep links still work. Revenue lists customer revenue by
+  app with unavailable values shown explicitly. Each app overview shows its
+  recorded build phase linking to Project, without a repeated administration menu.
+  The overview reads only its displayed data. Personal Support stays in Profile,
+  and AI model settings are linked from Integrations.
+
 - Mozaiks installs exclude Tree-sitter 0.26.0, which can crash the process
   while building a workspace dependency graph on Windows and Linux.
 - Notifications pack `0.1.16`: an email the SMTP server accepted no longer

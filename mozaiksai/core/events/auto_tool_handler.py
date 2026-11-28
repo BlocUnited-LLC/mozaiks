@@ -289,7 +289,14 @@ class AutoToolEventHandler:
                     "agent_name": agent_name,
                 }, pattern_context_ref)
                 logger.debug("[AUTO_TOOL] Prepared kwargs for %s: %s", binding.tool_name, {k: v for k, v in kwargs.items() if k != 'context_variables'})
-                await self._emit_tool_call(binding, agent_name, chat_id, kwargs, turn_key)
+                if (isinstance(kwargs.get("agent_message"), str) and not binding.self_emits_ui
+                        and not binding.ui_config.get("component")):
+                    await self._emit_tool_call(
+                        binding, agent_name, chat_id, kwargs, turn_key,
+                        app_id=context.get("app_id"), persist_agent_message=True,
+                    )
+                else:
+                    await self._emit_tool_call(binding, agent_name, chat_id, kwargs, turn_key)
                 result_payload, status = await self._invoke_tool(binding, kwargs)
                 # TOOL_TERMINAL: recorded SYNCHRONOUSLY before the next
                 # cancellable await, with detached facts only. A truthful tool
@@ -780,6 +787,9 @@ class AutoToolEventHandler:
         chat_id: str | None,
         kwargs: dict[str, Any],
         turn_key: str,
+        *,
+        app_id: str | None = None,
+        persist_agent_message: bool = False,
     ) -> None:
         if not chat_id:
             return
@@ -790,6 +800,20 @@ class AutoToolEventHandler:
             return
         if not transport:
             return
+        agent_message = kwargs.get("agent_message")
+        if (persist_agent_message and not binding.self_emits_ui and not binding.ui_config.get("component")
+                and isinstance(agent_message, str) and agent_message.strip()):
+            if not app_id:
+                raise ValueError("A visible auto-tool message requires its execution app")
+            # Raw structured output stays hidden. Save only the validated text
+            # this tool displays, before emitting it, so reconnect can replay it.
+            await AG2PersistenceManager().append_run_assistant_message(
+                chat_id=chat_id, app_id=app_id, content=agent_message.strip(), agent_name=agent_name,
+                metadata={"source": "auto_tool_agent_message", "presentation_only": True,
+                          "type": "tool_call_agent_message",
+                          "tool_call_id": turn_key},
+                idempotency_key=f"auto_tool_agent_message:{turn_key}",
+            )
         arg_payload = {k: serialize_event_content(v) for k, v in kwargs.items() if k != "context_variables"}
         try:
             await transport.send_event_to_ui(
@@ -829,7 +853,6 @@ class AutoToolEventHandler:
                 "mode": display_mode,
             },
         }
-        agent_message = kwargs.get("agent_message")
         if isinstance(agent_message, str) and agent_message.strip():
             event_payload["payload"]["agent_message"] = agent_message.strip()
         try:

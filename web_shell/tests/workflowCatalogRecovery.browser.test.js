@@ -23,6 +23,7 @@ test('a saved workflow opens after catalog discovery recovers', async t => {
       const auth = { getAccessToken: () => 'fixture', getCurrentUser: async () => ({id:'owner'}) };
       window.mozaiksAuth = auth;
       window.refreshCatalog = () => catalog.fetchWorkflowConfigs();
+      window.catalogDiscoverySettled = () => !catalog.fetchInProgress;
       const api = new WebSocketApiAdapter({baseUrl:location.origin, wsUrl:'ws://catalog.test', auth});
       createRoot(document.querySelector('main')).render(
         <BrowserRouter><NavigationProvider config={{appId:'sample', chat_startup_mode:'workflow', entry_point:'Study'}}>
@@ -88,6 +89,8 @@ test('a saved workflow opens after catalog discovery recovers', async t => {
       await page.addScriptTag({type:'module',content:bundle.outputFiles.find(file => file.path.endsWith('.js')).text});
       await expect.poll(() => errors[0] || discoveryFailed).toBe(true);
       assert.deepEqual(sockets, []);
+      // The failure log precedes fetch cleanup; recover after the failed discovery has settled.
+      await expect.poll(() => page.evaluate(() => window.catalogDiscoverySettled())).toBe(true);
       if (recovery === 'Reconnect') {
         const reconnect = page.getByRole('button', {name:'Reconnect'});
         await reconnect.evaluate(button => button.addEventListener('click', () => {

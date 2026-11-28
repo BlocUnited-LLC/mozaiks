@@ -56,7 +56,14 @@ def _requested_app_source_id(request: Any) -> str | None:
 
 def revision_app_source_id(context_variables: Any) -> str | None:
     """The explicitly pinned implementation or the app selected in the original request."""
+    from factory_app.workflows._shared.subscription_revision import subscription_revision_baseline
+
     selected = _requested_app_source_id(context_variables.get("refinement_request_meta"))
+    baseline = subscription_revision_baseline(context_variables)
+    if baseline is not None:
+        if selected and selected != baseline.app_bundle_id:
+            raise ValueError("revision_baseline_selection_mismatch")
+        selected = baseline.app_bundle_id
     pinned = context_variables.get("revision_source_artifact_version_id")
     if selected and pinned and selected != pinned:
         raise ValueError("revision_baseline_selection_mismatch")
@@ -161,6 +168,17 @@ async def read_revision_source(
         app_id=binding.target_app_id, build_record_id=artifact_id,
     )
     artifact = _require_owned_record(context_variables, artifact, artifact_id)
+    from factory_app.workflows._shared.subscription_revision import subscription_revision_baseline
+    from mozaiksai.core.artifacts.models import resolve_canonical_bundle_entry
+    from mozaiksai.core.session.build_binding import RunBuildBinding
+
+    baseline = subscription_revision_baseline(context_variables)
+    if baseline is not None:
+        metadata = artifact.commit_metadata.metadata
+        original = RunBuildBinding.model_validate({key: metadata.get(key) for key in RunBuildBinding.model_fields})
+        if (artifact.id != baseline.app_bundle_id or original != baseline.app_binding
+                or resolve_canonical_bundle_entry(artifact).sha256 != baseline.archive_sha256):
+            raise ValueError("revision_baseline_selection_mismatch")
     if require_accepted or context_variables.get("workflow_sequence") == "design_revision":
         _require_design_revision_baseline(artifact)
 

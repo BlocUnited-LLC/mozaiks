@@ -1,4 +1,12 @@
 definitions:
+  subscription_revision_baseline:
+    type: object
+    authority_class: closed_writer_routing_state
+    writer_ids: [transition_router]
+    persisted: true
+    model_visible: false
+    description: Exact server-admitted selected app catalog and reviewed inputs, relayed only through its bounded subscription revision.
+    source: {type: state, default: null}
   design_docs_artifact_version_id:
     type: string
     authority_class: closed_writer_routing_state
@@ -258,6 +266,7 @@ definitions:
     type: string
     description: Latest backend design document from DesignDocs.
     source:
+      snapshot: {context_key: subscription_revision_baseline, path: context.backend_design_document}
       type: data_reference
       database_name: mozaiksai
       collection: DesignDocuments
@@ -272,6 +281,7 @@ definitions:
     type: object
     description: Canonical typed surface realization contract from DesignDocs.
     source:
+      snapshot: {context_key: subscription_revision_baseline, path: context.design_surface_map}
       type: data_reference
       database_name: mozaiksai
       collection: DesignDocuments
@@ -298,6 +308,7 @@ definitions:
     type: object
     description: Approved DesignDocs collection ownership and entity contract; determines canonical list/get action identifiers.
     source:
+      snapshot: {context_key: subscription_revision_baseline, path: context.data_contract}
       type: data_reference
       database_name: mozaiksai
       collection: DataContracts
@@ -310,6 +321,7 @@ definitions:
     type: object
     description: Typed ExperienceSpec from DesignDocs.
     source:
+      snapshot: {context_key: subscription_revision_baseline, path: context.experience_spec}
       type: data_reference
       database_name: mozaiksai
       collection: DesignDocuments

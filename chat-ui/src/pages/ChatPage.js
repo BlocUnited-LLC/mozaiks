@@ -496,6 +496,8 @@ const ChatPage = () => {
       const nextEventType = message?.metadata?.event_type || null;
       const previousSource = String(previous?.metadata?.source || '').trim().toLowerCase();
       const nextSource = String(message?.metadata?.source || '').trim().toLowerCase();
+      const previousToolCallId = previous?.metadata?.type === 'tool_call_agent_message' ? previous.metadata.tool_call_id : null;
+      const nextToolCallId = message?.metadata?.type === 'tool_call_agent_message' ? message.metadata.tool_call_id : null;
       if (
         previous
         && previousSender === 'agent'
@@ -511,6 +513,7 @@ const ChatPage = () => {
         && String(previous?.agentName || previous?.agent_name || '').trim() === String(message?.agentName || message?.agent_name || '').trim()
         && String(previous?.content || '').trim() === String(message?.content || '').trim()
         && previousSource === nextSource
+        && !(previousToolCallId && nextToolCallId && previousToolCallId !== nextToolCallId)
       ) {
         continue;
       }
@@ -622,6 +625,9 @@ const ChatPage = () => {
     const messageKey = (message) => {
       const metadata = message?.metadata && typeof message.metadata === 'object' ? message.metadata : {};
       const toolCall = message?.toolCall && typeof message.toolCall === 'object' ? message.toolCall : {};
+      if (metadata.type === 'tool_call_agent_message' && typeof metadata.tool_call_id === 'string' && metadata.tool_call_id) {
+        return ['message_id', `${metadata.tool_call_id}-agent-message`].join(':');
+      }
       const replayIndex = stableNumber(message?.replayIndex ?? metadata.replayIndex ?? metadata.index);
       const serverSequence = stableNumber(message?.serverSequence ?? metadata.serverSequence ?? metadata.sequence);
       if (replayIndex !== null) {
@@ -2987,11 +2993,15 @@ const ChatPage = () => {
           metadataSource?.source === 'workflow_user' ||
           Boolean(metadataSource?.input_request_id)
         );
+        const toolMessageId = !isGeneralUserEcho && !isWorkflowUserMessage
+          && metadataSource?.type === 'tool_call_agent_message'
+          && typeof metadataSource.tool_call_id === 'string' && metadataSource.tool_call_id
+          ? `${metadataSource.tool_call_id}-agent-message` : null;
         if (conversationMode === 'ask' && metadataSource?.source !== 'general_agent') {
           if (content.trim()) {
             const displayAsWorkflowUser = isWorkflowUserMessage;
             cacheWorkflowTranscriptMessage({
-              id: `text-${Date.now()}`,
+              id: toolMessageId || `text-${Date.now()}`,
               sender: displayAsWorkflowUser ? 'user' : 'agent',
               agentName: displayAsWorkflowUser ? 'You' : extractAgentName(data),
               content,
@@ -3047,7 +3057,7 @@ const ChatPage = () => {
         }
         // Enhanced suppression for assistant parroting user input (including minor variation)
         try {
-          if (content) {
+          if (content && !toolMessageId) {
             const msgs = messagesRef.current;
             if (msgs.length) {
               const lastUserIdx = [...msgs].reverse().findIndex(m => m && m.sender === 'user');
@@ -3079,7 +3089,7 @@ const ChatPage = () => {
         const displayAsUser = isGeneralUserEcho || isWorkflowUserMessage;
         const agentName = displayAsUser ? 'You' : extractAgentName(data);
         const computedSender = displayAsUser ? 'user' : 'agent';
-        if (!displayAsUser) {
+        if (!displayAsUser && !toolMessageId) {
           const normalizedContent = String(content || '').trim();
           const recent = messagesRef.current[messagesRef.current.length - 1];
           const recentContent = String(recent?.content || '').trim();
@@ -3105,15 +3115,29 @@ const ChatPage = () => {
           }
           const filtered = prev.filter(m => !m.isThinking);
           const updated = [...filtered];
+          if (toolMessageId) {
+            const existingIndex = updated.findIndex(message => message.id === toolMessageId);
+            if (existingIndex !== -1) {
+              const existing = updated[existingIndex];
+              updated[existingIndex] = {
+                ...existing,
+                content,
+                metadata: { ...existing.metadata, ...metadataSource },
+                replayIndex: replayIndex ?? existing.replayIndex ?? null,
+                serverSequence: serverSequence ?? existing.serverSequence ?? null,
+              };
+              return updated;
+            }
+          }
           
-          if (updated.length) {
+          if (updated.length && !toolMessageId) {
             const last = updated[updated.length-1];
             if (last.__streaming && last.agentName === agentName) {
               last.isStreaming = false; delete last.__streaming; if(!last.content.endsWith(content)) last.content+=content; return updated;
             }
           }
 
-          if (isReplayEvent) {
+          if (isReplayEvent && !toolMessageId) {
             const normalizedContent = String(content).trim();
             for (let i = updated.length - 1; i >= 0; i -= 1) {
               const candidate = updated[i];
@@ -3146,7 +3170,7 @@ const ChatPage = () => {
           const structuredSchema = data.structured_schema || null; // schema describing structuredOutput
           const isVisual = !!data.is_visual;
           const isToolAgent = !!data.is_tool_agent;
-          if (computedSender === 'agent' && shouldSuppressConsecutiveAssistantDuplicate(updated, {
+          if (computedSender === 'agent' && !toolMessageId && shouldSuppressConsecutiveAssistantDuplicate(updated, {
             agentName,
             content,
             source: metadataSource?.source || null,
@@ -3154,7 +3178,7 @@ const ChatPage = () => {
             return updated;
           }
           updated.push({
-            id:`text-${Date.now()}`,
+            id: toolMessageId || `text-${Date.now()}`,
             sender: computedSender,
             agentName,
             content,

@@ -664,6 +664,7 @@ async def get_shell_config(request: Request, surface: str | None = None):
 
 @app.get("/api/me")
 async def get_current_user_profile(
+    request: Request,
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_any_auth),
 ):
@@ -674,7 +675,17 @@ async def get_current_user_profile(
     roles = list(principal.roles or [])
     if is_app_admin(principal) and "admin" not in roles:
         roles.append("admin")
-    return {**profile, "roles": roles}
+    from mozaiksai.core.admin.router import build_admin_config
+
+    try:
+        admin_entry = build_admin_config(principal, app=request.app)["entry_path"]
+    except HTTPException:
+        admin_entry = None
+    return {
+        **profile, "roles": roles, "admin_entry": admin_entry,
+        "app_id": resolved_app_id, "tenant_id": principal.tenant_id,
+        "workspace_id": principal.workspace_id, "scopes": list(principal.scopes),
+    }
 
 
 class ProfileUpdateRequest(BaseModel):

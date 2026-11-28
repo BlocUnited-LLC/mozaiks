@@ -11,7 +11,9 @@ The /api/admin/config response shape:
   {
     "pages": [...],          # from admin_registry.yaml
     "runtime_panels": [...], # framework panels, each bound to a standard page
-    "module_panels": [...],  # discovered from modules/{module}/contracts/admin.yaml
+    "module_panels": [...],  # permission-filtered module metadata for app staff
+    "is_admin": bool,        # whether framework and connected-backend admin may render
+    "entry_path": str | None, # first visible app-local portal destination
   }
 """
 from __future__ import annotations

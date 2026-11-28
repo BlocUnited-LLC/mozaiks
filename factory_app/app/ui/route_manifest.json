@@ -64,10 +64,23 @@
       }
     },
     {
+      "path": "/portfolio/revenue",
+      "component": "WorkspaceRevenuePage",
+      "label": "Revenue",
+      "order": 6,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresAuth": true,
+        "title": "Revenue by app",
+        "appShell": true,
+        "navigation": { "group": "workspace-studio", "scope": "local", "icon": "billing" }
+      }
+    },
+    {
       "path": "/usage",
       "component": "WorkspaceUsagePage",
       "label": "Token Usage",
-      "order": 6,
+      "order": 7,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
@@ -112,6 +125,7 @@
         "ai_context": "The user is on the workspace AI models page. It sets which AI model Factory builds and refinements use by default, and which models may be chosen.",
         "navigation": {
           "group": "workspace-studio",
+          "include": false,
           "scope": "local",
           "icon": "settings"
         }
@@ -138,6 +152,7 @@
         ],
         "navigation": {
           "group": "workspace-studio",
+          "include": false,
           "scope": "local",
           "icon": "support"
         }
@@ -168,7 +183,7 @@
         "surfaces": ["studio"],
         "title": "App Overview",
         "appShell": true,
-        "ai_context": "The user is on the App Overview page in App Studio. It shows the app's identity, top-level KPIs, build state, and recent activity.",
+        "ai_context": "The user is on the selected app overview, with its identity, available metrics, and recorded build phase linking to Project.",
         "navigation": {
           "group": "app-studio",
           "scope": "local",
@@ -297,13 +312,26 @@
       }
     },
     {
+      "path": "/apps/:appId/branding",
+      "component": "AppBrandingPage",
+      "label": "Branding",
+      "order": 23,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresAuth": true,
+        "title": "Branding",
+        "appShell": true,
+        "navigation": { "group": "app-studio", "scope": "local", "icon": "palette" }
+      }
+    },
+    {
       "path": "/apps/:appId/billing",
       "component": "AppBillingPage",
-      "label": "Billing",
+      "label": "Subscription",
       "order": 28,
       "meta": {
         "surfaces": ["studio"],
-        "title": "Billing",
+        "title": "Subscription",
         "requiresAuth": true,
         "appShell": true,
         "navigation": {

@@ -464,6 +464,7 @@ class PlatformHookRegistry:
         build_registry_id: str | None = None,
         source_chat_id: str | None = None,
         session_fields: dict[str, Any] | None = None,
+        expected_baseline: Any = None,
     ) -> dict[str, Any]:
         """Resolve or revalidate trusted session fields, failing closed.
 
@@ -472,11 +473,14 @@ class PlatformHookRegistry:
         Resume validates persisted facts and cannot install a different value.
         Route resolves an owned target without creating a build or chat.
         """
-        from mozaiksai.core.session.build_binding import BuildTargetReference
+        from mozaiksai.core.session.build_binding import BuildTargetReference, ExpectedBuildBaseline
 
         reference = BuildTargetReference(
             build_registry_id=build_registry_id, source_chat_id=source_chat_id,
         )
+        baseline = ExpectedBuildBaseline.model_validate(expected_baseline) if expected_baseline is not None else None
+        if baseline is not None and (phase != "prepare" or trigger_source != "refinement"):
+            raise ValueError("A build baseline applies only to a new refinement")
         extra: dict[str, Any] = deepcopy(session_fields or {})
         for hook in self._chat_session_fields_hooks:
             try:
@@ -490,6 +494,7 @@ class PlatformHookRegistry:
                     build_registry_id=reference.build_registry_id,
                     source_chat_id=reference.source_chat_id,
                     session_fields=deepcopy(extra),
+                    **({"expected_baseline": baseline} if baseline is not None else {}),
                 )
                 if inspect.isawaitable(res):
                     res = await res

@@ -167,6 +167,7 @@ from mozaiksai.core.secrets.contract import is_secret_contract_path, validate_se
 from mozaiksai.core.session.build_binding import (
     BuildIdentity,
     BuildTargetReference,
+    ExpectedBuildBaseline,
     RetryPlanSource,
     RunBuildBinding,
 )
@@ -992,6 +993,19 @@ async def get_build_dashboard_link(
         except ValidationError as exc:
             raise HTTPException(status_code=404, detail="Build context not found") from exc
     path = portal.route.replace(":appId", dashboard_app_id)
+    if binding.phase == "refinement":
+        saved_session = await registry.repo.get_owned_settings_session(
+            app_id=host_app_id, owner_user_id=user_id, chat_id=chat_id,
+        )
+        try:
+            selection = SettingsRefinementSelection.model_validate(
+                (saved_session.get("trigger_meta") or {}).get("settings_selection") if isinstance(saved_session, dict) else None,
+            )
+        except ValidationError:
+            selection = None
+        if selection is not None and selection.build_registry_id == binding.build_registry_id:
+            suffix = "branding" if selection.kind == "branding" else "billing"
+            path = f"/apps/{dashboard_app_id}/{suffix}"
     if not path.startswith("/") or path.startswith("//") or "\\" in path:
         raise HTTPException(status_code=500, detail="App dashboard route is invalid")
     return {"path": path}
@@ -1359,15 +1373,28 @@ async def get_studio_analytics_metric_detail(
         raise HTTPException(status_code=500, detail="Failed to build metric detail") from exc
 
 
+class SettingsRefinementSelection(BaseModel):
+    """Untrusted exact-build selectors, revalidated through the owned registry."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["branding", "subscription"]
+    dashboard_app_id: BuildIdentity
+    build_registry_id: BuildIdentity
+    build_id: BuildIdentity
+    app_bundle_id: BuildIdentity
+    artifact_version_id: BuildIdentity
+
+
 @app.get("/api/studio/apps/{dashboard_app_id}/billing")
 async def get_dashboard_app_billing(
     dashboard_app_id: str, principal: UserPrincipal = Depends(require_studio_user),
 ) -> dict[str, Any]:
     record = await _get_owned_dashboard_app_record(principal, dashboard_app_id)
-    version = await _current_dashboard_app_bundle(record)
+    version, resume = await _settings_build_context(record, kind="subscription")
     result = {"dashboard_app_id": dashboard_app_id, "app_name": record.get("name") or record["app_id"]}
     if version is None:
-        return {**result, "status": "no_build"}
+        return {**result, "status": "edit_in_progress" if resume else "no_build", **({"resume": resume} if resume else {})}
     if version.validation_status != ArtifactValidationStatus.PASSED or version.app_validation_status != "passed":
         return {**result, "status": "validation_required"}
 
@@ -1392,6 +1419,8 @@ async def get_dashboard_app_billing(
     groups = catalog.products or [catalog]
     return {
         **result, "status": "configured", "artifact_version_id": version.id,
+        **({"resume": resume} if resume else {}),
+        **await _settings_refinement_projection(record, version, kind="subscription", dashboard_app_id=dashboard_app_id),
         "products": [{
             "product_id": getattr(group, "product_id", None),
             "label": group.label,
@@ -2304,6 +2333,164 @@ async def _current_dashboard_app_bundle(record: dict[str, Any]) -> BuildRecord |
     if binding.build_id != run.get("build_id"):
         raise HTTPException(status_code=409, detail="The app bundle does not match the current build.")
     return version
+
+
+async def _settings_refinement_inputs(
+    record: dict[str, Any], version: BuildRecord, *, kind: Literal["branding", "subscription"], dashboard_app_id: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    source = version
+    baseline = None
+    if version.build_key != "app_bundle" or version.commit_metadata.author_user_id != record["owner_user_id"]:
+        return None, None
+    if kind == "subscription":
+        from factory_app.workflows._shared.subscription_revision import (
+            capture_subscription_revision_baseline,
+        )
+
+        source_id = version.canonical_inputs_version.get("subscription_contract")
+        if not source_id:
+            return None, None
+        source = await get_artifact_store().get_build_record(app_id=record["app_id"], build_record_id=source_id)
+        if (source is None or source.id != source_id or source.app_id != record["app_id"]
+                or source.build_family != "subscription_contract"
+                or source.lifecycle_status not in {ArtifactLifecycleStatus.DRAFT, ArtifactLifecycleStatus.CURRENT}):
+            return None, None
+        baseline = await capture_subscription_revision_baseline(
+            app_record=version, owner_user_id=record["owner_user_id"], build_registry_id=record["build_registry_id"],
+            artifact_store=get_artifact_store(),
+        )
+    selection = SettingsRefinementSelection(
+        kind=kind, dashboard_app_id=dashboard_app_id, build_registry_id=record["build_registry_id"],
+        build_id=record["current_build_run"]["build_id"], app_bundle_id=version.id, artifact_version_id=source.id,
+    )
+    return {"selection": selection.model_dump(), "app_id": record["chat_app_id"],
+            "artifact_kind": source.build_family, "artifact_key": source.build_key}, baseline
+
+
+async def _settings_refinement_projection(
+    record: dict[str, Any], version: BuildRecord, *, kind: Literal["branding", "subscription"], dashboard_app_id: str,
+) -> dict[str, Any]:
+    try:
+        descriptor, _ = await _settings_refinement_inputs(record, version, kind=kind, dashboard_app_id=dashboard_app_id)
+    except (HTTPException, ValueError, OSError, ContentNotFoundError, zipfile.BadZipFile):
+        return {"settings_refinement_unavailable": "Editing requires this build's exact reviewed inputs. Open Project to review its saved design and contract."}
+    return {"settings_refinement": descriptor} if descriptor is not None else {}
+
+
+async def _settings_resume(record: dict[str, Any], *, kind: str) -> dict[str, str] | None:
+    run = record.get("current_build_run") or {}
+    chat_id = run.get("active_chat_id")
+    if (run.get("phase") != "refinement" or run.get("status") in {"active", "hosted", "deployed"}
+            or not chat_id or not run.get("active_workflow_id")):
+        return None
+    saved = await _get_app_registry_service().repo.get_owned_settings_session(
+        app_id=record["chat_app_id"], owner_user_id=record["owner_user_id"], chat_id=chat_id,
+    )
+    if not isinstance(saved, dict):
+        return None
+    try:
+        binding = RunBuildBinding.model_validate(saved.get("run_build_binding"))
+        selection = SettingsRefinementSelection.model_validate((saved.get("trigger_meta") or {}).get("settings_selection"))
+    except ValidationError:
+        return None
+    if (selection.kind != kind or selection.build_registry_id != record["build_registry_id"]
+            or binding.build_registry_id != record["build_registry_id"] or binding.target_app_id != record["app_id"]
+            or binding.build_id != run.get("build_id")):
+        return None
+    return {"chat_id": chat_id, "workflow_id": run["active_workflow_id"], "app_id": record["chat_app_id"], "kind": kind}
+
+
+async def _settings_build_context(
+    record: dict[str, Any], *, kind: str,
+) -> tuple[BuildRecord | None, dict[str, str] | None]:
+    resume = await _settings_resume(record, kind=kind)
+    try:
+        version = await _current_dashboard_app_bundle(record)
+    except HTTPException as exc:
+        # A live native stage can point at its theme/contract before emitting the app bundle.
+        if resume is None or exc.status_code != 409:
+            raise
+        version = None
+    return version, resume
+
+
+async def _require_settings_selection(
+    selection: SettingsRefinementSelection, *, principal: UserPrincipal, build_registry_id: str | None,
+    refinement_request: RefinementRequest,
+) -> dict[str, Any] | None:
+    if build_registry_id != selection.build_registry_id:
+        raise HTTPException(status_code=409, detail="The settings selection belongs to a different app.")
+    record = await _get_owned_dashboard_app_record(principal, selection.dashboard_app_id)
+    if (record.get("build_registry_id") != selection.build_registry_id
+            or record.get("app_id") != refinement_request.target_app_id):
+        raise HTTPException(status_code=409, detail="The settings selection belongs to a different app.")
+    run = record.get("current_build_run") or {}
+    if run.get("build_id") != selection.build_id or run.get("artifact_version_id") != selection.app_bundle_id:
+        raise HTTPException(status_code=409, detail="The selected build changed. Refresh settings before editing.")
+    version = await _current_dashboard_app_bundle(record)
+    if (version is None or version.validation_status != ArtifactValidationStatus.PASSED
+            or version.app_validation_status != "passed"):
+        raise HTTPException(status_code=409, detail="The selected build is unavailable. Refresh settings before editing.")
+    try:
+        descriptor, baseline = await _settings_refinement_inputs(record, version, kind=selection.kind, dashboard_app_id=selection.dashboard_app_id)
+    except (ValueError, OSError, ContentNotFoundError, zipfile.BadZipFile) as exc:
+        raise HTTPException(status_code=409, detail="The selected build's exact reviewed settings inputs are unavailable. Open Project to review them.") from exc
+    descriptor = descriptor or {}
+    if (descriptor.get("selection") != selection.model_dump()
+            or descriptor.get("artifact_kind") != refinement_request.build_family
+            or descriptor.get("artifact_key") != refinement_request.build_key
+            or selection.artifact_version_id != refinement_request.build_record_id):
+        raise HTTPException(status_code=409, detail="The selected settings artifact changed. Refresh settings before editing.")
+    return baseline
+
+
+class SettingsPauseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    chat_id: BuildIdentity
+    kind: Literal["branding", "subscription"]
+
+
+@app.post("/api/studio/apps/{dashboard_app_id}/refinement/pause")
+async def pause_dashboard_settings_refinement(
+    dashboard_app_id: str, body: SettingsPauseRequest,
+    principal: UserPrincipal = Depends(require_studio_user),
+) -> dict[str, str]:
+    from mozaiksai.core.transport.simple_transport import SimpleTransport
+
+    record = await _get_owned_dashboard_app_record(principal, dashboard_app_id)
+    resume = await _settings_resume(record, kind=body.kind)
+    if resume is None or resume["chat_id"] != body.chat_id:
+        raise HTTPException(status_code=409, detail="This edit is no longer the app's active settings session.")
+    try:
+        transport = await SimpleTransport.get_instance()
+        paused = transport is not None and await transport.pause_background_workflow(
+            chat_id=body.chat_id, reason="owner_settings_pause", wait_for_completion=True,
+        )
+    except Exception as exc:
+        logger.exception("Settings refinement pause failed")
+        raise HTTPException(status_code=503, detail="The edit could not be confirmed paused. Reload its saved session to check progress.") from exc
+    if not paused:
+        raise HTTPException(status_code=409, detail="No active edit was confirmed paused. Reload its saved session or review the completed build.")
+    return {"status": "paused", "chat_id": body.chat_id}
+
+
+@app.get("/api/studio/apps/{dashboard_app_id}/branding")
+async def get_dashboard_app_branding(
+    dashboard_app_id: str, principal: UserPrincipal = Depends(require_studio_user),
+) -> dict[str, Any]:
+    record = await _get_owned_dashboard_app_record(principal, dashboard_app_id)
+    version, resume = await _settings_build_context(record, kind="branding")
+    result = {"dashboard_app_id": dashboard_app_id, "app_name": record.get("name") or record["app_id"]}
+    if version is None:
+        return {**result, "status": "edit_in_progress" if resume else "no_build", **({"resume": resume} if resume else {})}
+    if version.validation_status != ArtifactValidationStatus.PASSED or version.app_validation_status != "passed":
+        return {**result, "status": "validation_required"}
+    return {
+        **result, "status": "configured", "artifact_version_id": version.id,
+        **({"resume": resume} if resume else {}),
+        "theme": await _saved_parent_theme(version),
+        **await _settings_refinement_projection(record, version, kind="branding", dashboard_app_id=dashboard_app_id),
+    }
 
 
 async def _app_bundle_download(version: BuildRecord, *, target_app_id: str, artifact_version_id: str) -> Response:
@@ -3477,6 +3664,7 @@ class WorkflowTriggerRequest(BaseModel):
     build_registry_id: BuildIdentity | None = None
     source_chat_id: BuildIdentity | None = None
     retry_failed: StrictBool = False
+    settings_selection: SettingsRefinementSelection | None = None
 
 
 @dataclass(slots=True, kw_only=True)
@@ -4527,6 +4715,13 @@ async def trigger_workflow(
 ):
     app_id, user_id = _resolve_studio_scope(principal, app_id=body.app_id, user_id=body.user_id)
     authorize_http_workflow_source_paths(body.context_variables, principal=principal)
+    settings_selection = body.settings_selection
+    settings_baseline = None
+    if settings_selection is not None and (
+        body.trigger_source != "refinement" or body.workflow_id or body.journey_id or body.retry_failed
+        or body.context_variables or body.action_id or body.artifact_key
+    ):
+        raise HTTPException(status_code=400, detail="Settings edits must use the app's bounded refinement entry.")
     retry_contribution = None
     if body.retry_failed:
         try:
@@ -4636,6 +4831,13 @@ async def trigger_workflow(
         except ValidationError as exc:
             raise HTTPException(status_code=400, detail="Invalid refinement_request") from exc
 
+        if refinement_request is not None and settings_selection is not None:
+            settings_baseline = await _require_settings_selection(
+                settings_selection, principal=principal, build_registry_id=build_registry_id,
+                refinement_request=refinement_request,
+            )
+            if trigger_payload.get("coding_request") not in (None, {}):
+                raise HTTPException(status_code=400, detail="Settings edits cannot override their saved file scope.")
         if refinement_request is None:
             raise HTTPException(
                 status_code=400,
@@ -4677,6 +4879,8 @@ async def trigger_workflow(
             key: value for key, value in refinement_request.extra.items()
             if key in {"change_request_id", "revision_id"}
         }
+        if settings_selection is not None:
+            safe_extra["settings_selection"] = settings_selection.model_dump()
         safe_extra["files_manifest"] = [entry.model_dump(mode="python") for entry in source_version.files_manifest]
         if metadata.get("workspace_dir"):
             safe_extra.update(lifecycle_state="review", bundle_path=metadata["workspace_dir"])
@@ -4707,6 +4911,9 @@ async def trigger_workflow(
                 change_request_id=persisted_change_request_id, revision_id=persisted_revision_id,
                 source_chat_id=body.source_chat_id,
             )
+            saved_selection = (pending_decision.get("metadata") or {}).get("settings_selection")
+            if saved_selection != (settings_selection.model_dump() if settings_selection is not None else None):
+                raise HTTPException(status_code=409, detail="The decision belongs to different app settings. Reopen those settings.")
             if body.context_variables != (pending_decision.get("context_variables") or {}):
                 raise HTTPException(status_code=409, detail="The decision belongs to a different request context. Submit the change again.")
             _require_server_proposed_scope(pending_decision, change, refinement_request)
@@ -4778,6 +4985,26 @@ async def trigger_workflow(
             or refinement_decision.workflow_sequence != pending_decision.get("journey_id")
         ):
             raise HTTPException(status_code=409, detail="The recommended workflow has changed. Submit the change again to review the new route.")
+        if settings_selection is not None:
+            allowed_routes = {"app_theme_revision": "ThemeCapture", "logo_revision": "BrandAssetGeneratorWorkflow"} if settings_selection.kind == "branding" else {
+                "subscription_patch": "SubscriptionContractDesigner", "subscription_revision": "SubscriptionContractDesigner",
+            }
+            color_patch = (settings_selection.kind == "branding"
+                           and refinement_decision.change_intent.branding_intent == "theme_color_patch"
+                           and refinement_decision.workflow_sequence == "app_revision"
+                           and (trigger_payload.get("coding_request") == {}
+                                or (action_id == "apply_proposed_scope" and explicit_paths == [APP_THEME_PATH]))
+                           and orchestration_control.coding_enabled())
+            if (refinement_decision.is_full_restart or (not color_patch and
+                    allowed_routes.get(refinement_decision.workflow_sequence) != refinement_decision.workflow_id)):
+                raise HTTPException(status_code=409, detail="This request needs a broader app change. Open Project to review that scope.")
+            settings_baseline = await _require_settings_selection(
+                settings_selection, principal=principal, build_registry_id=build_registry_id,
+                refinement_request=refinement_request,
+            )
+        if settings_baseline is not None:
+            refinement_decision.context_seed["subscription_revision_baseline"] = settings_baseline
+            refinement_decision.context_seed["design_docs_artifact_version_id"] = settings_baseline["design_record"]["_id"]
         harness_decision = orchestration_control.build_harness_decision(refinement_decision)
         branding_intent = refinement_decision.change_intent.branding_intent
         branding_workflow = branding_intent in {"visual_redesign", "new_logo"}
@@ -4787,7 +5014,8 @@ async def trigger_workflow(
                 detail="The selected files do not match the app's color settings. Clear the file limit or refine the selected files.",
             )
         allow_surface = (
-            not workflow_continuation
+            settings_selection is None
+            and not workflow_continuation
             and not branding_workflow
             and not refinement_decision.change_intent.requires_workflow_revision
             and orchestration_control.contract_surface_enabled()
@@ -4842,6 +5070,7 @@ async def trigger_workflow(
                     inline_binding = await _get_app_registry_service().begin_refinement_run(
                         owner_user_id=user_id, app_id=app_id, build_registry_id=build_registry_id,
                         workflow_name=refinement_decision.workflow_id,
+                        **({"expected_baseline": ExpectedBuildBaseline(build_id=settings_selection.build_id, artifact_version_id=settings_selection.app_bundle_id)} if settings_selection else {}),
                     )
                     if refinement_request.refinement_model is not None:
                         inline_binding = inline_binding.model_copy(update={
@@ -4904,6 +5133,11 @@ async def trigger_workflow(
                         coding_request, confirmation_required_paths=workspace_pack_paths,
                     )
                     harness_decision = coding_decision
+                    if settings_selection is not None and branding_intent == "theme_color_patch":
+                        proposed_paths = list(coding_decision.selected_paths or []) if coding_decision else []
+                        if ((coding_request is not None and set(coding_request.files) != {APP_THEME_PATH})
+                                or (proposed_paths and proposed_paths != [APP_THEME_PATH])):
+                            raise HTTPException(status_code=409, detail="This color edit must stay within the selected build's theme settings.")
                     if coding_request is not None:
                         # Only an applying decision (auto_patch) returns a request.
                         _refuse_unverifiable_pack_patch(pack_owners, coding_request.files)
@@ -4919,6 +5153,7 @@ async def trigger_workflow(
                             owner_user_id=user_id, app_id=app_id,
                             build_registry_id=build_registry_id,
                             workflow_name=refinement_decision.workflow_id,
+                            **({"expected_baseline": ExpectedBuildBaseline(build_id=settings_selection.build_id, artifact_version_id=settings_selection.app_bundle_id)} if settings_selection else {}),
                         )
                         if refinement_request.refinement_model is not None:
                             inline_binding = inline_binding.model_copy(update={
@@ -4953,6 +5188,11 @@ async def trigger_workflow(
             trigger_payload["change_request_id"] = persisted_change_request_id
         if persisted_revision_id is not None:
             trigger_payload["revision_id"] = persisted_revision_id
+
+    if (settings_selection is not None and settings_selection.kind == "branding"
+            and branding_intent == "theme_color_patch" and coding_result is None
+            and (harness_decision is None or not harness_decision.requires_confirmation)):
+        raise HTTPException(status_code=409, detail="This color edit has no available scoped patch. Open Project to review a broader change.")
 
     artifact_store = get_artifact_store() if refinement_request is not None and refinement_decision is not None else None
 
@@ -5076,6 +5316,7 @@ async def trigger_workflow(
         decision_metadata = {
             **(harness_decision.metadata or {}), "build_registry_id": build_registry_id,
             "source_chat_id": body.source_chat_id,
+            **({"settings_selection": settings_selection.model_dump()} if settings_selection else {}),
         }
         try:
             pending_workflow_id = harness_decision.recommended_workflow_id or refinement_decision.workflow_id
@@ -5287,6 +5528,7 @@ async def trigger_workflow(
             trigger_payload=trigger_payload,
             build_registry_id=build_registry_id,
             source_chat_id=body.source_chat_id,
+            **({"expected_baseline": ExpectedBuildBaseline(build_id=settings_selection.build_id, artifact_version_id=settings_selection.app_bundle_id)} if settings_selection else {}),
             session_router=session_router,
             **({"refinement_model": refinement_request.refinement_model}
                if refinement_request is not None and refinement_request.refinement_model is not None else {}),
@@ -5294,6 +5536,7 @@ async def trigger_workflow(
                 TriggerRoutingContribution(
                     workflow_id=refinement_decision.workflow_id,
                     journey_id=refinement_decision.workflow_sequence,
+                    require_exact_route=settings_selection is not None,
                     context_seed=refinement_decision.context_seed,
                     explanation=refinement_decision.explanation,
                     is_full_restart=refinement_decision.is_full_restart,
@@ -5302,6 +5545,7 @@ async def trigger_workflow(
             ),
             extra_trigger_meta={
                 "action_id": body.action_id,
+                **({"settings_selection": settings_selection.model_dump()} if settings_selection else {}),
                 "change_class": resolved_change_class or (retry_contribution.context_seed.get("revision_scope") if retry_contribution else None),
                 "build_record_id": resolved_artifact_version_id or (retry_contribution.context_seed.get("artifact_version_id") if retry_contribution else None),
                 "build_family": resolved_artifact_kind or (retry_contribution.context_seed.get("artifact_kind") if retry_contribution else None),
@@ -5309,7 +5553,7 @@ async def trigger_workflow(
             },
         )
     except ValueError as route_err:
-        raise HTTPException(status_code=400, detail=str(route_err)) from route_err
+        raise HTTPException(status_code=409 if settings_selection else 400, detail=str(route_err)) from route_err
     except Exception as route_err:
         logger.error("SessionRouter routing failed: %s", route_err, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to route workflow trigger") from route_err

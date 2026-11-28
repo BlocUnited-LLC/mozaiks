@@ -1385,7 +1385,9 @@ class WorkflowBridgeMixin:
     # WORKFLOW PAUSE/RESUME
     # ==================================================================================
 
-    async def pause_background_workflow(self, *, chat_id: str, reason: str = "paused") -> bool:
+    async def pause_background_workflow(
+        self, *, chat_id: str, reason: str = "paused", wait_for_completion: bool = False,
+    ) -> bool:
         """Cancel a running background workflow task so it can be resumed later.
 
         This is runtime-level orchestration only: AG2 state is persisted to Mongo,
@@ -1424,6 +1426,15 @@ class WorkflowBridgeMixin:
             logger.debug("WORKFLOW_PAUSED_EMIT_FAILED chat=%s: %s", chat_id, _emit_exc)
 
         task.cancel()
+        if wait_for_completion:
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+            except asyncio.CancelledError:
+                if not task.done():
+                    raise
+            except TimeoutError:
+                return False
+            return task.done()
         return True
 
     # ==================================================================================

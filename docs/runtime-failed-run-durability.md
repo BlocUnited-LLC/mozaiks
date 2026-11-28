@@ -77,7 +77,7 @@ Regression coverage and aligned test doubles:
 - `tests/test_runtime_websocket_contract.py`
 - `tests/test_lifecycle_identity_guard.py`
 - `tests/test_chat_execution_lease.py`
-- `tests/failed-run-status.test.mjs`
+- `web_shell/tests/adminPortalPanels.test.js`
 
 Contract documentation:
 
@@ -86,6 +86,11 @@ Contract documentation:
 - This handoff.
 
 ## Verification
+
+The commands and counts in this section record the original validation. The
+helper-only `failed-run-status.test.mjs` was later retired when the overview and
+Project stopped rendering that activity list. Current admin session/run status
+coverage runs with `node --test web_shell/tests/adminPortalPanels.test.js`.
 
 All validation used the current integration checkout, not an installed OSS
 revision or an immutable dependency pin. The supplied model-call-admission

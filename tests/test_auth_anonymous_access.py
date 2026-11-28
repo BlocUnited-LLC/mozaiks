@@ -1773,6 +1773,8 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
     }
     existing_registry_gates = {
         "GET /api/studio/apps/{dashboard_app_id}/billing": "_get_owned_dashboard_app_record",
+        "GET /api/studio/apps/{dashboard_app_id}/branding": "_get_owned_dashboard_app_record",
+        "POST /api/studio/apps/{dashboard_app_id}/refinement/pause": "_get_owned_dashboard_app_record",
         "GET /api/studio/apps/{dashboard_app_id}/launch": "_get_owned_dashboard_app_record",
         "GET /api/studio/apps/{dashboard_app_id}/launch/{artifact_version_id}/download": "_get_owned_dashboard_app_record",
         "GET /api/studio/build/dashboard-link": "get_app_record",
@@ -1826,7 +1828,7 @@ def test_direct_studio_routes_classify_app_ownership_authority() -> None:
         | workspace_model_policy_routes.keys()
         | routes_without_app_scope
     )
-    assert len(direct_route_list) == len(direct_routes) == 45
+    assert len(direct_route_list) == len(direct_routes) == 47
     assert direct_routes.keys() == classified
     assert len(owned_app_routes) == 12
     for key in owned_app_routes:
@@ -1924,7 +1926,16 @@ def test_local_posture_serves_a_get_from_this_machine(monkeypatch, headers) -> N
 
     me = _platform_client(monkeypatch).get(_PERSONA_ME, headers=headers)
     assert me.status_code == 200
-    assert me.json() == {"user_id": "x", "roles": ["admin"], "provenance": "dev_override"}
+    assert me.json() == {
+        "user_id": "x", "roles": ["admin"], "provenance": "dev_override",
+        "admin_entry": None, "app_id": "default", "tenant_id": None, "workspace_id": None,
+        "scopes": [
+            "access_as_user", "workspace_support.read", "workspace_support.manage",
+            "workspace_integrations.read", "workspace_integrations.manage",
+            "app_registry.read", "app_registry.manage",
+            "security_readiness.read", "security_readiness.manage",
+        ],
+    }
     dispatch = _module_client(LOCAL).get("/api/modules/orders/authority", headers=headers)
     assert dispatch.status_code == 200
     assert (dispatch.json()["kind"], dispatch.json()["mode"]) == ("local_development", "trusted_bypass")

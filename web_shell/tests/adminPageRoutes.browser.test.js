@@ -11,7 +11,9 @@ const ui = path.resolve(shell, "../chat-ui/src");
 // Runtime admin config: one declared custom page, and module panels declared
 // out of order so the shell's sort is observable.
 const adminConfig = {
-  pages: [{ id: "notes", label: "Note Administration" }],
+  is_admin: true,
+  pages: [{ id: "notes", label: "Note Administration" },
+    ...["overview", "usage", "billing", "access", "support"].map(id => ({id, label: id[0].toUpperCase() + id.slice(1)}))],
   module_panels: [
     { id: "notes-second", label: "Second notes panel", page: "notes", order: 20 },
     { id: "notes-first", label: "First notes panel", page: "notes", order: 10 },
@@ -47,7 +49,7 @@ test("admin pages use declared metadata and preserve Studio section routing", as
   const stubs = {
     "../context/ChatUIContext": `const useChatUI = () => ({
   // ?as=visitor signs in someone without the admin role.
-  user: { roles: new URLSearchParams(location.search).get("as") === "visitor" ? ["user"] : ["admin"] },
+  user: { id: "same-user", app_id: window.adminScope || "first-app", roles: new URLSearchParams(location.search).get("as") === "visitor" ? ["user"] : ["admin"] },
   config: { appBackendUrl: location.origin + "/backend" },
   auth: null,
 });
@@ -56,7 +58,12 @@ export {
 };
 `,
     "../admin/components/AdminPrimitives.jsx": `import React from "react";
-const useAdminFetch = () => ({ data: ${JSON.stringify(adminConfig)}, loading: false, error: null });
+const useAdminFetch = () => {
+  const [who] = React.useState(() => window.adminScope === "second-app" ? "staff" : new URLSearchParams(location.search).get("as"));
+  return { data: who === 'visitor' ? null : who === 'staff'
+    ? {is_admin:false,pages:[{id:'support',label:'Support'}],runtime_panels:[],module_panels:[{id:'inbox',page:'support',label:'Support inbox'}]}
+    : ${JSON.stringify(adminConfig)}, loading:false,error:who === 'visitor' ? '403' : null };
+};
 const AdminExtensionPanels = ({ panels }) => <div>{panels.map((panel) => <p key={panel.id} data-module-panel>{panel.label}</p>)}</div>;
 const EmptyState = ({ children }) => <p data-empty>{children}</p>;
 const ErrorBox = ({ message }) => <p role="alert">{message}</p>;
@@ -110,7 +117,13 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import AdminPage from ${JSON.stringify(path.join(ui, "pages/AdminPage.jsx"))};
 const route = location.pathname === "/admin/notes" ? { meta: { adminPage: "notes" } } : void 0;
-createRoot(document.getElementById("root")).render(<BrowserRouter><AdminPage route={route} /></BrowserRouter>);
+function Host() {
+  const [scope, setScope] = React.useState('first-app');
+  window.adminScope = scope;
+  window.switchAdminScope = setScope;
+  return <AdminPage route={route} />;
+}
+createRoot(document.getElementById("root")).render(<BrowserRouter><Host /></BrowserRouter>);
 `, resolveDir: shell, loader: "jsx" },
     bundle: true,
     write: false,
@@ -206,12 +219,28 @@ createRoot(document.getElementById("root")).render(<BrowserRouter><AdminPage rou
   backendMode = "panels";
   backendRequests = 0;
   await page.goto(`${origin}/admin?as=visitor`);
-  await expect(page.getByText("Admin role required.", { exact: true })).toBeVisible();
+  await expect(page.getByText("You do not have access to this admin page.", { exact: true })).toBeVisible();
   await page.waitForLoadState("networkidle");
   assert.equal(backendRequests, 0);
   assert.equal(await page.locator("[data-framework]").count(), 0);
+  // A server-admitted app staff inbox mounts only its panels, without runtime
+  // or connected-backend reads; another admin deep link remains denied.
+  backendRequests = 0;
+  await page.goto(`${origin}/apps/customer/support?as=staff`);
+  await expect(heading("Support")).toBeVisible();
+  await expect(page.getByText("Support inbox", {exact:true})).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  assert.equal(backendRequests, 0);
+  assert.equal(await page.locator("[data-framework]").count(), 0);
+  await page.goto(`${origin}/apps/customer/usage?as=staff`);
+  await expect(page.getByText("You do not have access to this admin page.", {exact:true})).toBeVisible();
+  assert.equal(backendRequests, 0);
   // The same page for an admin does ask.
   await page.goto(`${origin}/admin`);
   await expect(heading("Overview")).toBeVisible();
   await expect.poll(() => backendRequests).toBeGreaterThan(0);
+  // The same subject and roles in another app must discard the old config.
+  await page.evaluate(() => window.switchAdminScope('second-app'));
+  await expect(page.getByText("You do not have access to this admin page.", {exact:true})).toBeVisible();
+  assert.equal(await page.locator("[data-framework]").count(), 0);
 });

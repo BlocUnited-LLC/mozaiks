@@ -444,3 +444,62 @@ def test_factory_owner_email_is_runtime_authority(writer):
     })
     with pytest.raises(ContextAuthorityError):
         policy.require_can_write("platform_user_email", writer_id=writer)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,value", [("build_id", "newer-build"), ("artifact_version_id", "newer-artifact")])
+async def test_exact_refinement_selection_refuses_changed_run_before_write(field, value):
+    from mozaiksai.core.session.build_binding import ExpectedBuildBaseline
+
+    service, repo = registry()
+    current = {"build_id": "selected-build", "artifact_version_id": "selected-artifact"}
+    current[field] = value
+    repo.get_by_build_registry_id.return_value["current_build_run"] = current
+    with pytest.raises(ValueError, match="selected build changed"):
+        await service.resolve_build_binding(
+            app_id="factory", owner_user_id="owner", chat_id="revision-chat", workflow_name="ThemeCapture",
+            build_registry_id="appreg_tracker", refinement=True,
+            expected_baseline=ExpectedBuildBaseline(build_id="selected-build", artifact_version_id="selected-artifact"),
+        )
+    repo.update_lifecycle_state.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_refinement_run_cas_preserves_both_selected_ids_during_allocation_race():
+    from mozaiksai.core.session.build_binding import ExpectedBuildBaseline
+
+    service, repo = registry()
+    repo.get_by_build_registry_id.return_value["current_build_run"] = {
+        "build_id": "selected-build", "artifact_version_id": "selected-artifact",
+    }
+    repo.update_lifecycle_state.return_value = None
+    with pytest.raises(ValueError, match="changed before refinement"):
+        await service.begin_refinement_run(
+            app_id="factory", owner_user_id="owner", build_registry_id="appreg_tracker", workflow_name="ThemeCapture",
+            expected_baseline=ExpectedBuildBaseline(build_id="selected-build", artifact_version_id="selected-artifact"),
+        )
+    write = repo.update_lifecycle_state.await_args.kwargs
+    assert write["expected_build_id"] == "selected-build"
+    assert write["expected_artifact_version_id"] == "selected-artifact"
+    assert write["build_registry_id"] == "appreg_tracker"
+    assert write["owner_user_id"] == "owner"
+
+
+@pytest.mark.asyncio
+async def test_exact_baseline_flows_through_existing_factory_hook(monkeypatch):
+    from factory_app.workflows._shared.platform import build_target
+    from mozaiksai.core.session.build_binding import ExpectedBuildBaseline
+    from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
+    baseline = ExpectedBuildBaseline(build_id="selected-build", artifact_version_id="selected-artifact")
+    service = type("Registry", (), {"resolve_build_binding": AsyncMock(return_value=binding(phase="refinement"))})()
+    monkeypatch.setattr(build_target, "AppRegistryService", lambda: service)
+    monkeypatch.setattr(workflow_manager, "get_config", lambda _: {})
+    hooks = PlatformHookRegistry()
+    hooks.register_bundle({"chat_session_fields": build_target.bind_factory_session}, source="factory")
+    fields = await hooks.call_chat_session_fields(
+        app_id="factory", user_id="owner", workflow_name="ThemeCapture", chat_id="next-chat",
+        trigger_source="refinement", build_registry_id="appreg_tracker", expected_baseline=baseline,
+    )
+    assert fields["run_build_binding"]["target_app_id"] == "customer_tracker"
+    assert service.resolve_build_binding.await_args.kwargs["expected_baseline"] == baseline

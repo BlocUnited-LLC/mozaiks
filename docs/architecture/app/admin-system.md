@@ -347,3 +347,23 @@ The unified UI does not collapse authority:
 - feature panels use module contracts
 - app-business panels may use a connected app backend
 
+
+## App staff panel access
+
+`GET /api/admin/config` projects the loaded app's existing grants. An app admin
+keeps the declared portal, runtime panels, and connected-backend administration.
+Other authenticated app users receive only eligible module panels and the enabled
+app-scope `/admin` pages that contain them. Empty panel requirements remain
+admin-only. A foreign app-bound token cannot discover this app's portal.
+
+A module panel's `permissions` requires every listed app permission or declared
+app role. Optional `permissions_any` additionally requires one listed alternative.
+Neither field grants permissions, changes roles, or bypasses module action policy.
+The stock Support inbox requires `support.submit` plus `support.read` or
+`support.manage`, matching its existing backend conversation and queue checks.
+Only an explicitly configured support team can qualify.
+
+The current-user profile projects a safe `admin_entry` for the account menu.
+The generated portal admits pages from the server configuration; runtime admin
+endpoints and connected-backend panels still require full app administration.
+Studio's selected-app pages and platform staff roles are separate.

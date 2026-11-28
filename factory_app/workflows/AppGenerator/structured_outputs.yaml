@@ -2582,7 +2582,11 @@ models:
       permissions:
         type: optional_list
         items: str
-        description: Permission ids or roles required to see or use this panel.
+        description: All listed app permission ids or app-declared roles are required to see this panel.
+      permissions_any:
+        type: optional_list
+        items: str
+        description: At least one listed app permission id or app-declared role is required in addition to permissions. Omit when no alternatives are needed. Empty permission requirements remain full-admin-only.
 
   ModuleManifest:
     type: model

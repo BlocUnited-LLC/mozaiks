@@ -5,7 +5,7 @@ import { activeWorkspacePath, withAppSections } from '../../chat-ui/src/workspac
 
 const item = (label, order, section = null) => ({ id: label, label, order, section });
 
-test('the portfolio chooser preserves the visible app menu order and its actual routes', () => {
+test('global navigation stays separate while existing pickers preserve selected-app routes', () => {
   const workspace = [{ label: null, items: [
     { label: 'My Apps', component: 'AppsPage', path: '/apps' },
     { label: 'Integrations', path: '/integrations' },
@@ -18,16 +18,12 @@ test('the portfolio chooser preserves the visible app menu order and its actual 
     { key: 'revenue', label: 'Revenue', route: '/apps/:appId/revenue' },
     { key: 'settings/adapters', label: 'Adapters', route: '/apps/:appId/settings/adapters' },
   ]);
-  assert.equal(navigation.groups[0], workspace[0]);
-  assert.equal(navigation.groups[1].label, 'Manage an app');
-  assert.deepEqual(navigation.groups[1].items.map(item => item.path), [
-    '/apps?section=revenue', '/apps?section=settings%2Fadapters',
-  ]);
+  assert.equal(navigation.groups, workspace);
   const active = (pathname, search) => activeWorkspacePath({ pathname, search }, navigation.sections);
-  assert.equal(active('/apps', '?sort=date&section=settings%2Fadapters'), '/apps?section=settings%2Fadapters');
+  assert.equal(active('/apps', '?sort=date&section=settings%2Fadapters'), '/apps');
   assert.equal(active('/apps', '?section=foreign'), '/apps');
   assert.equal(active('/apps', '?section=revenue&section=settings%2Fadapters'), '/apps');
-  assert.equal(active('/apps/', '?section=revenue'), '/apps?section=revenue');
+  assert.equal(active('/apps/', '?section=revenue'), '/apps');
   assert.equal(active('/apps', '?sort=date'), '/apps');
   assert.equal(active('/integrations', '?section=revenue'), '/integrations');
   assert.equal(active('/apps/one/revenue', '?section=settings%2Fadapters'), '/apps/one/revenue');

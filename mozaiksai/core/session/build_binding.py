@@ -27,6 +27,15 @@ class BuildTargetReference(BaseModel):
     source_chat_id: BuildIdentity | None = None
 
 
+class ExpectedBuildBaseline(BaseModel):
+    """Optional exact-build precondition for a newly allocated refinement run."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    build_id: BuildIdentity
+    artifact_version_id: BuildIdentity
+
+
 class RetryPlanSource(BaseModel):
     """Creation-only reference to an admitted plan and its exact dispatch rows."""
 

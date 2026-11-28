@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import os
+import re
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from importlib import import_module
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from ag2.events import UnknownEvent
+from ag2.events import ModelResponse, UnknownEvent
 from ag2.events.base import BaseEvent
 from ag2.history import Storage
 from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.core_config import get_mongo_client
@@ -19,6 +23,36 @@ from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeC
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id, dual_write_app_scope
 
 logger = get_workflow_logger("ag2_stream_storage")
+_MESSAGE_KEY_HASH = "wal_message_key_sha256"
+
+
+def _message_semantic_digest(event: BaseEvent) -> str:
+    if not isinstance(event, ModelResponse) or not event.content or event.tool_calls.calls or event.files:
+        raise ValueError("Idempotent run storage requires a plain assistant presentation message")
+    # Generated event/message timestamps and UUIDs are not message identity.
+    metadata = {key: value for key, value in event.metadata.items() if key != _MESSAGE_KEY_HASH}
+    return hashlib.sha256(json.dumps({
+        "content": event.content, "metadata": metadata, "model": event.model,
+        "provider": event.provider, "finish_reason": event.finish_reason,
+    }, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")).hexdigest()
+
+
+def _stored_message_key(event: BaseEvent) -> str | None:
+    if not isinstance(event, ModelResponse):
+        return None
+    value = event.metadata.get(_MESSAGE_KEY_HASH)
+    if value is None:
+        return None
+    if not isinstance(value, str) or re.fullmatch(r"[a-f0-9]{64}", value) is None:
+        raise ValueError("Stored assistant message key must be a SHA-256 digest")
+    return value
+
+
+def _message_event_id(app_id: str, stream_id: str, key_hash: str) -> str:
+    scope_hash = hashlib.sha256(json.dumps(
+        [app_id, stream_id, key_hash], separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")).hexdigest()
+    return f"{stream_id}:message:{scope_hash}"
 
 
 def stream_id_for_run(app_id: str, chat_id: str) -> UUID:
@@ -56,25 +90,60 @@ class MongoAG2StreamStorage(Storage):
         self._client_lock = asyncio.Lock()
         self._indexes_ready = False
 
-    async def save_event(self, event: BaseEvent, context: Any) -> None:
+    async def save_event(
+        self, event: BaseEvent, context: Any, *, idempotency_key: str | None = None,
+    ) -> None:
         stream_id = self._resolve_stream_id(context)
+        event_id = None
+        key_hash = None
+        semantic_digest = None
+        if idempotency_key is not None:
+            if (not isinstance(idempotency_key, str) or not idempotency_key.strip()
+                    or len(idempotency_key.encode("utf-8")) > 2048):
+                raise ValueError("Assistant message idempotency key must be nonempty and at most 2048 bytes")
+            semantic_digest = _message_semantic_digest(event)
+            key_hash = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+            if _stored_message_key(event) not in (None, key_hash):
+                raise ValueError("Stored assistant message key differs from the requested identity")
+            event_id = _message_event_id(self._app_id, stream_id, key_hash)
+            coll = await self._events_coll()
+            existing = await coll.find_one({"_id": event_id, "stream_id": stream_id, **build_app_scope_filter(self._app_id)})
+            if existing is not None:
+                if existing.get("message_semantic_sha256") != semantic_digest:
+                    raise ValueError("Assistant message idempotency key has different content")
+                return
         sequence = await self._next_sequence(stream_id)
         coll = await self._events_coll()
         now = datetime.now(UTC)
+        event_payload = event.to_dict()
+        if key_hash is not None:
+            assert isinstance(event, ModelResponse)  # Checked before allocating a keyed sequence.
+            # Keep the hashed identity through AG2 get_history / set_history.
+            # No raw caller key, generated UUID or timestamp becomes authority.
+            event_payload["message"]["metadata"] = {**event.metadata, _MESSAGE_KEY_HASH: key_hash}
         payload = dual_write_app_scope(
             {
-                "_id": f"{stream_id}:{sequence}",
+                "_id": event_id or f"{stream_id}:{sequence}",
                 "app_id": self._app_id,
                 "stream_id": stream_id,
                 "sequence": sequence,
                 "event_module": type(event).__module__,
                 "event_class": type(event).__name__,
-                "event_payload": event.to_dict(),
+                "event_payload": event_payload,
                 "created_at": now,
             },
             self._app_id,
         )
-        await coll.insert_one(payload)
+        if semantic_digest is not None:
+            payload["message_semantic_sha256"] = semantic_digest
+        try:
+            await coll.insert_one(payload)
+        except DuplicateKeyError:
+            if event_id is None:
+                raise
+            existing = await coll.find_one({"_id": event_id, "stream_id": stream_id, **build_app_scope_filter(self._app_id)})
+            if existing is None or existing.get("message_semantic_sha256") != semantic_digest:
+                raise ValueError("Assistant message idempotency key has different or unverifiable content") from None
 
     async def get_history(self, stream_id: Any) -> Iterable[BaseEvent]:
         coll = await self._events_coll()
@@ -89,19 +158,31 @@ class MongoAG2StreamStorage(Storage):
 
     async def set_history(self, stream_id: Any, events: Iterable[BaseEvent]) -> None:
         normalized_stream_id = self._normalize_stream_id(stream_id)
-        await self.drop_history(normalized_stream_id)
         event_list = [event for event in events if isinstance(event, BaseEvent)]
         if not event_list:
+            await self.drop_history(normalized_stream_id)
             return
 
         coll = await self._events_coll()
         now = datetime.now(UTC)
         docs = []
+        message_digests: dict[str, str] = {}
         for index, event in enumerate(event_list, start=1):
-            docs.append(
-                dual_write_app_scope(
+            key_hash = _stored_message_key(event)
+            event_id = _message_event_id(self._app_id, normalized_stream_id, key_hash) if key_hash else f"{normalized_stream_id}:{index}"
+            semantic_digest = _message_semantic_digest(event) if key_hash else None
+            if semantic_digest is not None:
+                existing = await coll.find_one({"_id": event_id, "stream_id": normalized_stream_id, **build_app_scope_filter(self._app_id)})
+                if existing is not None and existing.get("message_semantic_sha256") != semantic_digest:
+                    raise ValueError("Assistant message idempotency key has different content")
+                if event_id in message_digests:
+                    if message_digests[event_id] != semantic_digest:
+                        raise ValueError("Assistant message idempotency key has different content")
+                    continue
+                message_digests[event_id] = semantic_digest
+            payload = dual_write_app_scope(
                     {
-                        "_id": f"{normalized_stream_id}:{index}",
+                        "_id": event_id,
                         "app_id": self._app_id,
                         "stream_id": normalized_stream_id,
                         "sequence": index,
@@ -112,7 +193,10 @@ class MongoAG2StreamStorage(Storage):
                     },
                     self._app_id,
                 )
-            )
+            if semantic_digest is not None:
+                payload["message_semantic_sha256"] = semantic_digest
+            docs.append(payload)
+        await self.drop_history(normalized_stream_id)
         await coll.insert_many(docs)
 
         heads = await self._heads_coll()
@@ -126,7 +210,7 @@ class MongoAG2StreamStorage(Storage):
                     {
                         "app_id": self._app_id,
                         "stream_id": normalized_stream_id,
-                        "next_sequence": len(docs),
+                        "next_sequence": len(event_list),
                         "last_updated_at": now,
                     },
                     self._app_id,

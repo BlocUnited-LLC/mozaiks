@@ -1195,9 +1195,9 @@ async function mockStudioApis(page) {
 
   await page.route('**/api/studio/integrations/connectors?**', async (route) => {
     const appId = new URL(route.request().url()).searchParams.get('dashboard_app_id');
-    expect(appId).toBe(APP_ID);
+    expect([APP_ID, 'dashboard-member-growth']).toContain(appId);
     await route.fulfill({ json: {
-      app_id: appId,
+      app_id: appId === 'dashboard-member-growth' ? 'member-growth-studio' : appId,
       connectors: [
         { service: 'mozaikspay', display_name: 'Payments connection', ready: true, secret_available: true,
           status: 'active', lifecycle_status: 'active',
@@ -1857,14 +1857,14 @@ test('workspace AI models route stays responsive across desktop and mobile width
   await expect(page.getByText('Provider key missing', { exact: true })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
-  // The page is in the workspace menu, not reachable only by typing its address.
-  // (The mobile menu is covered by the mobile workspace navigation test.)
+  // The preserved deep link is reached from Integrations, outside the five global routes.
   const viewport = page.viewportSize();
   expect(viewport).not.toBeNull();
   if (viewport.width >= 768) {
     const navigation = page.getByRole('navigation', { name: 'Workspace navigation' });
-    await expect(navigation.locator('a[href="/settings/ai-models"]')).toBeVisible();
-    await expect(navigation.locator('a[href="/settings/ai-models"]')).toHaveAttribute('aria-current', 'page');
+    await expect(navigation.locator('a[href="/settings/ai-models"]')).toHaveCount(0);
+    await page.goto('/integrations');
+    await expect(page.locator('main').getByRole('link', { name: 'AI model settings', exact: true })).toHaveAttribute('href', '/settings/ai-models');
     // Pages with no data source behind them are not offered.
     await expect(navigation.locator('a[href="/users"]')).toHaveCount(0);
   }
@@ -1930,7 +1930,7 @@ test('app Studio root redirects to manifest default portal', async ({ page }) =>
   await page.goto(`/apps/${APP_ID}`);
 
   await expect(page).toHaveURL(new RegExp(`/apps/${APP_ID}/overview$`));
-  await expect(page.locator('main').getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
+  await expect(page.locator('main').getByRole('heading', { name: 'Campaign Revision Workbench', exact: true })).toBeVisible();
 });
 
 test('app Launch keeps Studio navigation and downloads only the displayed build', async ({ page, isMobile }) => {
@@ -1959,7 +1959,7 @@ test('app Launch keeps Studio navigation and downloads only the displayed build'
   await expectNoHorizontalOverflow(page);
 });
 
-test("app Billing shows the selected app's plans and links to its integrations", async ({ page, isMobile }) => {
+test("app Subscription shows the selected app's plans and links to its integrations", async ({ page, isMobile }) => {
   await page.route('**/api/modules/user_onboarding/get_onboarding_status**', route =>
     route.fulfill({ json: buildOnboardingStatusPayload({ dismissed: true }) }));
   await page.route(`**/api/studio/apps/${APP_ID}/billing`, route => route.fulfill({ json: {
@@ -1968,30 +1968,27 @@ test("app Billing shows the selected app's plans and links to its integrations",
       plans: [{ plan_id: 'starter', label: 'Starter', price: { amount_cents: 1200, currency: 'USD', interval: 'month' } }] }],
   } }));
   await page.goto(`/apps/${APP_ID}/billing`);
-  await expect(page.getByRole('heading', { name: 'Billing', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Subscription', exact: true })).toBeVisible();
   const plan = page.getByRole('listitem').filter({ hasText: 'Starter' });
   await expect(plan).toContainText('Default');
   await expect(plan).toContainText('$12.00 / month');
   await expect(page.getByRole('link', { name: 'Manage integrations' })).toHaveAttribute('href', `/apps/${APP_ID}/integrations`);
   await expectNoHorizontalOverflow(page);
   if (isMobile) await page.getByRole('button', { name: 'Open Studio navigation' }).click();
-  await expect(page.getByRole('navigation').getByRole('link', { name: 'Billing', exact: true }).filter({ visible: true })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('navigation').getByRole('link', { name: 'Subscription', exact: true }).filter({ visible: true })).toHaveAttribute('aria-current', 'page');
 });
 
 test('app overview route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.goto(`/apps/${APP_ID}/overview`);
   const main = page.locator('main');
 
-  await expect(main.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
-  await expect(main.getByText('Campaign Revision Workbench').first()).toBeVisible();
-  await expect(main.getByText('Next step').first()).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Campaign Revision Workbench', exact: true })).toBeVisible();
+  await expect(main.getByText('Runtime cost', { exact: true })).toBeVisible();
+  await expect(main.getByText('Active users', { exact: true })).toBeVisible();
+  for (const removed of ['Next step', 'Next move', 'Readiness', 'Activity', 'App intelligence']) {
+    await expect(main.getByText(removed, { exact: true })).toHaveCount(0);
+  }
   await expect(main.getByRole('link', { name: 'Continue Build' })).toHaveCount(0);
-  await expect(main.getByRole('heading', { name: 'Approval required' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Activity' })).toBeVisible();
-  await expect(main.getByText('Runtime cost').first()).toBeVisible();
-  await expect(main.getByText('Active users').first()).toBeVisible();
-  await expect(main.getByText('Revise the campaign approval workspace')).toBeVisible();
-  await expect(main.getByText('Approval required')).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -2036,7 +2033,7 @@ async function mockOverviewProgress(page, {
     ['**/api/admin/stats*', { tracked_chats: 0 }],
     ['**/api/admin/runs*', { runs: [] }],
     ['**/api/admin/usage?**', { totals: { estimated_cost_usd: cost } }],
-    ['**/api/studio/analytics/**', { metrics: {}, insights: [] }],
+    ['**/api/studio/analytics/apps/**', { registry: { mrr: { unit: 'currency_usd' } }, metrics: { mrr: { available: revenue !== null, value: revenue } } }],
     [`**/api/studio/apps/${APP_ID}/context`, {
       context_readiness: { status: 'missing' }, context_graph_status: { available: false, node_count: 0, edge_count: 0 },
     }],
@@ -2047,41 +2044,27 @@ async function mockOverviewProgress(page, {
 }
 
 for (const lifecycle of ['building', 'needs_revision']) {
-  test(`app overview shows current ${lifecycle} progress before optional diagnostics`, async ({ page }, testInfo) => {
+  test(`app overview links recorded ${lifecycle} progress to Project`, async ({ page }, testInfo) => {
     await mockOverviewProgress(page, { lifecycle });
     await page.goto(`/apps/${APP_ID}/overview`);
     const main = page.locator('main');
     await expect(main.getByRole('heading', { name: 'FocusSprint' })).toBeVisible();
     await expect(main.getByText('A focus timer that tracks completed sessions.')).toBeVisible();
-    await expect(main.getByText('Current step: App Generator')).toBeVisible();
-    const resume = main.getByRole('link', { name: 'Continue Build', exact: true });
-    await expect(resume).toHaveAttribute('href', '/chat?workflow=AppGenerator&mode=workflow&chat_id=q-chat&app_id=factory-session-app');
-    await expect(resume).toBeInViewport({ ratio: 1 });
-    expect(await resume.evaluate(link => {
-      const rect = link.getBoundingClientRect();
-      return link.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
-    })).toBe(true);
-    await expect(main.getByText('Not started', { exact: true })).toHaveCount(0);
-    await expect(main.getByText(/No builds yet|No build sessions yet|AI-Powered Workflows|concept brief is captured/)).toHaveCount(0);
-    await expect(main.getByRole('heading', { name: 'App intelligence' })).toBeHidden();
-    await expect(main.getByRole('group', { name: 'Revenue', exact: true })).toBeHidden();
+    const project = main.getByRole('link', { name: /Open Project: Genesis Build/ });
+    await expect(project).toHaveText('Genesis Build · App Generator');
+    await expect(project).toHaveAttribute('href', `/apps/${APP_ID}/building`);
+    await expect(project).toBeInViewport({ ratio: 1 });
+    await expect(main.getByRole('link', { name: 'Continue Build', exact: true })).toHaveCount(0);
+    await expect(main.getByText(/^(Activity|App intelligence|Next step|Next move|Readiness)$/)).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
     await page.screenshot({ path: testInfo.outputPath(`overview-${lifecycle}.png`), fullPage: true });
-
-    const details = main.locator('details').filter({ has: page.locator('summary', { hasText: 'Runtime and source details' }) });
-    await expect(details).not.toHaveAttribute('open', '');
-    await details.locator('summary').click();
-    await expect(main.getByRole('heading', { name: 'App intelligence' })).toBeVisible();
-    await expect(main.getByRole('heading', { name: 'Activity' })).toBeVisible();
-    const margin = main.getByRole('group', { name: 'Margin', exact: true });
-    await expect(margin).toContainText('Pending');
-    await expect(margin).not.toContainText('$0.00');
-    await expectNoHorizontalOverflow(page);
+    await project.click();
+    await expect(main.getByRole('heading', { name: 'Project', exact: true })).toBeVisible();
   });
 }
 
 for (const chatId of [null, 'previous-build-chat']) {
-  test(`review-ready overview opens its saved build with chat ${chatId}`, async ({ page }) => {
+  test(`review-ready overview keeps the recorded refinement Project link with chat ${chatId}`, async ({ page }) => {
     await mockOverviewProgress(page, {
       lifecycle: 'review',
       currentBuildRun: {
@@ -2089,66 +2072,45 @@ for (const chatId of [null, 'previous-build-chat']) {
         artifact_version_id: 'ver-17', active_chat_id: chatId, active_workflow_id: 'AppGenerator',
       },
     });
-    await page.route('**/api/studio/build/history?**', route => route.fulfill({
-      json: buildAppStudioPayload(APP_ID).buildHistory,
-    }));
     const mutations = [];
     page.on('request', request => {
       if (request.method() === 'POST') mutations.push(new URL(request.url()).pathname);
     });
     await page.goto(`/apps/${APP_ID}/overview`);
     const main = page.locator('main');
-    const review = main.getByRole('link', { name: 'Review builds', exact: true });
-    await expect(review).toHaveAttribute('href', `/apps/${APP_ID}/activity`);
-    await expect(main.getByText('Preview your saved version, request changes, then accept and activate it when ready.')).toBeVisible();
-    await expect(main.getByRole('link', { name: 'Continue Build', exact: true })).toHaveCount(0);
-    await expect(main.getByText(/A build conversation link is not available/)).toHaveCount(0);
-    await review.click();
-    await expect(page.getByText('Saved build ver-17', { exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Start draft preview', exact: true })).toBeVisible();
-    // The shell reads onboarding status through a POST module action.
+    await expect(main.getByRole('link', { name: /Open Project: Refinement Run/ })).toHaveAttribute('href', `/apps/${APP_ID}/building`);
+    await expect(main.getByRole('link', { name: /Review builds|Continue Build/ })).toHaveCount(0);
     expect(mutations.filter(path => path !== '/api/modules/user_onboarding/get_onboarding_status')).toEqual([]);
     await expectNoHorizontalOverflow(page);
   });
 }
 
 for (const missingField of ['active_chat_id', 'active_workflow_id']) {
-  test(`app overview without ${missingField} opens Project without inventing a resume`, async ({ page }) => {
+  test(`overview without a recorded phase does not synthesize progress from ${missingField}`, async ({ page }) => {
     await mockOverviewProgress(page, { currentBuildRun: null, description: null });
-    // An incomplete saved binding must not synthesize ValueEngine or resume a new chat.
-    await page.route('**/api/studio/overview?**', route => route.fulfill({
-      status: 200, contentType: 'application/json', body: JSON.stringify({ app: {
-        ...getWorkspaceApp(), name: 'FocusSprint', description: null,
-        status: 'building', lifecycle_state: 'building', lifecycle_label: 'Building',
-        active_chat_id: 'orphan-chat', active_workflow_id: 'AppGenerator', [missingField]: null, current_build_run: {},
-      } }),
-    }));
+    await page.route('**/api/studio/overview?**', route => route.fulfill({ json: { app: {
+      ...getWorkspaceApp(), name: 'FocusSprint', description: null,
+      status: 'building', lifecycle_state: 'building',
+      active_chat_id: 'orphan-chat', active_workflow_id: 'AppGenerator', [missingField]: null, current_build_run: {},
+    } } }));
     await page.goto(`/apps/${APP_ID}/overview`);
     const main = page.locator('main');
-    await expect(main.getByText('App description is not available.')).toBeVisible();
-    await expect(main.getByText('Latest saved build progress.')).toHaveCount(0);
-    await expect(main.getByRole('link', { name: 'Continue Build' })).toHaveCount(0);
-    const project = main.getByRole('link', { name: 'Open Project', exact: true });
-    await expect(project).toHaveAttribute('href', `/apps/${APP_ID}/building`);
-    await project.click();
-    await expect(page).toHaveURL(new RegExp(`/apps/${APP_ID}/building$`));
-    await expect(main.getByRole('heading', { name: 'Project', exact: true })).toBeVisible();
+    await expect(main.getByRole('heading', { name: 'FocusSprint' })).toBeVisible();
+    await expect(main.getByRole('link', { name: /Open Project|Continue Build/ })).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
   });
 }
 
-for (const [revenue, cost, expected] of [[100, 40, '$60.00'], [null, 40, 'Pending'], [100, null, 'Pending']]) {
-  test(`active app overview preserves runtime metrics with revenue ${revenue} and cost ${cost}`, async ({ page }) => {
+for (const [revenue, cost] of [[100, 40], [null, 40], [100, null], [0, 0]]) {
+  test(`active overview distinguishes unavailable metrics from zero with revenue ${revenue} and cost ${cost}`, async ({ page }) => {
     await mockOverviewProgress(page, { lifecycle: 'active', currentBuildRun: null, revenue, cost });
     await page.goto(`/apps/${APP_ID}/overview`);
     const main = page.locator('main');
-    await expect(main.getByRole('group', { name: 'Revenue', exact: true })).toBeVisible();
-    await expect(main.getByRole('group', { name: 'Runtime Cost', exact: true })).toBeVisible();
-    await expect(main.getByRole('heading', { name: 'Activity' })).toBeVisible();
-    await expect(main.locator('summary', { hasText: 'Runtime and source details' })).toHaveCount(0);
-    const margin = main.getByRole('group', { name: 'Margin', exact: true });
-    await expect(margin).toContainText(expected);
-    if (expected === 'Pending') await expect(margin).not.toContainText('%');
+    const mrr = main.getByText('MRR', { exact: true }).locator('..');
+    const runtimeCost = main.getByText('Runtime cost', { exact: true }).locator('..');
+    await expect(mrr).toContainText(revenue === null ? 'Unavailable' : `$${revenue.toFixed(2)}`);
+    await expect(runtimeCost).toContainText(cost === null ? 'Unavailable' : `$${cost.toFixed(2)}`);
+    await expect(main.getByText(/^(Activity|Next step|Next move|Readiness)$/)).toHaveCount(0);
     await expect(main.getByRole('link', { name: 'Open App Studio' })).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
   });
@@ -2975,17 +2937,14 @@ test('mobile workspace Studio navigation keeps route transitions stable', async 
       },
     },
     {
-      href: '/support',
-      heading: 'Support',
-      detail: async () => {
-        const campaignCard = main.locator('article').filter({ hasText: 'Campaign Revision Workbench' }).first();
-        await expect(campaignCard).toBeVisible();
-      },
+      href: '/performance',
+      heading: 'Performance',
+      detail: async () => expect(main.getByRole('columnheader', { name: 'App' })).toHaveCount(0),
     },
     {
-      href: '/settings/ai-models',
-      heading: 'AI models',
-      detail: async () => expect(page.getByRole('combobox', { name: 'Default model' })).toHaveValue('gemini'),
+      href: '/portfolio/revenue',
+      heading: 'Revenue',
+      detail: async () => expect(main.getByText('Customer revenue by app.', { exact: false })).toBeVisible(),
     },
     {
       href: '/apps',
@@ -3085,4 +3044,33 @@ test('onboarding tour does not appear for a completed user', async ({ page }) =>
 
   await page.waitForTimeout(1000);
   await expect(page.getByRole('dialog', { name: /Onboarding step/i })).toHaveCount(0);
+});
+
+
+test('app branding route stays responsive across desktop and mobile widths', async ({ page, isMobile }) => {
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', route =>
+    route.fulfill({ json: buildOnboardingStatusPayload({ dismissed: true }) }));
+  await page.route(`**/api/studio/apps/${APP_ID}/branding`, route => route.fulfill({ json: {
+    status: 'configured', dashboard_app_id: APP_ID, app_name: 'Campaign Revision Workbench',
+    theme: { theme: { primary: '#2F9C95', font: 'Roboto', appearance: 'light' } },
+  } }));
+  await page.goto(`/apps/${APP_ID}/branding`);
+  await expect(page.getByRole('heading', { name: 'Branding', exact: true })).toBeVisible();
+  await expect(page.getByText('#2F9C95', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Edit branding', exact: true })).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
+  if (isMobile) await page.getByRole('button', { name: 'Open Studio navigation' }).click();
+  await expect(page.getByRole('navigation').getByRole('link', { name: 'Branding', exact: true }).filter({ visible: true })).toHaveAttribute('aria-current', 'page');
+});
+
+test('workspace revenue route stays responsive across desktop and mobile widths', async ({ page }) => {
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', route =>
+    route.fulfill({ json: buildOnboardingStatusPayload({ dismissed: true }) }));
+  await page.goto('/portfolio/revenue');
+  const main = page.locator('main');
+  await expect(main.getByRole('heading', { name: 'Revenue', exact: true })).toBeVisible();
+  await expect(main.getByText('Customer revenue by app. Personal wallet balances and hosted account billing are separate.')).toBeVisible();
+  await expect(main.getByRole('link', { name: 'Member Growth Studio', exact: true }).filter({ visible: true })).toHaveAttribute('href', '/apps/dashboard-member-growth/revenue');
+  await expect(main.getByText('Dashboard unavailable').filter({ visible: true }).first()).toBeVisible();
+  await expectNoHorizontalOverflow(page);
 });

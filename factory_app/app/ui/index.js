@@ -11,6 +11,7 @@ import { registerAdminComponents } from '../admin/index.js'
 import { installOnboardingTour } from './installOnboardingTour.jsx'
 
 export { AppsDirectory } from '../admin/pages/AppsPage.jsx'
+export { default as AppOverviewPage } from '../admin/pages/AppOverviewPage.jsx'
 export { default as DashboardPortalPage } from '../admin/pages/DashboardPortalPage.jsx'
 
 export function register(registerComponent) {

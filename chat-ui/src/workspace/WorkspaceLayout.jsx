@@ -8,6 +8,7 @@ import {
   RiHammerFill,
   RiHistoryFill,
   RiMoneyDollarCircleFill,
+  RiPaletteFill,
   RiPlugLine,
   RiPulseLine,
   RiRocketFill,
@@ -31,6 +32,7 @@ const ICON_MAP = {
   hammer: RiHammerFill,
   history: RiHistoryFill,
   plug: RiPlugLine,
+  palette: RiPaletteFill,
   pulse: RiPulseLine,
   rocket: RiRocketFill,
   server: RiServerFill,
@@ -282,8 +284,8 @@ export function WorkspaceLayout({ children }) {
   const appId = resolveAppId(location.pathname)
   const shellLabel = surface === 'studio' && !appId ? 'Studio' : resolveShellLabel(appName, appId)
   const shellSubtext = resolveShellSubtext(appId)
-  const { groups: navGroups, sections } = useWorkspaceNavigation(appId)
-  const activePath = activeWorkspacePath(location, sections)
+  const { groups: navGroups } = useWorkspaceNavigation(appId)
+  const activePath = activeWorkspacePath(location)
   const activeNav = getActiveNavItem(navGroups, activePath)
   const activeLabel = activeNav.item?.label || activeNav.group?.label || 'Studio'
 

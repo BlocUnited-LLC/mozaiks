@@ -287,6 +287,7 @@ def test_runtime_admin_config_discovers_module_admin_yaml(tmp_path) -> None:
             ],
             "component": None,
             "permissions": [],
+            "permissions_any": [],
             "module_id": "crm",
             "source": "module",
         }

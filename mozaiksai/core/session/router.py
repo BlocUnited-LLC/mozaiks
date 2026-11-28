@@ -77,7 +77,7 @@ class SessionRouter:
         return scope
 
     async def route_trigger(
-        self, trigger: TriggerInput, *, contribution: TriggerRoutingContribution | None = None,
+        self, trigger: TriggerInput, *, contribution: TriggerRoutingContribution | None = None, persist: bool = True,
     ) -> RoutingDecision:
         trigger.target_app_id = self._target_app_id
         app_id = str(trigger.app_id or "").strip()
@@ -161,7 +161,8 @@ class SessionRouter:
             unmet_dependency=unmet_dependency,
             lifecycle_state=lifecycle_state,
         )
-        await self._persist_state(trigger=trigger, decision=decision)
+        if persist:
+            await self._persist_state(trigger=trigger, decision=decision)
         return decision
 
     async def resolve_transition(

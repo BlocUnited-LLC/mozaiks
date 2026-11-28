@@ -48,6 +48,33 @@ class AppRegistryRepo:
         )
         return (doc.get("run_build_binding") or {}) if isinstance(doc, dict) else None
 
+    async def get_owned_settings_session(
+        self, *, app_id: str, owner_user_id: str, chat_id: str,
+    ) -> dict[str, Any] | None:
+        coll = await self._pm._coll()
+        doc = await coll.find_one(
+            {"_id": chat_id, **build_app_scope_filter(app_id), "user_id": owner_user_id},
+            {"run_build_binding": 1, "trigger_meta.settings_selection": 1},
+        )
+        if not isinstance(doc, dict):
+            return None
+        if (doc.get("trigger_meta") or {}).get("settings_selection"):
+            return doc
+        from mozaiksai.core.session.build_binding import RunBuildBinding
+
+        try:
+            binding = RunBuildBinding.model_validate(doc.get("run_build_binding"))
+        except ValueError:
+            return None
+        if binding.phase != "refinement":
+            return None
+        source = await coll.find_one({
+            **build_app_scope_filter(app_id), "user_id": owner_user_id,
+            **{f"run_build_binding.{key}": value for key, value in binding.model_dump(exclude={"refinement_model"}).items()},
+            "trigger_meta.settings_selection": {"$exists": True},
+        }, {"run_build_binding": 1, "trigger_meta.settings_selection": 1})
+        return source if isinstance(source, dict) else None
+
     async def ensure_indexes(self) -> None:
         coll = await self._collection()
         try:

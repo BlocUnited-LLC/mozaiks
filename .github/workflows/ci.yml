@@ -257,11 +257,11 @@ jobs:
           install_dir="$(mktemp -d "${RUNNER_TEMP}/gitleaks.XXXXXX")"
           archive="${install_dir}/gitleaks.tar.gz"
           # Official v8.18.4 gitleaks_8.18.4_linux_x64.tar.gz release asset.
-          url="https://api.github.com/repos/gitleaks/gitleaks/releases/assets/173813554"
+          # Use the official release URL; the asset API can exhaust a shared runner's anonymous quota.
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${gitleaks_version}/gitleaks_${gitleaks_version}_linux_x64.tar.gz"
           if ! curl --fail --silent --show-error --location \
             --proto '=https' --proto-redir '=https' \
             --retry 3 --retry-all-errors --connect-timeout 15 --max-time 60 --retry-max-time 180 \
-            --header 'Accept: application/octet-stream' --header 'X-GitHub-Api-Version: 2022-11-28' \
             --output "$archive" "$url"; then
             echo "::error::Could not download gitleaks ${gitleaks_version} from ${url} after bounded retries."
             exit 1

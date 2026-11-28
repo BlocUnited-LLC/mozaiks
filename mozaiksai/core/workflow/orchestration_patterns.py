@@ -70,6 +70,21 @@ __all__ = [
 _SPECIAL_USER_AGENT_NAMES = frozenset({"user"})
 
 
+def _require_frontend_context_scope(frontend_context: Mapping[str, Any] | None, config: Mapping[str, Any]) -> None:
+    """Caller UI projections cannot seed a persisted router-owned snapshot."""
+    if not frontend_context:
+        return
+    definitions = (config.get("context_variables") or {}).get("definitions") or {}
+    roots = {
+        source["snapshot"].get("context_key")
+        for definition in definitions.values() if isinstance(definition, Mapping)
+        if isinstance(source := definition.get("source"), Mapping) and isinstance(source.get("snapshot"), Mapping)
+    }
+    projected = {key if key.startswith("ui_") else f"ui_{key}" for key in frontend_context}
+    if roots.intersection(projected):
+        raise ValueError("Saved workflow input snapshots cannot be supplied by frontend context")
+
+
 def _normalized_agent_name(value: str) -> str:
     return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
 
@@ -797,8 +812,11 @@ async def run_workflow_orchestration(
                 context = result_ctx
         else:
             from .context.variables import _load_context_async
-            context = await _load_context_async(workflow_name, app_id, runtime_context=runtime_context)
+            context = await _load_context_async(
+                workflow_name, app_id, runtime_context=runtime_context, persisted_context=persisted_extra_ctx,
+            )
 
+        _require_frontend_context_scope(frontend_context, config)
         if frontend_context and context is not None:
             for key, value in frontend_context.items():
                 prefixed = f"ui_{key}" if not key.startswith("ui_") else key
