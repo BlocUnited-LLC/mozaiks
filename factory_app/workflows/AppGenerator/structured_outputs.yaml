@@ -5055,6 +5055,84 @@ models:
         items: AppSegment
         description: Real proportional segments. Do not emit decorative fake charts.
 
+  AppPricingCatalogGroupKind:
+    type: literal
+    values: [subscription, service, add_on, mixed]
+
+  AppPricingCatalogManagedAI:
+    type: model
+    fields:
+      display: {type: optional_str}
+
+  AppPricingCatalogUsageLimit:
+    type: model
+    fields:
+      label: {type: optional_str}
+      monthly_limit_display: {type: optional_str}
+
+  AppPricingCatalogPrice:
+    type: model
+    fields:
+      display: {type: optional_str}
+      interval: {type: optional_str}
+
+  AppPricingCatalogPlan:
+    type: model
+    fields:
+      plan_id: {type: str}
+      label: {type: str}
+      description: {type: optional_str}
+      price_display: {type: optional_str}
+      cta_label: {type: optional_str}
+      highlights: {type: optional_list, items: str}
+      managed_ai: {type: union, variants: [AppPricingCatalogManagedAI, 'null']}
+      usage_limits: {type: optional_list, items: AppPricingCatalogUsageLimit}
+      pricing: {type: union, variants: [AppPricingCatalogPrice, 'null']}
+      is_default: {type: union, variants: [bool, 'null']}
+
+  AppPricingCatalogGroup:
+    type: model
+    fields:
+      group_id: {type: str}
+      label: {type: str}
+      description: {type: optional_str}
+      kind: {type: union, variants: [AppPricingCatalogGroupKind, 'null']}
+      plan_ids: {type: optional_list, items: str}
+      capability_groups: {type: optional_list, items: str}
+      add_on_ids: {type: optional_list, items: str}
+
+  AppPricingCatalogAddOn:
+    type: model
+    fields:
+      add_on_id: {type: str}
+      label: {type: str}
+      description: {type: optional_str}
+      price_display: {type: optional_str}
+      price: {type: union, variants: [AppPricingCatalogPrice, 'null']}
+      cta_label: {type: optional_str}
+      highlights: {type: optional_list, items: str}
+
+  AppPricingCatalogConfig:
+    type: model
+    fields:
+      data_source: {type: union, variants: [AppPageDataSource, 'null']}
+      title: {type: optional_str}
+      subtitle: {type: optional_str}
+      plans_key: {type: optional_str}
+      groups_key: {type: optional_str}
+      add_ons_key: {type: optional_str}
+      default_group_id: {type: optional_str}
+      default_group_key: {type: optional_str}
+      current_plan_key: {type: optional_str}
+      highlighted_plan_id: {type: optional_str}
+      plan_action_label: {type: optional_str}
+      add_on_action_label: {type: optional_str}
+      plans: {type: optional_list, items: AppPricingCatalogPlan}
+      groups: {type: optional_list, items: AppPricingCatalogGroup}
+      add_ons: {type: optional_list, items: AppPricingCatalogAddOn}
+      plan_action: {type: union, variants: [AppPageAction, 'null']}
+      add_on_action: {type: union, variants: [AppPageAction, 'null']}
+
   AppPageChildSectionConfig:
     type: union
     variants:
@@ -5083,6 +5161,7 @@ models:
     - AppAlertBannerConfig
     - AppActionButtonConfig
     - AppFileListConfig
+    - AppPricingCatalogConfig
 
   AppPageChildSection:
     type: model
@@ -5217,6 +5296,7 @@ models:
     - AppAlertBannerConfig
     - AppActionButtonConfig
     - AppFileListConfig
+    - AppPricingCatalogConfig
 
   AppPageSection:
     type: model

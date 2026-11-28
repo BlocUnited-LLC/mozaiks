@@ -553,6 +553,8 @@ This project follows a practical pre-1.0 changelog format:
   being instructed to regenerate supplied implementations.
 - App planning no longer reassigns a pack's event contract to an app-owned
   fixture task after releasing template-owned files.
+- Factory designs and builds can use the shipped pricing catalog on app-owned
+  pages, with inline plans or pricing data from an approved module action.
 
 - Scoped page refinements receive supported page contracts and linked
   server-query context, with guidance for selecting the query owner when server

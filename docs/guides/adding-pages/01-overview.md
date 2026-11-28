@@ -28,6 +28,31 @@ app/ui/route_manifest.json       ← registers the route
 app/ui/index.js                  ← registers the component key used by the route
 ```
 
+## How the Factory builds a page
+
+`DesignDocsAgent` records the route, access rules, rendering surface, and
+intended page sections in the experience spec. `AppPlanAgent` assigns each
+app-owned page to a page task. Assembly supplies the files declared by the
+selected packs. A worker can design a separate page over the same module
+actions without copying the pack's page or backend.
+
+For a declarative page, `AppSchemaAgent` returns `AppSchemaOutput` with
+typed sections from the shipped UI library. For example, a membership page
+can use `PricingCatalog` to display inline plans or read plans through an
+approved module action. The worker supplies `data_source.module_id` and
+`data_source.action_id`. The compiler resolves that pair against the app's
+action inventory and writes the page under `app/ui/pages/`. The platform
+serves its validated schema as JSON, and the browser renders each section
+with its registered component. An approved custom React page uses the
+separate custom route contract when a shipped component cannot express
+the reviewed interaction.
+
+File format follows the workspace contract. Pages use YAML, while app
+identity lives in `app/app.json`. Either format can be a static pack file
+or a declared `.j2` template when a value must vary per build. Assembly
+renders those templates with strict variables and parses the resulting
+YAML or JSON before accepting the output.
+
 ## Minimum Page Schema
 
 ```yaml
