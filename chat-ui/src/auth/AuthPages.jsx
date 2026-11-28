@@ -76,7 +76,7 @@ function OwnerAccountSetup() {
       if (!response.ok) throw new Error('Owner access check failed');
       const body = await response.json();
       if (!body || !Array.isArray(body.pages)) throw new Error('Invalid owner access response');
-      return 'ready';
+      return body.is_admin === true ? 'ready' : 'account_required';
     }).then(value => {
       if (!controller.signal.aborted) {
         setVerifiedScope(scope);

@@ -22,6 +22,14 @@ function shellConfig() {
   };
 }
 
+function ownerAdminConfig() {
+  return {
+    is_admin: true, entry_path: '/admin',
+    pages: [{ id: 'overview', label: 'Overview', path: '/admin', scope: 'app', enabled: true, show_in_navigation: true, order: 0 }],
+    runtime_panels: [], module_panels: [],
+  };
+}
+
 async function mockBackend(page, config = shellConfig()) {
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
@@ -102,7 +110,7 @@ test('owner handoff continues through OIDC and confirms app-authorized Admin acc
   await page.route('**/api/admin/config', route => {
     expect(route.request().headers().authorization).toBe('Bearer browser-access-token');
     checks += 1;
-    return route.fulfill({ json: { pages: [] } });
+    return route.fulfill({ json: ownerAdminConfig() });
   });
   await page.goto('/?owner=1');
   await expect(page.getByRole('heading', { name: 'Owner access confirmed', exact: true })).toBeVisible();
@@ -214,13 +222,37 @@ test('owner handoff respects app denial despite an admin role in the identity to
   await expect(page.getByRole('alert')).toContainText('This account has no Admin access');
 });
 
+test('owner handoff does not confirm inbox-only staff access as owner access', async ({ page }) => {
+  await mockBackend(page);
+  const identity = await mockIdentityProvider(page);
+  let checks = 0;
+  await page.route('**/api/admin/config', route => {
+    expect(route.request().headers().authorization).toBe('Bearer browser-access-token');
+    checks += 1;
+    return route.fulfill({ json: {
+      is_admin: false, entry_path: '/admin/support',
+      pages: [{ id: 'support', label: 'Support', path: '/admin/support', scope: 'app', enabled: true, show_in_navigation: true, order: 0 }],
+      runtime_panels: [],
+      module_panels: [{ id: 'support-inbox', page: 'support', module: 'support', component: 'SupportInbox' }],
+    } });
+  });
+  await page.goto('/login?owner=1');
+  await expect(page.getByRole('alert')).toContainText('This account has no Admin access');
+  await expect(page).toHaveURL(`${appOrigin}/login?owner=1`);
+  expect(identity.exchanges()).toBe(1);
+  expect(checks).toBeGreaterThan(0);
+  await expect(page.getByRole('heading', { name: 'Owner access confirmed', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Open Admin', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Sign in again', exact: true })).toBeVisible();
+});
+
 test('owner verification failure remains retryable and malformed success cannot confirm access', async ({ page }) => {
   await mockBackend(page);
   await mockIdentityProvider(page);
   let state = 'unavailable';
   await page.route('**/api/admin/config', route => route.fulfill(state === 'unavailable'
     ? { status: 503, json: { detail: 'Unavailable' } }
-    : { json: state === 'malformed' ? {} : { pages: [] } }));
+    : { json: state === 'malformed' ? {} : ownerAdminConfig() }));
   await page.goto('/login?owner=1');
   await expect(page.getByRole('alert')).toContainText('Owner access could not be checked');
   state = 'malformed';
