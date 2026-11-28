@@ -14,7 +14,7 @@ test keeps the two lists equal.
 
 | Scope | Menu | Purpose |
 | --- | --- | --- |
-| Workspace Dashboard | My Apps `/apps`, Performance `/performance`, Revenue `/portfolio/revenue`, Token Usage `/usage`, Integrations `/integrations`, Support `/support`, AI models `/settings/ai-models` | Manage the portfolio: app records, cross-app performance and usage, shared provider setup, support activity, and the AI models builds may use. |
+| Workspace Dashboard | My Apps `/apps`, Performance `/performance`, Revenue `/portfolio/revenue`, Token Usage `/usage`, Integrations `/integrations` | Manage the portfolio: app records, cross-app performance and usage, shared provider setup, support activity, and the AI models builds may use. |
 | App Dashboard | Overview, Revenue, Users, Project, Integrations, Launch, Billing, Token Usage, Health and Support, each under `/apps/:appId/...` | Manage one app. |
 
 In the workspace menu, **My Apps** lists the apps you own. **Performance** shows
@@ -23,8 +23,16 @@ to that app's own sidebar. Selected-app tools are not repeated in the workspace
 menu. Existing `/apps?section=...` chooser links still resolve to the mounted,
 role-filtered app routes and use each app page's existing authorization checks.
 
-Workspace administrators also see the workspace-wide Token Usage, Integrations,
-Support, and AI models pages. AI model settings require a signed-in workspace.
+Workspace administrators also see the workspace-wide Token Usage and Integrations
+pages. AI model settings remain available from Integrations at `/settings/ai-models`
+and require a signed-in workspace. Personal Support lives in Profile; the existing
+`/support` deep link remains mounted. Hosted staff Support Desk is a separate
+product route with its existing authorization.
+
+Hosts that bind a dashboard ID to a different Factory target can reuse
+`AppOverviewPage` with `targetAppId` and `buildRegistryId`, as they do for
+`DashboardPortalPage`. The data loader verifies the target association; Project
+links retain the selected dashboard route ID.
 
 One detail route is linked from other pages and is not in a menu:
 

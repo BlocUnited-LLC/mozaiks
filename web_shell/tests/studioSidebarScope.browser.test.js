@@ -30,6 +30,8 @@ test('Studio switches between portfolio and selected-app menus on desktop and mo
     `, loader: 'jsx', resolveDir: root },
     bundle: true, write: false, format: 'esm', jsx: 'automatic',
     nodePaths: [path.join(shell, 'node_modules')],
+    alias: { react: path.join(shell, 'node_modules/react'), 'react-dom': path.join(shell, 'node_modules/react-dom'),
+      'react-router-dom': path.join(shell, 'node_modules/react-router-dom'), 'react-icons': path.join(shell, 'node_modules/react-icons') },
     plugins: [{ name: 'host-context', setup(builder) {
       builder.onResolve({ filter: /\/(NavigationProvider|ChatUIContext)\.jsx$/ }, args => ({ path: args.path, namespace: 'host-context' }));
       builder.onLoad({ filter: /.*/, namespace: 'host-context' }, args => ({ contents: args.path.includes('NavigationProvider')
@@ -64,6 +66,9 @@ test('Studio switches between portfolio and selected-app menus on desktop and mo
           const workspace = page.getByRole('navigation', { name: 'Workspace navigation', exact: true });
           await expect(workspace.getByRole('link', { name: 'My Apps', exact: true })).toHaveAttribute('aria-current', 'page');
           await expect(workspace.getByText('Manage an app', { exact: true })).toHaveCount(0);
+          await expect(workspace.getByRole('link', {name:'Support',exact:true})).toHaveCount(0);
+          await expect(workspace.getByRole('link', {name:'AI models',exact:true})).toHaveCount(0);
+          await expect(workspace.getByRole('link', {name:'Revenue',exact:true})).toHaveAttribute('href','/portfolio/revenue');
           assert.equal(await workspace.getByRole('link', { name: 'Project', exact: true }).count(), 0);
           assert.equal(await workspace.getByRole('link', { name: 'Token Usage', exact: true }).count(), role === 'admin' ? 1 : 0);
           await expect(page.getByTestId('sections')).toContainText('/apps/:appId/revenue');

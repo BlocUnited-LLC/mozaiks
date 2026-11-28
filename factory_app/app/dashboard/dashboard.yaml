@@ -49,6 +49,7 @@ workspace:
       order: 30
 
     - id: support
+      enabled: false
       label: Support
       route: /support
       icon: support
@@ -56,6 +57,7 @@ workspace:
       description: Apps with support chats, each linking to that app's support inbox.
 
     - id: ai-models
+      enabled: false
       label: AI models
       route: /settings/ai-models
       icon: settings

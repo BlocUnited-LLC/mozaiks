@@ -19,6 +19,8 @@ This project follows a practical pre-1.0 changelog format:
   Existing app-picker deep links still work. Revenue lists customer revenue by
   app with unavailable values shown explicitly. Each app overview shows its
   recorded build phase linking to Project, without a repeated administration menu.
+  The overview reads only its displayed data. Personal Support stays in Profile,
+  and AI model settings are linked from Integrations.
 
 - Mozaiks installs exclude Tree-sitter 0.26.0, which can crash the process
   while building a workspace dependency graph on Windows and Linux.

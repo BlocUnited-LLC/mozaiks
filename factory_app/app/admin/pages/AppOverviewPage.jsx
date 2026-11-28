@@ -13,10 +13,11 @@ function metricValue(analytics, id) {
   return metric?.available ? formatMetricValue(analytics?.registry?.[id], metric.value, 'Unavailable') : 'Unavailable'
 }
 
-export default function AppOverviewPage() {
-  const { appId } = useParams()
-  const { data, loading, error, dataMode, refresh } = useAppStudioData(appId)
-  const { data: analytics } = useAppAnalytics(appId, DEFAULT_ANALYTICS_PERIOD)
+export default function AppOverviewPage({ targetAppId = null, buildRegistryId = null } = {}) {
+  const { appId: dashboardAppId } = useParams()
+  const appId = targetAppId || dashboardAppId
+  const { data, loading, error, dataMode, refresh } = useAppStudioData(appId, buildRegistryId, { overviewOnly: true })
+  const { data: analytics } = useAppAnalytics(dashboardAppId, DEFAULT_ANALYTICS_PERIOD)
   if (loading) return <StudioLoadingState label="Loading App Overview." />
   if (error || !data?.summary) return <StudioErrorState title="App Overview Unavailable" message={error || 'No summary returned.'} />
   const app = data.summary.app || {}
@@ -42,7 +43,7 @@ export default function AppOverviewPage() {
           actions={[{ id: 'refresh', label: 'Refresh', variant: 'outline' }]} onAction={() => refresh()} />
         <div className="flex flex-wrap items-center gap-2">
           {app.lifecycle_state && <StatusPill tone="default">{getAppLifecycleLabel(app.lifecycle_state)}</StatusPill>}
-          {phaseLabel && <Link to={'/apps/' + encodeURIComponent(appId) + '/building'} className="inline-flex rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+          {phaseLabel && <Link to={'/apps/' + encodeURIComponent(dashboardAppId) + '/building'} className="inline-flex rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
             aria-label={'Open Project: ' + phaseLabel + (stepLabel ? ' · ' + stepLabel : '')}>
             <StatusPill tone="primary">{phaseLabel}{stepLabel ? ' · ' + stepLabel : ''}</StatusPill>
           </Link>}

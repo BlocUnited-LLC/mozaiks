@@ -4,6 +4,7 @@ import { PageHeader, SummaryStrip } from '@mozaiks/chat-ui/ui'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ActionButton,
+  LinkButton,
   StatusPill,
   StudioErrorState,
   StudioInlineEmptyState,
@@ -830,6 +831,8 @@ export default function WorkspaceIntegrationsPage() {
         />
 
         <PortfolioIntegrations />
+
+        <LinkButton to="/settings/ai-models" variant="outline" size="sm">AI model settings</LinkButton>
 
         <SummaryStrip items={summaryItems} />
 

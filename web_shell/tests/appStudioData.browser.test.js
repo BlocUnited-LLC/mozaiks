@@ -9,7 +9,7 @@ import { chromium } from '@playwright/test';
 const shell = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const root = path.dirname(shell);
 
-async function fixture(t, { strict = false, holdRegistry = false, holdDetails = false } = {}) {
+async function fixture(t, { strict = false, holdRegistry = false, holdDetails = false, overviewOnly = false } = {}) {
   const state = { holdRegistry, holdDetails, failOverview: false, revision: 1 };
   const requests = [];
   const pending = [];
@@ -29,7 +29,7 @@ async function fixture(t, { strict = false, holdRegistry = false, holdDetails = 
         finally { call.settled = true; }
       };
       function Data({appId}) {
-        const {data, loading, error, refresh} = useAppStudioData(appId);
+        const {data, loading, error, refresh} = useAppStudioData(appId, null, {overviewOnly: ${overviewOnly}});
         return <>
           <button onClick={refresh}>Refresh</button>
           <output data-testid="state">{JSON.stringify({loading, error, app: data?.summary?.app?.app_id, revision: data?.summary?.revision})}</output>
@@ -163,4 +163,19 @@ test('a current request failure remains visible and explicit refresh can recover
   state.revision = 2;
   await page.getByRole('button', {name: 'Refresh', exact: true}).click();
   await waitForData('app-a', 2);
+});
+
+
+test('overview sends only its summary, runs and usage detail reads under StrictMode', async t => {
+  const {page, requests, waitForData} = await fixture(t, {strict: true, overviewOnly: true});
+  await waitForData('app-a');
+  await page.waitForFunction(() => window.calls.every(call => call.settled));
+  const details = requests.filter(request => request.path !== '/api/studio/apps');
+  assert.equal(details.length, 3);
+  assert.deepEqual(details.map(request => request.path).sort(), ['/api/admin/runs','/api/admin/usage','/api/studio/overview']);
+  assert.ok(requests.every(request => request.auth === 'Bearer fixture-token'));
+  const before = requests.length;
+  await page.getByRole('button', {name: 'Refresh', exact: true}).click();
+  await page.waitForFunction(count => window.calls.length >= count + 4 && window.calls.every(call => call.settled), before);
+  assert.equal(requests.length - before, 4);
 });

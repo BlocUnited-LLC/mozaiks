@@ -109,7 +109,7 @@ function buildDemoPayload(appId) {
   }
 }
 
-export function useAppStudioData(appId, expectedBuildRegistryId = null) {
+export function useAppStudioData(appId, expectedBuildRegistryId = null, { overviewOnly = false } = {}) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -144,6 +144,8 @@ export function useAppStudioData(appId, expectedBuildRegistryId = null) {
           ? `build_registry_id=${encodeURIComponent(buildRegistryId)}`
           : `app_id=${encodeURIComponent(appId)}`
 
+        // Overview reads only what it renders; detailed pages retain their existing batch.
+        const detailFetch = path => overviewOnly ? Promise.resolve(null) : studioFetch(path, requestOptions)
         const [
           overviewRes,
           statsRes,
@@ -157,30 +159,30 @@ export function useAppStudioData(appId, expectedBuildRegistryId = null) {
           runtimeMetricsRes,
         ] = await Promise.allSettled([
           studioFetch(`/api/studio/overview?${buildScope}`, requestOptions),
-          studioFetch(`/api/admin/stats?app_id=${encodeURIComponent(appId)}`, requestOptions),
+          detailFetch(`/api/admin/stats?app_id=${encodeURIComponent(appId)}`),
           studioFetch(`/api/admin/runs?app_id=${encodeURIComponent(appId)}&limit=12`, requestOptions),
-          studioFetch(`/api/admin/sessions?app_id=${encodeURIComponent(appId)}&limit=12`, requestOptions),
+          detailFetch(`/api/admin/sessions?app_id=${encodeURIComponent(appId)}&limit=12`),
           studioFetch(`/api/admin/usage?app_id=${encodeURIComponent(appId)}&limit=500`, requestOptions),
-          studioFetch(`/api/studio/build?${buildScope}`, requestOptions),
+          detailFetch(`/api/studio/build?${buildScope}`),
           buildRegistryId
-            ? studioFetch(`/api/studio/build/history?build_registry_id=${encodeURIComponent(buildRegistryId)}&build_family=app_bundle&limit=8`, requestOptions)
+            ? detailFetch(`/api/studio/build/history?build_registry_id=${encodeURIComponent(buildRegistryId)}&build_family=app_bundle&limit=8`)
             : Promise.resolve(null),
-          studioFetch(`/api/studio/integrations?app_id=${encodeURIComponent(appId)}`, requestOptions),
-          studioFetch(`/api/studio/apps/${encodeURIComponent(appId)}/context`, requestOptions),
-          studioFetch('/api/admin/metrics/runtime', requestOptions),
+          detailFetch(`/api/studio/integrations?app_id=${encodeURIComponent(appId)}`),
+          detailFetch(`/api/studio/apps/${encodeURIComponent(appId)}/context`),
+          detailFetch('/api/admin/metrics/runtime'),
         ])
         if (cancelled) return
 
-        const overview = overviewRes.status === 'fulfilled' && overviewRes.value.ok ? await overviewRes.value.json() : null
-        const stats = statsRes.status === 'fulfilled' && statsRes.value.ok ? await statsRes.value.json() : null
-        const runs = runsRes.status === 'fulfilled' && runsRes.value.ok ? await runsRes.value.json() : null
-        const sessions = sessionsRes.status === 'fulfilled' && sessionsRes.value.ok ? await sessionsRes.value.json() : null
-        const usage = usageRes.status === 'fulfilled' && usageRes.value.ok ? await usageRes.value.json() : null
-        const buildState = buildRes.status === 'fulfilled' && buildRes.value.ok ? await buildRes.value.json() : null
+        const overview = overviewRes.status === 'fulfilled' && overviewRes.value?.ok ? await overviewRes.value.json() : null
+        const stats = statsRes.status === 'fulfilled' && statsRes.value?.ok ? await statsRes.value.json() : null
+        const runs = runsRes.status === 'fulfilled' && runsRes.value?.ok ? await runsRes.value.json() : null
+        const sessions = sessionsRes.status === 'fulfilled' && sessionsRes.value?.ok ? await sessionsRes.value.json() : null
+        const usage = usageRes.status === 'fulfilled' && usageRes.value?.ok ? await usageRes.value.json() : null
+        const buildState = buildRes.status === 'fulfilled' && buildRes.value?.ok ? await buildRes.value.json() : null
         const buildHistory = historyRes.status === 'fulfilled' && historyRes.value?.ok ? await historyRes.value.json() : null
-        const integrations = integrationsRes.status === 'fulfilled' && integrationsRes.value.ok ? await integrationsRes.value.json() : null
-        const context = contextRes.status === 'fulfilled' && contextRes.value.ok ? await contextRes.value.json() : null
-        const runtimeMetrics = runtimeMetricsRes.status === 'fulfilled' && runtimeMetricsRes.value.ok ? await runtimeMetricsRes.value.json() : null
+        const integrations = integrationsRes.status === 'fulfilled' && integrationsRes.value?.ok ? await integrationsRes.value.json() : null
+        const context = contextRes.status === 'fulfilled' && contextRes.value?.ok ? await contextRes.value.json() : null
+        const runtimeMetrics = runtimeMetricsRes.status === 'fulfilled' && runtimeMetricsRes.value?.ok ? await runtimeMetricsRes.value.json() : null
 
         if (!overview) {
           throw new Error('App summary unavailable.')
@@ -226,7 +228,7 @@ export function useAppStudioData(appId, expectedBuildRegistryId = null) {
       cancelled = true
       controller.abort()
     }
-  }, [appId, expectedBuildRegistryId, refreshKey])
+  }, [appId, expectedBuildRegistryId, overviewOnly, refreshKey])
 
   return {
     data,

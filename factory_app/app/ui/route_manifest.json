@@ -125,6 +125,7 @@
         "ai_context": "The user is on the workspace AI models page. It sets which AI model Factory builds and refinements use by default, and which models may be chosen.",
         "navigation": {
           "group": "workspace-studio",
+          "include": false,
           "scope": "local",
           "icon": "settings"
         }
@@ -151,6 +152,7 @@
         ],
         "navigation": {
           "group": "workspace-studio",
+          "include": false,
           "scope": "local",
           "icon": "support"
         }

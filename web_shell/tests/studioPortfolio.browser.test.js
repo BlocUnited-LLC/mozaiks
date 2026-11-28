@@ -28,18 +28,20 @@ test('portfolio and overview distinguish unavailable data from zero at phone and
       import Usage from ${JSON.stringify(path.join(pages,'WorkspaceUsagePage.jsx'))};
       window.mozaiksAuth={getAccessToken:()=> 'fixture-token'};
       function Fixture(){const [revision,setRevision]=useState(0);window.replaceFixture=value=>{window.fixture=value;setRevision(x=>x+1)};
-        return <BrowserRouter><Routes key={revision}><Route path="/apps/:appId/overview" element={<Overview/>}/>
+        return <BrowserRouter><Routes key={revision}><Route path="/apps/:appId/overview" element={<Overview targetAppId={window.fixture.targetAppId} buildRegistryId={window.fixture.buildRegistryId}/>}/>
         <Route path="/revenue" element={<Revenue/>}/><Route path="/integrations" element={<Integrations/>}/>
         <Route path="/usage" element={<Usage/>}/></Routes></BrowserRouter>}
       createRoot(document.getElementById('root')).render(<Fixture/>);`,resolveDir:shell,loader:'jsx'},
     bundle:true,write:false,format:'esm',jsx:'automatic',loader:{'.js':'jsx','.png':'dataurl'},
     nodePaths:[path.join(shell,'node_modules')],
-    alias:{'@mozaiks/chat-ui/ui':path.join(root,'chat-ui/src/ui/index.js'),'@mozaiks/chat-ui/admin':path.join(root,'chat-ui/src/admin')},
+    alias:{react:path.join(shell,'node_modules/react'),'react-dom':path.join(shell,'node_modules/react-dom'),
+      'react-router-dom':path.join(shell,'node_modules/react-router-dom'),'react-icons':path.join(shell,'node_modules/react-icons'),
+      '@mozaiks/chat-ui/ui':path.join(root,'chat-ui/src/ui/index.js'),'@mozaiks/chat-ui/admin':path.join(root,'chat-ui/src/admin')},
     plugins:[{name:'fixture-boundaries',setup(builder){
       builder.onResolve({filter:/^@mozaiks\/chat-ui\/workspace$|\/(useAppStudioData|useStudioAnalytics|useWorkspaceApps|useWorkspaceStudioData)\.js$/},args=>({path:args.path,namespace:'fixture'}));
       builder.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:
-        args.path.includes('useAppStudioData')?'export const useAppStudioData=()=>({data:window.fixture.data,loading:false,error:null,dataMode:"live",refresh:()=>{}});':
-        args.path.includes('useStudioAnalytics')?'export const useAppAnalytics=()=>({data:window.fixture.analytics});export const usePortfolioAnalytics=()=>({data:window.fixture.portfolio,loading:false,error:null,dataMode:window.fixture.dataMode||"live"});':
+        args.path.includes('useAppStudioData')?'export const useAppStudioData=(appId,registryId)=>{window.studioSelection={appId,registryId};return {data:window.fixture.data,loading:false,error:null,dataMode:"live",refresh:()=>{}}};':
+        args.path.includes('useStudioAnalytics')?'export const useAppAnalytics=appId=>{window.analyticsSelection=appId;return {data:window.fixture.analytics}};export const usePortfolioAnalytics=()=>({data:window.fixture.portfolio,loading:false,error:null,dataMode:window.fixture.dataMode||"live"});':
         args.path.includes('useWorkspaceApps')?'export const useWorkspaceApps=()=>({apps:window.fixture.apps,loading:false,error:null});':
         args.path.includes('useWorkspaceStudioData')?'export const useWorkspaceStudioData=()=>({apps:window.fixture.apps,workspaceRuns:[],workspaceUsage:window.fixture.usage,loading:false,error:null,dataMode:"live"});':
         'export const WorkspaceLayout=({children})=>children;'}));
@@ -80,6 +82,10 @@ test('portfolio and overview distinguish unavailable data from zero at phone and
       await expect(page.getByText(/Next step|Readiness board|App intelligence/)).toHaveCount(0);
       await expect(page.getByRole('button',{name:'Add cover'})).toHaveCount(0);
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+      await page.evaluate(value=>window.replaceFixture(value),{...fixture,targetAppId:'factory-target',buildRegistryId:'registry-target'});
+      await expect.poll(()=>page.evaluate(()=>window.studioSelection)).toEqual({appId:'factory-target',registryId:'registry-target'});
+      assert.equal(await page.evaluate(()=>window.analyticsSelection),'first');
+      await expect(page.getByRole('link',{name:'Open Project: Genesis Build · Theme Capture',exact:true})).toHaveAttribute('href','/apps/first/building');
       const noPhase={...fixture,data:{...baseline,summary:{app:{name:'First app',lifecycle_state:'draft'}}}};
       await page.evaluate(value=>window.replaceFixture(value),noPhase);
       await expect(page.getByRole('link',{name:/Open Project:/})).toHaveCount(0);
