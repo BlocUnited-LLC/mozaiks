@@ -797,7 +797,9 @@ async def run_workflow_orchestration(
                 context = result_ctx
         else:
             from .context.variables import _load_context_async
-            context = await _load_context_async(workflow_name, app_id, runtime_context=runtime_context)
+            context = await _load_context_async(
+                workflow_name, app_id, runtime_context=runtime_context, persisted_context=persisted_extra_ctx,
+            )
 
         if frontend_context and context is not None:
             for key, value in frontend_context.items():

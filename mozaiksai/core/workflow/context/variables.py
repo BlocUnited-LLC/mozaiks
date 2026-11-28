@@ -16,11 +16,13 @@ from logs.logging_config import get_workflow_logger
 from .adapter import create_context_container
 from .authority import (
     RUNTIME_SYSTEM_WRITER,
+    ContextAuthorityClass,
     build_context_authority_policy,
     task_batch_written_context_keys,
 )
 from .data_entity import DataEntityManager
 from .db_adapters import get_db_adapter
+from .frozen import detach
 from .schema import (
     ContextVariableDefinition,
     ContextVariablesPlan,
@@ -336,6 +338,24 @@ def _materialize_query_template(
     return resolved
 
 
+def _active_snapshot(source: Any, context: Any) -> bool:
+    return (source.snapshot is not None
+            and source.snapshot.context_key in getattr(context, "_mozaiks_snapshot_roots", frozenset())
+            and context.get(source.snapshot.context_key) is not None)
+
+
+def _snapshot_reference_value(source: Any, context: Any) -> Any:
+    reference = source.snapshot
+    if reference.context_key not in getattr(context, "_mozaiks_snapshot_roots", frozenset()):
+        raise ValueError("A context snapshot must come from an admitted router-owned input")
+    value = detach(context.get(reference.context_key))
+    for part in reference.path.split("."):
+        if not isinstance(value, Mapping) or part not in value:
+            raise ValueError(f"The saved context snapshot has no projection {reference.path!r}")
+        value = value[part]
+    return detach(value)
+
+
 async def _load_data_reference_value(
     name: str,
     definition: ContextVariableDefinition,
@@ -345,6 +365,8 @@ async def _load_data_reference_value(
     context: Any,
 ) -> Any:
     source = definition.source
+    if _active_snapshot(source, context):
+        return _coerce_value(definition, _snapshot_reference_value(source, context))
     
     adapter = get_db_adapter(source)
     if not adapter:
@@ -573,6 +595,7 @@ async def _load_context_async(
     app_id: str | None,
     *,
     runtime_context: dict[str, Any] | None = None,
+    persisted_context: dict[str, Any] | None = None,
 ):
     business_logger.debug("Loading context for workflow=%s", workflow_name)
     context = _create_minimal_context(workflow_name, app_id)
@@ -639,6 +662,22 @@ async def _load_context_async(
             raise ValueError(f"Required runtime context '{name}' is missing for '{workflow_name}'")
         context.set(name, value)
 
+    snapshot_roots = {definition.source.snapshot.context_key for definition in definitions.values()
+                      if definition.source.snapshot is not None}
+    admitted_snapshot_roots: set[str] = set()
+    for name in snapshot_roots:
+        definition = definitions.get(name)
+        if (definition is None or definition.source.type != "state"
+                or definition.authority_class != ContextAuthorityClass.CLOSED_WRITER_ROUTING_STATE
+                or definition.persisted is not True or definition.writer_ids != ["transition_router"]):
+            raise ValueError(f"Snapshot root {name!r} must be persisted state owned exclusively by the transition router")
+        if name in (persisted_context or {}):
+            value = persisted_context[name]
+            authority_policy.require_replayable_value(name, value, operation="snapshot_load")
+            context.set(name, detach(value))
+            admitted_snapshot_roots.add(name)
+    context._mozaiks_snapshot_roots = frozenset(admitted_snapshot_roots)
+
     default_db = _database_defaults(raw_context_section)
     fallbacks = _load_data_reference_fallbacks()
     data_entity_managers: list[DataEntityManager] = []
@@ -662,7 +701,7 @@ async def _load_context_async(
                 app_id=internal_app_id,
                 context=context,
             )
-            if value is None:
+            if value is None and not _active_snapshot(source, context):
                 fallback_value = _lookup_data_reference_fallback(fallbacks, workflow_name, name)
                 if fallback_value is not None:
                     value = _coerce_value(definition, fallback_value)
@@ -688,6 +727,8 @@ async def _load_context_async(
             context.set(name, None)
             business_logger.debug("Registered computed variable %s (on-demand)", name)
         elif source_type == "state":
+            if name in snapshot_roots and name in (persisted_context or {}):
+                continue
             value = _resolve_state_default(definition)
             context.set(name, value)
             trigger_count = len(getattr(source, "triggers", []) or [])

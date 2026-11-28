@@ -312,13 +312,26 @@
       }
     },
     {
+      "path": "/apps/:appId/branding",
+      "component": "AppBrandingPage",
+      "label": "Branding",
+      "order": 23,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresAuth": true,
+        "title": "Branding",
+        "appShell": true,
+        "navigation": { "group": "app-studio", "scope": "local", "icon": "palette" }
+      }
+    },
+    {
       "path": "/apps/:appId/billing",
       "component": "AppBillingPage",
-      "label": "Billing",
+      "label": "Subscription",
       "order": 28,
       "meta": {
         "surfaces": ["studio"],
-        "title": "Billing",
+        "title": "Subscription",
         "requiresAuth": true,
         "appShell": true,
         "navigation": {

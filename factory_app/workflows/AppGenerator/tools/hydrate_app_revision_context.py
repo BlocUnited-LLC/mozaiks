@@ -105,9 +105,12 @@ async def hydrate_app_revision_context(context_variables: Any = None, *, load_wo
 
 
 def uses_revision_source_theme(context_variables: Any) -> bool:
+    from factory_app.workflows._shared.subscription_revision import subscription_revision_baseline
+
     return (
         revision_baseline_required(context_variables)
-        and context_variables.get("artifact_kind") == "app_bundle"
+        and (context_variables.get("artifact_kind") == "app_bundle"
+             or subscription_revision_baseline(context_variables) is not None)
         and context_variables.get("workflow_sequence") not in {"theme_revision", "theme_patch"}
     )
 

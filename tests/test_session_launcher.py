@@ -845,3 +845,33 @@ def test_validate_context_value_at_exact_limit_is_accepted() -> None:
     validated = _session_launcher.validate_context_for_workflow("unknown_wf", context)
     assert "key" in validated
 
+
+
+@pytest.mark.asyncio
+async def test_exact_build_preflight_refuses_dependency_redirect_without_allocating(monkeypatch):
+    from mozaiksai.core.session.build_binding import ExpectedBuildBaseline
+    from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
+
+    phases = []
+    async def session_fields(**kwargs):
+        phases.append(kwargs.get("phase", "prepare"))
+        assert kwargs.get("phase") == "route"
+        return {"target_app_id": "selected-app"}
+    hooks = SimpleNamespace(call_chat_prereqs=AsyncMock(return_value=(True, None)), call_chat_session_fields=session_fields)
+    monkeypatch.setattr(_session_launcher, "get_platform_hooks", lambda: hooks)
+    class Router:
+        def for_target(self, target):
+            assert target == "selected-app"
+            return self
+        async def route_trigger(self, trigger, *, contribution, persist):
+            assert persist is False
+            assert contribution.require_exact_route is True
+            raise ValueError("Trigger requires exact route; prerequisites no longer match")
+    with pytest.raises(ValueError, match="exact route"):
+        await _session_launcher.prepare_routed_workflow_launch(
+            workflow_id=None, app_id="host", user_id="owner", trigger_source="refinement", build_registry_id="selected-registry",
+            session_router=Router(), journey_id="subscription_patch",
+            expected_baseline=ExpectedBuildBaseline(build_id="selected-build", artifact_version_id="selected-bundle"),
+            routing_contribution=TriggerRoutingContribution(workflow_id="SubscriptionContractDesigner", journey_id="subscription_patch", require_exact_route=True),
+        )
+    assert phases == ["route"]

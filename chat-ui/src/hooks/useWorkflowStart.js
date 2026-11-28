@@ -84,6 +84,7 @@ export function useWorkflowStart() {
         build_registry_id = null,
         source_chat_id = null,
         retry_failed = false,
+        settings_selection = null,
         signal = null,
       } = options;
       const resolvedAppId = resolveWorkflowAppId(config, user, app_id);
@@ -110,6 +111,7 @@ export function useWorkflowStart() {
           ...(build_registry_id ? { build_registry_id } : {}),
           ...(source_chat_id ? { source_chat_id } : {}),
           ...(retry_failed ? { retry_failed: true } : {}),
+          ...(settings_selection ? { settings_selection } : {}),
           // workflow_id is optional for refinement triggers — backend router resolves it
           ...(workflowId ? { workflow_id: workflowId } : {}),
           ...(action_id ? { action_id } : {}),

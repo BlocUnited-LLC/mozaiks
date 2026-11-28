@@ -5,7 +5,11 @@ from types import EllipsisType
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from mozaiksai.core.session.build_binding import BuildTargetReference, RunBuildBinding
+from mozaiksai.core.session.build_binding import (
+    BuildTargetReference,
+    ExpectedBuildBaseline,
+    RunBuildBinding,
+)
 
 from .policy import is_generic_app_name, normalize_optional_text, validate_lifecycle_state
 from .schemas import (
@@ -81,6 +85,7 @@ class AppRegistryService:
         refinement: bool = False,
         allow_create: bool = False,
         allow_current_build: bool = False,
+        expected_baseline: ExpectedBuildBaseline | None = None,
     ) -> RunBuildBinding:
         """Bind a build through authenticated registry/session ownership.
 
@@ -201,6 +206,7 @@ class AppRegistryService:
                 owner_user_id=owner_user_id, app_id=app_id,
                 build_registry_id=record["build_registry_id"],
                 workflow_name=workflow_name, chat_id=chat_id,
+                **({"expected_baseline": expected_baseline} if expected_baseline is not None else {}),
             )
         if binding is None:
             raise ValueError("Build target could not be established")
@@ -212,6 +218,7 @@ class AppRegistryService:
     async def begin_refinement_run(
         self, *, owner_user_id: str, app_id: str, build_registry_id: str,
         workflow_name: str, chat_id: str | None = None,
+        expected_baseline: ExpectedBuildBaseline | None = None,
     ) -> RunBuildBinding:
         """Allocate a run for a workflow or an inline coding execution."""
         record = await self.repo.get_by_build_registry_id(
@@ -227,6 +234,12 @@ class AppRegistryService:
             )
         if isinstance(record.get("genesis_import"), dict) and record["genesis_import"].get("status") == "reserved":
             raise ValueError("Registered app has an unaccepted Genesis import")
+        current = record.get("current_build_run") or {}
+        if expected_baseline is not None and (
+            current.get("build_id") != expected_baseline.build_id
+            or current.get("artifact_version_id") != expected_baseline.artifact_version_id
+        ):
+            raise ValueError("The selected build changed. Refresh settings before editing.")
         binding = RunBuildBinding(
             build_registry_id=record["build_registry_id"], target_app_id=record["app_id"],
             build_id=f"build_{uuid4().hex}", phase="refinement",
@@ -234,7 +247,8 @@ class AppRegistryService:
         result = await self.update_build_status(
             owner_user_id=owner_user_id, build_registry_id=binding.build_registry_id,
             status="building", active_chat_id=chat_id, active_workflow_id=workflow_name,
-            expected_build_id=(record.get("current_build_run") or {}).get("build_id"),
+            expected_build_id=expected_baseline.build_id if expected_baseline else current.get("build_id"),
+            **({"expected_artifact_version_id": expected_baseline.artifact_version_id} if expected_baseline else {}),
             current_build_run={"build_id": binding.build_id, "phase": binding.phase},
         )
         if not result["success"]:

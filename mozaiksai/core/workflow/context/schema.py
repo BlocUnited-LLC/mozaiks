@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from mozaiksai.core.utils.sequences import dedupe_strings
 
 from ..declarative import parse_context_variables_config
-from ..declarative.contracts import ContextDataSortSpec
+from ..declarative.contracts import ContextDataSortSpec, ContextSnapshotReferenceSpec
 from ..reserved_context_keys import require_application_context_name_allowed
 from .authority import ContextAuthorityClass, ContextWriterId
 
@@ -99,6 +99,7 @@ class ContextVariableSource(ContextModel):
     fields: list[str] | None = None
     sort: list[ContextDataSortSpec] | None = Field(default=None, min_length=1)
     refresh_strategy: Literal["once", "per_phase", "on_demand"] | None = None
+    snapshot: ContextSnapshotReferenceSpec | None = None
 
     entity_schema: dict[str, Any] | None = Field(default=None, alias="schema", serialization_alias="schema")
     indexes: list[dict[str, Any]] | None = None
@@ -123,6 +124,12 @@ class ContextVariableSource(ContextModel):
     path: str | None = None
     format: Literal["json", "yaml", "text"] | None = None
     encoding: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_snapshot_source(self) -> ContextVariableSource:
+        if self.snapshot is not None and self.type != "data_reference":
+            raise ValueError("snapshot is available only for data_reference sources")
+        return self
 
     @field_validator(
         "env_var",

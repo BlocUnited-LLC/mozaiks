@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 from copy import deepcopy
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -319,3 +319,37 @@ async def test_real_mongo_allows_one_confirmation_or_dismissal_winner(monkeypatc
         if database is not None:
             await client.drop_database(database_name)
         client.close()
+
+
+@pytest.mark.asyncio
+async def test_selected_registry_cancellation_stays_in_owned_target(monkeypatch):
+    from fastapi import HTTPException
+
+    from mozaiksai.core import session
+    from mozaiksai.core.auth import UserPrincipal
+    from mozaiksai.core.runtime.composition import platform_hooks
+    from mozaiksai.hosts.routers import transitions
+
+    router, _, persistence, _ = await _pending_router()
+    other, _, _, _ = await _pending_router(target="target-b", persistence=persistence)
+    async def fields(**kwargs):
+        if kwargs["user_id"] != "alice" or kwargs["build_registry_id"] != "registry-a":
+            raise ValueError("Not available")
+        return {"target_app_id": "target-a"}
+    monkeypatch.setattr(session, "get_session_router", lambda: router)
+    monkeypatch.setattr(platform_hooks, "get_platform_hooks", lambda: SimpleNamespace(call_chat_session_fields=fields))
+    principal = UserPrincipal(user_id="alice", app_id="host", roles=["user"], email=None, name=None, scopes=[], raw_claims={})
+    result = await transitions.resolve_session_pending_decision(
+        transitions.SessionPendingDecisionResolveRequest(decision_id="decision", accepted=False, build_registry_id="registry-a"), principal,
+    )
+    assert result["session_state"]["accepted"] is False
+    assert (await other.get_session_snapshot(app_id="host", user_id="alice"))["pending_harness_decision"] is not None
+    with pytest.raises(HTTPException) as failure:
+        await transitions.get_session_state(app_id=None, user_id=None, source_chat_id=None, build_registry_id="registry-a",
+            principal=replace(principal, user_id="bob", roles=["admin"]))
+    assert failure.value.status_code == 404
+    with pytest.raises(HTTPException) as failure:
+        await transitions.resolve_session_pending_decision(
+            transitions.SessionPendingDecisionResolveRequest(decision_id="decision", accepted=False, build_registry_id="registry-a", source_chat_id="other-chat"), principal,
+        )
+    assert failure.value.status_code == 400

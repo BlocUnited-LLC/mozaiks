@@ -41,7 +41,10 @@ async def export_input_versions(
     context: Any, *, workflow: str, app_id: str, user_id: str | None, artifact_store: Any,
     additional_families: tuple[str, ...] = (),
 ) -> dict[str, str]:
+    from factory_app.workflows._shared.subscription_revision import subscription_revision_baseline
     from mozaiksai.core.artifacts import resolve_latest_artifact_version_refs
+
+    revision = subscription_revision_baseline(context)
 
     predecessor_workflows: set[str] = set()
     sequence_id = context.get("workflow_sequence")
@@ -54,12 +57,14 @@ async def export_input_versions(
                     break
                 predecessor_workflows.update(step.workflows)
 
-    current_families = list(additional_families)
-    owned: dict[str, str] = {}
+    current_families = [] if revision else list(additional_families)
+    owned: dict[str, str] = {
+        family: revision.app_inputs[family] for family in additional_families if family in revision.app_inputs
+    } if revision else {}
     for family, producer in _PRODUCERS.items():
-        record_id = context.get(f"{family}_artifact_version_id")
+        record_id = revision.design_record.id if family == "design_docs" and revision else context.get(f"{family}_artifact_version_id")
         if not record_id:
-            if producer in predecessor_workflows:
+            if revision or producer in predecessor_workflows:
                 raise ValueError(f"Missing exact {family} input from the preceding {producer} stage")
             current_families.append(family)
             continue
@@ -70,11 +75,14 @@ async def export_input_versions(
             artifact_store=artifact_store, family=family, record_id=record_id, app_id=app_id, user_id=user_id,
         )
         if family == "design_docs":
-            verify_generator_design_inputs(context, record, user_id=user_id, build_id=binding.build_id)
+            verify_generator_design_inputs(
+                context, record, user_id=user_id,
+                build_id=revision.input_binding.build_id if revision else binding.build_id,
+            )
         else:
             if resolve_subscription_contract(context) != verified_summary_payload(record):
                 raise ValueError("The subscription presented to the generator differs from its pinned input")
-            if design_id := context.get("design_docs_artifact_version_id"):
+            if design_id := (revision.design_record.id if revision else context.get("design_docs_artifact_version_id")):
                 verify_subscription_design_input(record, design_id)
         owned[family] = record.id
     current = await resolve_latest_artifact_version_refs(

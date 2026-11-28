@@ -1959,7 +1959,7 @@ test('app Launch keeps Studio navigation and downloads only the displayed build'
   await expectNoHorizontalOverflow(page);
 });
 
-test("app Billing shows the selected app's plans and links to its integrations", async ({ page, isMobile }) => {
+test("app Subscription shows the selected app's plans and links to its integrations", async ({ page, isMobile }) => {
   await page.route('**/api/modules/user_onboarding/get_onboarding_status**', route =>
     route.fulfill({ json: buildOnboardingStatusPayload({ dismissed: true }) }));
   await page.route(`**/api/studio/apps/${APP_ID}/billing`, route => route.fulfill({ json: {
@@ -1968,14 +1968,14 @@ test("app Billing shows the selected app's plans and links to its integrations",
       plans: [{ plan_id: 'starter', label: 'Starter', price: { amount_cents: 1200, currency: 'USD', interval: 'month' } }] }],
   } }));
   await page.goto(`/apps/${APP_ID}/billing`);
-  await expect(page.getByRole('heading', { name: 'Billing', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Subscription', exact: true })).toBeVisible();
   const plan = page.getByRole('listitem').filter({ hasText: 'Starter' });
   await expect(plan).toContainText('Default');
   await expect(plan).toContainText('$12.00 / month');
   await expect(page.getByRole('link', { name: 'Manage integrations' })).toHaveAttribute('href', `/apps/${APP_ID}/integrations`);
   await expectNoHorizontalOverflow(page);
   if (isMobile) await page.getByRole('button', { name: 'Open Studio navigation' }).click();
-  await expect(page.getByRole('navigation').getByRole('link', { name: 'Billing', exact: true }).filter({ visible: true })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('navigation').getByRole('link', { name: 'Subscription', exact: true }).filter({ visible: true })).toHaveAttribute('aria-current', 'page');
 });
 
 test('app overview route stays responsive across desktop and mobile widths', async ({ page }) => {
@@ -3044,4 +3044,33 @@ test('onboarding tour does not appear for a completed user', async ({ page }) =>
 
   await page.waitForTimeout(1000);
   await expect(page.getByRole('dialog', { name: /Onboarding step/i })).toHaveCount(0);
+});
+
+
+test('app branding route stays responsive across desktop and mobile widths', async ({ page, isMobile }) => {
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', route =>
+    route.fulfill({ json: buildOnboardingStatusPayload({ dismissed: true }) }));
+  await page.route(`**/api/studio/apps/${APP_ID}/branding`, route => route.fulfill({ json: {
+    status: 'configured', dashboard_app_id: APP_ID, app_name: 'Campaign Revision Workbench',
+    theme: { theme: { primary: '#2F9C95', font: 'Roboto', appearance: 'light' } },
+  } }));
+  await page.goto(`/apps/${APP_ID}/branding`);
+  await expect(page.getByRole('heading', { name: 'Branding', exact: true })).toBeVisible();
+  await expect(page.getByText('#2F9C95', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Edit branding', exact: true })).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
+  if (isMobile) await page.getByRole('button', { name: 'Open Studio navigation' }).click();
+  await expect(page.getByRole('navigation').getByRole('link', { name: 'Branding', exact: true }).filter({ visible: true })).toHaveAttribute('aria-current', 'page');
+});
+
+test('workspace revenue route stays responsive across desktop and mobile widths', async ({ page }) => {
+  await page.route('**/api/modules/user_onboarding/get_onboarding_status**', route =>
+    route.fulfill({ json: buildOnboardingStatusPayload({ dismissed: true }) }));
+  await page.goto('/portfolio/revenue');
+  const main = page.locator('main');
+  await expect(main.getByRole('heading', { name: 'Revenue', exact: true })).toBeVisible();
+  await expect(main.getByText('Customer revenue by app. Personal wallet balances and hosted account billing are separate.')).toBeVisible();
+  await expect(main.getByRole('link', { name: 'Member Growth Studio', exact: true }).filter({ visible: true })).toHaveAttribute('href', '/apps/dashboard-member-growth/revenue');
+  await expect(main.getByText('Dashboard unavailable').filter({ visible: true }).first()).toBeVisible();
+  await expectNoHorizontalOverflow(page);
 });

@@ -6,6 +6,7 @@ import {
   LinkButton, Panel, StatusPill, StudioErrorState, StudioInlineEmptyState, StudioLoadingState,
 } from '../../ui/components/StudioShared.jsx'
 import { studioFetch } from './studioApi.js'
+import SettingsRefinement, { SettingsResume } from './SettingsRefinement.jsx'
 
 const emptyStates = {
   no_build: ['No saved build yet', 'Build this app to see its subscription plans here.'],
@@ -39,16 +40,17 @@ function SelectedAppBilling({ appId }) {
     return () => controller.abort()
   }, [appId])
 
-  if (error) return <StudioErrorState title="Billing unavailable" message={error} />
+  if (error) return <StudioErrorState title="Subscription unavailable" message={error} />
   if (!billing) return <StudioLoadingState label="Loading subscription plans…" />
   const empty = emptyStates[billing.status]
   return (
     <div className="space-y-6">
-      <PageHeader title="Billing" subtitle={`Subscription plans for ${billing.app_name}.`} />
-      {empty ? (
+      <PageHeader title="Subscription" subtitle={`Subscription plans for ${billing.app_name}.`} />
+      <SettingsResume resume={billing.resume} appId={appId} />
+      {billing.status === 'edit_in_progress' ? null : empty ? (
         <StudioInlineEmptyState title={empty[0]} description={empty[1]} />
       ) : billing.products.map(product => (
-        <Panel key={product.product_id ?? appId} title={product.label} subtitle="Plans in the current validated build">
+        <Panel key={product.product_id ?? appId} title={product.label} subtitle="Plans in selected build">
           <ul className="divide-y divide-border">
             {product.plans.map(plan => (
               <li key={plan.plan_id} className="flex flex-wrap items-start justify-between gap-3 py-3">
@@ -65,6 +67,8 @@ function SelectedAppBilling({ appId }) {
           </ul>
         </Panel>
       ))}
+      {billing.settings_refinement_unavailable && <p role="status" className="text-sm text-muted-foreground">{billing.settings_refinement_unavailable}</p>}
+      <SettingsRefinement descriptor={billing.settings_refinement} appId={appId} />
       <LinkButton to={`/apps/${encodeURIComponent(appId)}/integrations`}>Manage integrations</LinkButton>
     </div>
   )

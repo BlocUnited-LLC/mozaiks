@@ -341,10 +341,17 @@ async def subscription_design_context(context: Any) -> dict[str, Any]:
     """Give the pricing compiler a turn-local view of the design reviewed for this build."""
     from factory_app.workflows._shared.export_inputs import load_pinned_input_record
     from factory_app.workflows._shared.platform.build_target import require_build_binding
+    from factory_app.workflows._shared.subscription_revision import (
+        subscription_revision_design_context,
+    )
     from factory_app.workflows.DesignDocs.tools.save_design_doc import verified_design_summary
     from mozaiksai.core.workflow.generator_support.design_access_policy import (
         resolve_design_access_policy,
     )
+
+    selected = subscription_revision_design_context(context)
+    if selected is not None:
+        return selected
 
     data = context_to_dict(context)
     # This workflow receives an exact record ID from the router. Request data cannot supply its record.
@@ -375,6 +382,11 @@ async def inject_subscription_action_inventory(agent: Any, messages: list[dict[s
     if getattr(agent, "name", None) != "ContractDesignerAgent":
         return
     data = await subscription_design_context(_context_data(agent))
+    from factory_app.workflows._shared.subscription_revision import subscription_revision_prompt
+
+    revision = subscription_revision_prompt(_context_data(agent))
+    if revision is not None:
+        update_agent_section(agent, "[SELECTED SUBSCRIPTION REVISION]", revision)
     inventory = approved_feature_inventory(data)
     rendered = yaml.safe_dump(inventory, sort_keys=True).strip()
     _apply_text(agent, "\n".join([

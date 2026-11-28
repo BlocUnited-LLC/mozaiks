@@ -27,7 +27,13 @@ from mozaiksai.core.workflow.context.authority import (
 from mozaiksai.core.workflow.pack.config import get_transition, load_global_pack_graph
 from mozaiksai.core.workflow.pack.schema import WorkflowTransition
 
-from .build_binding import BuildIdentity, RefinementModel, RetryPlanSource, RunBuildBinding
+from .build_binding import (
+    BuildIdentity,
+    ExpectedBuildBaseline,
+    RefinementModel,
+    RetryPlanSource,
+    RunBuildBinding,
+)
 from .build_context import revalidate_build_context
 from .model import RoutingDecision, TriggerInput
 from .trigger_routing import TriggerRoutingContribution
@@ -355,6 +361,7 @@ async def prepare_routed_workflow_launch(
     routing_contribution: TriggerRoutingContribution | None = None,
     refinement_model: RefinementModel | None = None,
     chat_id: str | None = None,
+    expected_baseline: ExpectedBuildBaseline | None = None,
 ) -> PreparedWorkflowLaunch:
     from .router import get_session_router
 
@@ -364,6 +371,22 @@ async def prepare_routed_workflow_launch(
     )
     if not allowed:
         raise ValueError(reason or "Chat prerequisites not met")
+    if expected_baseline is not None:
+        if routing_contribution is None or not routing_contribution.require_exact_route:
+            raise ValueError("An exact build selection requires a bounded workflow route")
+        # The existing route phase verifies ownership without allocating a run.
+        fields = await get_platform_hooks().call_chat_session_fields(
+            app_id=app_id, user_id=user_id, workflow_name=workflow_id or "", chat_id=chat_id,
+            phase="route", trigger_source=trigger_source, build_registry_id=build_registry_id,
+        )
+        if not fields.get("target_app_id"):
+            raise ValueError("The selected build target is unavailable")
+        preflight_router = (session_router or get_session_router()).for_target(fields["target_app_id"])
+        await preflight_router.route_trigger(
+            TriggerInput(app_id=app_id, user_id=user_id, trigger_source=trigger_source, workflow_id=workflow_id,
+                         journey_id=journey_id, context_variables=context_variables or {}, trigger_payload=trigger_payload or {}),
+            contribution=routing_contribution, persist=False,
+        )
     session_fields = await get_platform_hooks().call_chat_session_fields(
         app_id=app_id,
         user_id=user_id,
@@ -372,6 +395,7 @@ async def prepare_routed_workflow_launch(
         trigger_source=trigger_source,
         build_registry_id=build_registry_id,
         source_chat_id=source_chat_id,
+        **({"expected_baseline": expected_baseline} if expected_baseline is not None else {}),
     )
     router = session_router or get_session_router()
     if session_fields.get("run_build_binding") is not None:

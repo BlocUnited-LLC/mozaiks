@@ -24,6 +24,7 @@ const CreateAppRedirectPage = lazy(() => import('./pages/CreateAppRedirectPage.j
 const DashboardPortalPage = lazy(() => import('./pages/DashboardPortalPage.jsx'))
 const AppOverviewPage    = lazy(() => import('./pages/AppOverviewPage.jsx'))
 const AppRevenuePage     = lazy(() => import('./pages/AppRevenuePage.jsx'))
+const AppBrandingPage = lazy(() => import('./pages/AppBrandingPage.jsx'))
 const AppBillingPage     = lazy(() => import('./pages/AppBillingPage.jsx'))
 const AppLaunchPage      = lazy(() => import('./pages/AppLaunchPage.jsx'))
 const AppUsersPage       = lazy(() => import('./pages/AppUsersPage.jsx'))
@@ -83,6 +84,8 @@ export function registerAdminComponents(registerComponent) {
   registerComponent('AppRevenuePage', AppRevenuePage, {
     description: 'App revenue surface — recurring-revenue metrics, trend, and the MRR movement bridge explaining why revenue changed.',
   })
+
+  registerComponent('AppBrandingPage', AppBrandingPage, { description: 'Branding from the selected saved app build and bounded refinement.' })
 
   registerComponent('AppBillingPage', AppBillingPage, {
     description: 'Products and plans declared by the selected app.',

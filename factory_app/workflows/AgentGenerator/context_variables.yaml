@@ -1,4 +1,12 @@
 definitions:
+  subscription_revision_baseline:
+    type: object
+    authority_class: closed_writer_routing_state
+    writer_ids: [transition_router]
+    persisted: true
+    model_visible: false
+    description: Exact server-admitted selected app catalog and reviewed inputs, relayed only through its bounded subscription revision.
+    source: {type: state, default: null}
   design_docs_artifact_version_id:
     type: string
     authority_class: closed_writer_routing_state
@@ -412,6 +420,7 @@ definitions:
       Canonical backend design doc from DesignDocs. Human-readable reference for
       workflow/event rationale and API intent.
     source:
+      snapshot: {context_key: subscription_revision_baseline, path: context.backend_design_document}
       type: data_reference
       database_name: mozaiksai
       collection: DesignDocuments
@@ -429,6 +438,7 @@ definitions:
       `ui_schema`). Human-readable reference for persistent UI ownership and
       workflow touchpoints.
     source:
+      snapshot: {context_key: subscription_revision_baseline, path: context.experience_spec_document}
       type: data_reference
       database_name: mozaiksai
       collection: DesignDocuments
@@ -446,6 +456,7 @@ definitions:
       This is the primary machine-readable source for deciding which surfaces
       are workflows versus modules, control-plane concerns, integrations, or UI-only.
     source:
+      snapshot: {context_key: subscription_revision_baseline, path: context.design_surface_map}
       type: data_reference
       database_name: mozaiksai
       collection: DesignDocuments

@@ -332,6 +332,13 @@ class ContextDataSortSpec(DeclarativeModel):
     direction: Literal["asc", "desc"]
 
 
+class ContextSnapshotReferenceSpec(DeclarativeModel):
+    """A projection from persisted state written exclusively by the trusted router."""
+
+    context_key: str = Field(strict=True, pattern=r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+    path: str = Field(strict=True, max_length=512, pattern=r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
+
+
 class ContextVariableSourceSpec(DeclarativeModel):
     type: Literal["config", "data_reference", "data_entity", "computed", "state", "external", "file", "build_context", "runtime"]
     env_var: str | None = None
@@ -343,6 +350,7 @@ class ContextVariableSourceSpec(DeclarativeModel):
     fields: list[str] | None = None
     sort: list[ContextDataSortSpec] | None = Field(default=None, min_length=1)
     refresh_strategy: Literal["once", "per_phase", "on_demand"] | None = None
+    snapshot: ContextSnapshotReferenceSpec | None = None
     entity_schema: dict[str, Any] | None = Field(default=None, alias="schema", serialization_alias="schema")
     indexes: list[dict[str, Any]] | None = None
     write_strategy: Literal["immediate", "on_phase_transition", "on_workflow_end"] | None = None
@@ -362,6 +370,12 @@ class ContextVariableSourceSpec(DeclarativeModel):
     path: str | None = None
     format: Literal["json", "yaml", "text"] | None = None
     encoding: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_snapshot_source(self) -> ContextVariableSourceSpec:
+        if self.snapshot is not None and self.type != "data_reference":
+            raise ValueError("snapshot is available only for data_reference sources")
+        return self
 
     @field_validator(
         "env_var",

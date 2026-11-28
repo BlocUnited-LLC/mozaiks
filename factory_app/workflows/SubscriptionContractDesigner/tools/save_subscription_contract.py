@@ -758,7 +758,15 @@ async def save_subscription_contract(
         normalized["review_response"] = review_response
 
     try:
-        design_id = _cv_get(context_variables, "design_docs_artifact_version_id")
+        design_id = design_context.get("design_docs_artifact_version_id")
+        from factory_app.workflows._shared.subscription_revision import (
+            subscription_revision_baseline,
+        )
+
+        revision = subscription_revision_baseline(context_variables)
+        saved_inputs = {**revision.subscription_record.canonical_inputs_version, "design_docs": design_id} if revision else (
+            {"design_docs": design_id} if design_id else None
+        )
         artifact = await persist_summary_artifact(
             app_id=str(app_id),
             artifact_kind="subscription_contract",
@@ -768,8 +776,9 @@ async def save_subscription_contract(
             source_chat_id=str(chat_id) if chat_id else None,
             author_user_id=str(user_id) if user_id else None,
             revision_mode=str(build_mode or "").strip().lower() == "revision",
-            input_artifact_kinds=("concept",) if design_id else ("concept", "design_docs"),
-            canonical_inputs_version={"design_docs": design_id} if design_id else None,
+            input_artifact_kinds=() if revision else (("concept",) if design_id else ("concept", "design_docs")),
+            canonical_inputs_version=saved_inputs,
+            **({"parent_version_id": revision.subscription_record.id, "draft_only": True} if revision else {}),
         )
         if isinstance(context_variables, dict):
             context_variables["subscription_contract_artifact_version_id"] = artifact.id

@@ -58,6 +58,11 @@ agents:
         heading: '[CONTEXT]'
         content: |-
           Read:
+          - [SELECTED SUBSCRIPTION REVISION], when present, for the exact saved
+            contract and actual selected app catalog. Apply refinement_request to
+            those inputs and preserve unrequested plans, prices, gates, and quotas.
+            Missing baseline content blocks an edit; current global documents do
+            not substitute for selected inputs.
           - concept_overview and concept_blueprint for product intent
           - concept_blueprint.monetization_intent for the approved concept's own
             monetization answer: monetized, likely_revenue_models,

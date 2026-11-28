@@ -111,7 +111,7 @@ app:
       capabilities: []
 
     - id: billing
-      label: Billing
+      label: Subscription
       route: /apps/:appId/billing
       icon: billing
       order: 40
@@ -136,11 +136,15 @@ app:
       icon: support
       order: 70
 
+    - id: branding
+      label: Branding
+      route: /apps/:appId/branding
+      icon: palette
+      order: 30
+
     # Default portals this Studio has no page for. They stay in the default
     # contract for hosts that mount them; a portal without a route is disabled
     # here rather than left pointing nowhere.
-    - id: branding
-      enabled: false
     - id: growth
       enabled: false
     - id: users

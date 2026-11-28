@@ -373,3 +373,24 @@ agents:
 ```
 
 
+
+
+### Saved router input snapshots
+
+A `data_reference` source may declare a finite snapshot reference:
+
+```yaml
+source:
+  type: data_reference
+  snapshot:
+    context_key: subscription_revision_baseline
+    path: context.design_docs_artifact
+```
+
+The referenced root must be declared `closed_writer_routing_state`, persisted,
+with `source.type: state` and only `transition_router` in `writer_ids`. Runtime
+loads that scoped persisted input before database references. A present snapshot
+uses its exact projection; explicit null suppresses database and configured
+fallbacks, and a missing projection fails closed. An absent root retains ordinary
+reference loading. This lets a bounded revision reuse verified saved inputs while
+immutable runtime authority remains owned by initialization.

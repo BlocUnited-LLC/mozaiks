@@ -150,3 +150,31 @@ This page is linked from other pages and is not listed in the menu.
 | Page | Route | Opens from |
 | --- | --- | --- |
 | Build review | `/apps/:appId/activity` | Overview and Project, to review a saved build and its version history |
+
+
+## Branding and customer subscriptions
+
+Branding's **Edit branding** and Subscription's **Edit subscription** use the
+existing Factory refinement entry. `/apps/:appId/billing` remains the Subscription
+URL. The plans shown there are **plans in the selected build**, including a
+validated draft; they are not a payment-provider activation or account invoice.
+
+The server resolves the owned dashboard to its Factory registry, selected build,
+app bundle, and exact input artifact. A change to the registered build or bundle
+makes the selection stale. Subscription also verifies the archive catalog against
+its pinned contract and approved compilation. A selected app bundle can be a
+validated draft; its preserved DesignDocs input must already be current and
+reviewed. Missing binding or unverifiable inputs leave the edit unavailable.
+
+The existing harness chooses the bounded registered sequence. Theme redesigns
+use `app_theme_revision` (ThemeCapture only), logos use `logo_revision`, catalog
+edits use `subscription_patch`, and workflow metering edits use
+`subscription_revision`. A broader route or unmet upstream dependency is refused
+here. Scoped color patches can change only the saved theme file.
+
+Cancel dismisses an unsent edit or atomically cancels its pending proposal. A
+started settings session offers **Pause edit**, which confirms background task
+completion before acknowledging pause, and **Resume edit**, which opens the saved
+chat without allocating another run. Chat's existing dashboard return resolves
+the same app and settings kind from server-persisted metadata. Candidate acceptance
+remains in the existing build review.

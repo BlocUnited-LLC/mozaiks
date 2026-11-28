@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from factory_app.app.modules.app_registry.backend.service import AppRegistryService
-from mozaiksai.core.session.build_binding import RunBuildBinding
+from mozaiksai.core.session.build_binding import ExpectedBuildBaseline, RunBuildBinding
 
 
 def require_build_binding(context_variables: Any) -> RunBuildBinding:
@@ -25,6 +25,7 @@ async def bind_factory_session(
     build_registry_id: str | None,
     source_chat_id: str | None,
     session_fields: dict[str, Any],
+    expected_baseline: ExpectedBuildBaseline | None = None,
 ) -> dict[str, Any]:
     from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
@@ -62,6 +63,7 @@ async def bind_factory_session(
         refinement=trigger_source == "refinement",
         allow_create=workflow_name in {"ValueEngine", "ExistingAppDiscovery"},
         allow_current_build=(workflow_name == "AppReview" and phase == "prepare" and trigger_source != "refinement"),
+        **({"expected_baseline": expected_baseline} if expected_baseline is not None else {}),
     )
     fields: dict[str, Any] = {"run_build_binding": binding.model_dump()}
     if "platform_user_email" in definitions:

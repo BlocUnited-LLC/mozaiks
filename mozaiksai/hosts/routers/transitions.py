@@ -89,6 +89,7 @@ class SessionPendingDecisionResolveRequest(BaseModel):
     action_id: str | None = None
     accepted: bool = True
     source_chat_id: BuildIdentity | None = None
+    build_registry_id: BuildIdentity | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -199,28 +200,44 @@ async def resolve_transition_route(
     }
 
 
+async def _selected_session_router(
+    *, app_id: str, user_id: str, source_chat_id: str | None, build_registry_id: str | None,
+):
+    from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
+    from mozaiksai.core.session import get_session_router, get_session_router_for_chat
+
+    if source_chat_id is not None and build_registry_id is not None:
+        raise HTTPException(status_code=400, detail="Choose one workflow session selector")
+    try:
+        if source_chat_id is not None:
+            return await get_session_router_for_chat(app_id=app_id, user_id=user_id, chat_id=source_chat_id)
+        router = get_session_router()
+        if build_registry_id is not None:
+            fields = await get_platform_hooks().call_chat_session_fields(
+                app_id=app_id, user_id=user_id, workflow_name="", chat_id="", phase="route",
+                build_registry_id=build_registry_id,
+            )
+            if not fields.get("target_app_id"):
+                raise ValueError("Registered workflow target is unavailable")
+            router = router.for_target(fields["target_app_id"])
+        return router
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Workflow session is not available") from exc
+
+
 @router.get("/api/session/state")
 async def get_session_state(
     app_id: str | None = Query(default=None),
     user_id: str | None = Query(default=None),
     source_chat_id: BuildIdentity | None = Query(default=None),
+    build_registry_id: BuildIdentity | None = Query(default=None),
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    from mozaiksai.core.session import get_session_router, get_session_router_for_chat
-
-    scoped_app_id, scoped_user_id = resolve_scope_from_principal(
-        principal,
-        app_id=app_id,
-        user_id=user_id,
+    scoped_app_id, scoped_user_id = resolve_scope_from_principal(principal, app_id=app_id, user_id=user_id)
+    session_router = await _selected_session_router(
+        app_id=scoped_app_id, user_id=scoped_user_id,
+        source_chat_id=source_chat_id, build_registry_id=build_registry_id,
     )
-    session_router = get_session_router()
-    if source_chat_id is not None:
-        try:
-            session_router = await get_session_router_for_chat(
-                app_id=scoped_app_id, user_id=scoped_user_id, chat_id=source_chat_id,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail="Workflow session is not available") from exc
     snapshot = await session_router.get_session_snapshot(
         app_id=scoped_app_id,
         user_id=scoped_user_id,
@@ -291,16 +308,10 @@ async def resolve_session_pending_decision(
     body: SessionPendingDecisionResolveRequest,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    from mozaiksai.core.session import get_session_router, get_session_router_for_chat
-
-    session_router = get_session_router()
-    if body.source_chat_id is not None:
-        try:
-            session_router = await get_session_router_for_chat(
-                app_id=principal.app_id, user_id=principal.user_id, chat_id=body.source_chat_id,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail="Workflow session is not available") from exc
+    session_router = await _selected_session_router(
+        app_id=principal.app_id, user_id=principal.user_id,
+        source_chat_id=body.source_chat_id, build_registry_id=body.build_registry_id,
+    )
     snapshot = await session_router.resolve_pending_harness_decision(
         app_id=principal.app_id,
         user_id=principal.user_id,

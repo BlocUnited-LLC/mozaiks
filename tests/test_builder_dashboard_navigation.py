@@ -38,6 +38,9 @@ def dashboard(monkeypatch):
             return {"app": None}
         return {"app": {"app_id": current["record_app"], "chat_app_id": "factory"}}
 
+    async def settings_session(**kwargs):
+        return current.get("settings_session")
+
     def principal():
         return UserPrincipal(
             user_id=current["user"],
@@ -55,7 +58,7 @@ def dashboard(monkeypatch):
         studio,
         "_get_app_registry_service",
         lambda: SimpleNamespace(
-            repo=SimpleNamespace(get_owned_chat_binding=owned_binding), get_app_record=owned_record
+            repo=SimpleNamespace(get_owned_chat_binding=owned_binding, get_owned_settings_session=settings_session), get_app_record=owned_record
         ),
     )
     studio.app.dependency_overrides[studio.require_studio_user] = principal
@@ -188,3 +191,21 @@ def test_host_bound_builder_can_read_shared_manifest_but_not_select_foreign_app(
     assert response.status_code == 200
     assert response.json()["resolved"]["app_id"] is None
     assert client.get("/api/studio/dashboard?app_id=foreign-app").status_code == 403
+
+
+@pytest.mark.parametrize("kind,suffix", [("branding", "branding"), ("subscription", "billing")])
+def test_settings_return_uses_owned_host_mapping_and_finite_saved_kind(dashboard, monkeypatch, kind, suffix):
+    client, current, _ = dashboard
+    current["binding"] = {**BINDING, "phase": "refinement"}
+    current["settings_session"] = {"trigger_meta": {"settings_selection": {
+        "kind": kind, "dashboard_app_id": "stale-host-alias", "build_registry_id": "appreg_owned",
+        "build_id": "selected-build", "app_bundle_id": "selected-bundle", "artifact_version_id": "selected-input",
+    }}}
+    async def mapped(**kwargs):
+        return "host-registration"
+    monkeypatch.setattr(client.app.state, "resolve_studio_dashboard_app_id", mapped, raising=False)
+    assert client.get("/api/studio/build/dashboard-link?chat_id=chat_owned").json() == {"path": f"/apps/host-registration/{suffix}"}
+    current["settings_session"]["trigger_meta"]["settings_selection"]["kind"] = "https://outside.invalid"
+    assert client.get("/api/studio/build/dashboard-link?chat_id=chat_owned").json() == {"path": "/apps/host-registration/overview"}
+    current["user"] = "other-owner"
+    assert client.get("/api/studio/build/dashboard-link?chat_id=chat_owned").status_code == 404
