@@ -15,4 +15,3 @@ export async function requestConnectors(appId, { method = 'GET', service, check 
   }
   return response.json()
 }
-

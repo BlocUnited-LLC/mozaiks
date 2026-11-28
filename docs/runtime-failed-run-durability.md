@@ -87,6 +87,11 @@ Contract documentation:
 
 ## Verification
 
+The commands and counts in this section record the original validation. The
+helper-only `failed-run-status.test.mjs` was later retired when the overview and
+Project stopped rendering that activity list. Current admin session/run status
+coverage runs with `node --test web_shell/tests/adminPortalPanels.test.js`.
+
 All validation used the current integration checkout, not an installed OSS
 revision or an immutable dependency pin. The supplied model-call-admission
 Python lacked FastAPI, so the existing App validation interpreter was used:
@@ -118,7 +123,7 @@ Report: `.local/failed-run-validation/consolidated-final-mongo.xml`.
   -q -o addopts='' --no-cov -p no:cacheprovider --tb=short --show-capture=no `
   '--basetemp=\\?\C:\Repos\BlocUnitedRepo\mozaiks\.local\worktrees\factory-repeatable-integration\.local\failed-run-validation\temp-final-2' `
   --junitxml=.local/failed-run-validation/consolidated-final-mongo.xml
-node --test web_shell/tests/adminPortalPanels.test.js
+node --test tests/failed-run-status.test.mjs
 ```
 
 JS: **4 passed**, using existing read-only esbuild/React packages to evaluate
