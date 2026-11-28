@@ -125,3 +125,16 @@ async def test_state_default_cannot_masquerade_as_persisted_snapshot(monkeypatch
     assert detach(context.get("design")) == {"name": "stored-reference"}
     assert context._mozaiks_snapshot_roots == frozenset()
     adapter.fetch_one.assert_awaited_once()
+
+
+@pytest.mark.parametrize("key", ["selected_input", "ui_selected_input"])
+def test_frontend_context_cannot_seed_declared_snapshot_root(key):
+    from mozaiksai.core.workflow.orchestration_patterns import _require_frontend_context_scope
+
+    config = {"context_variables": {"definitions": {"design": {"source": {
+        "type": "data_reference", "snapshot": {"context_key": "ui_selected_input", "path": "context.design"},
+    }}}}}
+    with pytest.raises(ValueError, match="cannot be supplied by frontend context"):
+        _require_frontend_context_scope({key: {"context": {"design": {"role": "forged"}}}}, config)
+    _require_frontend_context_scope({"color": "teal"}, config)
+    _require_frontend_context_scope({key: "ordinary-ui-input"}, {})

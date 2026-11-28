@@ -68,11 +68,12 @@ class AppRegistryRepo:
             return None
         if binding.phase != "refinement":
             return None
-        return await coll.find_one({
+        source = await coll.find_one({
             **build_app_scope_filter(app_id), "user_id": owner_user_id,
             **{f"run_build_binding.{key}": value for key, value in binding.model_dump(exclude={"refinement_model"}).items()},
             "trigger_meta.settings_selection": {"$exists": True},
         }, {"run_build_binding": 1, "trigger_meta.settings_selection": 1})
+        return source if isinstance(source, dict) else None
 
     async def ensure_indexes(self) -> None:
         coll = await self._collection()

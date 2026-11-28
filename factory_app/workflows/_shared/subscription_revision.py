@@ -149,10 +149,13 @@ async def capture_subscription_revision_baseline(
         raise ValueError("Selected subscription catalog is invalid") from exc
     if inputs.get("subscription_contract") != verified_summary_payload(contract):
         raise ValueError("Selected subscription contract differs from approved compilation")
+    archive_sha256 = resolve_canonical_bundle_entry(app_record).sha256
+    if archive_sha256 is None:
+        raise ValueError("Selected subscription archive has no verified digest")
     payload = SubscriptionRevisionBaseline(
         owner_user_id=owner_user_id, app_bundle_id=app_record.id, app_binding=binding,
         app_inputs=app_record.canonical_inputs_version,
-        archive_sha256=resolve_canonical_bundle_entry(app_record).sha256,
+        archive_sha256=archive_sha256,
         input_binding=input_binding, design_record=design, subscription_record=contract,
         catalog=catalog, context=_design_projection(design), payload_sha256="0" * 64,
     ).model_dump(mode="json", by_alias=True)

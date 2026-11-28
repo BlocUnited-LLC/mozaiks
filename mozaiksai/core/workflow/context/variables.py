@@ -665,14 +665,15 @@ async def _load_context_async(
     snapshot_roots = {definition.source.snapshot.context_key for definition in definitions.values()
                       if definition.source.snapshot is not None}
     admitted_snapshot_roots: set[str] = set()
+    snapshot_inputs = persisted_context or {}
     for name in snapshot_roots:
-        definition = definitions.get(name)
-        if (definition is None or definition.source.type != "state"
-                or definition.authority_class != ContextAuthorityClass.CLOSED_WRITER_ROUTING_STATE
-                or definition.persisted is not True or definition.writer_ids != ["transition_router"]):
+        snapshot_definition = definitions.get(name)
+        if (snapshot_definition is None or snapshot_definition.source.type != "state"
+                or snapshot_definition.authority_class != ContextAuthorityClass.CLOSED_WRITER_ROUTING_STATE
+                or snapshot_definition.persisted is not True or snapshot_definition.writer_ids != ["transition_router"]):
             raise ValueError(f"Snapshot root {name!r} must be persisted state owned exclusively by the transition router")
-        if name in (persisted_context or {}):
-            value = persisted_context[name]
+        if name in snapshot_inputs:
+            value = snapshot_inputs[name]
             authority_policy.require_replayable_value(name, value, operation="snapshot_load")
             context.set(name, detach(value))
             admitted_snapshot_roots.add(name)

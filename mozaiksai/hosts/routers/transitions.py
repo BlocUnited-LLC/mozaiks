@@ -308,13 +308,14 @@ async def resolve_session_pending_decision(
     body: SessionPendingDecisionResolveRequest,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    scoped_app_id, scoped_user_id = resolve_scope_from_principal(principal, app_id=None, user_id=None)
     session_router = await _selected_session_router(
-        app_id=principal.app_id, user_id=principal.user_id,
+        app_id=scoped_app_id, user_id=scoped_user_id,
         source_chat_id=body.source_chat_id, build_registry_id=body.build_registry_id,
     )
     snapshot = await session_router.resolve_pending_harness_decision(
-        app_id=principal.app_id,
-        user_id=principal.user_id,
+        app_id=scoped_app_id,
+        user_id=scoped_user_id,
         decision_id=body.decision_id,
         action_id=body.action_id,
         accepted=body.accepted,

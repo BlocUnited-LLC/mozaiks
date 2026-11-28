@@ -35,6 +35,7 @@ function SelectedAppBranding({ appId }) {
           {fields.map(([label, value]) => <div key={label}><dt className="text-sm text-muted-foreground">{label}</dt><dd>{value}</dd></div>)}
         </dl>
       </Panel> : <StudioInlineEmptyState title="Branding details unavailable" description="The selected build has no saved theme values." />}
+      {branding.settings_refinement_unavailable && <p role="status" className="text-sm text-muted-foreground">{branding.settings_refinement_unavailable}</p>}
       <SettingsRefinement descriptor={branding.settings_refinement} appId={appId} />
     </> : !branding.resume && <StudioInlineEmptyState title="No editable Factory build" description="Branding edits become available when this app has a validated saved Factory build." />}
   </div>

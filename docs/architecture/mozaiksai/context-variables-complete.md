@@ -394,3 +394,5 @@ uses its exact projection; explicit null suppresses database and configured
 fallbacks, and a missing projection fails closed. An absent root retains ordinary
 reference loading. This lets a bounded revision reuse verified saved inputs while
 immutable runtime authority remains owned by initialization.
+
+Caller frontend context is checked before its projection into workflow context as well: its `ui_` projections cannot populate a declared snapshot root, including on WebSocket entry. Persisted snapshot authority is selected by the server.

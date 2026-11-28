@@ -149,6 +149,10 @@ test('app settings reuse exact-build refinement, cancellation, saved resume and 
       await expect(page.getByRole('link', { name: 'Review saved builds', exact: true })).toHaveAttribute('href', '/apps/first-dashboard/activity');
       assert.equal(posts.at(-1).body.settings_selection.artifact_version_id, 'selected-bundle');
       assert.ok(posts.every(post => !/accept|promote|publish|activate/.test(post.path)));
+      payload = { ...payload, settings_refinement: undefined, settings_refinement_unavailable: 'The selected build is unavailable. Return to Project to review it.' };
+      await page.reload();
+      await expect(page.getByText(payload.settings_refinement_unavailable, { exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Edit branding', exact: true })).toHaveCount(0);
       assert.deepEqual(errors, []);
     } catch (error) { throw new Error(error.message + "\nBrowser errors: " + JSON.stringify(errors) + "\nPage: " + (await page.locator('body').innerText())); } finally { await page.close(); }
   });

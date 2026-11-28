@@ -387,6 +387,7 @@ async def prepare_routed_workflow_launch(
                          journey_id=journey_id, context_variables=context_variables or {}, trigger_payload=trigger_payload or {}),
             contribution=routing_contribution, persist=False,
         )
+    baseline_kwargs: dict[str, Any] = {"expected_baseline": expected_baseline} if expected_baseline is not None else {}
     session_fields = await get_platform_hooks().call_chat_session_fields(
         app_id=app_id,
         user_id=user_id,
@@ -395,7 +396,7 @@ async def prepare_routed_workflow_launch(
         trigger_source=trigger_source,
         build_registry_id=build_registry_id,
         source_chat_id=source_chat_id,
-        **({"expected_baseline": expected_baseline} if expected_baseline is not None else {}),
+        **baseline_kwargs,
     )
     router = session_router or get_session_router()
     if session_fields.get("run_build_binding") is not None:
@@ -410,6 +411,7 @@ async def prepare_routed_workflow_launch(
         router = router.for_target(binding.target_app_id)
     elif refinement_model is not None:
         raise ValueError("A model selection requires a registered build session")
+    routing_kwargs: dict[str, Any] = {"contribution": routing_contribution} if routing_contribution is not None else {}
     routing_decision = await router.route_trigger(
         TriggerInput(
             app_id=app_id,
@@ -420,7 +422,7 @@ async def prepare_routed_workflow_launch(
             context_variables=context_variables or {},
             trigger_payload=trigger_payload or {},
         ),
-        **({"contribution": routing_contribution} if routing_contribution is not None else {}),
+        **routing_kwargs,
     )
     resolved_workflow_id = routing_decision.workflow_id
     policy = _context_authority_policy_for_workflow(resolved_workflow_id)
