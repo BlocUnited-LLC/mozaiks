@@ -152,7 +152,7 @@ def factory_manager():
 @pytest.fixture
 def side_effect_probes(monkeypatch):
     """Fake the tool's persistence/UI seams before its module is loaded."""
-    probes: dict[str, list] = {"summary_artifacts": [], "ui_surfaces": [], "theme_saves": [], "context_persists": []}
+    probes: dict[str, list] = {"summary_artifacts": [], "ui_surfaces": [], "theme_saves": [], "context_persists": [], "public_messages": []}
 
     async def fake_persist_summary_artifact(**kwargs):
         from bson import BSON
@@ -169,6 +169,9 @@ def side_effect_probes(monkeypatch):
             probes["theme_saves"].append(kwargs)
 
     class _FakePersistenceManager:
+        async def append_run_assistant_message(self, **kwargs):
+            probes["public_messages"].append(dict(kwargs))
+
         async def persist_context_variables(self, **kwargs):
             probes["context_persists"].append(dict(kwargs.get("variables") or {}))
 
@@ -267,6 +270,7 @@ async def test_theme_capture_auto_tool_succeeds_through_real_runtime_path(
     # the artifact set, and wrote its declared context keys.
     assert len(side_effect_probes["ui_surfaces"]) == 1
     assert side_effect_probes["ui_surfaces"][0]["component"] == "ThemePreviewCard"
+    assert side_effect_probes["public_messages"] == []
     assert len(side_effect_probes["summary_artifacts"]) == 1
     assert side_effect_probes["summary_artifacts"][0]["artifact_kind"] == "theme_capture"
     assert pattern.data.get("theme_capture_persisted") is True
@@ -323,6 +327,10 @@ async def test_typed_interview_readiness_reaches_chat_and_routes_through_auto_to
     calls = [event for event in events if event["kind"] == "tool_call"]
     assert len(calls) == 1
     assert calls[0]["payload"]["agent_message"] == payload["agent_message"]
+    assert len(side_effect_probes["public_messages"]) == 1
+    assert side_effect_probes["public_messages"][0]["content"] == message
+    assert side_effect_probes["public_messages"][0]["metadata"]["tool_call_id"] == calls[0]["tool_call_id"]
+    assert "tool_args" not in side_effect_probes["public_messages"][0]["metadata"]
     assert calls[0]["awaiting_response"] is False
     assert pattern.data["interview_outcome"] == outcome
     assert pattern.data["interview_attempts"] == 1
@@ -381,6 +389,8 @@ async def test_agentgenerator_interview_message_reaches_chat_through_auto_tool_b
     calls = [event for event in events if event["kind"] == "tool_call"]
     assert len(calls) == 1
     assert calls[0]["payload"]["agent_message"] == message
+    assert len(side_effect_probes["public_messages"]) == 1
+    assert side_effect_probes["public_messages"][0]["content"] == message
     assert calls[0]["awaiting_response"] is False
     assert pattern.data["interview_outcome"] == outcome
     results = [event for event in events if event["kind"] == "tool_response"]
@@ -489,6 +499,7 @@ async def test_extra_field_attack_rejects_before_normalization(
     assert side_effect_probes["summary_artifacts"] == []
     assert side_effect_probes["theme_saves"] == []
     assert side_effect_probes["context_persists"] == []
+    assert side_effect_probes["public_messages"] == []
     assert pattern.data == _PatternContext().data
 
 

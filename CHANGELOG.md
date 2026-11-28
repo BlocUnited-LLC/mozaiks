@@ -15,6 +15,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Saved workflow interviews retain the automatic tool's displayed question on
+  reload. Public text is stored once through the existing run transcript;
+  structured model output and interactive review cards keep their own paths.
 - Generated app operators can open only the app-local admin panels admitted by
   their existing module permissions. Support staff get the configured inbox;
   runtime and connected-backend administration remain admin-only. No roles or

@@ -84,6 +84,18 @@ paused after a blocked tool outcome can still show its normal waiting state
 alongside the failure notice; the declared outcome and retry budget remain
 authoritative.
 
+A validated componentless automatic-tool `agent_message` displayed as conversation text is
+also appended to the existing run transcript before live delivery. Its stable
+app/chat/turn key makes delivery retries idempotent, including after a
+handler restart. Reusing that key with different content fails rather than
+changing the saved message. This lets a saved interview resume with its visible
+question. Raw structured model output remains hidden, and tools that emit their
+own UI keep their existing persisted-card path.
+
+These public message projections are marked as presentation-only. They add no
+model invocation or token usage; native AG2 conversation state remains owned by
+the Hub knowledge store.
+
 ### 3. Input requests after normalization
 
 Runtime-generated AG2 input requests now normalize onto the same workflow UI

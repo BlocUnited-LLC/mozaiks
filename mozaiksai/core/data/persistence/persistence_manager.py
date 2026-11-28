@@ -1443,6 +1443,7 @@ class AG2PersistenceManager:
         content: str,
         agent_name: str | None = None,
         metadata: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> None:
         from types import SimpleNamespace
 
@@ -1473,7 +1474,9 @@ class AG2PersistenceManager:
         stream_context = SimpleNamespace(
             stream=SimpleNamespace(id=self._run_stream_id(chat_id=chat_id, app_id=resolved_app_id))
         )
-        await storage.save_event(event, stream_context)
+        await storage.save_event(
+            event, stream_context, **({"idempotency_key": idempotency_key} if idempotency_key is not None else {}),
+        )
 
     async def append_run_user_message(
         self,
