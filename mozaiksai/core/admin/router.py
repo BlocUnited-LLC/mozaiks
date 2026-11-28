@@ -1,6 +1,6 @@
 # ==============================================================================
 # FILE: mozaiksai/core/admin/router.py
-# DESCRIPTION: First-class admin API. All routes require the "admin" role.
+# DESCRIPTION: Admin data requires admin; config projects entitled app panels.
 #              Surfaces data already captured by the runtime — no new storage.
 # ==============================================================================
 from __future__ import annotations
@@ -20,6 +20,8 @@ from mozaiksai.core.admin.paths import resolve_admin_app_root as resolve_admin_a
 from mozaiksai.core.admin.registry import load_admin_registry
 from mozaiksai.core.auth.dependencies import UserPrincipal, require_user
 from mozaiksai.core.data.models import WorkflowStatus
+from mozaiksai.core.runtime.app.auth_contract import AppAuthContract
+from mozaiksai.core.runtime.app.module_permissions import resolve_module_permissions
 
 logger = get_core_logger("admin.router")
 
@@ -608,19 +610,69 @@ async def get_admin_sessions(
 # Config — read the framework-owned admin shell config
 # ---------------------------------------------------------------------------
 
-@router.get("/config")
-async def get_admin_config(
-    user: UserPrincipal = Depends(_require_admin),
-):
-    """Return the active admin shell config: registry pages + runtime + module panels."""
+def is_app_admin_path(value: Any) -> bool:
+    """An app-local static portal path, never a Studio or external destination."""
+    if not isinstance(value, str) or not value.startswith("/admin"):
+        return False
+    segments = value.rstrip("/").split("/")
+    return segments[1] == "admin" and all(
+        segment and segment not in {".", ".."}
+        and all(character.isascii() and (character.isalnum() or character in "_~.-") for character in segment)
+        for segment in segments[1:]
+    )
+
+
+def build_admin_config(user: UserPrincipal, *, app: Any) -> dict[str, Any]:
+    """Project metadata for existing app grants; this never grants an admin role."""
+    if not (user.is_authenticated or user.has_local_development_access):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    state = getattr(app, "state", None)
+    loaded_app_id = getattr(state, "loaded_app_id", None)
+    if user.app_id and (not loaded_app_id or user.app_id != loaded_app_id):
+        raise HTTPException(status_code=403, detail="App ID does not match the loaded app")
+    full_admin = is_app_admin(user)
+    if not full_admin and not loaded_app_id:
+        raise HTTPException(status_code=403, detail="App admin access required")
     app_root = _resolve_admin_app_root()
     registry = load_admin_registry(app_root)
-    config = {
-        "pages": [p.model_dump() for p in registry.enabled_pages()],
-        "runtime_panels": list(DEFAULT_RUNTIME_PANELS),
-        "module_panels": _load_module_admin_panels(app_root),
+    pages = [page.model_dump() for page in registry.enabled_pages()]
+    panels = _load_module_admin_panels(app_root)
+    if not full_admin:
+        granted = set(resolve_module_permissions(user, app=app))
+        # Role names in panel contracts refer only to roles declared by this app.
+        contract = getattr(state, "auth_contract", None)
+        declared_roles = {role.id for role in contract.authorization.roles} if isinstance(contract, AppAuthContract) else set()
+        granted.update(declared_roles.intersection(user.roles))
+        panels = [panel for panel in panels if
+            (panel["permissions"] or panel["permissions_any"])
+            and set(panel["permissions"]).issubset(granted)
+            and (not panel["permissions_any"] or granted.intersection(panel["permissions_any"]))]
+        panel_pages = {panel["page"] for panel in panels}
+        pages = [page for page in pages if page["scope"] == "app"
+                 and is_app_admin_path(page["path"]) and page["id"] in panel_pages
+                 and (page["surfaces"] is None or "platform" in page["surfaces"])]
+        page_ids = {page["id"] for page in pages}
+        panels = [panel for panel in panels if panel["page"] in page_ids]
+        if not panels:
+            raise HTTPException(status_code=403, detail="App admin access required")
+    entry = next((page["path"] for page in pages
+                  if page["show_in_navigation"] and is_app_admin_path(page["path"])), None)
+    return {
+        "pages": pages,
+        "runtime_panels": list(DEFAULT_RUNTIME_PANELS) if full_admin else [],
+        "module_panels": panels,
+        "is_admin": full_admin,
+        "entry_path": entry,
     }
-    return config
+
+
+@router.get("/config")
+async def get_admin_config(
+    request: Request,
+    user: UserPrincipal = Depends(require_user),
+):
+    """Return only the portal metadata admitted by the caller's existing app grants."""
+    return build_admin_config(user, app=request.app)
 
 
 # ---------------------------------------------------------------------------

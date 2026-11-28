@@ -682,3 +682,108 @@ test('an account change during app role hydration cannot overwrite the new sessi
   assert.equal(await pending, null);
   assert.deepEqual(JSON.parse(storage.get(key)), replacement);
 });
+
+
+test('app admin entry is projected only from a matching server profile and clears on reload', async () => {
+  const originalFetch = globalThis.fetch;
+  let entry = '/admin/support';
+  globalThis.fetch = async (url, options) => url === '/api/me'
+    ? {ok:true,json:async()=>({user_id:'user-1',roles:['user'],admin_entry:entry})}
+    : originalFetch(url, options);
+  const adapter = createAuthAdapter({authConfig:config(),appId:'app-one',apiBaseUrl:''});
+  await begin(adapter);
+  await adapter.handleCallback();
+  assert.equal((await adapter.getCurrentUser()).admin_entry, '/admin/support');
+  for (const invalid of ['https://other.example/admin','//other.example/admin','/admin/../settings','/admin/%2e%2e/settings','/apps/private','/admin?x=1',null]) {
+    entry = invalid;
+    const reloaded = createAuthAdapter({authConfig:config(),appId:'app-one',apiBaseUrl:''});
+    assert.equal((await reloaded.getCurrentUser()).admin_entry, null);
+  }
+});
+
+test('another subject cannot retain or supply an app admin entry', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => url === '/api/me'
+    ? {ok:true,json:async()=>({user_id:'someone-else',roles:['admin'],admin_entry:'/admin/support'})}
+    : originalFetch(url, options);
+  const adapter = createAuthAdapter({authConfig:config(),appId:'app-one',apiBaseUrl:''});
+  await begin(adapter);
+  await adapter.handleCallback();
+  assert.equal((await adapter.getCurrentUser()).admin_entry, null);
+  const key = [...storage.keys()].find(key => key.endsWith(':session'));
+  const saved = JSON.parse(storage.get(key));
+  storage.set(key, JSON.stringify({...saved,user:{...saved.user,admin_entry:'/admin/support'}}));
+  assert.equal((await adapter.getCurrentUser()).admin_entry, null);
+  assert.deepEqual((await adapter.getCurrentUser()).roles, ['user']);
+});
+
+
+test('failed profile hydration clears a previously admitted app admin entry', async () => {
+  const originalFetch = globalThis.fetch;
+  let available = true;
+  globalThis.fetch = async (url, options) => url === '/api/me'
+    ? available ? {ok:true,json:async()=>({user_id:'user-1',roles:['user'],admin_entry:'/admin/support'})} : {ok:false,status:403}
+    : originalFetch(url, options);
+  const adapter = createAuthAdapter({authConfig:config(),appId:'app-one',apiBaseUrl:''});
+  await begin(adapter);
+  await adapter.handleCallback();
+  assert.equal((await adapter.getCurrentUser()).admin_entry, '/admin/support');
+  available = false;
+  assert.equal((await adapter.getCurrentUser()).admin_entry, null);
+});
+
+
+test('real adapter exchanges retain verified scope changes for the same subject and roles', async () => {
+  const originalFetch = globalThis.fetch;
+  const profiles = {
+    'scope-token-a': {app_id:'app-a',tenant_id:'tenant-a',workspace_id:'workspace-a',scopes:['records.read']},
+    'scope-token-b': {app_id:'app-b',tenant_id:'tenant-b',workspace_id:'workspace-b',scopes:['support.submit']},
+  };
+  const hydrated = [];
+  globalThis.fetch = async (url, options) => {
+    if (url !== '/api/me') return originalFetch(url, options);
+    const bearer = options.headers.Authorization.replace(/^Bearer /, '');
+    assert.ok(profiles[bearer]);
+    hydrated.push(bearer);
+    return {ok:true,json:async()=>({user_id:'user-1',roles:['user'],...profiles[bearer]})};
+  };
+  const adapter = createAuthAdapter({authConfig:config(),appId:'app-one',apiBaseUrl:''});
+  const users = [];
+  const unsubscribe = adapter.onAuthStateChange(user=>user && users.push(user));
+  const scopeOf = user=>Object.fromEntries(['app_id','tenant_id','workspace_id','scopes'].map(key=>[key,user[key]]));
+  for (const bearer of ['scope-token-a','scope-token-b']) {
+    const {claims} = await begin(adapter);
+    // Scope-looking ID-token fields do not supply app authority.
+    tokenResponse = {...tokenResponse,access_token:bearer,id_token:jwt({...claims,
+      app_id:'untrusted-app',tenant_id:'untrusted-tenant',workspace_id:'untrusted-workspace',scopes:['unearned']})};
+    await adapter.handleCallback();
+    const user = await adapter.getCurrentUser();
+    assert.equal(user.id,'user-1');
+    assert.deepEqual(user.roles,['user']);
+    assert.deepEqual(scopeOf(user),profiles[bearer]);
+    assert.deepEqual(scopeOf(users.at(-1)),profiles[bearer]);
+    assert.ok(!Object.keys(user).some(key=>/token/i.test(key)));
+  }
+  unsubscribe();
+  assert.ok(hydrated.includes('scope-token-a') && hydrated.includes('scope-token-b'));
+  assert.notDeepEqual(scopeOf(users[0]),scopeOf(users.at(-1)));
+});
+
+test('failed or mismatched profile hydration clears prior trusted scope as well as admin entry', async () => {
+  const originalFetch = globalThis.fetch;
+  let mode = 'valid';
+  globalThis.fetch = async (url, options) => url === '/api/me'
+    ? mode === 'failed' ? {ok:false,status:403}
+      : {ok:true,json:async()=>({user_id:mode === 'wrong-subject' ? 'someone-else' : 'user-1',roles:['user'],
+        app_id:'app-a',tenant_id:'tenant-a',workspace_id:'workspace-a',scopes:['records.read'],admin_entry:'/admin/support'})}
+    : originalFetch(url,options);
+  const adapter = createAuthAdapter({authConfig:config(),appId:'app-one',apiBaseUrl:''});
+  await begin(adapter);await adapter.handleCallback();
+  assert.equal((await adapter.getCurrentUser()).app_id,'app-a');
+  for (const failure of ['failed','wrong-subject']) {
+    mode = failure;
+    const user = await adapter.getCurrentUser();
+    assert.equal(user.app_id,null);assert.equal(user.tenant_id,null);assert.equal(user.workspace_id,null);
+    assert.deepEqual(user.scopes,[]);assert.equal(user.admin_entry,null);
+  }
+});

@@ -840,6 +840,7 @@ class ModuleAdminPanel(ModuleContractModel):
     sections: list[dict[str, Any]] = Field(default_factory=list)
     component: str | None = None
     permissions: list[str] = Field(default_factory=list)
+    permissions_any: list[str] = Field(default_factory=list)
 
     @field_validator("id", "label", mode="before")
     @classmethod
@@ -859,7 +860,7 @@ class ModuleAdminPanel(ModuleContractModel):
     def _optional(cls, value: Any) -> str | None:
         return _optional_text(value)
 
-    @field_validator("permissions", mode="before")
+    @field_validator("permissions", "permissions_any", mode="before")
     @classmethod
     def _permissions(cls, value: Any) -> list[str]:
         return _string_list(value)

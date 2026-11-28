@@ -85,7 +85,8 @@ runtime_boundaries:
       Register SupportProfileTab through ui/index.js and its profile manifest.
       Grant support.submit to members, owners, and support-team roles.
       Also grant support.read and support.manage to the app owner or
-      explicitly configured support team.
+      explicitly configured support team. The stock inbox requires support.submit
+      and either support.read or support.manage; it never grants those permissions.
       Do not emit standalone support routes or global admin menu entries.
   - id: ticket_metadata_only
     rule: >

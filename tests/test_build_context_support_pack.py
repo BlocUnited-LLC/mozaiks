@@ -290,7 +290,8 @@ def test_support_registers_profile_and_admin_surfaces() -> None:
     profile = _read_yaml(TEMPLATES / "modules/support/contracts/profile.yaml")
     assert profile["pages"][0]["action"] == "get_support_profile"
     admin = _read_yaml(TEMPLATES / "modules/support/contracts/admin.yaml")
-    assert admin["panels"][0]["permissions"] == ["support.read"]
+    assert admin["panels"][0]["permissions"] == ["support.submit"]
+    assert admin["panels"][0]["permissions_any"] == ["support.read", "support.manage"]
     assert (TEMPLATES / "ui/components/SupportProfileTab.jsx").exists()
 
 

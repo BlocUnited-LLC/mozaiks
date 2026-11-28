@@ -9,8 +9,8 @@
  *   module panels            (panels whose `page` is this page)
  *   empty state              (when the page has none of the above)
  *
- * Access is gated by the "admin" role (client-side guard; backend enforces
- * independently on all /api/admin/* routes).
+ * The server admits each page and module panel using the loaded app grants.
+ * Framework data and connected-backend panels remain admin-only.
  *
  * Config comes from GET /api/admin/config:
  *   { "pages": [...], "runtime_panels": [...], "module_panels": [...] }
@@ -94,27 +94,33 @@ function pagePanels(panels, pageId) {
 // ---------------------------------------------------------------------------
 
 export default function AdminPage({ route } = {}) {
-  const { user } = useChatUI()
-  const location = useLocation()
-  // Client-side role guard (backend enforces independently on all API routes)
-  const isAdmin = user?.roles?.includes('admin') ?? true // true fallback = no-auth dev mode
-  const { data: config, loading: configLoading, error: configError } = useAdminFetch('/api/admin/config')
-  const appBackend = useAppBackendAdminPanels({ enabled: isAdmin })
+  const { user, config } = useChatUI()
+  const identity = JSON.stringify([user?.id, user?.user_id, user?.app_id, user?.tenant_id,
+    user?.workspace_id, user?.roles, user?.scopes, config?.appId, config?.app_id])
+  return <AdminPageContent key={identity} route={route} />
+}
 
-  if (!isAdmin) {
+function AdminPageContent({ route }) {
+  const location = useLocation()
+  const { data: config, loading: configLoading, error: configError } = useAdminFetch('/api/admin/config')
+  const isAdmin = !configLoading && config?.is_admin === true
+  const appBackend = useAppBackendAdminPanels({ enabled: isAdmin })
+  const activePage = route?.meta?.adminPage || AdminSectionRoute(location.pathname)
+  const allPages = config?.pages ?? []
+  const declaredPage = allPages.find((page) => page.id === activePage) || null
+
+  if (configLoading) return <Spinner />
+  if (!config || !declaredPage) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-8 text-center max-w-sm">
           <h1 className="text-lg font-bold text-destructive mb-2">Access Denied</h1>
-          <p className="text-sm text-muted-foreground">Admin role required.</p>
+          <p className="text-sm text-muted-foreground">You do not have access to this admin page.</p>
         </div>
       </div>
     )
   }
 
-  const activePage    = route?.meta?.adminPage || AdminSectionRoute(location.pathname)
-  const allPages      = config?.pages ?? []
-  const declaredPage  = allPages.find((p) => p.id === activePage) || null
   const standardPage  = getStandardAdminPage(activePage)
   const title         = declaredPage?.label || standardPage?.label || activePage
   const description   = standardPage?.description || null
@@ -125,7 +131,7 @@ export default function AdminPage({ route } = {}) {
     .filter((p) => p.section === activePage)
     .sort((a, b) => a.order - b.order)
 
-  const FrameworkContent = FRAMEWORK_PAGES[activePage] || null
+  const FrameworkContent = isAdmin ? FRAMEWORK_PAGES[activePage] || null : null
   const stillLoading = (configLoading && !config) || appBackend.loading
   const isEmpty = !FrameworkContent && modulePanels.length === 0 && backendPanels.length === 0
 

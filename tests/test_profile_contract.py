@@ -60,7 +60,10 @@ async def test_platform_profile_contract_uses_host_defaults_for_local_dev(monkey
         auth_provenance="local_development",
     )
 
-    result = await platform_app.get_current_user_profile(app_id=None, principal=principal)
+    from starlette.requests import Request
+
+    request = Request({"type": "http", "app": platform_app.app})
+    result = await platform_app.get_current_user_profile(request, app_id=None, principal=principal)
 
     assert result["app_id"] == platform_app._resolve_default_app_id()
     assert result["user_id"] == platform_app._DEFAULT_PROFILE_USER_ID

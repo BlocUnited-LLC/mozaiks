@@ -1146,7 +1146,7 @@ async def build_shell_config(
             "order": route["order"],
             "meta": {
                 "requiresAuth": True,
-                "requiresRole": "admin",
+                **({} if shell_surface == "platform" else {"requiresRole": "admin"}),
                 "title": route["title"],
                 "appShell": True,
                 "adminPage": route["admin_page"],

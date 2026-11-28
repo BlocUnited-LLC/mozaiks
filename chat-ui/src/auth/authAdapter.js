@@ -156,6 +156,7 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {}, aut
   }
 
   async function hydrateAppUser(user, accessToken) {
+    user = { ...user, admin_entry: null, app_id: null, tenant_id: null, workspace_id: null, scopes: [] };
     if (apiBaseUrl === undefined) return user;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -167,7 +168,17 @@ export function createAuthAdapter({ authConfig, appId = 'mozaiks', env = {}, aut
       if (!response.ok) return user;
       const profile = await response.json();
       if (profile.user_id !== user.id || !Array.isArray(profile.roles)) return user;
-      return { ...user, roles: profile.roles.filter(role => typeof role === 'string') };
+      const entry = profile.admin_entry;
+      const parts = typeof entry === 'string' ? entry.replace(/\/$/, '').split('/') : [];
+      const validEntry = /^\/admin(?:\/[A-Za-z0-9._~-]+)*\/?$/.test(entry || '')
+        && parts.every(part => part !== '.' && part !== '..');
+      return {
+        ...user, roles: profile.roles.filter(role => typeof role === 'string'), admin_entry: validEntry ? entry : null,
+        app_id: typeof profile.app_id === 'string' && profile.app_id ? profile.app_id : null,
+        tenant_id: typeof profile.tenant_id === 'string' && profile.tenant_id ? profile.tenant_id : null,
+        workspace_id: typeof profile.workspace_id === 'string' && profile.workspace_id ? profile.workspace_id : null,
+        scopes: Array.isArray(profile.scopes) ? profile.scopes.filter(scope => typeof scope === 'string') : [],
+      };
     } catch {
       return user;
     } finally {

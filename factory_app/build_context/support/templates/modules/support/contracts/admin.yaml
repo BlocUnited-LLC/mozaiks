@@ -5,4 +5,5 @@ panels:
     page: support
     renderer: custom_component
     component: SupportAdminPanel
-    permissions: [support.read]
+    permissions: [support.submit]
+    permissions_any: [support.read, support.manage]

@@ -213,7 +213,14 @@ const Header = ({
     [headerActions]
   );
   const profileMenu = useMemo(() => {
-    const configured = Array.isArray(profileConfig.menu) ? profileConfig.menu : [];
+    const entry = currentUser.admin_entry;
+    const allowedEntry = typeof entry === 'string' && /^\/admin(?:\/[A-Za-z0-9._~-]+)*\/?$/.test(entry)
+      && !entry.split('/').some(part => part === '.' || part === '..');
+    const configured = (Array.isArray(profileConfig.menu) ? profileConfig.menu : []).map(item => (
+      item?.id === 'admin-portal' && allowedEntry
+        ? { ...item, path: entry, requiresRole: undefined }
+        : item
+    ));
     const defaults = getDefaultProfileMenu(currentUser);
     const landingPage = isSignInAvailable(shellAuth) && pages?.find(
       (page) => page.path === landingSpot && isShellItemVisible(page, userRoles)
