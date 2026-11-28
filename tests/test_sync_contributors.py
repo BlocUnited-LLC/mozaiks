@@ -26,6 +26,12 @@ class ContributorWallTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sync.update_readme("no markers", sync.render({"aaas72"}))
 
+    def test_github_noreply_attribution(self):
+        match = sync.NOREPLY.fullmatch("183341550+hammadfarooq-ai@users.noreply.github.com")
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group(1), "hammadfarooq-ai")
+        self.assertIsNone(sync.NOREPLY.fullmatch("unlinked@example.org"))
+
     def test_login_validation(self):
         self.assertFalse(sync.eligible('"><script>'))
         self.assertFalse(sync.eligible("claude"))
