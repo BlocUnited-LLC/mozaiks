@@ -19,7 +19,7 @@ import urllib.request
 REPO = "BlocUnited-LLC/mozaiks"
 START = "<!-- contributors:auto:start -->"
 END = "<!-- contributors:auto:end -->"
-NOREPLY = re.compile(r"^(?:[0-9]+\\+)?([A-Za-z0-9-]+)@users\\.noreply\\.github\\.com$", re.I)
+NOREPLY = re.compile(r"^(?:[0-9]+\+)?([A-Za-z0-9-]+)@users\.noreply\.github\.com$", re.I)
 VALID_LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
 EXCLUDED = {"dependabot", "dependabot[bot]", "github-actions[bot]", "claude", "codex", "web-flow"}
 MAX_CONTRIBUTORS = 100
