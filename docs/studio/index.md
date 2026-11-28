@@ -18,13 +18,10 @@ test keeps the two lists equal.
 | App Dashboard | Overview, Revenue, Users, Project, Integrations, Launch, Billing, Token Usage, Health and Support, each under `/apps/:appId/...` | Manage one app. |
 
 In the workspace menu, **My Apps** lists the apps you own. **Performance** shows
-revenue and user metrics across those apps. Under **Manage an app**, pick a tool
-such as **Integrations**, then pick an app. Studio opens that app's Integrations
-page. You can also open the app first and choose Integrations from its menu.
-
-Studio builds these shortcuts from the selected-app pages available to you.
-A host that adds, hides, or renames a page gets the corresponding menu change
-in both places. Each app page uses its existing authorization checks.
+revenue and user metrics across those apps. Open an app's **Dashboard** to switch
+to that app's own sidebar. Selected-app tools are not repeated in the workspace
+menu. Existing `/apps?section=...` chooser links still resolve to the mounted,
+role-filtered app routes and use each app page's existing authorization checks.
 
 Workspace administrators also see the workspace-wide Token Usage, Integrations,
 Support, and AI models pages. AI model settings require a signed-in workspace.
