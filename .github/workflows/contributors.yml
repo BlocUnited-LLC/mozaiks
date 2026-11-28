@@ -1,0 +1,50 @@
+name: Sync Contributors Wall
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contributors-wall-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'BlocUnited-LLC/mozaiks'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Generate wall from GitHub contributor attribution
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/sync_contributors.py
+      - name: Run deterministic rendering tests
+        run: python -m unittest discover -s tests -p test_sync_contributors.py
+      - name: Open update PR only when content changed
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: automation/sync-contributors-wall
+          add-paths: README.md
+          commit-message: "docs: synchronize contributors wall"
+          title: "docs: synchronize contributors wall"
+          body: |
+            Automated README-only contributor attribution update.
+            Uses GitHub's contributors API and GitHub noreply authors from
+            commits on main. No contributor commits or author metadata changed.
+            Please run required CI/DCO and review before merging.
